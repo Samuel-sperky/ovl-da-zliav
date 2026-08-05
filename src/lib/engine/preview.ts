@@ -9,12 +9,23 @@
  * Blokátory sú fail-closed: kým existuje čo len jeden, token sa NEVYDÁ
  * (`previewToken` je prázdny string) a sada sa nedá potvrdiť.
  *
- * Vlastník: A9.
+ * Redizajn (plán §2 body 11, 15 · U2, U3):
+ *  - chýbajúci/expirovaný kľúč je VLASTNÝ blokátor `key_missing`, nie
+ *    `shop_unreachable`; shop sa v tom prípade nevolá vôbec a položky sa
+ *    poskladajú z `catalog_cache`, aby sa dal uložiť koncept (D21, decision 15),
+ *  - prekryv (D28) vracia STRUKTUROVANÝ zoznam kolízií (kampaň, okno, produkt),
+ *    takže UI vie pomenovať konflikt a ponúknuť „vyradiť kolidujúce zo sady";
+ *    predtým sa `overlapIds` zahodilo cez `void`,
+ *  - `item.warnings` už neopakuje disclaimer o zaokrúhlení (drží ho `PriceHint`
+ *    pri každej cene, D4 zostáva splnené) a nenesie kódy rozhodnutí (plán §2/10).
+ *
+ * Vlastník: A9 (úpravy B3).
  */
 import type {
   AllowlistRepo,
   ApiKeyRepo,
   CampaignKind,
+  CampaignStatus,
   CampaignsRepo,
   CatalogRepo,
   DateOnly,
@@ -30,13 +41,14 @@ import type {
 } from '@/contracts';
 
 import {
+  formatDateOnlySk,
   isSameOrBefore,
   startOfDayUtc,
   todayInZone,
   LOGIC_TIME_ZONE,
 } from '@/lib/domain/dates';
 import { validateCampaignWindow } from '@/lib/domain/campaign-rules';
-import { discountedPrice, DISCOUNTED_PRICE_DISCLAIMER_SK } from '@/lib/domain/pricing';
+import { discountedPrice } from '@/lib/domain/pricing';
 import { previewTokenService as defaultPreviewTokens } from '@/lib/crypto/preview-token';
 import { allowlistRepo as defaultAllowlistRepo } from '@/lib/repo/allowlist.repo';
 import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
@@ -67,13 +79,43 @@ export interface PreviewDeps {
   shopClient: Pick<ShopClient, 'batchGetProducts'>;
   allowlistRepo?: Pick<AllowlistRepo, 'areAllActive' | 'listActive'>;
   campaignsRepo?: Pick<CampaignsRepo, 'lastOwnWrite' | 'findFutureOverlaps'>;
-  catalogRepo?: Pick<CatalogRepo, 'upsert'> | null;
+  /** `getMany` je voliteľné — bez kľúča z neho vieme aspoň názvy a ceny. */
+  catalogRepo?: (Pick<CatalogRepo, 'upsert'> & Partial<Pick<CatalogRepo, 'getMany'>>) | null;
   apiKeyMeta?: Pick<ApiKeyRepo, 'getMeta'>;
   previewTokens?: PreviewTokenService;
   guards?: GuardsDeps;
   now?: () => Date;
   timeZone?: string;
 }
+
+/** Jedna kolízia budúcich kampaní na jednom produkte (D28, U3). */
+export interface PreviewConflict {
+  productId: number;
+  campaignId: number;
+  campaignName: string;
+  from: DateOnly;
+  to: DateOnly;
+  status: CampaignStatus;
+}
+
+/**
+ * Výsledok dry-runu rozšírený o to, čo UI potrebuje, aby blokátor nebol slepou
+ * uličkou. Je priraditeľný na `PreviewResult` (contracts §11), takže route ani
+ * klienti nič nestrácajú.
+ */
+export interface PreviewResultEx extends PreviewResult {
+  /** Kolízie per produkt — pomenovanie konfliktu + „vyradiť zo sady" (D28). */
+  conflicts: PreviewConflict[];
+  /** Kedy expiruje kľúč, aby varovanie D8 vedelo povedať KEDY, nie len „skôr". */
+  keyExpiresAt: string | null;
+  /** `true` = kľúč chýba/expiroval; sada sa dá uložiť len ako koncept. */
+  keyMissing: boolean;
+}
+
+export const KEY_MISSING_BLOCKER_CODE = 'key_missing';
+
+const KEY_MISSING_MESSAGE =
+  'API kľúč chýba alebo expiroval — bez neho appka nevie prečítať ceny zo shopu ani nič zapísať. Vlož nový kľúč v Nastaveniach; rozpracovanú kampaň si medzitým môžeš uložiť ako koncept.';
 
 /**
  * Dry-run: NIKDY nič nezapisuje — všetky volania shopu sú čítacie
@@ -83,7 +125,7 @@ export async function buildPreview(
   input: PreviewInput,
   deps: PreviewDeps,
   ctx: ShopCtx,
-): Promise<PreviewResult> {
+): Promise<PreviewResultEx> {
   const allowlistRepo = deps.allowlistRepo ?? defaultAllowlistRepo;
   const campaignsRepo = deps.campaignsRepo ?? defaultCampaignsRepo;
   const catalogRepo = deps.catalogRepo === undefined ? defaultCatalogRepo : deps.catalogRepo;
@@ -116,44 +158,85 @@ export async function buildPreview(
     blockers.push({ code: allowCheck.code, message: allowCheck.message });
   }
 
-  /* 3. Prekryv budúcich kampaní na produkte (D28) — blokuje pri vytváraní. */
-  let overlapIds: number[] = [];
+  /* 3. Prekryv budúcich kampaní na produkte (D28) — blokuje pri vytváraní.
+   *    Kolízie sa NEZAHADZUJÚ: každá dostane vlastný blokátor s `productId`
+   *    a štruktúrovaný záznam v `conflicts` (meno kampane, okno, stav), aby
+   *    UI vedelo povedať KTORÁ kampaň a ponúknuť cestu von (U3). */
+  const conflicts: PreviewConflict[] = [];
   if (allowCheck.ok) {
-    const found = await campaignsRepo.findFutureOverlaps(input.productIds, input.from, input.to);
-    // Rodič opakovania/predĺženia neblokuje sám seba (D15, D16, D19). Bez tejto
-    // výnimky bol dry-run „Zopakovať zlyhané" VŽDY zablokovaný `future_overlap`
-    // (rodič má rovnaké produkty aj rovnaké okno a stav `partial` je v dotaze).
-    const overlaps =
-      input.parentCampaignId === undefined
-        ? found
-        : found.filter((c) => c.id !== input.parentCampaignId);
-    overlapIds = [...new Set(overlaps.flatMap((c) => (c.id > 0 ? [c.id] : [])))];
-    if (overlaps.length > 0) {
+    // Dotaz ide per produkt (max 10, I2), aby sa dalo povedať KTORÝ produkt
+    // koliduje s KTOROU kampaňou. Rodič opakovania/predĺženia neblokuje sám
+    // seba (D15, D16, D19) — bez tejto výnimky bol dry-run „Zopakovať zlyhané"
+    // VŽDY zablokovaný (rodič má rovnaké produkty aj rovnaké okno).
+    for (const productId of [...input.productIds].sort((a, b) => a - b)) {
+      const found = await campaignsRepo.findFutureOverlaps([productId], input.from, input.to);
+      for (const campaign of found) {
+        if (campaign.id === input.parentCampaignId) continue;
+        conflicts.push({
+          productId,
+          campaignId: campaign.id,
+          campaignName: campaign.name,
+          from: campaign.dateFrom,
+          to: campaign.dateTo,
+          status: campaign.status,
+        });
+      }
+    }
+
+    for (const conflict of conflicts) {
       blockers.push({
         code: 'future_overlap',
-        message:
-          'Na produkte už existuje iná budúca kampaň s prekrývajúcim sa oknom — prekryv dvoch budúcich kampaní je blokovaný (D28).',
+        productId: conflict.productId,
+        message: `Produkt už má naplánovanú kampaň „${conflict.campaignName}" (#${conflict.campaignId}) na ${formatDateOnlySk(conflict.from)} – ${formatDateOnlySk(conflict.to)}. Dve naplánované zľavy na jednom produkte appka nepovolí — nedá sa zistiť, ktorá v shope vyhrá. Vyraď produkt zo sady, zmeň okno alebo zruš pôvodnú kampaň.`,
       });
     }
   }
-  void overlapIds;
 
-  /* 4. Čerstvé detaily zo shopu (D57) + položky náhľadu. */
+  /* 4. Kľúč (D10, decision 15): bez platného kľúča sa shop nevolá vôbec.
+   *    Hláška menuje KĽÚČ — nie „shop je nedostupný", ktoré zavádzalo. */
+  let keyPresent = true;
+  let keyExpiresAtDate: Date | null = null;
+  if (deps.apiKeyMeta) {
+    try {
+      const meta = await deps.apiKeyMeta.getMeta();
+      keyExpiresAtDate = meta.expiresAt;
+      keyPresent =
+        meta.present && (meta.expiresAt === null || meta.expiresAt.getTime() > now().getTime());
+    } catch {
+      keyPresent = false; // fail-closed
+    }
+  }
+  const keyMissing = !keyPresent;
+  if (keyMissing) {
+    blockers.push({ code: KEY_MISSING_BLOCKER_CODE, message: KEY_MISSING_MESSAGE });
+  }
+
+  /* 5. Čerstvé detaily zo shopu (D57) + položky náhľadu. */
   const items: PreviewItem[] = [];
   const pricesAtPreview: Record<string, MoneyString> = {};
   const hasAttributesIds: number[] = [];
   const overwriteIds: number[] = [];
 
   let details = new Map<number, ProductDetail | import('@/contracts').ShopError>();
-  if (allowCheck.ok) {
+  let cached = new Map<number, import('@/contracts').CatalogCacheRecord>();
+  if (allowCheck.ok && !keyMissing) {
     try {
       const fetched = await deps.shopClient.batchGetProducts(input.productIds, ctx);
       details = fetched.results;
     } catch {
       blockers.push({
         code: 'shop_unreachable',
-        message: 'Shop sa nepodarilo prečítať — dry-run sa nedá zostaviť (fail-closed).',
+        message:
+          'Shop sa nepodarilo prečítať — náhľad sa nedá zostaviť a nič sa nezapíše. Skús to znova o chvíľu.',
       });
+    }
+  } else if (allowCheck.ok && keyMissing && catalogRepo?.getMany) {
+    // Bez kľúča ukážeme aspoň poslednú známu cenu z cache — nie je to stav
+    // shopu, len naša evidencia (I11), a token sa aj tak nevydá.
+    try {
+      cached = await catalogRepo.getMany(input.productIds);
+    } catch {
+      cached = new Map();
     }
   }
 
@@ -161,6 +244,27 @@ export async function buildPreview(
     const detail = details.get(productId);
     const lastOwnWrite = await campaignsRepo.lastOwnWrite(productId);
     const warnings: string[] = [];
+
+    if (keyMissing) {
+      // Bez kľúča nie je čo čítať zo shopu — položka nesie cache, nie pravdu.
+      const fromCache = cached.get(productId) ?? null;
+      items.push({
+        productId,
+        name: fromCache?.name ?? null,
+        price: fromCache?.price ?? null,
+        discountedPrice:
+          fromCache?.price != null ? discountedPrice(fromCache.price, input.percent) : null,
+        hasAttributes: fromCache?.hasAttributes ?? false,
+        lastOwnWrite,
+        reductionUnverifiable: true,
+        warnings: [
+          fromCache
+            ? 'Cena je z poslednej známej evidencie appky, nie zo shopu — bez kľúča sa nedá overiť.'
+            : 'Bez kľúča appka o tomto produkte nemá ani uloženú cenu.',
+        ],
+      });
+      continue;
+    }
 
     if (detail === undefined || isShopError(detail)) {
       const notFound = detail !== undefined && detail.kind === 'not_found';
@@ -190,16 +294,17 @@ export async function buildPreview(
     if (detail.has_attributes) {
       hasAttributesIds.push(productId);
       warnings.push(
-        'Produkt má varianty — zľava sa v shope uplatní podľa jeho pravidiel pre varianty (D60).',
+        'Produkt má varianty — zľavu na ne uplatní logika shopu, výsledné ceny variantov appka negarantuje.',
       );
     }
     if (lastOwnWrite !== null && isSameOrBefore(input.from, lastOwnWrite.to)) {
       overwriteIds.push(productId);
       warnings.push(
-        `Podľa vlastného zápisu z ${lastOwnWrite.at.toISOString().slice(0, 10)} tu zľava beží alebo je naplánovaná — nový zápis ju prepíše (D28, I11).`,
+        `Podľa vlastného zápisu z ${formatDateOnlySk(lastOwnWrite.at.toISOString().slice(0, 10))} tu zľava beží alebo je naplánovaná — nový zápis ju prepíše. Shop môže mať iný stav.`,
       );
     }
-    warnings.push(DISCOUNTED_PRICE_DISCLAIMER_SK);
+    // Disclaimer o zaokrúhlení sa do `warnings` NEDUPLIKUJE — drží ho `PriceHint`
+    // pri každej vypočítanej cene (D4 zostáva splnené, plán §2 bod 8).
 
     items.push({
       productId,
@@ -229,22 +334,14 @@ export async function buildPreview(
     }
   }
 
-  /* 5. Varovania (D8, D30, D28, D60). */
-  let keyExpiresBeforeStart = false;
-  if (deps.apiKeyMeta) {
-    try {
-      const meta = await deps.apiKeyMeta.getMeta();
-      if (meta.present && meta.expiresAt !== null) {
-        keyExpiresBeforeStart = meta.expiresAt.getTime() < startOfDayUtc(input.from, timeZone).getTime();
-      } else if (!meta.present) {
-        keyExpiresBeforeStart = true;
-      }
-    } catch {
-      keyExpiresBeforeStart = true; // fail-closed varovanie (D8)
-    }
-  }
+  /* 6. Varovania (D8, D30, D28, D60). Meta kľúča sa už načítalo v kroku 4. */
+  const keyExpiresBeforeStart = deps.apiKeyMeta
+    ? keyMissing ||
+      (keyExpiresAtDate !== null &&
+        keyExpiresAtDate.getTime() < startOfDayUtc(input.from, timeZone).getTime())
+    : false;
 
-  /* 6. Token len pre čistú sadu (I3, O2). */
+  /* 7. Token len pre čistú sadu (I3, O2). */
   let previewToken = '';
   if (blockers.length === 0) {
     const issued = await previewTokens.issue({
@@ -269,5 +366,8 @@ export async function buildPreview(
       hasAttributes: hasAttributesIds,
     },
     blockers,
+    conflicts,
+    keyExpiresAt: keyExpiresAtDate === null ? null : keyExpiresAtDate.toISOString(),
+    keyMissing,
   };
 }

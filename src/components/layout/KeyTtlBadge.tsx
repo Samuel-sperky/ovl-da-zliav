@@ -3,11 +3,16 @@
 /**
  * Aura Zľavy — badge TTL API kľúča (D5).
  *
- * Štyri vizuálne stavy: kľúč chýba (danger), > 6 h (neutrál/ok),
- * ≤ 6 h (výstraha), ≤ 1 h (kritická). Odpočet beží klientsky každú sekundu.
+ * Trvalý badge v hlavičke na KAŽDEJ stránke; na mobile sa skrývať NESMIE
+ * (D5, K8). Štyri stavy: kľúč chýba (critical), > 6 h (good), ≤ 6 h
+ * (attention), ≤ 1 h (critical). Odpočet beží klientsky každú sekundu.
+ *
+ * I1: badge nesie výhradne zostávajúci čas — nikdy kľúč, nikdy `last4`.
+ * `data-state` (`missing|ok|warning|critical`) je stabilné rozhranie pre e2e.
  */
 import { useEffect, useState } from 'react';
 
+import ToneBadge, { type StatusTone } from '@/components/ui/ToneBadge';
 import { formatCountdownSk } from '@/lib/ui/format';
 
 export interface KeyTtlBadgeProps {
@@ -29,9 +34,15 @@ export function KeyTtlBadge({ present, expiresAt }: KeyTtlBadgeProps) {
 
   if (!present || !expiresAt) {
     return (
-      <span className="ovl-badge ovl-badge--danger" data-testid="key-ttl-badge" data-state="missing">
+      <ToneBadge
+        tone="critical"
+        glyph="⚿"
+        data-testid="key-ttl-badge"
+        data-state="missing"
+        title="API kľúč nie je uložený — appka je v režime len na čítanie"
+      >
         kľúč chýba
-      </span>
+      </ToneBadge>
     );
   }
 
@@ -39,25 +50,33 @@ export function KeyTtlBadge({ present, expiresAt }: KeyTtlBadgeProps) {
 
   if (left <= 0) {
     return (
-      <span className="ovl-badge ovl-badge--danger" data-testid="key-ttl-badge" data-state="missing">
+      <ToneBadge
+        tone="critical"
+        glyph="⚿"
+        data-testid="key-ttl-badge"
+        data-state="missing"
+        title="API kľúč expiroval — appka je v režime len na čítanie"
+      >
         kľúč expiroval
-      </span>
+      </ToneBadge>
     );
   }
 
   const state = left <= ONE_HOUR ? 'critical' : left <= SIX_HOURS ? 'warning' : 'ok';
-  const tone = state === 'critical' ? 'danger' : state === 'warning' ? 'warning' : 'ok';
+  const tone: StatusTone =
+    state === 'critical' ? 'critical' : state === 'warning' ? 'attention' : 'good';
 
   return (
-    <span
-      className={`ovl-badge ovl-badge--${tone}`}
+    <ToneBadge
+      tone={tone}
+      glyph={state === 'ok' ? '⚿' : '⏱'}
       data-testid="key-ttl-badge"
       data-state={state}
       title="Zostávajúca platnosť API kľúča (max 48 h)"
       suppressHydrationWarning
     >
       kľúč: {formatCountdownSk(left)}
-    </span>
+    </ToneBadge>
   );
 }
 

@@ -51,8 +51,13 @@ function world(opts: {
   return { deps, settingsRepo, allowlistRepo, audit };
 }
 
+// Deň počítaný v zóne appky (Europe/Bratislava), nie v UTC — guardy porovnávajú
+// `to` proti dnešku v zóne, takže UTC helper by medzi 22:00 a 24:00 UTC posielal
+// včerajší dátum a test by flakoval presne v tom okne.
 const day = (offset: number): string =>
-  new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bratislava' }).format(
+    new Date(Date.now() + offset * 86_400_000),
+  );
 
 const validParams = {
   productIds: [201, 202, 203],

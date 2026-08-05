@@ -1,12 +1,14 @@
 'use client';
 
 /**
- * Aura Zľavy — sudo dialóg (D70, §5).
+ * Aura Zľavy — sudo dialóg (D70 v revízii plánu §7).
  *
- * Citlivé operácie vyžadujú sudo okno < 15 min. Ak vypršalo, tento dialóg
- * si vypýta heslo a POSTne ho na `/api/auth/sudo`; po úspechu zavolá
- * `onSuccess` s novým `sudoUntil`. Heslo sa drží len v lokálnom state
- * a po odoslaní sa okamžite zahodí.
+ * Citlivé operácie vyžadujú platné sudo okno (30 min, heslo raz). Ak vypršalo,
+ * tento dialóg si vypýta heslo a POSTne ho na `/api/auth/sudo`; po úspechu
+ * zavolá `onSuccess` s novým `sudoUntil`. Heslo sa drží len v lokálnom state
+ * a po odoslaní sa okamžite zahodí — nikdy sa neloguje ani neukladá (I1).
+ *
+ * Odpočet zostávajúceho okna v hlavičke dodáva B3 (`sudoSecondsLeft()`).
  */
 import { useState } from 'react';
 
@@ -60,8 +62,8 @@ export function SudoPrompt({ actionLabel, onSuccess, onCancel }: SudoPromptProps
       <form className="ovl-sudo-dialog" onSubmit={submit}>
         <h3>Over sa heslom</h3>
         <p className="ovl-small ovl-muted">
-          Od poslednej autentifikácie ubehlo viac než 15 minút. Akcia
-          „{actionLabel}“ vyžaduje opätovné zadanie hesla.
+          Akcia „{actionLabel}“ vyžaduje potvrdenie heslom. Po overení zostane
+          okno otvorené 30 minút a heslo sa už znova pýtať nebude.
         </p>
         <input
           type="password"

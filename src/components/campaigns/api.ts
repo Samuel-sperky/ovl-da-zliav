@@ -58,12 +58,31 @@ export interface PreviewBlockerView {
   productId?: number;
 }
 
+/** Kolízia s inou budúcou kampaňou na konkrétnom produkte (D28). */
+export interface PreviewConflictView {
+  productId: number;
+  campaignId: number;
+  campaignName: string;
+  from: string;
+  to: string;
+  status: CampaignStatus;
+}
+
 export interface PreviewResponse {
   previewToken: string;
   items: PreviewItemView[];
   warnings: PreviewWarningsView;
   blockers: PreviewBlockerView[];
+  /** Prekryvy per produkt — `engine/preview` (voliteľné pre staršie odpovede). */
+  conflicts?: PreviewConflictView[];
+  /** Kedy expiruje kľúč — varovanie D8 vie povedať KEDY, nie len „skôr". */
+  keyExpiresAt?: string | null;
+  /** `true` = kľúč chýba/expiroval; sada sa dá uložiť len ako koncept. */
+  keyMissing?: boolean;
 }
+
+/** Kód blokátora „chýba API kľúč" — pozná ho `engine/preview`. */
+export const KEY_MISSING_CODE = 'key_missing';
 
 export interface CampaignListRow {
   id: number;
@@ -232,6 +251,29 @@ export function addDays(dateOnly: string, days: number): string {
   return `${dt.getFullYear()}-${mm}-${dd}`;
 }
 
+/** Neskorší z dvoch dní (`YYYY-MM-DD` sa dá porovnávať lexikograficky). */
+export function maxDateOnly(a: string, b: string): string {
+  return a >= b ? a : b;
+}
+
+/** Počet dní okna vrátane oboch hraníc (D13 — „od 00:00 OD do 23:59 DO"). */
+export function windowDays(from: string, to: string): number {
+  if (!isValidDateOnly(from) || !isValidDateOnly(to)) return 0;
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  const start = Date.UTC(fy!, fm! - 1, fd!);
+  const end = Date.UTC(ty!, tm! - 1, td!);
+  if (end < start) return 0;
+  return Math.round((end - start) / 86_400_000) + 1;
+}
+
+/** Slovenský tvar počtu dní: `1 deň` / `3 dni` / `15 dní`. */
+export function daysLabelSk(days: number): string {
+  if (days === 1) return '1 deň';
+  if (days >= 2 && days <= 4) return `${days} dni`;
+  return `${days} dní`;
+}
+
 /** Posledný deň mesiaca dňa `dateOnly`. */
 export function endOfMonth(dateOnly: string): string {
   const [y, m] = dateOnly.split('-').map(Number);
@@ -289,13 +331,21 @@ export function validateExtendTo(lockedFrom: string, currentTo: string, newTo: s
   return null;
 }
 
-/* ── sudo okno (D70) ───────────────────────────────────────────────────── */
+/* ── sudo okno (D70, plán §7 — 30 min, heslo raz) ──────────────────────── */
 
-/** `true`, keď je sudo okno platné (menej než 15 min od autentifikácie). */
+/** `true`, keď sudo okno ešte platí (server ho vyhodnocuje fail-closed sám). */
 export function sudoValid(sudoUntil: string | null | undefined): boolean {
   if (!sudoUntil) return false;
   const t = new Date(sudoUntil).getTime();
   return Number.isFinite(t) && t > Date.now();
+}
+
+/** Koľko sekúnd sudo okna zostáva (0 = neplatí) — pre odpočet v UI. */
+export function sudoSecondsLeft(sudoUntil: string | null | undefined): number {
+  if (!sudoUntil) return 0;
+  const t = new Date(sudoUntil).getTime();
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, Math.ceil((t - Date.now()) / 1000));
 }
 
 export async function fetchSession(): Promise<SessionInfo | null> {

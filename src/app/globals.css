@@ -1,318 +1,1308 @@
 /*
- * Aura Zľavy — globálne štýly a dizajnové primitívy (A13, §8).
+ * Aura Zľavy — dizajnový systém (32-UX-UI-PLAN §3, sekcia B1).
  *
- * Bez externého UI frameworku. Farby stavov: neutrál / ok / výstraha /
- * kritická podľa D5, D6, D14. Jazyk UI slovenčina, dátumy DD.MM.YYYY.
+ * Smer: priehľadné (vrstvené priesvitné plochy), minimalistické (menej rámov,
+ * jedna dominanta), praktické, rodina Aura (teal/gold, Inter, koruna, dark
+ * default), animácie krátke a funkčné.
+ *
+ * Bezpečnostné výnimky z „priehľadnosti" (§1.1) — VŽDY plné a nepriesvitné:
+ *   · pruh PRODUKCIA (D6)
+ *   · stavové badge (D5, D14)
+ *   · chybové a stavové panely (.ovl-note*)
+ * Ich čitateľnosť je bezpečnostná funkcia, nie estetika.
+ *
+ * Tvrdé pravidlá farieb (§3.1):
+ *   · --brand (teal) a --gold NIKDY nekódujú stav ani plochu stavového badge.
+ *     Gold = koruna, hairline, eyebrow. Teal = štruktúra, akcia, výber,
+ *     a sekvenčná rampa --seq-teal-* (magnitúda, nie stav).
+ *   · stav nie je nikdy len farba — vždy farba + glyf + text (§3.3).
+ *
+ * Téma: DARK je default. `:root` bez `data-theme` = dark; dark je deklarovaný
+ * aj pod `@media (prefers-color-scheme: dark)`, aj pod `:root[data-theme="dark"]`,
+ * takže prepínač („Light pill") vyhrá v oboch smeroch. Hodnotu ukladá
+ * `ThemeToggle` do `localStorage` a inline skript v layout ju aplikuje pred
+ * prvým paintom.
+ *
+ * Rozhranie pre B2/B3/B4 (plán §6) — tieto triedy a tokeny sú stabilné:
+ *   .ovl-card .ovl-card--quiet .ovl-panel .ovl-note
+ *   .ovl-badge .ovl-badge--{critical,attention,progress,good,idle}
+ *   .ovl-num .ovl-mono .ovl-grid .ovl-w-wide .ovl-w-default .ovl-w-form
+ *   .ovl-anim-in .ovl-stagger .ovl-shimmer
+ *   --paper --surface --surface-solid --line --ink --dim --brand --brand-tint
+ *   --gold --st-{critical,attention,progress,good,idle} --seq-teal-1…5
+ * Staré názvy (`--ovl-*`, `.ovl-badge--{ok,warning,danger,neutral,outline}`,
+ * `.ovl-error`, `.ovl-card--{danger,warning}`) zostávajú ako aliasy, aby sa
+ * nemuselo prepisovať 40 volajúcich miest naraz.
  */
 
+/* ══════════════════════════════════════════════════════════════════════════
+   1. Primitívy rodiny (nezávislé od témy)
+   ══════════════════════════════════════════════════════════════════════════ */
+
 :root {
-  color-scheme: light;
-  --ovl-bg: #f6f7f9;
-  --ovl-surface: #ffffff;
-  --ovl-fg: #17181c;
-  --ovl-muted: #5c6070;
-  --ovl-border: #d8dae0;
-  --ovl-accent: #1f4fd8;
+  --aura-teal-900: #025c60;
+  --aura-teal-700: #03797e;
+  --aura-teal-500: #05a3aa;
+  --aura-teal-400: #05bcc4;
 
-  /* PRODUKCIA pruh (D6) a stavové farby (D5, D14) */
-  --ovl-danger: #b3261e;
-  --ovl-danger-bg: #fdecea;
-  --ovl-warning: #9a6700;
-  --ovl-warning-bg: #fff3d6;
-  --ovl-ok: #1a7f37;
-  --ovl-ok-bg: #e6f4ea;
-  --ovl-neutral-bg: #eceef2;
+  --aura-gold-500: #d8b878;
+  --aura-gold-600: #c9a869;
+  --aura-gold-800: #8a6417;
 
-  --ovl-font: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-  --ovl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --ovl-radius: 8px;
-  --ovl-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.08);
+  /* Typografia — Inter s tabulárnymi číslicami (§2 bod 3).
+     Fonty sa neinštalujú z siete (package.json je zamknutý, žiadny
+     next/font/google); ak Inter v systéme nie je, padá sa na system-ui. */
+  --ovl-font:
+    'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --ovl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --ovl-fs-eyebrow: 0.6875rem;
+  --ovl-fs-micro: 0.75rem;
+  --ovl-fs-small: 0.8125rem;
+  --ovl-fs-table: 0.875rem;
+  --ovl-fs-body: 0.9375rem;
+  --ovl-fs-h3: 1rem;
+  --ovl-fs-h2: 1.125rem;
+  --ovl-fs-h1: 1.5rem;
+  --ovl-fs-stat: 1.75rem;
+
+  --ovl-lh-tight: 1.25;
+  --ovl-lh-body: 1.5;
+
+  --ovl-s1: 0.25rem;
+  --ovl-s2: 0.375rem;
+  --ovl-s3: 0.625rem;
+  --ovl-s4: 0.875rem;
+  --ovl-s5: 1.25rem;
+  --ovl-s6: 1.75rem;
+
+  --ovl-radius: 10px;
+  --ovl-radius-sm: 6px;
+  --ovl-radius-pill: 999px;
+
+  /* Šírky obsahu (§2 bod 20) */
+  --ovl-max-wide: 1180px;
+  --ovl-max: 1100px;
+  --ovl-max-form: 720px;
+
+  --ovl-header-h: 56px;
+
+  /* Trvania animácií (§3.4) */
+  --ovl-dur-in: 180ms;
+  --ovl-dur-card: 160ms;
+  --ovl-dur-badge: 200ms;
+  --ovl-dur-hover: 120ms;
+  --ovl-dur-toast: 220ms;
+  --ovl-dur-grow: 320ms;
+  --ovl-ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
-* { box-sizing: border-box; }
+/* ══════════════════════════════════════════════════════════════════════════
+   2. Téma — DARK (default rodiny) a LIGHT (prepínač)
+   ══════════════════════════════════════════════════════════════════════════ */
 
-html, body { margin: 0; padding: 0; }
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --paper: #0e1413;
+  --surface: color-mix(in srgb, #16201f 62%, transparent);
+  --surface-solid: #16201f;
+  --surface-raised: #1b2624;
+  --line: #22302e;
+  --line-strong: #31423f;
+  --ink: #eef3f2;
+  --dim: #8a9895;
+  --brand: #05bcc4;
+  --brand-fill: var(--aura-teal-700);
+  --brand-ink: #04211f;
+  --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
+  --gold: #d8b878;
+
+  --st-critical: #e5534b;
+  --st-attention: #b58900;
+  --st-progress: #8b80e8;
+  --st-good: #3fa045;
+  --st-idle: #8a9895;
+
+  /* Pruh PRODUKCIA (D6) — v darku vyššia luminancia + gold hairline (V8) */
+  --production-bg: #c62f26;
+  --production-fg: #fff4f2;
+
+  /* Sekvenčná teal rampa pre G2 (hĺbka zľavy) — monotónna vo svetlosti,
+     od takmer-pozadia k plnej teal. Nekóduje stav, len magnitúdu. */
+  --seq-teal-1: #12312f;
+  --seq-teal-2: #12504f;
+  --seq-teal-3: #0a7076;
+  --seq-teal-4: #049199;
+  --seq-teal-5: #05bcc4;
+
+  /* Text stavu na tinte: čistý stavový tón má na 14% tinte kontrast ~4,1:1,
+     čo pri 13 px bold nestačí. Text sa preto mieša smerom k --ink (dark 80 %,
+     light 70 %) a dostane ≥ 4,5:1 na tinte aj na papieri. Plný tón zostáva
+     nedotknutý pre okraje, pruhy a marky grafov. */
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
+
+  --ovl-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+  --ovl-shadow-raised: 0 10px 30px -18px rgb(0 0 0 / 0.8);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --paper: #0e1413;
+    --surface: color-mix(in srgb, #16201f 62%, transparent);
+    --surface-solid: #16201f;
+    --surface-raised: #1b2624;
+    --line: #22302e;
+    --line-strong: #31423f;
+    --ink: #eef3f2;
+    --dim: #8a9895;
+    --brand: #05bcc4;
+    --brand-fill: var(--aura-teal-700);
+    --brand-ink: #04211f;
+    --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
+    --gold: #d8b878;
+
+    --st-critical: #e5534b;
+    --st-attention: #b58900;
+    --st-progress: #8b80e8;
+    --st-good: #3fa045;
+    --st-idle: #8a9895;
+
+    --production-bg: #c62f26;
+    --production-fg: #fff4f2;
+
+    --seq-teal-1: #12312f;
+    --seq-teal-2: #12504f;
+    --seq-teal-3: #0a7076;
+    --seq-teal-4: #049199;
+    --seq-teal-5: #05bcc4;
+
+    /* Text stavu na tinte: čistý stavový tón má na 14% tinte kontrast ~4,1:1,
+       čo pri 13 px bold nestačí. Text sa preto mieša smerom k --ink (dark 80 %,
+       light 70 %) a dostane ≥ 4,5:1 na tinte aj na papieri. Plný tón zostáva
+       nedotknutý pre okraje, pruhy a marky grafov. */
+    --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
+    --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
+    --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
+    --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
+    --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
+
+    --ovl-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+    --ovl-shadow-raised: 0 10px 30px -18px rgb(0 0 0 / 0.8);
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --paper: #f8f4f7;
+  --surface: color-mix(in srgb, #ffffff 72%, transparent);
+  --surface-solid: #ffffff;
+  --surface-raised: #ffffff;
+  --line: #e2dae0;
+  --line-strong: #c9bdc8;
+  --ink: #131b1a;
+  --dim: #667574;
+  --brand: #03797e;
+  --brand-fill: var(--aura-teal-700);
+  --brand-ink: #ffffff;
+  --brand-tint: #e3f1f1;
+  --gold: #8a6417;
+
+  --st-critical: #c62f26;
+  --st-attention: #d97706;
+  --st-progress: #4a3aa7;
+  --st-good: #2e7d32;
+  --st-idle: #667574;
+
+  --production-bg: #c62f26;
+  --production-fg: #ffffff;
+
+  --seq-teal-1: #e3f1f1;
+  --seq-teal-2: #a8d9da;
+  --seq-teal-3: #67bcbf;
+  --seq-teal-4: #2a9aa0;
+  --seq-teal-5: #03797e;
+
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 70%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 70%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 70%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 70%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 70%, var(--ink));
+
+  --ovl-shadow: 0 1px 2px rgb(19 27 26 / 0.05), 0 1px 3px rgb(19 27 26 / 0.07);
+  --ovl-shadow-raised: 0 10px 30px -16px rgb(19 27 26 / 0.22);
+}
+
+/* Derivované tinty a okraje — jedno pravidlo pre obe témy. Miešajú sa proti
+   NEPRIESVITNÉMU povrchu, aby badge a panely zostali plné (§1.1). */
+:root {
+  --st-critical-tint: color-mix(in oklab, var(--st-critical) 14%, var(--surface-solid));
+  --st-critical-edge: color-mix(in oklab, var(--st-critical) 42%, var(--surface-solid));
+  --st-attention-tint: color-mix(in oklab, var(--st-attention) 14%, var(--surface-solid));
+  --st-attention-edge: color-mix(in oklab, var(--st-attention) 42%, var(--surface-solid));
+  --st-progress-tint: color-mix(in oklab, var(--st-progress) 14%, var(--surface-solid));
+  --st-progress-edge: color-mix(in oklab, var(--st-progress) 42%, var(--surface-solid));
+  --st-good-tint: color-mix(in oklab, var(--st-good) 14%, var(--surface-solid));
+  --st-good-edge: color-mix(in oklab, var(--st-good) 42%, var(--surface-solid));
+  --st-idle-tint: color-mix(in oklab, var(--st-idle) 12%, var(--surface-solid));
+  --st-idle-edge: color-mix(in oklab, var(--st-idle) 36%, var(--surface-solid));
+
+  --gold-hairline: color-mix(in oklab, var(--aura-gold-600) 70%, transparent);
+
+  /* ── Aliasy starých názvov (volajúci ich používajú, nemenia sa) ────────── */
+  --ovl-bg: var(--paper);
+  --ovl-surface: var(--surface-solid);
+  --ovl-surface-2: var(--surface-raised);
+  --ovl-fg: var(--ink);
+  --ovl-muted: var(--dim);
+  --ovl-border: var(--line);
+  --ovl-border-strong: var(--line-strong);
+  --ovl-accent: var(--brand);
+  --ovl-danger: var(--st-critical);
+  --ovl-danger-bg: var(--st-critical-tint);
+  --ovl-warning: var(--st-attention);
+  --ovl-warning-bg: var(--st-attention-tint);
+  --ovl-ok: var(--st-good);
+  --ovl-ok-bg: var(--st-good-tint);
+  --ovl-neutral-bg: var(--st-idle-tint);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   3. Reset a základ
+   ══════════════════════════════════════════════════════════════════════════ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
 
 body {
-  background: var(--ovl-bg);
-  color: var(--ovl-fg);
+  background: var(--paper);
+  color: var(--ink);
   font-family: var(--ovl-font);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: var(--ovl-fs-body);
+  line-height: var(--ovl-lh-body);
+  /* Tabulárne číslice sú default v celej appke (§2 bod 3) — ceny, dátumy,
+     percentá a odpočty sa tak zarovnajú aj mimo tabuliek. */
+  font-variant-numeric: tabular-nums lining-nums;
+  -webkit-font-smoothing: antialiased;
 }
 
-a { color: inherit; }
+/* Jemný priehľadný závoj rodiny — dva veľmi mierne radiálne gradienty, aby
+   priesvitné plochy mali čo prekrývať. Bez obrázkov, bez parallaxu. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      70rem 34rem at 12% -8%,
+      color-mix(in oklab, var(--brand) 10%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      55rem 28rem at 105% 8%,
+      color-mix(in oklab, var(--gold) 8%, transparent),
+      transparent 70%
+    );
+}
 
-code { font-family: var(--ovl-mono); font-size: 0.9em; }
+/* Typografická hierarchia (V13) — default prehliadača už nikdy neprebije
+   dizajn: `h2` nesmie byť väčší než `h1`. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 700;
+  line-height: var(--ovl-lh-tight);
+  letter-spacing: -0.01em;
+}
+h1 {
+  font-size: var(--ovl-fs-h1);
+}
+h2 {
+  font-size: var(--ovl-fs-h2);
+}
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--ovl-fs-h3);
+}
 
-/* ── Shell ─────────────────────────────────────────────────────────────── */
+.ovl-page-title {
+  font-size: var(--ovl-fs-h1);
+  margin: 0 0 var(--ovl-s5);
+}
+.ovl-section-title {
+  font-size: var(--ovl-fs-h2);
+  margin: var(--ovl-s6) 0 var(--ovl-s3);
+}
+.ovl-eyebrow {
+  font-size: var(--ovl-fs-eyebrow);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+}
+
+a {
+  color: inherit;
+}
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--brand) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--ovl-radius-sm);
+}
+
+code {
+  font-family: var(--ovl-mono);
+  font-size: 0.9em;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: var(--ovl-s5) 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   4. Shell — pruh PRODUKCIA, teal lišta, gold hairline (§2 body 1, 2)
+   ══════════════════════════════════════════════════════════════════════════ */
 
 .ovl-main {
-  max-width: 1100px;
+  width: 100%;
+  max-width: var(--ovl-max);
   margin: 0 auto;
-  padding: 1.25rem 1rem 4rem;
+  padding: var(--ovl-s5) 1rem 2.5rem;
+}
+/* Šírka obsahu sa riadi obsahom: stačí, aby stránka obalila svoj obsah do
+   `.ovl-w-wide` / `.ovl-w-form` a shell sa prispôsobí (§2 bod 20). */
+.ovl-main:has(> .ovl-w-wide, > * > .ovl-w-wide) {
+  max-width: var(--ovl-max-wide);
+}
+.ovl-main:has(> .ovl-w-form) {
+  max-width: var(--ovl-max-form);
 }
 
-/* Trvalý červený pruh PRODUKCIA (D6) */
+.ovl-w-wide {
+  width: 100%;
+  max-width: var(--ovl-max-wide);
+  margin-inline: auto;
+}
+.ovl-w-default {
+  width: 100%;
+  max-width: var(--ovl-max);
+  margin-inline: auto;
+}
+.ovl-w-form {
+  width: 100%;
+  max-width: var(--ovl-max-form);
+  margin-inline: auto;
+}
+
+/* Trvalý červený pruh PRODUKCIA (D6) — plný, nepriesvitný, neanimovaný.
+   Gold hairline pod ním ho zväzuje s teal lištou do jednej hlavy. */
 .ovl-production-bar {
-  background: var(--ovl-danger);
-  color: #fff;
+  background: var(--production-bg);
+  color: var(--production-fg);
   text-align: center;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   padding: 0.4rem 1rem;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  border-bottom: 1px solid var(--gold-hairline);
+  box-shadow: 0 6px 18px -12px var(--production-bg);
 }
 .ovl-production-bar code {
   font-weight: 700;
-  background: rgb(255 255 255 / 0.15);
+  background: rgb(255 255 255 / 0.16);
   padding: 0 0.35em;
   border-radius: 4px;
+  letter-spacing: 0;
 }
 
+/* Teal lišta rodiny hneď pod pruhom */
 .ovl-header {
-  background: var(--ovl-surface);
-  border-bottom: 1px solid var(--ovl-border);
+  background: var(--brand-fill);
+  color: #fff;
+  border-bottom: 1px solid var(--gold-hairline);
 }
 
 .ovl-header-inner {
-  max-width: 1100px;
+  width: 100%;
+  max-width: var(--ovl-max-wide);
   margin: 0 auto;
-  padding: 0.5rem 1rem;
-  display: flex;
-  flex-wrap: wrap;
+  min-height: var(--ovl-header-h);
+  padding: 0.35rem 1rem;
+  display: grid;
+  /* wordmark | nav (max-content) | badge slot. Badge slot sa pri nedostatku
+     miesta zlomí do druhého radu — navigácia sa NESMIE odseknúť. */
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
-  gap: 0.75rem;
+  column-gap: var(--ovl-s4);
 }
 
-.ovl-brand { font-weight: 800; font-size: 1.05rem; margin-right: 0.5rem; }
+.ovl-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  font-weight: 700;
+  font-size: 1.0625rem;
+  letter-spacing: 0.01em;
+  color: #fff;
+  padding-right: var(--ovl-s4);
+  border-right: 1px solid var(--gold-hairline);
+}
+.ovl-crown {
+  color: var(--aura-gold-500);
+  font-size: 0.95em;
+  line-height: 1;
+}
 
-.ovl-nav { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.ovl-nav {
+  display: flex;
+  gap: 0.15rem;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+}
+.ovl-nav::-webkit-scrollbar {
+  display: none;
+}
 .ovl-nav a {
   text-decoration: none;
   padding: 0.3rem 0.65rem;
-  border-radius: var(--ovl-radius);
-  color: var(--ovl-muted);
+  border-radius: var(--ovl-radius-pill);
+  color: rgb(255 255 255 / 0.78);
   font-weight: 600;
+  font-size: var(--ovl-fs-small);
+  white-space: nowrap;
+  scroll-snap-align: start;
+  transition: background var(--ovl-dur-hover) ease-out, color var(--ovl-dur-hover) ease-out;
 }
-.ovl-nav a:hover { background: var(--ovl-neutral-bg); color: var(--ovl-fg); }
-.ovl-nav a[aria-current='page'] { background: var(--ovl-neutral-bg); color: var(--ovl-fg); }
+.ovl-nav a:hover {
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+}
+.ovl-nav a[aria-current='page'] {
+  background: rgb(255 255 255 / 0.18);
+  color: #fff;
+  box-shadow: inset 0 -2px 0 0 var(--aura-gold-500);
+}
 
 .ovl-header-badges {
-  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* Sekundárne stavové badge sa na mobile skladajú za prepínač; TTL badge
+   ostáva vždy viditeľný (D5 — skrývať sa NESMIE). */
+.ovl-status-secondary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
-/* ── Badge primitív (D5, D14, D87) ─────────────────────────────────────── */
+.ovl-theme-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font: inherit;
+  font-size: var(--ovl-fs-micro);
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--ovl-radius-pill);
+  border: 1px solid rgb(255 255 255 / 0.35);
+  background: rgb(255 255 255 / 0.1);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ovl-dur-hover) ease-out;
+}
+.ovl-theme-pill:hover {
+  background: rgb(255 255 255 / 0.2);
+}
+/* Prepínač skladania sekundárnych badge je len mobilná afordancia. */
+.ovl-header-badges .ovl-status-more {
+  display: none;
+}
+
+/* Glyfy stavov (§3.3) používajú znaky mimo základnej latinky — fallback na
+   systémové symbolové fonty, aby sa nekreslil prázdny rámik. Text stavu je
+   pri glyfe VŽDY, takže význam nesie aj keď glyf font nepokrýva. */
+.ovl-badge-glyph,
+.ovl-note-glyph {
+  font-family:
+    'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols',
+    'DejaVu Sans', var(--ovl-font);
+}
+
+/* Read-only výzva (D10) — full-bleed pás pod hlavičkou, nenápadný:
+   bez veľkej plochy, len hairline v tóne attention. */
+.ovl-readonly-strip {
+  background: var(--surface);
+  border-bottom: 2px solid var(--st-attention);
+  backdrop-filter: blur(8px);
+}
+.ovl-readonly-notice {
+  width: 100%;
+  max-width: var(--ovl-max-wide);
+  margin: 0 auto;
+  min-height: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 1rem;
+  font-size: var(--ovl-fs-small);
+  color: var(--ink);
+}
+.ovl-readonly-notice a {
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.ovl-footer {
+  width: 100%;
+  max-width: var(--ovl-max-wide);
+  margin: 0 auto;
+  padding: 0 1rem 2rem;
+  color: var(--dim);
+  font-size: var(--ovl-fs-micro);
+  border-top: 1px solid var(--line);
+  padding-top: var(--ovl-s4);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   5. Plochy — karty, panely, poznámky
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ovl-card {
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  border-radius: var(--ovl-radius);
+  box-shadow: var(--ovl-shadow);
+  padding: var(--ovl-s5);
+}
+.ovl-card h2 {
+  margin: 0 0 var(--ovl-s3);
+  font-size: var(--ovl-fs-eyebrow);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+}
+/* Tichá karta: bez tieňa, len hairline — pre zoznamy a druhoradý obsah. */
+.ovl-card--quiet {
+  background: color-mix(in oklab, var(--surface-solid) 42%, transparent);
+  box-shadow: none;
+  border-color: color-mix(in oklab, var(--line) 70%, transparent);
+}
+.ovl-card--danger {
+  border-color: var(--st-critical-edge);
+  border-left: 4px solid var(--st-critical);
+}
+.ovl-card--warning {
+  border-color: var(--st-attention-edge);
+  border-left: 4px solid var(--st-attention);
+}
+
+/* Veľká priesvitná plocha bez vlastnej „kartovosti" — obal sekcie. */
+.ovl-panel {
+  background: color-mix(in oklab, var(--surface-solid) 34%, transparent);
+  backdrop-filter: blur(6px);
+  border: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+  border-radius: var(--ovl-radius);
+  padding: var(--ovl-s5);
+}
+
+/* Poznámkové/stavové panely. VŽDY plné (§1.1) — čitateľnosť je bezpečnostná
+   funkcia. `.ovl-note` bez modifikátora je neutrálna informácia, nie chyba
+   (rieši V20: `preskočený` sa nesmie kresliť ako chyba). */
+.ovl-note {
+  background: var(--st-idle-tint);
+  border: 1px solid var(--st-idle-edge);
+  border-left: 3px solid var(--st-idle);
+  border-radius: var(--ovl-radius-sm);
+  padding: 0.55rem 0.75rem;
+  font-size: var(--ovl-fs-small);
+  color: var(--ink);
+}
+.ovl-note--critical {
+  background: var(--st-critical-tint);
+  border-color: var(--st-critical-edge);
+  border-left-color: var(--st-critical);
+}
+.ovl-note--attention {
+  background: var(--st-attention-tint);
+  border-color: var(--st-attention-edge);
+  border-left-color: var(--st-attention);
+}
+.ovl-note--progress {
+  background: var(--st-progress-tint);
+  border-color: var(--st-progress-edge);
+  border-left-color: var(--st-progress);
+}
+.ovl-note--good {
+  background: var(--st-good-tint);
+  border-color: var(--st-good-edge);
+  border-left-color: var(--st-good);
+}
+.ovl-note-glyph {
+  font-weight: 700;
+  margin-right: 0.35em;
+}
+.ovl-note--critical .ovl-note-glyph {
+  color: var(--st-critical-ink);
+}
+.ovl-note--attention .ovl-note-glyph {
+  color: var(--st-attention-ink);
+}
+.ovl-note--good .ovl-note-glyph {
+  color: var(--st-good-ink);
+}
+.ovl-note details,
+.ovl-error details {
+  margin-top: 0.35rem;
+  color: var(--ink);
+}
+.ovl-note summary,
+.ovl-error summary {
+  cursor: pointer;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+.ovl-note pre,
+.ovl-error pre {
+  margin: 0.3rem 0 0;
+  font-family: var(--ovl-mono);
+  font-size: var(--ovl-fs-micro);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Alias: `.ovl-error` = `.ovl-note--critical` (7 volajúcich miest). */
+.ovl-error {
+  background: var(--st-critical-tint);
+  border: 1px solid var(--st-critical-edge);
+  border-left: 3px solid var(--st-critical);
+  border-radius: var(--ovl-radius-sm);
+  padding: 0.55rem 0.75rem;
+  color: var(--ink);
+  font-size: var(--ovl-fs-small);
+}
+
+/* Rozbalenie „Technický detail" — plynulá výška (§3.4) */
+.ovl-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--ovl-dur-card) var(--ovl-ease-out);
+}
+.ovl-expand > * {
+  overflow: hidden;
+}
+.ovl-expand[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+
+/* Legenda: plné znenie povinnej vety RAZ na sekciu (D4/D7 — §2 body 7, 8) */
+.ovl-legend {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 0.6rem;
+  color: var(--dim);
+  font-size: var(--ovl-fs-small);
+}
+
+/* Agregovaný banner needs_key + missed — ROVNAKÁ vizuálna váha (D8, D33b).
+   Rozdelenie na dve karty alebo iná farba pre jeden z nich je porušenie. */
+.ovl-alerts-banner {
+  background: var(--st-attention-tint);
+  border: 1px solid var(--st-attention-edge);
+  border-left: 4px solid var(--st-attention);
+  border-radius: var(--ovl-radius);
+  padding: var(--ovl-s4) var(--ovl-s5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ovl-alerts-banner strong {
+  color: var(--st-attention-ink);
+}
+.ovl-alerts-banner ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.ovl-runbook {
+  background: var(--surface-solid);
+  border: 1px solid var(--st-critical-edge);
+  border-left: 4px solid var(--st-critical);
+  border-radius: var(--ovl-radius);
+  padding: var(--ovl-s5);
+}
+.ovl-runbook h3 {
+  margin: 0 0 0.5rem;
+  color: var(--st-critical-ink);
+}
+.ovl-runbook ol {
+  margin: 0;
+  padding-left: 1.3rem;
+}
+.ovl-runbook li {
+  margin-bottom: 0.3rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   6. Stavové badge (§3.2, §3.3) — farba + glyf + text, nikdy len farba
+   ══════════════════════════════════════════════════════════════════════════ */
 
 .ovl-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.35em;
   padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
+  border-radius: var(--ovl-radius-pill);
+  font-size: var(--ovl-fs-small);
   font-weight: 700;
   white-space: nowrap;
-  border: 1px solid transparent;
-  background: var(--ovl-neutral-bg);
-  color: var(--ovl-fg);
+  border: 1px solid var(--st-idle-edge);
+  background: var(--st-idle-tint);
+  color: var(--ink);
+  transition:
+    background var(--ovl-dur-badge) ease-out,
+    border-color var(--ovl-dur-badge) ease-out,
+    color var(--ovl-dur-badge) ease-out;
 }
-.ovl-badge--ok { background: var(--ovl-ok-bg); color: var(--ovl-ok); }
-.ovl-badge--warning { background: var(--ovl-warning-bg); color: var(--ovl-warning); }
-.ovl-badge--danger { background: var(--ovl-danger-bg); color: var(--ovl-danger); }
-.ovl-badge--neutral { background: var(--ovl-neutral-bg); color: var(--ovl-muted); }
-.ovl-badge--outline { background: transparent; border-color: var(--ovl-border); color: var(--ovl-muted); }
+.ovl-badge-glyph {
+  font-weight: 700;
+  line-height: 1;
+}
 
-/* Badge „podľa vlastného zápisu" (D7, I11) je vždy outline + kurzíva */
+.ovl-badge--critical {
+  background: var(--st-critical-tint);
+  border-color: var(--st-critical-edge);
+  color: var(--st-critical-ink);
+  /* Iná silueta než ostatné tóny — rozpoznateľné aj v čiernobielej. */
+  border-left-width: 3px;
+}
+.ovl-badge--attention {
+  background: var(--st-attention-tint);
+  border-color: var(--st-attention-edge);
+  color: var(--st-attention-ink);
+}
+.ovl-badge--progress {
+  background: var(--st-progress-tint);
+  border-color: var(--st-progress-edge);
+  color: var(--st-progress-ink);
+}
+.ovl-badge--good {
+  background: var(--st-good-tint);
+  border-color: var(--st-good-edge);
+  color: var(--st-good-ink);
+}
+.ovl-badge--idle {
+  background: var(--st-idle-tint);
+  border-color: var(--st-idle-edge);
+  color: var(--st-idle-ink);
+}
+.ovl-badge--outline {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--dim);
+}
+/* Aliasy starých tónov — volajúci ich skladajú do template stringu. */
+.ovl-badge--ok {
+  background: var(--st-good-tint);
+  border-color: var(--st-good-edge);
+  color: var(--st-good-ink);
+}
+.ovl-badge--warning {
+  background: var(--st-attention-tint);
+  border-color: var(--st-attention-edge);
+  color: var(--st-attention-ink);
+}
+.ovl-badge--danger {
+  background: var(--st-critical-tint);
+  border-color: var(--st-critical-edge);
+  color: var(--st-critical-ink);
+  border-left-width: 3px;
+}
+.ovl-badge--neutral {
+  background: var(--st-idle-tint);
+  border-color: var(--st-idle-edge);
+  color: var(--st-idle-ink);
+}
+
+/* Badge „podľa vlastného zápisu" (D7, I11) — prerušovaný okraj + kurzíva
+   nesú rozdiel „naša evidencia" vs. „tvrdenie o shope" aj bez farby.
+   Formu NEMENIŤ (K9); skracuje sa len viditeľný text, plné znenie je v
+   `title` + `aria-label` (§2 bod 7). */
 .ovl-selfwrite {
   display: inline-flex;
   align-items: center;
   gap: 0.3em;
-  font-size: 0.78rem;
+  font-size: var(--ovl-fs-small);
   font-style: italic;
-  color: var(--ovl-muted);
-  border: 1px dashed var(--ovl-border);
-  border-radius: 6px;
+  color: var(--dim);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--ovl-radius-sm);
   padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+  cursor: help;
 }
 
-/* ── Tlačidlá ──────────────────────────────────────────────────────────── */
+/* `≈` marker pri vypočítanej cene (D4, §2 bod 8) */
+.ovl-approx {
+  cursor: help;
+  color: var(--dim);
+  font-weight: 700;
+  margin-right: 0.15em;
+}
+.ovl-price-hint {
+  font-size: var(--ovl-fs-small);
+  color: var(--dim);
+  font-style: italic;
+}
+
+.ovl-variant-warning {
+  background: var(--st-attention-tint);
+  border: 1px solid var(--st-attention-edge);
+  border-radius: var(--ovl-radius-sm);
+  padding: 0.3rem 0.6rem;
+  font-size: var(--ovl-fs-small);
+  color: var(--ink);
+}
+/* Kompaktný tvar do kariet a tabuliek (V16) — plná veta v title/aria-label. */
+.ovl-variant-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--ovl-radius-sm);
+  border: 1px solid var(--st-attention-edge);
+  color: var(--st-attention-ink);
+  background: var(--st-attention-tint);
+  font-size: var(--ovl-fs-micro);
+  cursor: help;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   7. Tlačidlá, čipy, vstupy
+   ══════════════════════════════════════════════════════════════════════════ */
 
 .ovl-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.4em;
   font: inherit;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: var(--ovl-fs-table);
   padding: 0.45rem 0.9rem;
+  min-height: 2.25rem;
   border-radius: var(--ovl-radius);
-  border: 1px solid var(--ovl-border);
-  background: var(--ovl-surface);
-  color: var(--ovl-fg);
+  border: 1px solid var(--line-strong);
+  background: color-mix(in oklab, var(--surface-solid) 70%, transparent);
+  color: var(--ink);
+  text-decoration: none; /* V31 — `<a class="ovl-btn">` nebolo podčiarknuté */
   cursor: pointer;
+  /* Šírka podľa obsahu aj vnútri `.ovl-stack` (V15) */
+  align-self: flex-start;
+  flex: 0 0 auto;
+  transition:
+    background var(--ovl-dur-hover) ease-out,
+    border-color var(--ovl-dur-hover) ease-out;
 }
-.ovl-btn:hover:not(:disabled) { background: var(--ovl-neutral-bg); }
-.ovl-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.ovl-btn--primary { background: var(--ovl-accent); border-color: var(--ovl-accent); color: #fff; }
-.ovl-btn--primary:hover:not(:disabled) { background: #1a43b8; }
-.ovl-btn--danger { background: var(--ovl-danger); border-color: var(--ovl-danger); color: #fff; }
-.ovl-btn--danger:hover:not(:disabled) { background: #921d17; }
-.ovl-btn--small { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
-
-/* ── Karty a panely ────────────────────────────────────────────────────── */
-
-.ovl-card {
-  background: var(--ovl-surface);
-  border: 1px solid var(--ovl-border);
-  border-radius: var(--ovl-radius);
-  box-shadow: var(--ovl-shadow);
-  padding: 1rem;
+.ovl-btn:hover:not(:disabled) {
+  background: var(--surface-raised);
+  border-color: var(--brand);
 }
-.ovl-card h2 {
-  margin: 0 0 0.6rem;
-  font-size: 1rem;
+.ovl-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
-.ovl-card--danger { border-color: var(--ovl-danger); }
-.ovl-card--warning { border-color: var(--ovl-warning); }
+.ovl-btn--primary {
+  background: var(--brand-fill);
+  border-color: var(--brand-fill);
+  color: #fff;
+}
+.ovl-btn--primary:hover:not(:disabled) {
+  background: var(--aura-teal-900);
+  border-color: var(--aura-teal-900);
+}
+/* Solid červená sa rezervuje pre potvrdzovacie tlačidlá zápisu a panic. */
+.ovl-btn--danger {
+  background: var(--st-critical);
+  border-color: var(--st-critical);
+  color: #fff;
+}
+.ovl-btn--danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--st-critical) 82%, #000);
+  border-color: color-mix(in oklab, var(--st-critical) 82%, #000);
+}
+/* Tichá deštruktívna akcia v riadkoch tabuliek (V35) */
+.ovl-btn--danger-quiet {
+  background: transparent;
+  color: var(--st-critical-ink);
+  border-color: color-mix(in oklab, var(--st-critical) 40%, transparent);
+}
+.ovl-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--brand);
+}
+.ovl-btn--small {
+  padding: 0.25rem 0.6rem;
+  min-height: 1.75rem;
+  font-size: var(--ovl-fs-small);
+}
 
-.ovl-grid { display: grid; gap: 1rem; }
-.ovl-grid--dashboard { grid-template-columns: 1fr; }
+/* Dôvod vypnutia ako VIDITEĽNÝ text, nie len tooltip (U17) */
+.ovl-btn-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+.ovl-btn-reason {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  max-width: 32rem;
+}
+
+/* Inline spinner v tlačidle (§3.4) — nikdy na potvrdzovacom tlačidle zápisu. */
+.ovl-spinner {
+  width: 0.85em;
+  height: 0.85em;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: ovl-spin 700ms linear infinite;
+}
+
+/* Pilulka = voľba, zaoblený obdĺžnik = akcia (V30) */
+.ovl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  height: 1.75rem;
+  padding: 0 0.7rem;
+  border-radius: var(--ovl-radius-pill);
+  font: inherit;
+  font-size: var(--ovl-fs-small);
+  font-weight: 600;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ovl-dur-hover) ease-out;
+}
+.ovl-chip[aria-pressed='true'] {
+  background: var(--brand-tint);
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 700;
+}
+
+/* Formuláre (V28) — jedno pravidlo pokryje celú appku bez zásahu do
+   komponentov, ktoré patria iným agentom. */
+:where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  font: inherit;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ovl-radius-sm);
+  background: var(--surface-solid);
+  color: var(--ink);
+  color-scheme: inherit;
+}
+:where(input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--brand) 60%, transparent);
+  outline-offset: 1px;
+  border-color: var(--brand);
+}
+:where(input, select, textarea):disabled {
+  background: var(--surface-raised);
+  color: var(--dim);
+  cursor: not-allowed;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--brand);
+  width: 1rem;
+  height: 1rem;
+}
+input::placeholder {
+  color: var(--dim);
+  opacity: 1;
+}
+.ovl-input--xs {
+  width: 5rem;
+}
+.ovl-input--sm {
+  width: 12rem;
+}
+.ovl-input--md {
+  width: 22rem;
+  max-width: 100%;
+}
+.ovl-input--full {
+  width: 100%;
+}
+/* SK echo dátumu vedľa natívneho pickeru (D13, §2 bod 9) */
+.ovl-date-echo {
+  font-size: var(--ovl-fs-small);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* Výber produktu má viditeľnú odozvu (V32) */
+.ovl-pick {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--ovl-radius-sm);
+}
+.ovl-pick:hover {
+  background: var(--surface-raised);
+}
+.ovl-pick:has(input:checked) {
+  background: var(--brand-tint);
+  border-color: color-mix(in oklab, var(--brand) 35%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   8. Tabuľky (+ mobil: kartový režim a sticky prvý stĺpec — §2 bod 19)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ovl-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--ovl-radius-sm);
+}
+.ovl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ovl-fs-table);
+}
+.ovl-table th,
+.ovl-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+  vertical-align: top;
+}
+.ovl-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-solid);
+  font-size: var(--ovl-fs-eyebrow);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  border-bottom: 1px solid var(--line-strong);
+}
+.ovl-table tbody tr:hover {
+  background: var(--surface-raised);
+}
+.ovl-table caption {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: 0.4rem;
+}
+.ovl-table a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in oklab, currentColor 40%, transparent);
+}
+.ovl-table .ovl-num {
+  text-align: right;
+}
+.ovl-table-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+/* Dlhá hlavička do dvoch riadkov (V25) — `Položky` + `ok / zlyh. / spolu`.
+   Šírka stĺpca potom nie je daná hlavičkou, ale dátami. */
+.ovl-th-sub {
+  display: block;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--dim);
+}
+
+/* Sticky prvý stĺpec + scroll fade pre široké tabuľky (audit) */
+.ovl-table-wrap--sticky-first {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+.ovl-table--sticky-first th:first-child,
+.ovl-table--sticky-first td:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--surface-solid);
+  border-right: 1px solid var(--line);
+  z-index: 2;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9. Mriežky, produktové karty, drobnosti
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ovl-grid {
+  display: grid;
+  gap: var(--ovl-s4);
+}
+.ovl-grid--dashboard {
+  grid-template-columns: 1fr;
+}
 @media (min-width: 820px) {
-  .ovl-grid--dashboard { grid-template-columns: 1fr 1fr; }
-  .ovl-grid--dashboard .ovl-span-2 { grid-column: span 2; }
+  .ovl-grid--dashboard {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ovl-grid--dashboard .ovl-span-2 {
+    grid-column: span 2;
+  }
 }
 
 .ovl-allowlist-grid {
   display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--ovl-s3);
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-auto-rows: 1fr;
 }
 .ovl-product-card {
-  background: var(--ovl-surface);
-  border: 1px solid var(--ovl-border);
-  border-radius: var(--ovl-radius);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--ovl-radius-sm);
   padding: 0.7rem;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   gap: 0.35rem;
-  font-size: 0.85rem;
+  font-size: var(--ovl-fs-small);
+  min-height: 7rem;
 }
 .ovl-product-card--empty {
   border-style: dashed;
-  color: var(--ovl-muted);
+  color: var(--dim);
   align-items: center;
   justify-content: center;
-  min-height: 6rem;
+  background: transparent;
 }
-.ovl-product-name { font-weight: 700; font-size: 0.9rem; overflow-wrap: anywhere; }
-.ovl-product-price { font-variant-numeric: tabular-nums; }
-
-/* Agregovaný banner needs_key + missed — ROVNAKÁ vizuálna váha (D8, D33b) */
-.ovl-alerts-banner {
-  background: var(--ovl-danger-bg);
-  border: 2px solid var(--ovl-danger);
-  border-radius: var(--ovl-radius);
-  padding: 0.8rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.ovl-alerts-banner strong { color: var(--ovl-danger); }
-.ovl-alerts-banner ul { margin: 0; padding-left: 1.2rem; }
-
-/* Read-only režim (D10) */
-.ovl-readonly-notice {
-  background: var(--ovl-warning-bg);
-  border: 1px solid var(--ovl-warning);
-  color: var(--ovl-warning);
-  border-radius: var(--ovl-radius);
-  padding: 0.35rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-.ovl-readonly-notice a { font-weight: 700; }
-
-/* ── Tabuľky ───────────────────────────────────────────────────────────── */
-
-.ovl-table-wrap { overflow-x: auto; }
-.ovl-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-  background: var(--ovl-surface);
-}
-.ovl-table th, .ovl-table td {
-  text-align: left;
-  padding: 0.45rem 0.6rem;
-  border-bottom: 1px solid var(--ovl-border);
-  vertical-align: top;
-}
-.ovl-table th {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--ovl-muted);
-}
-.ovl-table tbody tr:hover { background: var(--ovl-bg); }
-.ovl-table .ovl-num { text-align: right; font-variant-numeric: tabular-nums; }
-
-/* ── Drobnosti ─────────────────────────────────────────────────────────── */
-
-.ovl-muted { color: var(--ovl-muted); }
-.ovl-small { font-size: 0.8rem; }
-.ovl-mono { font-family: var(--ovl-mono); }
-.ovl-stack { display: flex; flex-direction: column; gap: 0.4rem; }
-.ovl-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.ovl-spread { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
-
-.ovl-price-hint { font-size: 0.78rem; color: var(--ovl-muted); font-style: italic; }
-
-.ovl-error {
-  background: var(--ovl-danger-bg);
-  border: 1px solid var(--ovl-danger);
-  border-radius: var(--ovl-radius);
-  padding: 0.6rem 0.8rem;
-  color: var(--ovl-danger);
-  font-size: 0.88rem;
-}
-.ovl-error details { margin-top: 0.3rem; color: var(--ovl-fg); }
-.ovl-error summary { cursor: pointer; font-size: 0.8rem; }
-.ovl-error pre {
-  margin: 0.3rem 0 0;
-  font-family: var(--ovl-mono);
-  font-size: 0.75rem;
-  white-space: pre-wrap;
+.ovl-product-name {
+  font-weight: 700;
+  font-size: var(--ovl-fs-table);
   overflow-wrap: anywhere;
 }
-
-.ovl-variant-warning {
-  background: var(--ovl-warning-bg);
-  border: 1px solid var(--ovl-warning);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.8rem;
-  color: var(--ovl-warning);
+.ovl-product-price {
+  white-space: nowrap;
+}
+/* Miesto obrázka nesie iniciálový monogram (§4) — API obrázky nemá. */
+.ovl-monogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--ovl-radius-sm);
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-weight: 700;
+  font-size: var(--ovl-fs-small);
 }
 
-.ovl-runbook {
-  background: var(--ovl-surface);
-  border: 2px solid var(--ovl-danger);
-  border-radius: var(--ovl-radius);
-  padding: 1rem;
+.ovl-muted {
+  color: var(--dim);
 }
-.ovl-runbook h3 { margin: 0 0 0.5rem; color: var(--ovl-danger); }
-.ovl-runbook ol { margin: 0; padding-left: 1.3rem; }
-.ovl-runbook li { margin-bottom: 0.3rem; }
+.ovl-small {
+  font-size: var(--ovl-fs-small);
+}
+.ovl-mono {
+  font-family: var(--ovl-mono);
+  font-size: 0.9em;
+}
+/* Čísla, ceny, percentá a dátumy sa NESMÚ lámať (V35) */
+.ovl-num,
+.ovl-money,
+.ovl-pct,
+.ovl-date {
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+}
+.ovl-daterange {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.ovl-stat {
+  font-size: var(--ovl-fs-stat);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.ovl-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start; /* V15 — stretch naťahoval tlačidlá na 1065 px */
+}
+.ovl-stack--fill {
+  align-items: stretch;
+}
+.ovl-stack--loose {
+  gap: var(--ovl-s5);
+}
+.ovl-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ovl-spread {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 
 .ovl-sudo-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.45);
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -320,36 +1310,281 @@ code { font-family: var(--ovl-mono); font-size: 0.9em; }
   padding: 1rem;
 }
 .ovl-sudo-dialog {
-  background: var(--ovl-surface);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
   border-radius: var(--ovl-radius);
-  box-shadow: 0 10px 40px rgb(0 0 0 / 0.25);
-  padding: 1.25rem;
+  box-shadow: var(--ovl-shadow-raised);
+  padding: var(--ovl-s5);
   max-width: 420px;
   width: 100%;
 }
-.ovl-sudo-dialog h3 { margin: 0 0 0.5rem; }
+.ovl-sudo-dialog h3 {
+  margin: 0 0 0.5rem;
+}
 .ovl-sudo-dialog input[type='password'] {
-  font: inherit;
   width: 100%;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--ovl-border);
-  border-radius: var(--ovl-radius);
   margin: 0.5rem 0 0.75rem;
 }
 
-.ovl-skeleton {
-  background: var(--ovl-neutral-bg);
-  border-radius: 6px;
-  color: transparent;
-  animation: ovl-pulse 1.4s ease-in-out infinite;
-  user-select: none;
+/* Toast výsledku zápisu — drží kým sa neodklikne (§3.4) */
+.ovl-toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(36rem, calc(100vw - 2rem));
 }
-@keyframes ovl-pulse { 50% { opacity: 0.55; } }
+.ovl-toast {
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--brand);
+  border-radius: var(--ovl-radius);
+  box-shadow: var(--ovl-shadow-raised);
+  padding: 0.7rem 0.9rem;
+  font-size: var(--ovl-fs-small);
+  animation: ovl-toast-in var(--ovl-dur-toast) var(--ovl-ease-out) both;
+}
 
-.ovl-footer {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0 1rem 2rem;
-  color: var(--ovl-muted);
-  font-size: 0.78rem;
+/* ══════════════════════════════════════════════════════════════════════════
+   10. Grafy (B2 kreslí inline SVG do týchto tried, tokeny z §3.1)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ovl-chart {
+  width: 100%;
+  overflow: visible;
+}
+.ovl-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+/* Hover na mark: 2 px surface ring, bez posunu (§3.4) */
+.ovl-chart-mark {
+  transition: filter var(--ovl-dur-hover) ease-out;
+}
+.ovl-chart-mark:hover {
+  stroke: var(--surface-solid);
+  stroke-width: 2;
+  paint-order: stroke fill;
+}
+/* Bary/spany narastú z baseline raz pri prvom zobrazení */
+.ovl-anim-grow {
+  transform-origin: left center;
+  animation: ovl-grow var(--ovl-dur-grow) var(--ovl-ease-out) both;
+}
+.ovl-chart-table {
+  font-size: var(--ovl-fs-small);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   11. Animácie (§3.4) — krátke, funkčné, vypnuté pri reduced-motion
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes ovl-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ovl-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@keyframes ovl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ovl-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes ovl-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Vstup obrazovky */
+.ovl-anim-in {
+  animation: ovl-in var(--ovl-dur-in) var(--ovl-ease-out) both;
+}
+/* Staggered fade kariet — 40 ms krok, max 6 kariet */
+.ovl-stagger > * {
+  animation: ovl-in var(--ovl-dur-card) var(--ovl-ease-out) both;
+}
+.ovl-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.ovl-stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.ovl-stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.ovl-stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.ovl-stagger > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.ovl-stagger > *:nth-child(6) {
+  animation-delay: 200ms;
+}
+.ovl-stagger > *:nth-child(n + 7) {
+  animation-delay: 200ms;
+}
+
+/* Skeleton: shimmer 1,2 s (nie pulz) */
+.ovl-shimmer,
+.ovl-skeleton {
+  color: transparent;
+  user-select: none;
+  border-radius: var(--ovl-radius-sm);
+  background-color: var(--surface-raised);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--ink) 8%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: ovl-shimmer 1200ms linear infinite;
+}
+.ovl-skeleton--row {
+  min-height: 1.25rem;
+  display: block;
+}
+.ovl-skeleton--card {
+  min-height: 6rem;
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   12. Mobil (§2 bod 19) — appka je na mobile scenár „pozriem, čo beží"
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Pod 1100 px sa stavové badge presunú na vlastný riadok — inak by stlačili
+   navigáciu a tá by sa odsekla. */
+@media (max-width: 1100px) {
+  .ovl-header-inner {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 0.35rem;
+  }
+  .ovl-header-badges {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 719px) {
+  .ovl-production-bar {
+    font-size: var(--ovl-fs-small);
+    line-height: var(--ovl-lh-tight);
+    letter-spacing: 0.02em;
+  }
+  .ovl-brand {
+    font-size: 1rem;
+    padding-right: var(--ovl-s3);
+  }
+  .ovl-main {
+    padding: var(--ovl-s4) 0.75rem 2rem;
+  }
+  /* Sekundárne badge sa skladajú za prepínač, TTL badge zostáva (D5) */
+  .ovl-header-badges .ovl-status-more {
+    display: inline-flex;
+  }
+  .ovl-status-secondary[data-open='false'] {
+    display: none;
+  }
+
+  /* Kartový režim tabuliek: hlavička sa presúva do `data-label` buniek */
+  .ovl-table--cards thead {
+    display: none;
+  }
+  .ovl-table--cards,
+  .ovl-table--cards tbody,
+  .ovl-table--cards tr,
+  .ovl-table--cards td {
+    display: block;
+    width: auto;
+  }
+  .ovl-table--cards tr {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--ovl-radius-sm);
+    padding: 0.5rem 0.6rem;
+    margin-bottom: var(--ovl-s3);
+  }
+  .ovl-table--cards td {
+    border: 0;
+    padding: 0.2rem 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    text-align: left !important;
+  }
+  .ovl-table--cards td[data-label] {
+    grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+    align-items: start;
+  }
+  .ovl-table--cards td[data-label]::before {
+    content: attr(data-label);
+    font-size: var(--ovl-fs-eyebrow);
+    font-weight: 700;
+    line-height: var(--ovl-lh-tight);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    /* Číselné stĺpce majú `nowrap` (V35) — hlavička v kartovom režime sa ale
+       zalomiť MUSÍ, inak prekryje hodnotu. */
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .ovl-table--cards td:empty {
+    display: none;
+  }
+}
+
+@media (min-width: 720px) {
+  /* Na desktope sú sekundárne badge vždy viditeľné bez ohľadu na stav
+     mobilného prepínača. */
+  .ovl-status-secondary {
+    display: flex !important;
+  }
 }

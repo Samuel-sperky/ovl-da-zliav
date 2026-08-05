@@ -44,6 +44,30 @@ export function computeReminders(campaigns: readonly CampaignRecord[], now: UtcD
   return out;
 }
 
+/**
+ * D8 — kampane ohrozené tým, že kľúč expiruje SKÔR, než sa majú zapísať.
+ * Čistá funkcia: volajúci dodá zoznam čakajúcich kampaní a koniec platnosti
+ * kľúča (`null` = kľúč vôbec nie je uložený → ohrozené sú všetky).
+ *
+ * Toto nie je pripomienka podľa pásiem (D26), ale samostatná trieda rizika:
+ * kampaň môže byť ďaleko za pásmom 48 h a napriek tomu byť odsúdená na
+ * `needs_key`. Banner na dashboarde ich agreguje spolu (D8).
+ */
+export function computeAtRisk(
+  campaigns: readonly CampaignRecord[],
+  keyExpiresAt: UtcDate | null,
+): Array<{ campaignId: number; name: string; fireAt: UtcDate }> {
+  const out: Array<{ campaignId: number; name: string; fireAt: UtcDate }> = [];
+  for (const c of campaigns) {
+    if (c.status !== 'scheduled') continue;
+    if (!c.fireAt) continue;
+    if (keyExpiresAt !== null && c.fireAt.getTime() <= keyExpiresAt.getTime()) continue;
+    out.push({ campaignId: c.id, name: c.name, fireAt: c.fireAt });
+  }
+  out.sort((a, b) => a.fireAt.getTime() - b.fireAt.getTime() || a.campaignId - b.campaignId);
+  return out;
+}
+
 /* ───────────────── in-process stav pre /api/notifications ──────────────── */
 
 let active: Reminder[] = [];

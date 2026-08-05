@@ -2,9 +2,11 @@
  * Aura Zľavy — sudo mód (D70, INVARIANT I3).
  *
  * D70: „Pred ostrým zápisom MUSÍ appka vyžiadať heslo znova, ak je od poslednej
- * autentifikácie viac než 15 minút." Sudo okno je preto priamou súčasťou I3
- * („žiadny zápis bez potvrdenia") a tento modul musí vedieť **jednoznačne**
- * odpovedať, či okno platí.
+ * autentifikácie viac než 15 minút." Plán §7 dĺžku okna mení na **30 minút,
+ * heslo raz** (dôvod: to isté heslo sa zadávalo 2× na jeden zápis); podmienka
+ * „bez platného okna sa nezapisuje" zostáva nedotknutá. Sudo okno je priamou
+ * súčasťou I3 („žiadny zápis bez potvrdenia") a tento modul musí vedieť
+ * **jednoznačne** odpovedať, či okno platí.
  *
  * **PRI POCHYBNOSTI VŽDY „NIE".** `checkSudo()` vracia `valid: false`, keď:
  *  - session chýba alebo je neplatná (`claims === null`),
@@ -20,7 +22,7 @@
  *  - pipeline `auth: 'sudo'` (A5) si vystačí s cookie.
  *
  * Predĺžiť okno sa dá VÝHRADNE opätovným zadaním hesla (`grantSudo()`), nikdy
- * aktivitou používateľa — inak by 15-minútové okno nebolo obmedzením (D70).
+ * aktivitou používateľa — inak by časové okno nebolo obmedzením (D70).
  *
  * Vlastník: A4.
  */
@@ -39,8 +41,17 @@ import { usersRepo, type UsersRepository } from '@/lib/repo/users.repo';
 /** Kód, ktorý pipeline (A5) mapuje na 401 `sudo_required` (§5). */
 export const SUDO_REQUIRED_CODE = 'sudo_required';
 
+/**
+ * Dĺžka okna po zadaní hesla. Plán §7 mení D70 z „re-auth po 15 minútach" na
+ * „okno 30 minút, heslo raz" — to isté heslo sa predtým zadávalo dvakrát na
+ * jeden zápis. ENV `SUDO_WINDOW_MINUTES` môže okno len PREDĹŽIŤ (strop 60 min
+ * drží zod schéma v `env.ts`), nikdy skrátiť pod túto hodnotu; kratšie okno by
+ * vrátilo dvojité zadávanie hesla, ktoré plán ruší.
+ */
+export const SUDO_WINDOW_MINUTES = 30;
+
 export const SUDO_REQUIRED_MESSAGE =
-  'Pred ostrým zápisom je potrebné znova zadať heslo (sudo mód, platnosť 15 minút, D70).';
+  'Pred ostrým zápisom je potrebné znova zadať heslo — potvrdenie potom platí 30 minút.';
 
 /** Chyba pre `auth: 'sudo'` route-y. Fail-closed — nikdy sa neprehlta (I3). */
 export class SudoRequiredError extends Error {
@@ -52,13 +63,15 @@ export class SudoRequiredError extends Error {
   }
 }
 
-/** Okno v minútach z ENV (§11, `SUDO_WINDOW_MINUTES`, default 15). */
+/**
+ * Okno v minútach: `max(ENV, 30)` (§11 `SUDO_WINDOW_MINUTES`, plán §7).
+ * Bez načítateľného ENV platí 30 — nikdy nie viac, než dovolí ENV strop.
+ */
 export function sudoWindowMinutes(): number {
   try {
-    return env.SUDO_WINDOW_MINUTES;
+    return Math.max(env.SUDO_WINDOW_MINUTES, SUDO_WINDOW_MINUTES);
   } catch {
-    // Bez ENV sa nechováme voľnejšie než D70.
-    return 15;
+    return SUDO_WINDOW_MINUTES;
   }
 }
 
