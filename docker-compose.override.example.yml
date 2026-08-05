@@ -1,0 +1,21 @@
+# Aura Zľavy — PRÍKLAD lokálneho override súboru (docker-compose.override.yml).
+#
+# Skopíruj na `docker-compose.override.yml` (je v .gitignore? NIE — preto
+# override drž mimo repa, alebo commituj len tento .example) a uprav podľa
+# potreby VÝVOJOVÉHO prostredia.
+#
+# POZOR — INVARIANT I5 platí aj tu: NIKDY nepridávaj `ports:` na
+# `ovl-zliav-app` ani `ovl-zliav-db`. `scripts/check-compose-bind.ts`
+# kontroluje aj override súbor, ak existuje, a CI pri porušení zlyhá.
+
+services:
+  ovl-zliav-app:
+    # Vývoj: viac logov. Zápisy zostávajú vypnuté (I13) — WRITES_ENABLED=true
+    # patrí výhradne do produkčného .env, nikdy do override v repe.
+    environment:
+      LOG_LEVEL: debug
+      # NODE_ENV nechaj na production, inak boot assertions nemusia sedieť.
+
+  # Príklad: pripnutie verzie DB alebo iný lokálny volume.
+  # ovl-zliav-db:
+  #   image: mariadb:11.4.5

@@ -1,0 +1,97 @@
+# Aura Zľavy — docker-compose (BUILD-SPEC §10, R4, R10, I5)
+#
+# PASCA R10: service names MUSIA byť `ovl-zliav-*`. Názvy `app`, `db`, `web`,
+# `caddy` sú ZAKÁZANÉ — network alias by kolidoval s iným stackom na hoste.
+#
+# INVARIANT I5: jediný publikovaný port je 127.0.0.1:3050 na ovl-zliav-caddy.
+# `ovl-zliav-app` a `ovl-zliav-db` NESMÚ mať `ports:` — vynucuje to
+# scripts/check-compose-bind.ts a test/unit/compose-bind.spec.ts.
+
+name: ovl-zliav
+
+services:
+  ovl-zliav-db:
+    image: mariadb:11.4
+    container_name: ovl-zliav-db
+    restart: unless-stopped
+    # ŽIADNE ports: (I5, D96)
+    environment:
+      MARIADB_DATABASE: ovl_zliav
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+      MARIADB_USER: ovl_zliav_app
+      MARIADB_PASSWORD_FILE: /run/secrets/db_app_password
+    volumes:
+      - ovl-zliav-db-data:/var/lib/mysql
+      - ./secrets/db_root_password:/run/secrets/db_root_password:ro
+      - ./secrets/db_app_password:/run/secrets/db_app_password:ro
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [ovl-zliav-net]
+    security_opt: ["no-new-privileges:true"]
+
+  ovl-zliav-app:
+    build: .
+    container_name: ovl-zliav-app
+    restart: unless-stopped
+    # ŽIADNE ports: — dostupná len cez ovl-zliav-caddy (I5, D96)
+    depends_on:
+      ovl-zliav-db:
+        condition: service_healthy
+    env_file: [./.env]
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0          # vnútri kontajnera; localhost-only garantuje publikovaný mapping Caddy (O5)
+      PORT: "3000"
+      PUBLIC_BIND: 127.0.0.1     # kontrolované boot assertion (D78)
+      DB_HOST: ovl-zliav-db
+    volumes:
+      - ./secrets/master.key:/run/secrets/master.key:ro      # chmod 400 (D61)
+      - ./secrets/session.key:/run/secrets/session.key:ro
+      - ./secrets/db_app_password:/run/secrets/db_app_password:ro
+      - ./secrets/db_mig_password:/run/secrets/db_mig_password:ro
+    user: "10050:10050"                                       # non-root (D98)
+    read_only: true
+    tmpfs: ["/tmp", "/app/.next/cache"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 30s                                    # D85
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }              # D92
+    networks: [ovl-zliav-net]
+
+  ovl-zliav-caddy:
+    image: caddy:2-alpine
+    container_name: ovl-zliav-caddy
+    restart: unless-stopped
+    depends_on:
+      ovl-zliav-app:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3050:3050"      # JEDINÝ publikovaný port (R4, D96, I5)
+    volumes:
+      - ./secrets/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./secrets/basicauth.hash:/etc/caddy/basicauth.hash:ro   # bcrypt mimo gitu (D97)
+      - ovl-zliav-caddy-data:/data
+      - ovl-zliav-caddy-config:/config
+    security_opt: ["no-new-privileges:true"]
+    networks: [ovl-zliav-net]
+
+volumes:
+  ovl-zliav-db-data:
+  ovl-zliav-caddy-data:
+  ovl-zliav-caddy-config:
+
+networks:
+  ovl-zliav-net:
+    driver: bridge

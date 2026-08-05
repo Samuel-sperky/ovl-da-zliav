@@ -1,0 +1,35 @@
+# Aura Zľavy — Caddyfile PRÍKLAD (D94, D95, D97).
+#
+# Repo obsahuje LEN tento example (I1). Reálny súbor ži je v `secrets/Caddyfile`
+# (mimo gitu) a bcrypt hash v `secrets/basicauth.hash`. Postup: docs/21-RUNBOOKY.md.
+#
+# Hash vygeneruješ:
+#   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'TVOJE-HESLO'
+# a výsledok ulož do secrets/basicauth.hash (chmod 600). Do tohto súboru ani do
+# repa hash NEPATRÍ — nižšie je len placeholder.
+
+{
+  admin off
+  # ak by sa v budúcnosti pridal reverse proxy/tunel, doplniť:
+  # servers { trusted_proxies static private_ranges }
+}
+
+localhost:3050 {
+  tls internal                                   # lokálna CA (D94)
+
+  basic_auth {                                   # D97 — hash žije v secrets/
+    samuel {$OVL_ZLIAV_BASICAUTH_HASH}           # hodnota z /etc/caddy/basicauth.hash
+  }
+
+  header {                                       # D95
+    Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Strict-Transport-Security "max-age=31536000"
+    -Server
+  }
+
+  encode gzip
+  reverse_proxy ovl-zliav-app:3000
+}

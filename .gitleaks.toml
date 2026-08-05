@@ -1,0 +1,51 @@
+# Aura Zľavy — gitleaks konfigurácia (I1, D99). Blokujúca v CI.
+#
+# Cieľ: žiadne tajomstvo v repe — shop API kľúč, master key, session key,
+# DB heslá, bcrypt hashe. V testoch sa smú používať výhradne zjavne falošné
+# fixtures v tvare 'fake-shop-key-XXXX'.
+
+title = "Aura Zľavy gitleaks"
+
+[extend]
+# Štandardné vstavané pravidlá gitleaks zostávajú aktívne.
+useDefault = true
+
+# ── Vlastné pravidlá ─────────────────────────────────────────────────────────
+
+[[rules]]
+id = "ovl-shop-api-key-header"
+description = "Shop API kľúč priradený k X-Api-Key/Authorization hlavičke"
+regex = '''(?i)(x-api-key|authorization)['"]?\s*[:=]\s*['"](?!fake-shop-key-)[A-Za-z0-9_\-\.]{16,}['"]'''
+
+[[rules]]
+id = "ovl-shop-api-key-literal"
+description = "Literál v tvare dlhého API tokenu mimo povolených fake fixtures"
+regex = '''['"](sk_live_|sk_test_|AKIA|ghp_|gho_|glpat-)[A-Za-z0-9_\-]{8,}['"]'''
+
+[[rules]]
+id = "ovl-bcrypt-hash"
+description = "Bcrypt hash (basic auth) — patrí do secrets/, nie do repa (D97)"
+regex = '''\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}'''
+
+[[rules]]
+id = "ovl-master-key-hex"
+description = "64-znakový hex blob priradený ku key/secret premennej (možný master key)"
+regex = '''(?i)(master[_-]?key|session[_-]?secret)\s*[:=]\s*['"][0-9a-f]{64}['"]'''
+
+[[rules]]
+id = "ovl-db-password"
+description = "DB heslo v kóde/konfigu — heslá žijú v secrets/ súboroch (D89)"
+regex = '''(?i)(db_password|mariadb_password|mysql_pwd)\s*[:=]\s*['"][^'"\s]{8,}['"]'''
+
+# ── Allowlist ────────────────────────────────────────────────────────────────
+
+[allowlist]
+description = "Povolené výnimky"
+paths = [
+  '''^docs/''',           # dokumentácia obsahuje len placeholder príklady
+  '''\.gitleaks\.toml$''',
+]
+regexes = [
+  '''fake-shop-key-[A-Za-z0-9]+''',   # testovacie fixtures (sprint pravidlo)
+  '''\{\$OVL_ZLIAV_BASICAUTH_HASH\}''', # Caddyfile placeholder, nie hash
+]

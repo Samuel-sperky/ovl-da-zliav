@@ -1,48 +1,355 @@
 /*
- * Aura Zľavy — globálne štýly.
+ * Aura Zľavy — globálne štýly a dizajnové primitívy (A13, §8).
  *
- * MINIMÁLNY PLACEHOLDER od A0. Vlastníctvo PREBERÁ A13 (dizajnové primitívy,
- * CSS Modules pre komponenty, farby stavových badge podľa §8).
- * Bez externého UI frameworku (§8).
+ * Bez externého UI frameworku. Farby stavov: neutrál / ok / výstraha /
+ * kritická podľa D5, D6, D14. Jazyk UI slovenčina, dátumy DD.MM.YYYY.
  */
 
 :root {
   color-scheme: light;
-  --ovl-bg: #f7f7f8;
+  --ovl-bg: #f6f7f9;
+  --ovl-surface: #ffffff;
   --ovl-fg: #17181c;
   --ovl-muted: #5c6070;
   --ovl-border: #d8dae0;
-  /* PRODUKCIA pruh (D6) a výstražné stavy (D5) */
+  --ovl-accent: #1f4fd8;
+
+  /* PRODUKCIA pruh (D6) a stavové farby (D5, D14) */
   --ovl-danger: #b3261e;
+  --ovl-danger-bg: #fdecea;
   --ovl-warning: #9a6700;
+  --ovl-warning-bg: #fff3d6;
   --ovl-ok: #1a7f37;
+  --ovl-ok-bg: #e6f4ea;
+  --ovl-neutral-bg: #eceef2;
+
   --ovl-font: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --ovl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --ovl-radius: 8px;
+  --ovl-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.08);
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-}
+html, body { margin: 0; padding: 0; }
 
 body {
   background: var(--ovl-bg);
   color: var(--ovl-fg);
   font-family: var(--ovl-font);
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.5;
 }
 
-main {
+a { color: inherit; }
+
+code { font-family: var(--ovl-mono); font-size: 0.9em; }
+
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+
+.ovl-main {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 4rem;
+  padding: 1.25rem 1rem 4rem;
 }
 
-a {
-  color: inherit;
+/* Trvalý červený pruh PRODUKCIA (D6) */
+.ovl-production-bar {
+  background: var(--ovl-danger);
+  color: #fff;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.4rem 1rem;
+  font-size: 0.9rem;
+}
+.ovl-production-bar code {
+  font-weight: 700;
+  background: rgb(255 255 255 / 0.15);
+  padding: 0 0.35em;
+  border-radius: 4px;
+}
+
+.ovl-header {
+  background: var(--ovl-surface);
+  border-bottom: 1px solid var(--ovl-border);
+}
+
+.ovl-header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0.5rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ovl-brand { font-weight: 800; font-size: 1.05rem; margin-right: 0.5rem; }
+
+.ovl-nav { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.ovl-nav a {
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--ovl-radius);
+  color: var(--ovl-muted);
+  font-weight: 600;
+}
+.ovl-nav a:hover { background: var(--ovl-neutral-bg); color: var(--ovl-fg); }
+.ovl-nav a[aria-current='page'] { background: var(--ovl-neutral-bg); color: var(--ovl-fg); }
+
+.ovl-header-badges {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ── Badge primitív (D5, D14, D87) ─────────────────────────────────────── */
+
+.ovl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  background: var(--ovl-neutral-bg);
+  color: var(--ovl-fg);
+}
+.ovl-badge--ok { background: var(--ovl-ok-bg); color: var(--ovl-ok); }
+.ovl-badge--warning { background: var(--ovl-warning-bg); color: var(--ovl-warning); }
+.ovl-badge--danger { background: var(--ovl-danger-bg); color: var(--ovl-danger); }
+.ovl-badge--neutral { background: var(--ovl-neutral-bg); color: var(--ovl-muted); }
+.ovl-badge--outline { background: transparent; border-color: var(--ovl-border); color: var(--ovl-muted); }
+
+/* Badge „podľa vlastného zápisu" (D7, I11) je vždy outline + kurzíva */
+.ovl-selfwrite {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--ovl-muted);
+  border: 1px dashed var(--ovl-border);
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+}
+
+/* ── Tlačidlá ──────────────────────────────────────────────────────────── */
+
+.ovl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--ovl-radius);
+  border: 1px solid var(--ovl-border);
+  background: var(--ovl-surface);
+  color: var(--ovl-fg);
+  cursor: pointer;
+}
+.ovl-btn:hover:not(:disabled) { background: var(--ovl-neutral-bg); }
+.ovl-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.ovl-btn--primary { background: var(--ovl-accent); border-color: var(--ovl-accent); color: #fff; }
+.ovl-btn--primary:hover:not(:disabled) { background: #1a43b8; }
+.ovl-btn--danger { background: var(--ovl-danger); border-color: var(--ovl-danger); color: #fff; }
+.ovl-btn--danger:hover:not(:disabled) { background: #921d17; }
+.ovl-btn--small { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+
+/* ── Karty a panely ────────────────────────────────────────────────────── */
+
+.ovl-card {
+  background: var(--ovl-surface);
+  border: 1px solid var(--ovl-border);
+  border-radius: var(--ovl-radius);
+  box-shadow: var(--ovl-shadow);
+  padding: 1rem;
+}
+.ovl-card h2 {
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
+}
+.ovl-card--danger { border-color: var(--ovl-danger); }
+.ovl-card--warning { border-color: var(--ovl-warning); }
+
+.ovl-grid { display: grid; gap: 1rem; }
+.ovl-grid--dashboard { grid-template-columns: 1fr; }
+@media (min-width: 820px) {
+  .ovl-grid--dashboard { grid-template-columns: 1fr 1fr; }
+  .ovl-grid--dashboard .ovl-span-2 { grid-column: span 2; }
+}
+
+.ovl-allowlist-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+.ovl-product-card {
+  background: var(--ovl-surface);
+  border: 1px solid var(--ovl-border);
+  border-radius: var(--ovl-radius);
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.ovl-product-card--empty {
+  border-style: dashed;
+  color: var(--ovl-muted);
+  align-items: center;
+  justify-content: center;
+  min-height: 6rem;
+}
+.ovl-product-name { font-weight: 700; font-size: 0.9rem; overflow-wrap: anywhere; }
+.ovl-product-price { font-variant-numeric: tabular-nums; }
+
+/* Agregovaný banner needs_key + missed — ROVNAKÁ vizuálna váha (D8, D33b) */
+.ovl-alerts-banner {
+  background: var(--ovl-danger-bg);
+  border: 2px solid var(--ovl-danger);
+  border-radius: var(--ovl-radius);
+  padding: 0.8rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ovl-alerts-banner strong { color: var(--ovl-danger); }
+.ovl-alerts-banner ul { margin: 0; padding-left: 1.2rem; }
+
+/* Read-only režim (D10) */
+.ovl-readonly-notice {
+  background: var(--ovl-warning-bg);
+  border: 1px solid var(--ovl-warning);
+  color: var(--ovl-warning);
+  border-radius: var(--ovl-radius);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.ovl-readonly-notice a { font-weight: 700; }
+
+/* ── Tabuľky ───────────────────────────────────────────────────────────── */
+
+.ovl-table-wrap { overflow-x: auto; }
+.ovl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  background: var(--ovl-surface);
+}
+.ovl-table th, .ovl-table td {
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--ovl-border);
+  vertical-align: top;
+}
+.ovl-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ovl-muted);
+}
+.ovl-table tbody tr:hover { background: var(--ovl-bg); }
+.ovl-table .ovl-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Drobnosti ─────────────────────────────────────────────────────────── */
+
+.ovl-muted { color: var(--ovl-muted); }
+.ovl-small { font-size: 0.8rem; }
+.ovl-mono { font-family: var(--ovl-mono); }
+.ovl-stack { display: flex; flex-direction: column; gap: 0.4rem; }
+.ovl-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.ovl-spread { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+
+.ovl-price-hint { font-size: 0.78rem; color: var(--ovl-muted); font-style: italic; }
+
+.ovl-error {
+  background: var(--ovl-danger-bg);
+  border: 1px solid var(--ovl-danger);
+  border-radius: var(--ovl-radius);
+  padding: 0.6rem 0.8rem;
+  color: var(--ovl-danger);
+  font-size: 0.88rem;
+}
+.ovl-error details { margin-top: 0.3rem; color: var(--ovl-fg); }
+.ovl-error summary { cursor: pointer; font-size: 0.8rem; }
+.ovl-error pre {
+  margin: 0.3rem 0 0;
+  font-family: var(--ovl-mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ovl-variant-warning {
+  background: var(--ovl-warning-bg);
+  border: 1px solid var(--ovl-warning);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  color: var(--ovl-warning);
+}
+
+.ovl-runbook {
+  background: var(--ovl-surface);
+  border: 2px solid var(--ovl-danger);
+  border-radius: var(--ovl-radius);
+  padding: 1rem;
+}
+.ovl-runbook h3 { margin: 0 0 0.5rem; color: var(--ovl-danger); }
+.ovl-runbook ol { margin: 0; padding-left: 1.3rem; }
+.ovl-runbook li { margin-bottom: 0.3rem; }
+
+.ovl-sudo-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 1rem;
+}
+.ovl-sudo-dialog {
+  background: var(--ovl-surface);
+  border-radius: var(--ovl-radius);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.25);
+  padding: 1.25rem;
+  max-width: 420px;
+  width: 100%;
+}
+.ovl-sudo-dialog h3 { margin: 0 0 0.5rem; }
+.ovl-sudo-dialog input[type='password'] {
+  font: inherit;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--ovl-border);
+  border-radius: var(--ovl-radius);
+  margin: 0.5rem 0 0.75rem;
+}
+
+.ovl-skeleton {
+  background: var(--ovl-neutral-bg);
+  border-radius: 6px;
+  color: transparent;
+  animation: ovl-pulse 1.4s ease-in-out infinite;
+  user-select: none;
+}
+@keyframes ovl-pulse { 50% { opacity: 0.55; } }
+
+.ovl-footer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 1rem 2rem;
+  color: var(--ovl-muted);
+  font-size: 0.78rem;
 }

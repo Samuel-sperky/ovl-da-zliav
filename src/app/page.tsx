@@ -1,26 +1,27 @@
 /**
- * Aura Zľavy — dashboard (D1).
+ * Aura Zľavy — dashboard (A13, D1).
  *
- * MINIMÁLNY PLACEHOLDER od A0. Vlastníctvo PREBERÁ A13: `KeyCard`,
- * `AlertsBanner` (agregované `needs_key` + `missed` s rovnakou váhou — D8/D33b),
- * `UnackedResults` (D17), `CampaignsMini`, `AllowlistGrid` s badge
- * „podľa vlastného zápisu z DD.MM." (D7, I11).
- *
- * A0 tu ÚMYSELNE nečíta z DB ani z API — skeleton nesmie obsahovať business
- * logiku a `next build` nesmie závisieť od bežiacej databázy.
+ * Kombinovaná hlavná obrazovka: stav kľúča (`KeyCard`), agregovaný banner
+ * `needs_key` + `missed` s rovnakou vizuálnou váhou (`AlertsBanner`, D8/D33b),
+ * neodklikané výsledky (`UnackedResults`, D17), mini prehľad kampaní
+ * a mriežka 10 allowlist produktov s badge „podľa vlastného zápisu z DD.MM."
+ * (D7, I11). Dáta číta klient z API kontraktu §5 — `next build` nezávisí
+ * od bežiacej DB.
  */
-import { APP_DISPLAY_NAME, APP_VERSION } from '@/version';
+import type { Metadata } from 'next';
 
-export default function DashboardPlaceholderPage() {
+import Dashboard from '@/components/dashboard/Dashboard';
+import { APP_DISPLAY_NAME } from '@/version';
+
+export const metadata: Metadata = {
+  title: `Dashboard — ${APP_DISPLAY_NAME}`,
+};
+
+export default function DashboardPage() {
   return (
-    <main>
-      <h1>{APP_DISPLAY_NAME}</h1>
-      <p>
-        Skeleton verzie <code>{APP_VERSION}</code>. Dashboard dodá úloha A13.
-      </p>
-      <p>
-        Appka je dostupná výhradne lokálne cez Caddy na <code>127.0.0.1:3050</code>.
-      </p>
-    </main>
+    <>
+      <h1 style={{ fontSize: '1.3rem', margin: '0 0 1rem' }}>Dashboard</h1>
+      <Dashboard />
+    </>
   );
 }
