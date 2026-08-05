@@ -33,6 +33,7 @@ export {
   hashPassword,
   isArgon2idHash,
   needsRehash,
+  resetDummyHashCache,
   verifyPassword,
   type Argon2Params,
   type PasswordErrorCode,
@@ -117,4 +118,5 @@ export {
   type LoginInput,
   type LoginResult,
   type LoginService,
+  type LoginServiceOptions,
 } from '@/lib/auth/login';
