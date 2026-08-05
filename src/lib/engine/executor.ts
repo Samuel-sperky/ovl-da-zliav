@@ -41,7 +41,6 @@ import type {
   ApiKeyRepo,
   SettingsRepo,
   ExecutorResult,
-  ItemStatus,
   SecretRef,
   ShopClient,
   ShopCtx,

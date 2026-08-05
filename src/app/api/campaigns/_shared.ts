@@ -135,8 +135,18 @@ export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDep
     mutex: overrides.mutex ?? defaultWriteMutex,
     executorFlags: overrides.executorFlags ?? executorFlagsFromEnv,
     now: overrides.now ?? (() => new Date()),
-    timeZone: overrides.timeZone ?? env.LOGIC_TIMEZONE,
-    fireTime: overrides.fireTime ?? env.SCHEDULER_FIRE_TIME,
+    // LAZY (A19): route moduly volajú `resolveRoutesDeps()` na module scope
+    // (`export const GET = createXGet()`), takže eager čítanie `env.*` by
+    // spustilo zod validáciu už počas `next build` (collect page data) a build
+    // by padol na produkčne povinných `DB_*_PASSWORD_FILE`. Gettery držia
+    // vyhodnotenie ENV až na moment requestu — presne ako to zamýšľa lazy Proxy
+    // v `src/env.ts` aj komentár v `Dockerfile` („build nesmie vyžadovať ENV").
+    get timeZone(): string {
+      return overrides.timeZone ?? env.LOGIC_TIMEZONE;
+    },
+    get fireTime(): string {
+      return overrides.fireTime ?? env.SCHEDULER_FIRE_TIME;
+    },
   };
 }
 

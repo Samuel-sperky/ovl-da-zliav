@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { closePool } from '@/db/pool';
-import { allowlistRepo, AllowlistError } from '@/lib/repo/allowlist.repo';
+import { allowlistRepo } from '@/lib/repo/allowlist.repo';
 import { campaignItemsRepo } from '@/lib/repo/campaign-items.repo';
 import { campaignsRepo } from '@/lib/repo/campaigns.repo';
 import { catalogRepo } from '@/lib/repo/catalog.repo';

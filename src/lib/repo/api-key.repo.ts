@@ -296,7 +296,7 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
   const repo: ApiKeyRepository = {
     async getMeta(conn?: Queryable): Promise<ApiKeyMeta> {
       const row = await selectRow(conn);
-      if (!row) return { ...ABSENT_META };
+      if (row === null) return { ...ABSENT_META };
 
       // Lazy TTL kontrola aj tu (D63): expirovaný kľúč sa pre UI neexistuje
       // a rovno sa wipne — nečaká sa na tick schedulera.
@@ -400,7 +400,7 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
      */
     async loadForUse(): Promise<SecretRef | null> {
       const row = await selectRow();
-      if (!row) return null;
+      if (row === null) return null;
       if (isExpired(row)) {
         await repo.wipe('ttl_expired');
         return null;
@@ -410,7 +410,7 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
       // a znova skontroluje TTL — medzi `loadForUse()` a zápisom mohlo TTL vypršať.
       return async () => {
         const fresh = await selectRow();
-        if (!fresh) {
+        if (fresh === null) {
           throw new ApiKeyError('unavailable', 'API kľúč už v DB nie je (bol wipnutý).');
         }
         if (isExpired(fresh)) {
