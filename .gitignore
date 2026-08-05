@@ -38,3 +38,7 @@ Thumbs.db
 # Logy
 *.log
 npm-debug.log*
+
+# Vizuálne snímky UI — generovaný artefakt (Playwright proti mock shopu),
+# nie zdroj. Regenerujú sa na požiadanie, do repa nepatria (2,5 MB a starnú).
+/screenshots/
