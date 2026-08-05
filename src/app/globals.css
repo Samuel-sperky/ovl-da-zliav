@@ -1,0 +1,48 @@
+/*
+ * Aura Zľavy — globálne štýly.
+ *
+ * MINIMÁLNY PLACEHOLDER od A0. Vlastníctvo PREBERÁ A13 (dizajnové primitívy,
+ * CSS Modules pre komponenty, farby stavových badge podľa §8).
+ * Bez externého UI frameworku (§8).
+ */
+
+:root {
+  color-scheme: light;
+  --ovl-bg: #f7f7f8;
+  --ovl-fg: #17181c;
+  --ovl-muted: #5c6070;
+  --ovl-border: #d8dae0;
+  /* PRODUKCIA pruh (D6) a výstražné stavy (D5) */
+  --ovl-danger: #b3261e;
+  --ovl-warning: #9a6700;
+  --ovl-ok: #1a7f37;
+  --ovl-font: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--ovl-bg);
+  color: var(--ovl-fg);
+  font-family: var(--ovl-font);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+a {
+  color: inherit;
+}

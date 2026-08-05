@@ -1,0 +1,40 @@
+# Aura Zľavy — .gitignore
+# Invariant I1: žiadne tajomstvo sa NESMIE dostať do repozitára.
+
+# Tajomstvá a kľúče (I1, D61, D89, D97)
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.hash
+*.pem
+*.crt
+
+# Zálohy (D90) — obsahujú DB dump
+backups/
+
+# Node / Next
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Testy a nástroje
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Editory a OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logy
+*.log
+npm-debug.log*
