@@ -21,7 +21,7 @@ import { formatDateSk, formatPercentSk } from '@/lib/ui/format';
 
 /** Derivovaný UI pohľad z `done` + dátumov okna (§4, O1). */
 export function deriveView(row: CampaignListRow): 'aktivna' | 'expirovana' | null {
-  if (row.derivedView) return row.derivedView;
+  if (row.derived) return row.derived;
   if (row.status !== 'done') return null;
   const today = todayDateOnly();
   if (row.dateTo < today) return 'expirovana';

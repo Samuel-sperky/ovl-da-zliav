@@ -74,7 +74,14 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   const c = detail.campaign;
   const today = todayDateOnly();
   const derived =
-    c.status === 'done' ? (c.dateTo < today ? 'expirovana' : c.dateFrom <= today ? 'aktivna' : null) : null;
+    c.derived ??
+    (c.status === 'done'
+      ? c.dateTo < today
+        ? 'expirovana'
+        : c.dateFrom <= today
+          ? 'aktivna'
+          : null
+      : null);
   const canCancel = (CANCELLABLE as readonly string[]).includes(c.status);
   const canExecute = (EXECUTABLE as readonly string[]).includes(c.status);
   const canExtend = c.status === 'done' && c.dateTo >= today;
@@ -252,7 +259,7 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
         }}
       />
 
-      <AuditTrail rows={detail.audit} />
+      <AuditTrail rows={detail.auditTrail ?? []} />
     </div>
   );
 }

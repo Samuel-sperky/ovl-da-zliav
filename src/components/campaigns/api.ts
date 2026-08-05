@@ -70,7 +70,8 @@ export interface CampaignListRow {
   name: string;
   kind: CampaignKind;
   status: CampaignStatus;
-  derivedView?: DerivedCampaignView;
+  /** Derivovaný UI stav zo `_shared.campaignView()` (§4). */
+  derived?: DerivedCampaignView;
   statusReason?: string | null;
   percent: number;
   dateFrom: string;
@@ -115,7 +116,8 @@ export interface CampaignDetailView {
   kind: CampaignKind;
   parentCampaignId: number | null;
   status: CampaignStatus;
-  derivedView?: DerivedCampaignView;
+  /** Derivovaný UI stav zo `_shared.campaignView()` (§4). */
+  derived?: DerivedCampaignView;
   statusReason: string | null;
   percent: number;
   dateFrom: string;
@@ -129,7 +131,7 @@ export interface CampaignDetailView {
   itemsOk: number;
   itemsFailed: number;
   itemsUncertain: number;
-  confirmedAt: string | null;
+  confirmedAt?: string | null;
   createdAt: string;
 }
 
@@ -148,7 +150,8 @@ export interface AuditTrailRow {
 export interface CampaignDetailResponse {
   campaign: CampaignDetailView;
   items: CampaignItemView[];
-  audit: AuditTrailRow[];
+  /** Kľúč z `GET /api/campaigns/[id]` (A12) — audit stopa kampane. */
+  auditTrail: AuditTrailRow[];
 }
 
 export interface AllowlistProduct {

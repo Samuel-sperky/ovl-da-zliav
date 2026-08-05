@@ -1,0 +1,220 @@
+# Aura Zľavy — CI (A18, BUILD-SPEC §12, D99).
+#
+# push:         lint → typecheck → vitest (MariaDB service) → next build
+#               → compose-bind (I5) → gitleaks → npm audit --audit-level=high
+# pull_request: navyše Playwright e2e proti MOCK shopu.
+#
+# INVARIANT I6: v tomto workflow NIE JE a nikdy nesmie byť reálna doména shopu
+# ani reálny API kľúč. Testy volajú výhradne `127.0.0.1` (mock shop z
+# `test/mock-shop/`), e2e harness nastavuje `SHOP_BASE_URL_OVERRIDE` na loopback.
+# INVARIANT I1: všetky hodnoty nižšie sú syntetické (DB heslá pre ephemeral
+# service container, kľúče shopu v tvare `fake-shop-key-…`).
+# D99: `gitleaks` aj `npm audit --audit-level=high` sú BLOKUJÚCE.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# Bez zbytočných práv — CI nič nezapisuje.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.18.0'
+  # Syntetické DB heslá pre ephemeral MariaDB v CI (I1 — nič reálne).
+  DB_ROOT_PASSWORD: ci_root_password
+  DB_APP_PASSWORD: test_app_password
+  DB_MIG_PASSWORD: test_mig_password
+
+jobs:
+  # ─────────────────────────── lint + typecheck ────────────────────────────
+  static:
+    name: lint + typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      # I5 — compose smie publikovať výhradne 127.0.0.1:3050 (Caddy).
+      - name: compose-bind (I5)
+        run: npm run check-compose-bind
+
+  # ───────────────────── unit + integračné testy nad DB ────────────────────
+  test:
+    name: vitest (unit + integračné)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci_root_password
+          MARIADB_DATABASE: ovl_zliav_test
+          MARIADB_USER: ovl_zliav_app
+          MARIADB_PASSWORD: test_app_password
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_NAME: ovl_zliav_test
+      DB_USER: ovl_zliav_app
+      DB_PASSWORD: test_app_password
+      DB_MIGRATION_USER: ovl_zliav_mig
+      DB_MIGRATION_PASSWORD: test_mig_password
+      MASTER_KEY_FILE: secrets/test-master.key
+      SESSION_SECRET_FILE: secrets/test-session.key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: DB — migračný user a schémy
+        run: |
+          mariadb -h 127.0.0.1 -P 3306 -u root -p"$DB_ROOT_PASSWORD" <<SQL
+          CREATE DATABASE IF NOT EXISTS ovl_zliav_test;
+          CREATE DATABASE IF NOT EXISTS ovl_zliav_e2e;
+          CREATE USER IF NOT EXISTS 'ovl_zliav_mig'@'%' IDENTIFIED BY '$DB_MIG_PASSWORD';
+          CREATE USER IF NOT EXISTS 'ovl_zliav_app'@'%' IDENTIFIED BY '$DB_APP_PASSWORD';
+          GRANT ALL PRIVILEGES ON \`ovl_zliav_test\`.* TO 'ovl_zliav_mig'@'%' WITH GRANT OPTION;
+          GRANT ALL PRIVILEGES ON \`ovl_zliav_e2e\`.* TO 'ovl_zliav_mig'@'%' WITH GRANT OPTION;
+          FLUSH PRIVILEGES;
+          SQL
+
+      - name: Tajomstvá (syntetické, mimo gitu)
+        run: |
+          npm run gen-master-key -- secrets/test-master.key
+          npm run gen-master-key -- secrets/test-session.key
+
+      - run: npm run migrate
+      - run: npm run test
+
+  # ──────────────────────────── produkčný build ────────────────────────────
+  build:
+    name: next build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  # ──────────────────── bezpečnosť: gitleaks + npm audit ───────────────────
+  security:
+    name: gitleaks + npm audit (blokujúce)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+
+      # D99/I1 — akýkoľvek nález zhodí job.
+      - name: gitleaks detect
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks:v8.28.0 detect --source=/repo --redact --verbose
+
+      # I1 — v repe nesmie byť nič v tvare reálneho kľúča poskytovateľa.
+      - name: žiadne kľúčové vzory v repe (I1)
+        run: |
+          if git grep -nIE 'sk_live_[A-Za-z0-9]|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20}' -- . ; then
+            echo '::error::V repozitári je hodnota v tvare reálneho API kľúča (I1).'
+            exit 1
+          fi
+
+      # D99 — high/critical nález je blokujúci.
+      - name: npm audit
+        run: npm audit --audit-level=high
+
+  # ─────────────────── e2e proti MOCK shopu (len na PR) ────────────────────
+  e2e:
+    name: playwright e2e (mock shop)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [static]
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci_root_password
+          MARIADB_DATABASE: ovl_zliav_e2e
+          MARIADB_USER: ovl_zliav_app
+          MARIADB_PASSWORD: test_app_password
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      # I6 — appka aj mock výhradne na loopbacku; doména shopu tu neexistuje.
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_NAME: ovl_zliav_e2e
+      DB_USER: ovl_zliav_app
+      DB_PASSWORD: test_app_password
+      DB_MIGRATION_USER: ovl_zliav_mig
+      DB_MIGRATION_PASSWORD: test_mig_password
+      MASTER_KEY_FILE: secrets/e2e-master.key
+      SESSION_SECRET_FILE: secrets/e2e-session.key
+      E2E_PORT: '3131'
+      E2E_CONTROL_PORT: '3132'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: DB — migračný user a e2e schéma
+        run: |
+          mariadb -h 127.0.0.1 -P 3306 -u root -p"$DB_ROOT_PASSWORD" <<SQL
+          CREATE DATABASE IF NOT EXISTS ovl_zliav_e2e;
+          CREATE USER IF NOT EXISTS 'ovl_zliav_mig'@'%' IDENTIFIED BY '$DB_MIG_PASSWORD';
+          GRANT ALL PRIVILEGES ON \`ovl_zliav_e2e\`.* TO 'ovl_zliav_mig'@'%' WITH GRANT OPTION;
+          FLUSH PRIVILEGES;
+          SQL
+
+      # e2e harness (test/e2e/serve.ts) si migrácie, seed, mock shop aj
+      # `next dev` spustí sám — vrátane SHOP_BASE_URL_OVERRIDE na 127.0.0.1.
+      - run: npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
