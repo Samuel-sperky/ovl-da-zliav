@@ -2,7 +2,8 @@
 #
 # push:         lint → typecheck → vitest (MariaDB service) → next build
 #               → compose-bind (I5) → gitleaks → npm audit --audit-level=high
-# pull_request: navyše Playwright e2e proti MOCK shopu.
+# pull_request: navyše Playwright e2e proti MOCK shopu a SMOKE TEST nad
+#               produkčným buildom (`npm run test:build`, F.7).
 #
 # INVARIANT I6: v tomto workflow NIE JE a nikdy nesmie byť reálna doména shopu
 # ani reálny API kľúč. Testy volajú výhradne `127.0.0.1` (mock shop z
@@ -152,6 +153,63 @@ jobs:
       # D99 — high/critical nález je blokujúci.
       - name: npm audit
         run: npm audit --audit-level=high
+
+  # ───────── smoke nad PRODUKČNÝM buildom (len na PR, F.7 / D100) ──────────
+  # Jediný test, ktorý ide HTTP-om proti `node .next/standalone/server.js`.
+  # Bez neho môže miscompile bundlera (§A.3 protokolu — `GET /api/key` → 500)
+  # prejsť do produkcie znova pri akomkoľvek upgrade Next.js.
+  build-smoke:
+    name: smoke nad produkčným buildom
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [static]
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci_root_password
+          MARIADB_DATABASE: ovl_zliav_smoke
+          MARIADB_USER: ovl_zliav_app
+          MARIADB_PASSWORD: test_app_password
+        ports:
+          - 127.0.0.1:3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      # I6 — všetko na loopbacku; doména shopu tu neexistuje a appka v smoke
+      # teste žiadnu nastavenú nemá (nemá teda kam volať).
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      SMOKE_DB_NAME: ovl_zliav_smoke
+      DB_NAME: ovl_zliav_smoke
+      DB_USER: ovl_zliav_app
+      DB_PASSWORD: test_app_password
+      DB_MIGRATION_USER: ovl_zliav_mig
+      DB_MIGRATION_PASSWORD: test_mig_password
+      SMOKE_PORT: '3141'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: DB — migračný user a smoke schéma
+        run: |
+          mariadb -h 127.0.0.1 -P 3306 -u root -p"$DB_ROOT_PASSWORD" <<SQL
+          CREATE DATABASE IF NOT EXISTS ovl_zliav_smoke;
+          CREATE USER IF NOT EXISTS 'ovl_zliav_mig'@'%' IDENTIFIED BY '$DB_MIG_PASSWORD';
+          GRANT ALL PRIVILEGES ON \`ovl_zliav_smoke\`.* TO 'ovl_zliav_mig'@'%' WITH GRANT OPTION;
+          FLUSH PRIVILEGES;
+          SQL
+
+      # Harness (test/smoke/harness.ts) si spustí `next build`, migrácie, seed
+      # admina a produkčný `node .next/standalone/server.js` sám.
+      - run: npm run test:build
 
   # ─────────────────── e2e proti MOCK shopu (len na PR) ────────────────────
   e2e:

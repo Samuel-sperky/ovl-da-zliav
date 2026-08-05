@@ -213,6 +213,49 @@ export function isDeniedFieldName(name: string): boolean {
   return DENY_SUFFIX.some((suffix) => normalized.length > suffix.length && normalized.endsWith(suffix));
 }
 
+/* ═════════════ 3b. Úzka výnimka: bezpečná dvojica `{present, expiresAt}` ═══ */
+
+/**
+ * Tvary, ktoré sa POD menom z denylistu NEMASKUJÚ celé (a rekurzia ide dovnútra).
+ *
+ * Dôvod: `GET /api/health` musí podľa NORMATÍVNEHO kontraktu (BUILD-SPEC §5)
+ * vracať `key: {present, expiresAt}` a telo každej odpovede prechádza
+ * `redact()` (`lib/http/responses.ts`, I1). Meno `key` je v denylistu, takže sa
+ * celá dvojica maskovala na `***REDACTED***` — UI potom **vždy** hlásilo „kľúč
+ * chýba" a natrvalo zobrazovalo režim len na čítanie, aj keď kľúč platil
+ * (nahlásené v `test/integration/health.spec.ts` ako „A11/A19").
+ *
+ * Prečo to NEOSLABUJE I1:
+ *   - výnimka platí len pre **plain objekt** s PRESNE týmito menami polí; kľúč
+ *     je vždy `string` (alebo `Buffer`) → naň sa výnimka nikdy nevzťahuje,
+ *   - hodnoty smú byť len `boolean | number | null | Date | string`, pričom
+ *     stringy vnútri **stále** prechádzajú `scrub()` (inline scan + substring
+ *     scan na aktuálny kľúč a jeho posledných 8 znakov, §6),
+ *   - akýkoľvek iný tvar (extra pole, vnorený objekt, pole hodnôt) sa maskuje
+ *     celý ako doteraz — fail-closed.
+ */
+const SAFE_DENIED_SHAPES: readonly ReadonlySet<string>[] = [new Set(['present', 'expiresAt'])];
+
+/** True, keď hodnota poľa z denylistu je jeden z tvarov `SAFE_DENIED_SHAPES`. */
+export function isSafeDeniedShape(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value) as object | null;
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Object.keys(value as Record<string, unknown>);
+  const shapeMatches = SAFE_DENIED_SHAPES.some(
+    (shape) => keys.length === shape.size && keys.every((k) => shape.has(k)),
+  );
+  if (!shapeMatches) return false;
+  return Object.values(value as Record<string, unknown>).every(
+    (v) =>
+      v === null ||
+      typeof v === 'boolean' ||
+      typeof v === 'number' ||
+      typeof v === 'string' ||
+      v instanceof Date,
+  );
+}
+
 /* ══════════════════════════ 4. Skenovanie textu ═══════════════════════════ */
 
 interface PassState {
@@ -341,9 +384,10 @@ function walk(value: unknown, depth: number, path: Set<object>, state: PassState
       const out: Record<string, unknown> = {};
       for (const [rawKey, rawValue] of obj) {
         const key = typeof rawKey === 'string' ? rawKey : String(rawKey);
-        out[scrub(key, state)] = isDeniedFieldName(key)
-          ? REDACTED
-          : walk(rawValue, depth + 1, path, state);
+        out[scrub(key, state)] =
+          isDeniedFieldName(key) && !isSafeDeniedShape(rawValue)
+            ? REDACTED
+            : walk(rawValue, depth + 1, path, state);
       }
       return out;
     }
@@ -352,7 +396,10 @@ function walk(value: unknown, depth: number, path: Set<object>, state: PassState
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(source)) {
       const safeKey = scrub(key, state);
-      out[safeKey] = isDeniedFieldName(key) ? REDACTED : walk(source[key], depth + 1, path, state);
+      out[safeKey] =
+        isDeniedFieldName(key) && !isSafeDeniedShape(source[key])
+          ? REDACTED
+          : walk(source[key], depth + 1, path, state);
     }
     return out;
   } finally {

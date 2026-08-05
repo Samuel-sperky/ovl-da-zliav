@@ -28,6 +28,9 @@ import { resolve } from 'node:path';
 
 import { EnvError, loadEnv, type Env } from '@/env';
 import { pingDb, query } from '@/db/pool';
+import { auditWriter } from '@/lib/audit/write';
+import { logger } from '@/lib/log/logger';
+import { configureApiKeyRepo } from '@/lib/repo/api-key.repo';
 import { startScheduler } from '@/lib/scheduler/boot';
 import { APP_DISPLAY_NAME, APP_VERSION } from '@/version';
 
@@ -255,6 +258,19 @@ export async function register(): Promise<void> {
   // TODO(A2/A10): audit event `boot` sa zapíše cez `appendAudit()` z
   // `src/lib/audit/write.ts` — jediná povolená cesta do `audit_log` (I4).
   // A0 ho úmyselne NEZAPISUJE priamym INSERTom, aby nevznikla druhá cesta.
+
+  /**
+   * Wiring auditu do repozitára API kľúča (I4, D67).
+   *
+   * `src/lib/repo/api-key.repo.ts` má audit ZÁMERNE injektovaný
+   * (`configureApiKeyRepo()`) a jeho dokumentácia hovorí „MUSÍ sa zavolať pri
+   * boote". Nikto to nerobil, takže `key_stored`, `key_verified`, `key_wiped`
+   * ani `key_panic_wipe` sa do `audit_log` NEZAPISOVALI — len sa logovali ako
+   * `audit_fallback`. Pri panic buttone (D67) tak chýbal jediný trvalý dôkaz,
+   * že kľúč bol wipnutý. Jediná cesta do `audit_log` zostáva `appendAudit()`
+   * z A2 (I4) — tu sa len dodá referencia.
+   */
+  configureApiKeyRepo({ audit: auditWriter, logger });
 
   startScheduler();
 

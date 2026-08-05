@@ -56,6 +56,10 @@ export function createPreviewPost(
               ...(ctx.body.oneDayAcknowledged !== undefined
                 ? { oneDayAcknowledged: ctx.body.oneDayAcknowledged }
                 : {}),
+              // D15/D16 — rodič opakovania sa z kontroly prekryvu vylučuje.
+              ...(ctx.body.parentCampaignId !== undefined
+                ? { parentCampaignId: ctx.body.parentCampaignId }
+                : {}),
             },
             {
               shopClient: d.shopClient,

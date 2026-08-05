@@ -45,6 +45,16 @@ export const E2E_CONFIG = {
   migPassword: process.env.DB_MIGRATION_PASSWORD ?? 'test_mig_password',
   masterKeyFile: process.env.MASTER_KEY_FILE ?? 'secrets/e2e-master.key',
   sessionSecretFile: process.env.SESSION_SECRET_FILE ?? 'secrets/e2e-session.key',
+  /**
+   * TLS pre e2e (D69, F.6). Harness servuje appku cez HTTPS, pretože session
+   * cookie je `Secure` a Playwright `APIRequestContext` ju cez `http://`
+   * neposiela. Certifikát je self-signed, generuje ho harness do
+   * gitignorovaného `secrets/` a Playwright ho akceptuje cez
+   * `ignoreHTTPSErrors` (viď `playwright.config.ts`). Do repa sa nedostane
+   * (I1: `secrets/`, `*.key`, `*.pem` sú v `.gitignore`).
+   */
+  tlsKeyFile: 'secrets/e2e-tls.key',
+  tlsCertFile: 'secrets/e2e-tls.pem',
   adminUsername: process.env.E2E_ADMIN_USERNAME ?? 'e2e-admin',
   /** Heslo ≥ 12 znakov (D68) — syntetické, nikde inde sa nepoužíva (I1). */
   adminPassword: process.env.E2E_ADMIN_PASSWORD ?? 'e2e-heslo-1234567',
@@ -52,5 +62,6 @@ export const E2E_CONFIG = {
   shopDomain: 'https://shop.e2e.invalid',
 } as const;
 
-export const APP_BASE_URL = `http://${E2E_HOST}:${E2E_CONFIG.appPort}`;
+/** Appka beží cez HTTPS (self-signed) — inak `Secure` session cookie nefunguje. */
+export const APP_BASE_URL = `https://${E2E_HOST}:${E2E_CONFIG.appPort}`;
 export const CONTROL_BASE_URL = `http://${E2E_HOST}:${E2E_CONFIG.controlPort}`;

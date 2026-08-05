@@ -42,7 +42,9 @@ test.describe('onboarding', () => {
     await page.getByTestId('domain-password').fill(E2E_CONFIG.adminPassword);
     await page.getByTestId('domain-save').click();
 
-    await expect(page.getByRole('alert')).toBeVisible();
+    // Chybová hláška patrí formuláru domény. `getByRole('alert')` globálne by
+    // trafilo aj `ProductionBar` (tiež `role="alert"`) → strict mode violation.
+    await expect(page.getByTestId('domain-form').getByRole('alert')).toBeVisible();
     await expect(page.getByTestId('domain-canary')).toBeHidden();
     const rows = await db.query<{ shop_domain: string | null }>(
       'SELECT shop_domain FROM settings WHERE id = 1',

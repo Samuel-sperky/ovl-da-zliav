@@ -27,11 +27,12 @@
  *
  * Vlastník: A18.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -62,6 +63,45 @@ function ensureSecret(relativePath: string): void {
   if (existsSync(target)) return;
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, `${randomBytes(32).toString('hex')}\n`, { mode: 0o600, flag: 'w' });
+}
+
+/**
+ * Self-signed TLS certifikát pre e2e (D69, F.6).
+ *
+ * Prečo TLS: session cookie appky je `Secure` (D69, invariant sa neoslabuje).
+ * Chromium síce `127.0.0.1` považuje za trustworthy origin a cez plain HTTP
+ * cookie pošle, ale Playwright `APIRequestContext` (`page.request`) atribút
+ * `Secure` vynucuje striktne — cez `http://` cookie NEPOŠLE a každé API volanie
+ * z testu skončí na 401. Harness preto servuje appku cez HTTPS, presne ako
+ * produkcia za Caddy. Certifikát je self-signed, žije len v gitignorovanom
+ * `secrets/` a Playwright ho akceptuje cez `ignoreHTTPSErrors` (I1: do repa sa
+ * nedostane; nie je to tajomstvo aplikácie, len lokálny testovací cert).
+ */
+function ensureTlsCert(): { keyPath: string; certPath: string } {
+  const keyPath = resolvePath(REPO_ROOT, E2E_CONFIG.tlsKeyFile);
+  const certPath = resolvePath(REPO_ROOT, E2E_CONFIG.tlsCertFile);
+  if (existsSync(keyPath) && existsSync(certPath)) return { keyPath, certPath };
+  mkdirSync(dirname(keyPath), { recursive: true });
+  // `openssl` je v CI (ubuntu-latest) aj v každom bežnom vývojárskom prostredí.
+  const result = spawnSync(
+    'openssl',
+    [
+      'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', '365', '-nodes',
+      '-keyout', keyPath,
+      '-out', certPath,
+      '-subj', `/CN=${E2E_HOST}`,
+      '-addext', `subjectAltName=IP:${E2E_HOST},DNS:localhost`,
+    ],
+    { stdio: ['ignore', 'ignore', 'pipe'] },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `[e2e] nepodarilo sa vygenerovať self-signed certifikát pre HTTPS harness ` +
+        `(potrebné je \`openssl\`): ${result.stderr?.toString() ?? ''}`,
+    );
+  }
+  chmodSync(keyPath, 0o600);
+  return { keyPath, certPath };
 }
 
 function migrationEnv(): NodeJS.ProcessEnv {
@@ -246,16 +286,46 @@ function appEnv(mockBaseUrl: string): NodeJS.ProcessEnv {
   };
 }
 
-function startNextDev(mockBaseUrl: string): ChildProcess {
+function startNextDev(
+  mockBaseUrl: string,
+  tls: { keyPath: string; certPath: string },
+): ChildProcess {
   const child = spawn(
     process.execPath,
-    [resolvePath(REPO_ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev', '-p', String(E2E_CONFIG.appPort), '-H', E2E_HOST],
+    [
+      resolvePath(REPO_ROOT, 'node_modules', 'next', 'dist', 'bin', 'next'),
+      'dev',
+      '-p', String(E2E_CONFIG.appPort),
+      '-H', E2E_HOST,
+      // TLS (D69, F.6) — cert dodávame vlastný, aby `next dev` nemusel ťahať
+      // `mkcert` zo siete (v uzavretých prostrediach nedostupné).
+      '--experimental-https',
+      '--experimental-https-key', tls.keyPath,
+      '--experimental-https-cert', tls.certPath,
+    ],
     { cwd: REPO_ROOT, env: appEnv(mockBaseUrl), stdio: ['ignore', 'inherit', 'inherit'] },
   );
   return child;
 }
 
 /* ═════════════════════════ 5. Global setup Playwrightu ══════════════════════ */
+
+/**
+ * Jeden GET cez HTTPS so self-signed certom harnessu. `fetch()` v Node by cert
+ * odmietol a `NODE_TLS_REJECT_UNAUTHORIZED` sa tu zámerne nenastavuje (vypnulo
+ * by verifikáciu pre celý proces) — výnimka platí len pre tento jeden probe na
+ * `127.0.0.1`.
+ */
+function probeHttps(url: string): Promise<number> {
+  return new Promise((resolveStatus, reject) => {
+    const req = httpsRequest(url, { rejectUnauthorized: false }, (res) => {
+      res.resume();
+      resolveStatus(res.statusCode ?? 0);
+    });
+    req.once('error', reject);
+    req.end();
+  });
+}
 
 /** Počká, kým appka odpovie na `/api/health` (bez auth). */
 async function waitForApp(timeoutMs = 180_000): Promise<void> {
@@ -264,9 +334,9 @@ async function waitForApp(timeoutMs = 180_000): Promise<void> {
   let lastError = 'žiadna odpoveď';
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(url);
-      if (res.status < 500) return;
-      lastError = `HTTP ${res.status}`;
+      const status = await probeHttps(url);
+      if (status < 500) return;
+      lastError = `HTTP ${status}`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -291,7 +361,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   const mock = await startMockShop({ products: DEFAULT_PRODUCTS, keys: DEFAULT_KEYS });
   const control = await startControlServer(mock);
-  const app = startNextDev(mock.baseUrl);
+  const tls = ensureTlsCert();
+  const app = startNextDev(mock.baseUrl, tls);
 
   process.stdout.write(
     `[e2e] mock shop: ${mock.baseUrl} · control: ${CONTROL_BASE_URL} · app: ${APP_BASE_URL}\n`,

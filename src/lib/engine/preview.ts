@@ -55,6 +55,12 @@ export interface PreviewInput {
   to: DateOnly;
   /** D30 — potvrdenie „naozaj 1 deň?". Bez neho je `from = to` blokátor. */
   oneDayAcknowledged?: boolean;
+  /**
+   * Rodičovská kampaň pri `kind = 'retry'` / `'extend'` (D15, D16, D19).
+   * Z kontroly prekryvu (D28) sa VYLUČUJE — opakovanie zlyhaných zápisov tej
+   * istej kampane nie je „iná budúca kampaň" a nesmie sa blokovať samo sebou.
+   */
+  parentCampaignId?: number;
 }
 
 export interface PreviewDeps {
@@ -113,7 +119,14 @@ export async function buildPreview(
   /* 3. Prekryv budúcich kampaní na produkte (D28) — blokuje pri vytváraní. */
   let overlapIds: number[] = [];
   if (allowCheck.ok) {
-    const overlaps = await campaignsRepo.findFutureOverlaps(input.productIds, input.from, input.to);
+    const found = await campaignsRepo.findFutureOverlaps(input.productIds, input.from, input.to);
+    // Rodič opakovania/predĺženia neblokuje sám seba (D15, D16, D19). Bez tejto
+    // výnimky bol dry-run „Zopakovať zlyhané" VŽDY zablokovaný `future_overlap`
+    // (rodič má rovnaké produkty aj rovnaké okno a stav `partial` je v dotaze).
+    const overlaps =
+      input.parentCampaignId === undefined
+        ? found
+        : found.filter((c) => c.id !== input.parentCampaignId);
     overlapIds = [...new Set(overlaps.flatMap((c) => (c.id > 0 ? [c.id] : [])))];
     if (overlaps.length > 0) {
       blockers.push({

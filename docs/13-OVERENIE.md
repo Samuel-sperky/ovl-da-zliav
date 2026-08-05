@@ -977,3 +977,188 @@ zápis urob na jednom produkte a skontroluj ho v shope ručne.
 zmeny v štyroch cudzích súboroch sú vymenované v §A.2 a boli povolené
 mandátom A19 (odstránenie zlyhania lintu, buildu a miscompilácie).
 Žiadny `git commit` ani `git push` A19 nespustil.*
+
+---
+
+## Dodatok — oprava e2e a smoke test buildu
+
+*Dopísané po protokole, samostatná úloha: odstrániť dva konkrétne nedostatky —
+nefunkčné e2e (§D.2, F.6) a chýbajúci test nad zbuildovanou appkou (F.7).
+Rozsah zmien: e2e harness + testy, nová smoke suita, CI job, `package.json` len
+o jeden skript — a **päť opráv v `src/**`**, pretože po sfunkčnení e2e sa
+ukázalo, že štyri zo zlyhaní neboli chyby harnessu, ale skutočné chyby appky.*
+
+### 1. E2e: harness servuje appku cez HTTPS (cesta „a")
+
+**Príčina zlyhaní bola presne tá z §D.2:** session cookie je (správne, D69)
+`Secure`, harness servoval `http://127.0.0.1:3131`, a Playwright
+`APIRequestContext` (`page.request`) `Secure` cookie cez `http://` neposiela.
+
+**Zvolená cesta: (a) — HTTPS harness.** Dôvody:
+- je bližšie produkcii (appka beží za Caddy s TLS), takže e2e testuje ten istý
+  režim cookie ako ostrá prevádzka;
+- opravuje príčinu na jednom mieste, nie symptóm v každom helperi — `api()`
+  zostal na `page.request` a funguje aj `page.evaluate(fetch)`, aj `page.goto`;
+- v tomto prostredí sa ukázala ako spoľahlivá (opakované behy bez flake).
+
+Konkrétne:
+- `test/e2e/serve.ts` → `ensureTlsCert()` vygeneruje self-signed cert
+  (`openssl req -x509 …`, SAN `IP:127.0.0.1`) do gitignorovaného `secrets/`
+  (`secrets/e2e-tls.key`, `secrets/e2e-tls.pem`; `.gitignore` má `secrets/`,
+  `*.key`, `*.pem`). `next dev` sa spúšťa s `--experimental-https
+  --experimental-https-key/--experimental-https-cert`, takže **nesťahuje
+  `mkcert` zo siete** (v tomto prostredí by to proxy zamietla).
+- `test/e2e/config.ts` → `APP_BASE_URL` je `https://127.0.0.1:3131`.
+- `playwright.config.ts` → `use.ignoreHTTPSErrors: true` (len self-signed cert,
+  nič iné sa neoslabuje).
+- health probe harnessu ide cez `node:https` s `rejectUnauthorized:false`
+  **len pre tento jeden request** — `NODE_TLS_REJECT_UNAUTHORIZED` sa nikde
+  nenastavuje.
+- `playwright.config.ts` navyše rešpektuje `PLAYWRIGHT_CHROMIUM_EXECUTABLE`
+  (cesta k už nainštalovanému Chromiu) — obchádzka pre prostredia bez prístupu
+  na `cdn.playwright.dev` (§0). Bez tejto premennej sa nič nemení.
+
+**Aplikácia sa neoslabila:** cookie je stále `HttpOnly; Secure; SameSite=Strict`
+(overuje to aj nový smoke test, viď §3), CSRF kontrola `Origin` = `Host` platí
+naďalej, `SHOP_BASE_URL_OVERRIDE` je v produkcii stále zakázaný.
+
+### 2. Chyby harnessu, ktoré sa objavili až po sfunkčnení cookie
+
+- `test/e2e/fixtures.ts` — `seedCampaign()`/`seedAuditRow()` čítali id cez
+  **samostatný** `SELECT LAST_INSERT_ID()` nad **poolom**, takže hodnota mohla
+  prísť z iného spojenia (padalo FK `fk_items_campaign`). Nahradené
+  `insertId`-om z výsledku INSERT-u (`db.insert()`).
+- `test/e2e/onboarding.spec.ts` — `getByRole('alert')` trafilo aj
+  `ProductionBar` (má tiež `role="alert"`) → strict mode violation. Zúžené na
+  `getByTestId('domain-form').getByRole('alert')`.
+
+### 3. Smoke test nad zbuildovanou appkou (F.7)
+
+Nové súbory: `test/smoke/harness.ts`, `test/smoke/build-smoke.spec.ts`,
+`vitest.smoke.config.ts`. Spúšťanie: **`npm run test:build`** (jediná zmena
+v `package.json` — nový skript, žiadna nová závislosť).
+`vitest.config.ts` má `test/smoke/**` v `exclude`, takže `npm run test`
+(614 testov) sa nespomalí. V CI je to samostatný job **`build-smoke`, ktorý beží
+na pull requestoch** (`.github/workflows/ci.yml`) s MariaDB 11.4 service
+containerom a vlastnou schémou `ovl_zliav_smoke`.
+
+Čo robí: `next build` → `node .next/standalone/server.js` s `NODE_ENV=production`,
+DB heslami zo **súborov** (D89), master keyom a session secretom zo súborov
+(D61, D69), proti reálnej MariaDB, na `127.0.0.1`, **bez**
+`SHOP_BASE_URL_OVERRIDE` a **bez** domény shopu v `settings` (I6 — appka nemá
+kam volať), `WRITES_ENABLED=false` (I13). 8 testov:
+
+| # | Overuje |
+| --- | --- |
+| 1 | build vyrobil `.next/standalone/server.js`, v logu je `boot_ok` a žiadne `boot_assertions_failed` |
+| 2 | `GET /api/health` = 200 bez auth; `key` je presne `{present:false, expiresAt:null}`; v celej odpovedi nie je `last4`, `apiKey`, `authorization`, `password`, `secret`, `token`, `master` ani heslo admina (I1); `writesEnabled:false` (I13) |
+| 3 | login flow prejde a `Set-Cookie` má `HttpOnly` + `Secure` + `SameSite=Strict` + `Path=/` (D69) |
+| 4 | `GET /api/key` bez session = 401 (fail-closed) |
+| 5 | **`GET /api/key` s session a BEZ uloženého kľúča = 200, `present:false`, `last4:null`** — presne tá regresia z §A.3, ktorá padala na 500 len v zbuildovanej appke |
+| 6 | `POST /api/campaigns` bez `previewToken`/`acknowledgements` = 4xx (I3) |
+| 7 | mutácia bez hlavičky `Origin` = 403 `origin_missing` (CSRF, D72) |
+| 8 | `PUBLIC_BIND=0.0.0.0` na zbuildovanom artefakte = `boot_assertions_failed` + **exit 1** (I5, I14) |
+
+Poznámka k DB: schému si smoke test vytvorí sám, len ak má `DB_ROOT_PASSWORD`
+(tak to je v CI). Lokálne, kde migračný user nemá `CREATE DATABASE`, použije
+existujúcu schému (`SMOKE_DB_NAME` / `DB_NAME`, default `ovl_zliav_e2e`) a jej
+dáta pred behom vyčistí. `SMOKE_REUSE_BUILD=1` preskočí build — výhradne pomôcka
+pri ladení samotného testu, nie default.
+
+### 4. Skutočné chyby aplikácie, ktoré e2e po oprave odhalilo (5 zmien v `src/**`)
+
+Boli to **chyby appky, nie testov** — každá bola v produkčnej ceste a testy nad
+zdrojákom ich nevideli, pretože žiadny z nich nešiel cez UI ani cez celý shell.
+
+1. **`src/lib/log/redact.ts` + `HealthReport.key` — celá hlavička UI tvrdila
+   „kľúč chýba"**, aj keď kľúč platil, a natrvalo svietil režim len na čítanie.
+   Príčina: telo každej odpovede prechádza `redact()` (I1) a `key` je meno
+   z denylistu, takže sa dvojica `{present, expiresAt}` maskovala celá na
+   `***REDACTED***` — hoci BUILD-SPEC §5 predpisuje, že `GET /api/health` má
+   vracať `key:{present,expiresAt}`. (V protokole §B/I1 bod 3 je to omylom
+   uvedené ako *dôkaz* redakcie; `test/integration/health.spec.ts` to má
+   poznačené ako „nahlásené A11/A19".) Oprava: **úzka výnimka** — pod
+   denylistovým menom sa prepustí VÝHRADNE plain objekt s presne poľami
+   `{present, expiresAt}` a hodnotami `boolean|number|null|Date|string`;
+   všetko ostatné (vrátane stringu, extra poľa, vnoreného objektu) sa maskuje
+   celé ako doteraz, stringy vnútri navyše stále prechádzajú inline aj
+   substring scanom na aktuálny kľúč. Pokryté 6 novými testami
+   v `test/unit/redact.spec.ts` (I1 sa neoslabuje: kľúč je vždy string/Buffer,
+   na ten sa výnimka nikdy nevzťahuje).
+2. **`src/instrumentation-node.ts` + `src/lib/repo/api-key.repo.ts` — audit
+   kľúča sa NIKDY nezapisoval do `audit_log`.** `configureApiKeyRepo()` (podľa
+   vlastnej dokumentácie „MUSÍ sa zavolať pri boote") nevolal nikto, takže
+   `key_stored`, `key_verified`, `key_wiped` aj `key_panic_wipe` končili len ako
+   log `audit_fallback`. **Po panic buttone (D67) tak neexistoval žiadny trvalý
+   dôkaz, že kľúč bol wipnutý** — a runbook R5 sa oň opiera. Oprava: (a) wiring
+   pri boote v `instrumentation-node.ts`, (b) — a to je to podstatné — repo si
+   writer dotiahne aj samo (`await import('@/lib/audit/write')`), pretože
+   Next.js kompiluje `instrumentation` do vlastného module grafu a singleton
+   z bootu **nie je ten istý objekt**, aký vidia route handlery (samotný wiring
+   pri boote problém neopravil, meraný stav bol stále `audit_fallback`).
+   Jediná cesta do `audit_log` zostáva `appendAudit()` z A2 (I4).
+3. **`src/lib/engine/preview.ts` + `src/app/api/campaigns/preview/route.ts` —
+   „Zopakovať zlyhané" (D15, D16) bolo v UI nepoužiteľné.** Dry-run opakovania
+   vždy skončil blokátorom `future_overlap`: kontrola prekryvu (D28) počítala aj
+   **rodičovskú** kampaň (rovnaké produkty, rovnaké okno, stav `partial` je
+   v dotaze) a `parentCampaignId` sa z route do `buildPreview()` vôbec
+   neposielal. Oprava: `PreviewInput.parentCampaignId` sa forwarduje a rodič sa
+   z prekryvu vylučuje; prekryv s **inými** kampaňami blokuje naďalej.
+4. **`src/components/campaigns/NewCampaignWizard.tsx` — jednodňová zľava (D30)
+   sa nedala vytvoriť vôbec.** Preview vrátil blokátor
+   `one_day_not_acknowledged`, pri blokátore sa `ConfirmPanel` nevykreslí — a
+   potvrdenie „naozaj 1 deň?" je práve v ňom. Slepá ulička. Oprava: pri
+   `from === to` posiela sprievodca do **dry-runu** `oneDayAcknowledged: true`
+   (dry-run nič nezapisuje). **Záväzné potvrdenie sa neobchádza:**
+   `POST /api/campaigns` stále vyžaduje `acknowledgements.oneDay` a kontroluje
+   ho ešte pred spálením preview tokenu (I3, D30) — presne to overuje e2e test
+   „D30: jednodňová zľava sa nepotvrdí bez explicitného ‚naozaj 1 deň'".
+
+Žiadna z týchto zmien nemení kontrakt §5, nezavádza závislosť a neoslabuje
+invariant. Ostatné body §D a §F zostávajú v platnosti nezmenené.
+
+### 5. Nový stav (skutočné čísla, po zmenách)
+
+| Príkaz | Výsledok |
+| --- | --- |
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npm run lint` | ✅ exit 0 |
+| `npx vitest run` | ✅ **38 súborov / 620 testov** (614 + 6 nových k redakcii), 0 zlyhaných |
+| `npx playwright test` | ✅ **20/20** (predtým 4/20); opakovaný beh rovnako 20/20 |
+| `npm run test:build` (smoke nad buildom) | ✅ **8/8**, vrátane `next build` a behu `node .next/standalone/server.js` |
+
+E2e beh v tomto prostredí vyžaduje `PLAYWRIGHT_CHROMIUM_EXECUTABLE`
+(predinštalovaný Chromium rev. 1194 namiesto 1234 — §0/§D.2a); v CI to netreba,
+tam `npx playwright install` funguje.
+
+### 6. Čo zostáva neoverené (nezmenené oproti §D/§F)
+
+- Docker build a beh stacku (§D.1, F.5) — stále bez daemona; **smoke test
+  Docker nenahrádza**, spúšťa `node .next/standalone/server.js` priamo.
+- `gitleaks detect` (§D.4), MariaDB **11.4** lokálne (§D.6) — smoke aj e2e tu
+  bežali proti 10.11.14; v CI je 11.4.
+- Nedosiahnuteľnosť portu 3000 z hosta (I5, §B/I5) — vyžaduje Docker.
+- F.8 (stacktrace 500-tiek sa neloguje), F.9 (`unverified` kľúč), F.11
+  (`APP_VERSION` na dvoch miestach) — vedomé, neriešené.
+- Oprava č. 3 (retry/prekryv) a č. 4 (jednodňová zľava) sú pokryté e2e testami,
+  ale **nemajú vlastný unit/integračný test** — pri prípadnej regresii ich
+  zachytí až Playwright.
+- Boot audit event `boot` sa stále nezapisuje (`TODO(A2/A10)`
+  v `src/instrumentation-node.ts`) — nesúvisí s wiringom kľúča, ostáva otvorené.
+
+### Oprava naviac — automatické nájdenie Chromia pre e2e
+
+Dodatok vyššie uvádzal `npx playwright test` = 20/20, ale to platilo **len
+s ručne nastavenou** premennou `PLAYWRIGHT_CHROMIUM_EXECUTABLE`. Bez nej padlo
+všetkých 20 testov na `browserType.launch: Executable doesn't exist at
+…chromium_headless_shell-1234/…` — `@playwright/test` 1.62 chce revíziu 1234,
+prostredie má 1194, a `cdn.playwright.dev` je za proxy nedostupný, takže
+`npx playwright install` ju nemá odkiaľ stiahnuť.
+
+E2e, ktoré prejdú len s premennou, o ktorej nikto nevie, nie sú regresná sieť.
+`playwright.config.ts` preto Chromium hľadá sám: explicitná premenná → najnovšia
+revízia `chromium-*` v `PLAYWRIGHT_BROWSERS_PATH` (predvolene `/opt/pw-browsers`)
+bez ohľadu na očakávanú revíziu → štandardné správanie Playwrightu.
+
+Overené: `npx playwright test` bez akejkoľvek premennej = **20/20 passed**
+(52,8 s).

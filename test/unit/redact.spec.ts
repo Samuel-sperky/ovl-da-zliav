@@ -416,3 +416,57 @@ describe('appendAudit() — nikdy nehodí výnimku do volajúceho toku', () => {
     expect(lines.some((l) => l.includes('audit_unknown_event_type'))).toBe(true);
   });
 });
+
+/**
+ * Úzka výnimka z denylistu pre `HealthReport.key` (§5, I1).
+ *
+ * `GET /api/health` musí podľa kontraktu vracať `key: {present, expiresAt}`
+ * a telo každej odpovede prechádza `redact()`. Meno `key` je v denylistu, takže
+ * sa celá dvojica maskovala a UI **vždy** hlásilo „kľúč chýba" + režim len na
+ * čítanie. Výnimka platí VÝHRADNE pre tento presný tvar; všetko ostatné pod
+ * denylistovým menom sa maskuje ako doteraz (fail-closed).
+ */
+describe('redact — bezpečný tvar {present, expiresAt} pod denylistovým menom', () => {
+  beforeEach(() => {
+    resetRedactionState();
+  });
+
+  it('prepustí presne `key: {present, expiresAt}`', () => {
+    const out = redact({ key: { present: true, expiresAt: '2026-08-07T10:00:00.000Z' } });
+    expect(out.key).toEqual({ present: true, expiresAt: '2026-08-07T10:00:00.000Z' });
+  });
+
+  it('prepustí aj `{present:false, expiresAt:null}`', () => {
+    const out = redact({ key: { present: false, expiresAt: null } });
+    expect(out.key).toEqual({ present: false, expiresAt: null });
+  });
+
+  it('string pod denylistovým menom sa stále maskuje celý', () => {
+    const out = redact({ key: 'fake-shop-key-A1B2C3D4', apiKey: 'fake-shop-key-A1B2C3D4' });
+    expect(out.key).toBe(REDACTED);
+    expect(out.apiKey).toBe(REDACTED);
+  });
+
+  it('objekt s akýmkoľvek iným polom sa maskuje celý (fail-closed)', () => {
+    expect(redact({ key: { present: true, expiresAt: null, value: 'tajne' } }).key).toBe(REDACTED);
+    expect(redact({ key: { present: true } }).key).toBe(REDACTED);
+    expect(redact({ key: { last4: 'abcd', expiresAt: null } }).key).toBe(REDACTED);
+    expect(redact({ token: { present: true, expiresAt: null, extra: 1 } }).token).toBe(REDACTED);
+  });
+
+  it('vnorený objekt vo „bezpečnom" tvare sa nepreplíži (hodnoty musia byť primitívne)', () => {
+    expect(redact({ key: { present: true, expiresAt: { deep: 'fake-shop-key-A1B2C3D4' } } }).key).toBe(
+      REDACTED,
+    );
+  });
+
+  it('aktuálny kľúč vnútri prepusteného tvaru aj tak padne na substring scan (§6)', () => {
+    setActiveSecretForScan('fake-shop-key-A1B2C3D4');
+    try {
+      const out = redact({ key: { present: true, expiresAt: 'fake-shop-key-A1B2C3D4' } });
+      expect(out.key).toEqual({ present: true, expiresAt: REDACTED });
+    } finally {
+      setActiveSecretForScan(null);
+    }
+  });
+});

@@ -220,6 +220,12 @@ export interface ApiKeyRepository extends ApiKeyRepo {
 
 export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
   let audit = deps.audit ?? null;
+  /**
+   * `audit` uvedený explicitne (aj ako `null`) = volajúci si audit riadi sám
+   * (testy). Keď kľúč `audit` v `deps` vôbec nie je, repo si writer dotiahne
+   * sám — viď `resolveAudit()`.
+   */
+  const auditExplicit = 'audit' in deps;
   let logger = deps.logger ?? null;
   const now = deps.now ?? (() => new Date());
   const boxOptions: SecretBoxOptions = deps.masterKey ? { masterKey: deps.masterKey } : {};
@@ -233,7 +239,33 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
     return withTransaction((tx) => fn(tx));
   };
 
+  /**
+   * Lazy dotiahnutie skutočného `AuditWriter`-a (A2) pre PRODUKČNÝ singleton.
+   *
+   * Prečo: `configureApiKeyRepo()` sa dá zavolať len z boot kódu
+   * (`src/instrumentation-node.ts`), ale Next.js kompiluje instrumentation do
+   * VLASTNÉHO module grafu — singleton, ktorý nakonfiguruje boot, NIE JE ten
+   * istý objekt, aký vidia route handlery. Dôsledok bol, že `key_stored`,
+   * `key_verified`, `key_wiped` ani `key_panic_wipe` sa NIKDY nezapísali do
+   * `audit_log` a len sa logoval `audit_fallback` (pri panic buttone teda
+   * neexistoval trvalý dôkaz o wipe — D67, I4).
+   *
+   * `import()` je dynamický zámerne: statický import by v čase A1 vytvoril
+   * cyklus (A2 vtedy neexistoval). Jediná cesta do `audit_log` zostáva
+   * `appendAudit()` z A2 (I4) — tu sa len získa referencia na ňu.
+   */
+  const resolveAudit = async (): Promise<void> => {
+    if (audit || auditExplicit) return;
+    try {
+      const mod = await import('@/lib/audit/write');
+      audit = mod.auditWriter;
+    } catch {
+      // Zostáva `fallbackAudit()` — audit nikdy nemlčí.
+    }
+  };
+
   const writeAudit = async (input: AuditInput, conn?: Queryable): Promise<void> => {
+    await resolveAudit();
     if (!audit) {
       fallbackAudit(logger, input);
       return;

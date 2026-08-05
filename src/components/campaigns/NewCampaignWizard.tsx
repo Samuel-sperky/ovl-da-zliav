@@ -99,6 +99,14 @@ export function NewCampaignWizard() {
       from,
       to,
       kind: overwriteIntent || selectedWithOwnWrite.length > 0 ? 'overwrite' : 'new',
+      // D30 — jednodňové okno: dry-run sa smie zobraziť, inak by bol tok slepý.
+      // Bez tohto príznaku vráti preview blokátor `one_day_not_acknowledged`,
+      // pri blokátore sa `ConfirmPanel` vôbec nevykreslí — a práve v ňom sa
+      // potvrdenie „naozaj 1 deň?" zbiera. ZÁVÄZNÉ potvrdenie sa tým
+      // NEOBCHÁDZA: `POST /api/campaigns` ho vyžaduje v `acknowledgements.oneDay`
+      // a kontroluje ho ešte pred spálením preview tokenu (I3, D30). Dry-run
+      // nič nezapisuje.
+      ...(from === to ? { oneDayAcknowledged: true } : {}),
     });
     if (res.ok) {
       setPreview(res.data);

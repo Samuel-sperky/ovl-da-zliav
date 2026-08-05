@@ -98,6 +98,8 @@ export interface SeedCampaignInput {
 
 export interface DbHelper {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+  /** INSERT, ktorý vráti `insertId` z toho istého spojenia (viď `insert()`). */
+  insert(sql: string, params?: unknown[]): Promise<number>;
   /** Vyčistí dáta a vráti singletony do východiskového stavu. */
   reset(): Promise<void>;
   adminUserId(): Promise<number>;
@@ -131,6 +133,21 @@ function makeDb(): DbHelper {
     return Array.isArray(rows) ? (rows as T[]) : [];
   };
 
+  /**
+   * INSERT s návratom `insertId`.
+   *
+   * POZOR: `SELECT LAST_INSERT_ID()` ako SAMOSTATNÝ dotaz nad poolom je chyba —
+   * pool ho môže poslať na INÉ spojenie, kde je hodnota z iného (alebo žiadneho)
+   * INSERT-u. Prejavovalo sa to zlyhaním FK `fk_items_campaign` pri seede
+   * kampane. `insertId` z výsledku INSERT-u je vždy z toho istého spojenia.
+   */
+  const insert = async (sql: string, params: unknown[] = []): Promise<number> => {
+    const result: unknown = await p.query(sql, params);
+    const id = (result as { insertId?: number | bigint } | null)?.insertId;
+    if (id === undefined) throw new Error(`INSERT nevrátil insertId: ${sql}`);
+    return Number(id);
+  };
+
   const adminUserId = async (): Promise<number> => {
     const rows = await query<{ id: number }>('SELECT id FROM users WHERE username = ?', [
       ADMIN.username,
@@ -141,6 +158,7 @@ function makeDb(): DbHelper {
 
   return {
     query,
+    insert,
     adminUserId,
 
     async reset(): Promise<void> {
@@ -177,7 +195,7 @@ function makeDb(): DbHelper {
       const itemsOk = input.items.filter((i) => i.status === 'ok').length;
       const itemsFailed = input.items.filter((i) => i.status === 'failed').length;
       const itemsUncertain = input.items.filter((i) => i.status === 'uncertain').length;
-      await query(
+      const campaignId = await insert(
         'INSERT INTO campaigns (operation_id, name, kind, percent, date_from, date_to, mode, status, ' +
           'items_total, items_ok, items_failed, items_uncertain, confirmed_at, confirm_payload_hash, ' +
           'sudo_at, finished_at, created_by) ' +
@@ -199,9 +217,6 @@ function makeDb(): DbHelper {
           userId,
         ],
       );
-      const [row] = await query<{ id: number }>('SELECT LAST_INSERT_ID() AS id');
-      const campaignId = Number(row.id);
-
       let position = 1;
       for (const item of input.items) {
         await query(
@@ -229,7 +244,7 @@ function makeDb(): DbHelper {
 
     async seedAuditRow(input): Promise<number> {
       // I4 — výhradne INSERT; audit sa v e2e nikdy nemení ani nemaže.
-      await query(
+      return insert(
         'INSERT INTO audit_log (actor, user_id, event_type, ok, campaign_id, product_id, ' +
           'http_status, before_snapshot, after_snapshot, message) ' +
           'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -249,8 +264,6 @@ function makeDb(): DbHelper {
           input.message,
         ],
       );
-      const [row] = await query<{ id: number }>('SELECT LAST_INSERT_ID() AS id');
-      return Number(row.id);
     },
 
     async expireApiKey(): Promise<void> {
