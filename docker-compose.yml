@@ -80,8 +80,9 @@ services:
     ports:
       - "127.0.0.1:3050:3050"      # JEDINÝ publikovaný port (R4, D96, I5)
     volumes:
+      # Hash basic auth je priamo v tomto Caddyfile (mimo gitu, D97) — Caddy
+      # nevie načítať súbor do placeholdera, preto sa samostatný .hash nemountuje.
       - ./secrets/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./secrets/basicauth.hash:/etc/caddy/basicauth.hash:ro   # bcrypt mimo gitu (D97)
       - ovl-zliav-caddy-data:/data
       - ovl-zliav-caddy-config:/config
     security_opt: ["no-new-privileges:true"]
