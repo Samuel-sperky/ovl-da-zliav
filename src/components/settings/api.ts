@@ -76,6 +76,12 @@ async function sendJson<T>(
 export const getSettings = () => getJson<SettingsView>('/api/settings');
 export const getKeyMeta = () => getJson<KeyMetaView>('/api/key');
 
+/**
+ * Stav OBJEDNÁVKOVÉHO kľúča (`orders_read`, P2/P5). Tvar odpovede je rovnaký
+ * ako pri zápisovom kľúči a obsahuje výhradne `present`, `last4` a časy (D65, I1).
+ */
+export const getOrdersKeyMeta = () => getJson<KeyMetaView>('/api/key?kind=orders_read');
+
 export const putDomain = (domain: string, password: string) =>
   sendJson<{ shopDomain: string; canary: { ok: boolean; total: number } }>(
     '/api/settings/domain',
@@ -95,6 +101,17 @@ export const putKey = (apiKey: string) =>
   sendJson<{ last4: string; expiresAt: string; verifyStatus: string }>('/api/key', 'PUT', {
     apiKey,
   });
+
+/**
+ * Vloženie objednávkového kľúča. Server ho uloží LEN vtedy, keď mu shop skutočne
+ * povolí čítanie objednávok — inak vráti chybu a v DB sa nič nezmení.
+ */
+export const putOrdersKey = (apiKey: string) =>
+  sendJson<{ last4: string; expiresAt: string; verifyStatus: string; kind: string }>(
+    '/api/key',
+    'PUT',
+    { apiKey, kind: 'orders_read' },
+  );
 
 export const panicWipeKey = (password: string) =>
   sendJson<PanicResult>('/api/key', 'DELETE', {

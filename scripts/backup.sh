@@ -20,6 +20,13 @@ chmod 700 "$BACKUP_DIR"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT="$BACKUP_DIR/ovl_zliav-$STAMP.sql.gz"
 
+# `--ignore-table=api_key` chráni OBA kľúče, a to bez ďalšej zmeny (P5, D76, I1):
+# druhý kľúč (`orders_read`) nedostal vlastnú tabuľku, žije ako ĎALŠÍ RIADOK
+# v tej istej `api_key` (rozlíšený stĺpcom `kind`, migrácia 0009). Vylúčenie je
+# na úrovni TABUĽKY, takže sa vzťahuje na každý riadok bez ohľadu na druh —
+# a bude platiť aj pre prípadný tretí druh kľúča. Overené: v dumpe nesmie byť
+# ani INSERT INTO api_key, ani CREATE TABLE api_key.
+#
 # Root heslo číta mysqldump vnútri kontajnera zo secret súboru — heslo sa
 # NIKDY neobjaví v argumentoch procesu na hoste ani v tomto skripte (I1).
 docker exec "$DB_CONTAINER" sh -c '

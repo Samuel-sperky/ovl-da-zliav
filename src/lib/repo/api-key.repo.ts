@@ -1,7 +1,21 @@
 /**
- * Aura Zľavy — repozitár singleton tabuľky `api_key` (BUILD-SPEC §3/§7, R2, D63–D65).
+ * Aura Zľavy — repozitár tabuľky `api_key` (BUILD-SPEC §3/§7, R2, D63–D65).
  *
  * Toto je JEDINÉ miesto v appke, kde sa API kľúč šifruje, dešifruje a maže.
+ *
+ * P5 (KONTRAKT-PREDAJNOST-2026-08-06): tabuľka drží najviac JEDEN záznam NA
+ * DRUH kľúča (`kind` = `shop_write` | `orders_read`, UNIQUE na `kind`, migrácia
+ * 0009). Repozitár je preto parametrizovaný druhom: `createApiKeyRepo({ kind })`
+ * vracia inštanciu, ktorá vidí VÝHRADNE svoj druh. Cesta pre šifrovanie, TTL,
+ * `last4`, `verify_status`, audit a wipe je pritom JEDNA a spoločná — presne
+ * preto, aby sa zákaz logovania (I1) aj panic wipe (D63, D67) vzťahovali na oba
+ * kľúče automaticky, bez druhej neotestovanej cesty.
+ *
+ * Dôsledok, ktorý je vedomý a testovaný: `wipe('panic_button')` maže OBA druhy
+ * naraz (viď `wipeWithConn`). Panic button znamená „kľúč unikol" — v tej chvíli
+ * nesmie v appke zostať žiadny kľúč, ani ten, ktorého sa incident „netýkal".
+ * Wipe z iného dôvodu (TTL, 401/403, rotácia) sa naopak drží výhradne svojho
+ * druhu: expirovaný shop kľúč nesmie zhodiť platný objednávkový a naopak.
  *
  * Invarianty držané tu:
  *  - I1  — plaintext kľúča neopustí `Buffer` vnútri `SecretHandle`; `getMeta()`
@@ -45,10 +59,42 @@ import {
   type SecretBoxOptions,
 } from '@/lib/crypto/secret-box';
 
+/**
+ * Druh kľúča (migrácia 0009, P5). Typ žije TU, nie v `src/contracts.ts` —
+ * kontrakty vlastní iný agent a repozitár si svoj vstup musí vedieť opísať sám.
+ */
+export type ApiKeyKind = 'shop_write' | 'orders_read';
+
+/** Poradie je normatívne pre panic wipe a pre UI (zápisový kľúč je prvý). */
+export const API_KEY_KINDS: readonly ApiKeyKind[] = ['shop_write', 'orders_read'];
+
+/** Default druh — kód, ktorý o druhoch nevie, hovorí o zápisovom kľúči do shopu. */
+export const DEFAULT_API_KEY_KIND: ApiKeyKind = 'shop_write';
+
 /** Strop TTL podľa R2 — vyššiu hodnotu repozitár odmietne, nie zaokrúhli. */
 export const API_KEY_MAX_TTL_HOURS = 48;
 
-/** `api_key` je singleton (`CHECK (id = 1)`, §3). */
+/**
+ * Strop TTL objednávkového kľúča (P2): 90 dní, teda strop premennej
+ * `ORDERS_KEY_TTL_DAYS` (default 30 dní). Je to VEDOMÁ odchýlka od 48 h (R2/D69)
+ * odôvodnená tým, že kľúč je len na čítanie a nevidí osobné údaje; panic button
+ * ho maže kedykoľvek a TTL je viditeľné v UI.
+ */
+export const ORDERS_KEY_MAX_TTL_HOURS = 90 * 24;
+
+/** Strop TTL podľa druhu kľúča (R2 pre zápis, P2 pre objednávky). */
+export function maxTtlHoursForKind(kind: ApiKeyKind): number {
+  return kind === 'orders_read' ? ORDERS_KEY_MAX_TTL_HOURS : API_KEY_MAX_TTL_HOURS;
+}
+
+/**
+ * Kým bola `api_key` singleton (`CHECK (id = 1)`, §3), riadok mal pevné `id = 1`.
+ * Migrácia 0009 CHECK zhodila a `id` je AUTO_INCREMENT — identita riadku je od
+ * vtedy `kind` (UNIQUE), nie `id`. Konštanta zostáva len pre spätnú
+ * kompatibilitu volajúcich; repozitár ju NEPOUŽÍVA.
+ *
+ * @deprecated Vyberaj podľa `kind`, nie podľa `id`.
+ */
 export const API_KEY_ROW_ID = 1;
 
 export type ApiKeyErrorCode = 'bad_input' | 'unavailable' | 'expired';
@@ -63,11 +109,11 @@ export class ApiKeyError extends Error {
   }
 }
 
-/* ───────────────────────────── SQL (singleton) ─────────────────────────── */
+/* ─────────────────────────── SQL (jeden riadok na druh) ────────────────── */
 
 const SQL_SELECT =
   'SELECT ciphertext, iv, auth_tag, key_version, last4, created_at, expires_at, ' +
-  'verify_status, verified_at, last_used_at FROM api_key WHERE id = ?';
+  'verify_status, verified_at, last_used_at FROM api_key WHERE kind = ?';
 
 /**
  * Krok 1 wipe procedúry (D63) — prepis náhodnými bajtmi PRED zmazaním, aby sa
@@ -75,17 +121,35 @@ const SQL_SELECT =
  */
 const SQL_WIPE_OVERWRITE =
   'UPDATE api_key SET ciphertext = RANDOM_BYTES(LENGTH(ciphertext)), ' +
-  'iv = RANDOM_BYTES(12), auth_tag = RANDOM_BYTES(16) WHERE id = ?';
+  'iv = RANDOM_BYTES(12), auth_tag = RANDOM_BYTES(16) WHERE kind = ?';
 
-const SQL_WIPE_DELETE = 'DELETE FROM api_key WHERE id = ?';
+const SQL_WIPE_DELETE = 'DELETE FROM api_key WHERE kind = ?';
 
+/**
+ * Panic wipe (D67) ide zámerne BEZ filtra na `kind` — jediným príkazom prepíše
+ * a zmaže VŠETKY kľúče. Keby sa mazalo v cykle po druhoch, pridanie tretieho
+ * druhu by panic button tichým opomenutím obišlo.
+ */
+const SQL_WIPE_OVERWRITE_ALL =
+  'UPDATE api_key SET ciphertext = RANDOM_BYTES(LENGTH(ciphertext)), ' +
+  'iv = RANDOM_BYTES(12), auth_tag = RANDOM_BYTES(16)';
+
+const SQL_WIPE_DELETE_ALL = 'DELETE FROM api_key';
+
+/** Ktoré druhy práve existujú — kvôli auditu wipe za každý z nich (I4). */
+const SQL_SELECT_KINDS = 'SELECT kind FROM api_key';
+
+/**
+ * `id` je od migrácie 0009 AUTO_INCREMENT, identitou riadku je `kind`. Poradie
+ * ostatných hodnôt sa ZÁMERNE nemení (testy A1 kontrolujú pozície).
+ */
 const SQL_INSERT =
-  'INSERT INTO api_key (id, ciphertext, iv, auth_tag, key_version, last4, created_at, ' +
+  'INSERT INTO api_key (kind, ciphertext, iv, auth_tag, key_version, last4, created_at, ' +
   'expires_at, verify_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
-const SQL_SET_VERIFY = 'UPDATE api_key SET verify_status = ?, verified_at = ? WHERE id = ?';
+const SQL_SET_VERIFY = 'UPDATE api_key SET verify_status = ?, verified_at = ? WHERE kind = ?';
 
-const SQL_TOUCH_LAST_USED = 'UPDATE api_key SET last_used_at = ? WHERE id = ?';
+const SQL_TOUCH_LAST_USED = 'UPDATE api_key SET last_used_at = ? WHERE kind = ?';
 
 /* ─────────────────────────────── DB riadok ─────────────────────────────── */
 
@@ -124,6 +188,11 @@ type MinimalLogger = {
 };
 
 export interface ApiKeyRepoDeps {
+  /**
+   * Druh kľúča, ktorý inštancia vidí (P5). Default `shop_write`, aby sa chovanie
+   * existujúcich volajúcich nezmenilo ani o čiarku.
+   */
+  kind?: ApiKeyKind;
   /** `appendAudit()` z `src/lib/audit/write.ts` (A2) — jediná cesta do `audit_log` (I4). */
   audit?: AuditWriter | null;
   logger?: MinimalLogger | null;
@@ -202,6 +271,11 @@ const configureHooks = new WeakMap<
 >();
 
 export interface ApiKeyRepository extends ApiKeyRepo {
+  /**
+   * Druh, ktorý táto inštancia vidí (P5). Voliteľné zámerne: in-memory fakes
+   * kontraktu v testoch druh nepoznajú a nemusia — vždy hovoria o zápisovom kľúči.
+   */
+  readonly kind?: ApiKeyKind;
   /** Nadstavba kontraktu: wipe s explicitným aktérom (route/scheduler, D67). */
   wipe(
     reason: KeyWipeReason,
@@ -219,6 +293,8 @@ export interface ApiKeyRepository extends ApiKeyRepo {
 }
 
 export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
+  const kind: ApiKeyKind = deps.kind ?? DEFAULT_API_KEY_KIND;
+  const maxTtlHours = maxTtlHoursForKind(kind);
   let audit = deps.audit ?? null;
   /**
    * `audit` uvedený explicitne (aj ako `null`) = volajúci si audit riadi sám
@@ -290,42 +366,83 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
   };
 
   const selectRow = async (conn?: Queryable): Promise<ApiKeyRow | null> =>
-    runInTx(conn, async (tx) => asRow(await tx.query(SQL_SELECT, [API_KEY_ROW_ID])));
+    runInTx(conn, async (tx) => asRow(await tx.query(SQL_SELECT, [kind])));
+
+  /**
+   * Druhy, ktoré v tabuľke práve existujú. Používa to len panic wipe, aby vedel
+   * zapísať audit za KAŽDÝ zmazaný kľúč (I4) — sám o sebe nič nemaže.
+   */
+  const selectPresentKinds = async (conn: Queryable): Promise<ApiKeyKind[]> => {
+    const result = await conn.query(SQL_SELECT_KINDS, []);
+    if (!Array.isArray(result)) return [];
+    return result.map((row) => {
+      const value = (row as { kind?: unknown }).kind;
+      // Fallback pre riadky z čias pred migráciou 0009 (stĺpec ešte nebol).
+      return value === 'orders_read' ? 'orders_read' : 'shop_write';
+    });
+  };
 
   const isExpired = (row: ApiKeyRow): boolean => {
     const expiresAt = row.expires_at instanceof Date ? row.expires_at : new Date(row.expires_at);
     return expiresAt.getTime() <= now().getTime();
   };
 
-  /** Wipe procedúra v POŽADOVANOM poradí: prepis → DELETE → audit (D63). */
+  /**
+   * Wipe procedúra v POŽADOVANOM poradí: prepis → DELETE → audit (D63).
+   *
+   * `panic_button` je jediný dôvod, ktorý prekračuje hranicu druhu: maže VŠETKY
+   * kľúče (D67, akceptačné kritérium 3 kontraktu) a zapíše audit za každý
+   * skutočne zmazaný druh. Ostatné dôvody sa držia druhu tejto inštancie.
+   */
   const wipeWithConn = async (
     conn: Queryable,
     reason: KeyWipeReason,
     context?: { actor?: AuditActor; userId?: number | null; message?: string },
   ): Promise<boolean> => {
-    const overwritten = affected(await conn.query(SQL_WIPE_OVERWRITE, [API_KEY_ROW_ID]));
+    const allKinds = reason === 'panic_button';
+    // Pri panic wipe treba vedieť, čo v tabuľke bolo, EŠTE pred zmazaním.
+    const wipedKinds = allKinds ? await selectPresentKinds(conn) : [];
+
+    const overwritten = affected(
+      allKinds
+        ? await conn.query(SQL_WIPE_OVERWRITE_ALL, [])
+        : await conn.query(SQL_WIPE_OVERWRITE, [kind]),
+    );
     if (overwritten > 0) {
-      await conn.query(SQL_WIPE_DELETE, [API_KEY_ROW_ID]);
+      if (allKinds) await conn.query(SQL_WIPE_DELETE_ALL, []);
+      else await conn.query(SQL_WIPE_DELETE, [kind]);
+    }
+
+    const baseMessage = context?.message ?? reason;
+    const auditEntry = (message: string) => ({
+      actor: context?.actor ?? actorForWipe(reason),
+      userId: context?.userId ?? null,
+      eventType: auditEventForWipe(reason),
+      ok: true,
+      // Do auditu ide dôvod a druh kľúča — nikdy kľúč ani `last4` (I1).
+      message,
+    });
+
+    if (overwritten > 0 && wipedKinds.length > 0) {
+      // Panic: jeden audit event za KAŽDÝ zmazaný kľúč, aby bol v audite dôkaz
+      // o oboch (a nie jeden riadok, z ktorého sa nedá zistiť, čo zmizlo).
+      for (const wipedKind of wipedKinds) {
+        await writeAudit(auditEntry(`${baseMessage} [kind=${wipedKind}]`), conn);
+      }
+      return true;
     }
 
     // Pri panic buttone auditujeme aj vtedy, keď už nebolo čo mazať — operátor
     // stlačil panic a to sa MUSÍ objaviť v audite (D67, I4).
     if (overwritten > 0 || reason === 'panic_button') {
-      await writeAudit(
-        {
-          actor: context?.actor ?? actorForWipe(reason),
-          userId: context?.userId ?? null,
-          eventType: auditEventForWipe(reason),
-          ok: true,
-          message: context?.message ?? reason,
-        },
-        conn,
-      );
+      await writeAudit(auditEntry(baseMessage), conn);
     }
     return overwritten > 0;
   };
 
   const repo: ApiKeyRepository = {
+    kind,
+
     async getMeta(conn?: Queryable): Promise<ApiKeyMeta> {
       const row = await selectRow(conn);
       if (row === null) return { ...ABSENT_META };
@@ -367,11 +484,13 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
       if (!Buffer.isBuffer(plain) || plain.length === 0) {
         throw new ApiKeyError('bad_input', 'API kľúč musí byť neprázdny Buffer.');
       }
-      if (!Number.isInteger(ttlHours) || ttlHours < 1 || ttlHours > API_KEY_MAX_TTL_HOURS) {
+      if (!Number.isInteger(ttlHours) || ttlHours < 1 || ttlHours > maxTtlHours) {
         wipeBuffer(plain);
         throw new ApiKeyError(
           'bad_input',
-          `TTL musí byť celé číslo 1–${API_KEY_MAX_TTL_HOURS} h (R2, ENV strop 48).`,
+          kind === 'orders_read'
+            ? `TTL musí byť celé číslo 1–${maxTtlHours} h (P2, strop ORDERS_KEY_TTL_DAYS 90 dní).`
+            : `TTL musí byť celé číslo 1–${maxTtlHours} h (R2, ENV strop 48).`,
         );
       }
 
@@ -400,7 +519,7 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
           message: 'nahradenie starého kľúča novým',
         });
         await tx.query(SQL_INSERT, [
-          API_KEY_ROW_ID,
+          kind,
           record.ciphertext,
           record.iv,
           record.authTag,
@@ -416,8 +535,8 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
             userId: context?.userId ?? null,
             eventType: 'key_stored',
             ok: true,
-            // Do auditu ide výhradne fakt a TTL — nikdy kľúč ani `last4` (I1).
-            message: `API kľúč uložený, TTL ${ttlHours} h`,
+            // Do auditu ide výhradne fakt, druh a TTL — nikdy kľúč ani `last4` (I1).
+            message: `API kľúč uložený, TTL ${ttlHours} h [kind=${kind}]`,
           },
           tx,
         );
@@ -447,7 +566,10 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
         }
         if (isExpired(fresh)) {
           await repo.wipe('ttl_expired');
-          throw new ApiKeyError('expired', 'API kľúč expiroval (TTL 48 h) — zadaj nový v UI (R2).');
+          throw new ApiKeyError(
+            'expired',
+            `API kľúč expiroval (TTL ${maxTtlHours} h) — zadaj nový v UI (R2, P2).`,
+          );
         }
         return createSecretHandle(
           decryptApiKey(
@@ -469,7 +591,7 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
 
     async setVerifyStatus(status: KeyVerifyStatus, conn?: Queryable): Promise<void> {
       await runInTx(conn, async (tx) => {
-        const result = await tx.query(SQL_SET_VERIFY, [status, now(), API_KEY_ROW_ID]);
+        const result = await tx.query(SQL_SET_VERIFY, [status, now(), kind]);
         if (affected(result) === 0) return;
         await writeAudit(
           {
@@ -485,7 +607,7 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
 
     async touchLastUsed(conn?: Queryable): Promise<void> {
       await runInTx(conn, async (tx) => {
-        await tx.query(SQL_TOUCH_LAST_USED, [now(), API_KEY_ROW_ID]);
+        await tx.query(SQL_TOUCH_LAST_USED, [now(), kind]);
       });
     },
   };
@@ -500,8 +622,25 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
   return repo;
 }
 
-/** Singleton pre route-y, engine a scheduler. */
+/**
+ * Singleton ZÁPISOVÉHO kľúča (`product:edit`) pre route-y, engine a scheduler.
+ *
+ * I8' bod 4: `setReduction` volá výhradne `src/lib/engine/executor.ts` a výhradne
+ * týmto singletonom. Objednávkový kľúč sa k zápisu nedostane ani omylom —
+ * inštancia nižšie vidí v SQL výhradne `kind = 'orders_read'`.
+ */
 export const apiKeyRepo: ApiKeyRepository = createApiKeyRepo();
+
+/**
+ * Singleton OBJEDNÁVKOVÉHO kľúča (`orders:read`, P2/P5). Používa ho `/api/key`
+ * a synchronizácia predajov — NIKDY zápisová cesta.
+ */
+export const ordersKeyRepo: ApiKeyRepository = createApiKeyRepo({ kind: 'orders_read' });
+
+/** Repozitár podľa druhu — jediné miesto, kde sa druh mapuje na inštanciu. */
+export function apiKeyRepoForKind(kind: ApiKeyKind): ApiKeyRepository {
+  return kind === 'orders_read' ? ordersKeyRepo : apiKeyRepo;
+}
 
 /**
  * Doplní audit writer a logger singletonu. MUSÍ sa zavolať pri boote, hneď ako
@@ -513,10 +652,18 @@ export const apiKeyRepo: ApiKeyRepository = createApiKeyRepo();
  *
  * Bez toho sa audit `key_wiped` / `key_stored` nezapíše do `audit_log` a len sa
  * zaloguje ako `audit_fallback` (viď hlavička súboru).
+ *
+ * Bez explicitného `target` sa nakonfigurujú OBA singletony — inak by
+ * objednávkový kľúč mal audit len vo fallbacku (P5: jedna cesta pre oba).
  */
 export function configureApiKeyRepo(
   deps: Pick<ApiKeyRepoDeps, 'audit' | 'logger'>,
-  target: ApiKeyRepo = apiKeyRepo,
+  target?: ApiKeyRepo,
 ): void {
-  configureHooks.get(target)?.(deps);
+  if (target) {
+    configureHooks.get(target)?.(deps);
+    return;
+  }
+  configureHooks.get(apiKeyRepo)?.(deps);
+  configureHooks.get(ordersKeyRepo)?.(deps);
 }

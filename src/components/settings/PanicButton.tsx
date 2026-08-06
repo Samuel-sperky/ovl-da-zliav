@@ -23,10 +23,10 @@ import {
 } from '@/components/settings/api';
 
 const RUNBOOK_STEPS: readonly string[] = [
-  'Kľúč je z appky wipnutý (prepis ciphertextu + zmazanie) a všetky čakajúce kampane sú zrušené. Nič nebeží automaticky.',
-  'Kontaktuj maintainera shopu a požiadaj o REVOKÁCIU kľúča na strane shopu — appka kľúč revokovať nevie, vie ho len zabudnúť.',
+  'OBA kľúče (zápisový aj objednávkový) sú z appky wipnuté (prepis ciphertextu + zmazanie) a všetky čakajúce kampane sú zrušené. Nič nebeží automaticky.',
+  'Kontaktuj maintainera shopu a požiadaj o REVOKÁCIU oboch kľúčov na strane shopu — appka kľúč revokovať nevie, vie ho len zabudnúť.',
   'Skontroluj audit log (filtre podľa dátumu a typu „zápis") a admin shopu, či medzitým neprebehli neočakávané zmeny zliav.',
-  'Po revokácii vygeneruj v shope nový kľúč so scope výhradne product:edit a vlož ho v Nastaveniach.',
+  'Po revokácii vygeneruj v shope nový kľúč so scope výhradne product:edit a vlož ho v Nastaveniach. Objednávkový kľúč vlož znova až vtedy, keď ho znova potrebuješ — bez neho appka len nevidí predajnosť.',
   'Skontroluj kampane v stave „vyžaduje kľúč" a rozhodni, ktoré chceš dopáliť novým dry-runom.',
 ];
 
@@ -107,13 +107,13 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
     <section className="ovl-card ovl-card--danger" data-testid="panic-button">
       <h2>Panic button — kľúč unikol</h2>
       <p className="ovl-small">
-        Okamžite zmaže API kľúč z appky, zruší všetky čakajúce kampane a zapíše
-        audit event. Už zapísané zľavy v shope zostanú a dobehnú — appka ich
+        Okamžite zmaže OBA API kľúče z appky (zápisový aj objednávkový), zruší
+        všetky čakajúce kampane a zapíše audit event za každý zmazaný kľúč. Už zapísané zľavy v shope zostanú a dobehnú — appka ich
         zrušiť nedokáže. Skutočnú revokáciu kľúča vie urobiť len maintainer shopu.
       </p>
       {!keyPresent ? (
         <p className="ovl-small ovl-muted">
-          Kľúč momentálne nie je uložený, ale panic button môžeš použiť aj tak —
+          Kľúč momentálne nie je uložený (ani zápisový, ani objednávkový), ale panic button môžeš použiť aj tak —
           zruší čakajúce kampane a zapíše incident do auditu.
         </p>
       ) : null}
