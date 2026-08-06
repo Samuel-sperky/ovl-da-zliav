@@ -39,14 +39,28 @@ export const WRITES_LOCKED_TOOLTIP =
 export const HEALTH_UNKNOWN_TOOLTIP =
   'Stav appky sa nepodarilo overiť — zapisovacie akcie sú pre istotu vypnuté.';
 
+export const NOT_AUTHENTICATED_TOOLTIP =
+  'Nie si prihlásený — zapisovacie akcie sú vypnuté, kým sa neprihlásiš.';
+
 /**
  * Brána pre zapisovacie akcie. Pri prvom načítaní (`loading`) sa nič nevypína;
  * hneď ako je stav známy, rozhoduje kľúč a zámok zápisov.
  */
 export function useWriteGate(pollMs = 30_000): WriteGate {
-  const { health, loading, unreachable } = useHealth(pollMs);
+  const { health, loading, unreachable, unauthenticated } = useHealth(pollMs);
 
   if (loading) return { canWrite: true, loading: true, keyPresent: false };
+
+  /* Chýbajúca session je stále fail-closed (I13 sa nemení), len dôvod je
+     pravdivý — nehlásime poruchu appky tam, kde žiadna nie je. */
+  if (unauthenticated) {
+    return {
+      canWrite: false,
+      reason: NOT_AUTHENTICATED_TOOLTIP,
+      loading: false,
+      keyPresent: false,
+    };
+  }
 
   if (unreachable || !health) {
     return { canWrite: false, reason: HEALTH_UNKNOWN_TOOLTIP, loading: false, keyPresent: false };
