@@ -9,8 +9,9 @@
  */
 import { useState } from 'react';
 
+import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import ErrorMessage from '@/components/ui/ErrorMessage';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import { putEagerWriteDefault } from '@/components/settings/api';
 
 export interface EagerWriteToggleProps {
@@ -20,21 +21,20 @@ export interface EagerWriteToggleProps {
 
 export function EagerWriteToggle({ enabled, onChanged }: EagerWriteToggleProps) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [rawCode, setRawCode] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
 
   async function toggle() {
     if (busy) return;
     setBusy(true);
-    setError(null);
-    setRawCode(null);
+    setFailure(null);
     const res = await putEagerWriteDefault(!enabled);
     setBusy(false);
     if (!res.ok) {
-      setError(res.error.message);
-      setRawCode(res.error.code);
+      // Nastavenie sa NEuložilo — pri chýbajúcej session to povieme ľudsky.
+      setFailure(describeActionFailure(res.error, { action: 'Uloženie nastavenia' }));
       return;
     }
+    setFailure(null);
     onChanged();
   }
 
@@ -61,7 +61,7 @@ export function EagerWriteToggle({ enabled, onChanged }: EagerWriteToggleProps) 
           predvolenú hodnotu vo formulári; každý zápis stále prejde dry-runom
           a samostatným potvrdením.
         </p>
-        {error ? <ErrorMessage message={error} rawCode={rawCode} /> : null}
+        <ActionFailurePanel failure={failure} testId="eager-write-failure" />
       </div>
     </section>
   );

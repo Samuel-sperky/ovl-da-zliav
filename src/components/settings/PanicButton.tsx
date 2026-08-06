@@ -10,10 +10,11 @@
  */
 import { useState } from 'react';
 
+import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import ErrorMessage from '@/components/ui/ErrorMessage';
 import RunbookPanel from '@/components/ui/RunbookPanel';
 import SudoPrompt from '@/components/ui/SudoPrompt';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
   PANIC_CONFIRM_LITERAL,
   SUDO_REQUIRED_CODE,
@@ -39,25 +40,29 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [rawCode, setRawCode] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [result, setResult] = useState<PanicResult | null>(null);
   const [needSudo, setNeedSudo] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
 
   const confirmOk = confirm === PANIC_CONFIRM_LITERAL;
 
+  const fail = (error: { code?: string | null; message?: string | null } | null) =>
+    setFailure(describeActionFailure(error, { action: 'Wipnutie kľúča' }));
+
   async function submit(pwd: string) {
-    setRawCode(null);
     if (pwd.length === 0) {
-      setError('Panic button vyžaduje tvoje heslo.');
+      fail({ code: 'validation_failed', message: 'Panic button vyžaduje tvoje heslo.' });
       return;
     }
     if (!confirmOk) {
-      setError(`Do potvrdzovacieho poľa opíš presne text ${PANIC_CONFIRM_LITERAL} (bez diakritiky).`);
+      fail({
+        code: 'validation_failed',
+        message: `Do potvrdzovacieho poľa opíš presne text ${PANIC_CONFIRM_LITERAL} (bez diakritiky).`,
+      });
       return;
     }
-    setError(null);
+    setFailure(null);
     setBusy(true);
     const res = await panicWipeKey(pwd);
     setBusy(false);
@@ -65,19 +70,20 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
       setPassword('');
       setConfirm('');
       setPending(null);
+      setFailure(null);
       setResult(res.data);
       onWiped();
       return;
     }
     if (res.error.code === SUDO_REQUIRED_CODE) {
+      // Sudo okno vypršalo — to NIE je odhlásenie; pýtame heslo, nie login.
       setPending(pwd);
       setNeedSudo(true);
       return;
     }
     setPassword('');
     setPending(null);
-    setError(res.error.message);
-    setRawCode(res.error.code);
+    fail(res.error);
   }
 
   if (result) {
@@ -161,14 +167,14 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
                 setOpen(false);
                 setPassword('');
                 setConfirm('');
-                setError(null);
+                setFailure(null);
               }}
               disabled={busy}
             >
               Zrušiť
             </Button>
           </div>
-          {error ? <ErrorMessage message={error} rawCode={rawCode} /> : null}
+          <ActionFailurePanel failure={failure} testId="panic-failure" />
         </div>
       )}
       {needSudo ? (

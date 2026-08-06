@@ -7,19 +7,65 @@
  * Pri lockoute (429) UI zobrazí, koľko času zostáva — hodnotu berie z hlavičky
  * `Retry-After` alebo z hlášky servera; nikdy nehádame, či heslo bolo správne.
  * Prihlásenie ide výhradne na `/api/auth/login` (žiadny Server Action).
+ *
+ * PRVÝ BEH APPKY: po čerstvej inštalácii je `users=0` a prihlásiť sa NEDÁ
+ * žiadnym menom ani heslom. Stránka to zistí z `GET /api/auth/bootstrap`
+ * (výhradne POČET účtov, nikdy ich údaje — I1) a namiesto slepého formulára
+ * zobrazí presný príkaz na vytvorenie admina. Príkaz MUSÍ spustiť človek
+ * v normálnom termináli: `seed-admin` si pýta heslo interaktívne a na jeho
+ * maskovanie potrebuje skutočné TTY, takže appka ho nikdy nespustí sama.
+ *
+ * Fail-closed: keď bootstrap neodpovie (alebo trvá dlho), stránka sa vráti
+ * k bežnému formuláru a NIKDY netvrdí, že účet neexistuje. Hlášky NEúspešného
+ * prihlásenia zostávajú generické — nikdy neprezradia, či meno existuje (D68).
  */
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import Button from '@/components/ui/Button';
 import ErrorMessage from '@/components/ui/ErrorMessage';
+import {
+  SEED_ADMIN_COMMAND,
+  firstRunStateFromCount,
+  showsAdminSetup,
+  type FirstRunState,
+} from '@/lib/ui/first-run';
 
 /** Minimum podľa §5 (`password: string(12..200)`). */
 const PASSWORD_MIN = 12;
 
+/** Po tomto čase sa bootstrap vzdá a stránka ukáže bežný formulár. */
+const BOOTSTRAP_TIMEOUT_MS = 4000;
+
 interface LoginEnvelope {
   ok: boolean;
   error?: { code?: string; message?: string };
+}
+
+interface BootstrapEnvelope {
+  ok: boolean;
+  data?: { needsAdmin?: boolean };
+}
+
+/**
+ * Zistí stav prvého behu. Vracia `'unknown'` pri akejkoľvek neistote —
+ * príznak `needsAdmin` sa berie len vtedy, keď je to skutočný boolean.
+ */
+async function loadFirstRunState(signal: AbortSignal): Promise<FirstRunState> {
+  try {
+    const res = await fetch('/api/auth/bootstrap', {
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+    if (!res.ok) return 'unknown';
+    const body = (await res.json()) as BootstrapEnvelope;
+    if (!body?.ok || typeof body.data?.needsAdmin !== 'boolean') return 'unknown';
+    // Príznak servera prekladáme cez rovnakú čistú funkciu ako počet účtov,
+    // aby existoval jediný zdroj pravdy o tom, čo znamená „prvý beh".
+    return firstRunStateFromCount(body.data.needsAdmin ? 0 : 1);
+  } catch {
+    return 'unknown';
+  }
 }
 
 export default function LoginPage() {
@@ -30,6 +76,24 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [rawCode, setRawCode] = useState<string | null>(null);
   const [lockSeconds, setLockSeconds] = useState<number | null>(null);
+  /** `null` = ešte nevieme; potom `needs-admin` / `ready` / `unknown`. */
+  const [firstRun, setFirstRun] = useState<FirstRunState | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  /* Prvý beh: existuje vôbec nejaký účet? */
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BOOTSTRAP_TIMEOUT_MS);
+    let alive = true;
+    void loadFirstRunState(controller.signal).then((next) => {
+      if (alive) setFirstRun(next);
+    });
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, []);
 
   /* Odpočet lockoutu — po uplynutí sa formulár znova povolí. */
   useEffect(() => {
@@ -97,6 +161,83 @@ export default function LoginPage() {
       setState('idle');
       setError('Server neodpovedá. Skús znova.');
     }
+  }
+
+  async function copyCommand() {
+    try {
+      await navigator.clipboard.writeText(SEED_ADMIN_COMMAND);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Bez clipboard práv sa príkaz označí ručne — text je aj tak na obrazovke.
+      setCopied(false);
+    }
+  }
+
+  /* ── Kým bootstrap neodpovie, formulár nezobrazujeme (nebliká) ─────────── */
+  if (firstRun === null) {
+    return (
+      <section
+        className="ovl-card ovl-skeleton"
+        style={{ maxWidth: '26rem', minHeight: '10rem' }}
+        aria-busy="true"
+        data-testid="login-loading"
+      />
+    );
+  }
+
+  /* ── Prvý beh: v DB nie je ani jeden účet ─────────────────────────────── */
+  if (showsAdminSetup(firstRun)) {
+    return (
+      <section className="ovl-card" style={{ maxWidth: '34rem' }} data-testid="login-needs-admin">
+        <h1 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem' }}>Appka ešte nemá účet</h1>
+        <div className="ovl-note ovl-note--attention" role="status">
+          <span className="ovl-note-glyph" aria-hidden="true">
+            ▲
+          </span>
+          <span>
+            V databáze nie je ani jeden používateľ, takže sa teraz nedá prihlásiť
+            žiadnym menom ani heslom. Nie je to porucha — appka je len čerstvo
+            nainštalovaná a chýba jej prvý účet.
+          </span>
+        </div>
+        <div className="ovl-stack" style={{ marginTop: '0.9rem' }}>
+          <p style={{ margin: 0 }}>
+            <strong>Čo urobiť:</strong> spusti tento príkaz v termináli na počítači,
+            kde beží Docker, a zadaj meno a heslo (aspoň {PASSWORD_MIN} znakov).
+          </p>
+          <pre
+            className="ovl-mono"
+            data-testid="login-seed-command"
+            style={{
+              margin: 0,
+              padding: '0.6rem 0.7rem',
+              overflowX: 'auto',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              border: '1px solid var(--line)',
+              borderRadius: '0.35rem',
+            }}
+          >
+            {SEED_ADMIN_COMMAND}
+          </pre>
+          <div className="ovl-row">
+            <Button onClick={() => void copyCommand()} data-testid="login-copy-command">
+              {copied ? 'Skopírované ✓' : 'Skopírovať príkaz'}
+            </Button>
+            <Button variant="primary" onClick={() => window.location.reload()} data-testid="login-recheck">
+              Účet som vytvoril — skús znova
+            </Button>
+          </div>
+          <p className="ovl-small ovl-muted" style={{ margin: 0 }}>
+            Príkaz musí spustiť človek v normálnom termináli: skript si heslo pýta
+            interaktívne a na jeho zamaskovanie potrebuje skutočný terminál. Appka
+            ho preto nespúšťa sama a heslo nikdy nevidí ani neukladá inak než ako
+            argon2id hash. Po vytvorení účtu sa vráť sem a prihlás sa.
+          </p>
+        </div>
+      </section>
+    );
   }
 
   const locked = state === 'locked';

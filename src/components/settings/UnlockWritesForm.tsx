@@ -9,9 +9,10 @@
  */
 import { useState } from 'react';
 
+import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import ErrorMessage from '@/components/ui/ErrorMessage';
 import SudoPrompt from '@/components/ui/SudoPrompt';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import { SUDO_REQUIRED_CODE, unlockWrites } from '@/components/settings/api';
 
 export interface UnlockWritesFormProps {
@@ -27,36 +28,38 @@ export function UnlockWritesForm({
 }: UnlockWritesFormProps) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [rawCode, setRawCode] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [needSudo, setNeedSudo] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
 
+  const fail = (error: { code?: string | null; message?: string | null } | null) =>
+    setFailure(describeActionFailure(error, { action: 'Odomknutie zápisov' }));
+
   async function submit(value: string) {
-    setRawCode(null);
     if (value.length === 0) {
-      setError('Odomknutie zápisov vyžaduje tvoje heslo.');
+      fail({ code: 'validation_failed', message: 'Odomknutie zápisov vyžaduje tvoje heslo.' });
       return;
     }
-    setError(null);
+    setFailure(null);
     setBusy(true);
     const res = await unlockWrites(value);
     setBusy(false);
     if (res.ok) {
       setPassword('');
       setPending(null);
+      setFailure(null);
       onUnlocked();
       return;
     }
     if (res.error.code === SUDO_REQUIRED_CODE) {
+      // Sudo okno vypršalo — to NIE je odhlásenie; pýtame heslo, nie login.
       setPending(value);
       setNeedSudo(true);
       return;
     }
     setPassword('');
     setPending(null);
-    setError(res.error.message);
-    setRawCode(res.error.code);
+    fail(res.error);
   }
 
   return (
@@ -105,7 +108,7 @@ export function UnlockWritesForm({
               {busy ? 'Odomykám…' : 'Odomknúť zápisy'}
             </Button>
           </div>
-          {error ? <ErrorMessage message={error} rawCode={rawCode} /> : null}
+          <ActionFailurePanel failure={failure} testId="unlock-writes-failure" />
         </div>
       )}
       {needSudo ? (
