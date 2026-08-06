@@ -8,7 +8,19 @@
  * Poctivosť (I11): každé zistenie hovorí len o VLASTNÝCH zápisoch a vlastnom
  * pláne appky, nikdy o skutočnom stave zľavy v shope. Zásoba je LEN zásoba
  * variantov (`quantity` z /products/get — jediná, ktorú shop API dáva) a text
- * to musí povedať. Žiadne orders dáta (I8) — predajnosť tu neexistuje.
+ * to musí povedať.
+ *
+ * PREDAJNOSŤ (KONTRAKT-PREDAJNOST-2026-08-06, P1): pravidlá smú pracovať
+ * s počtom predaných KUSOV na produkt a deň z vlastnej tabuľky súčtov. Platia
+ * pri tom tri hranice:
+ *   · nie je to obrátkovosť — na tú chýba COGS aj zásoba nevariantných
+ *     produktov, a dopočítavať ju je zakázané (I11),
+ *   · nie sú to peniaze — zaplatená suma patrí celej objednávke, nie položke,
+ *     takže obrat na produkt sa priradiť nedá (P4),
+ *   · pokryté obdobie je krátke a nočne sa rozširuje (P3), preto KAŽDÉ zistenie
+ *     o predaji musí v texte povedať, za aké obdobie to platí. Keď snímka
+ *     predaje nemá (`sales == null`), žiadne takéto pravidlo sa nespustí —
+ *     mlčať je poctivejšie než hlásiť nulu bez dát.
  *
  * Výstup je ČISTO ČÍTACÍ návrh: `action.href` otvára drawer s predvyplnením
  * (`/kampane?nova=1&…`), kde platí plný dvojkrok s dry-run potvrdením (I3).
@@ -55,6 +67,35 @@ export interface RuleVariantStock {
   fetchedAt: string | null;
 }
 
+/**
+ * Predajnosť jedného produktu za POKRYTÉ obdobie (nie za nastavené okno).
+ * Kusy, nikdy peniaze (P4). `recentUnits`/`previousUnits` sú polovice obdobia
+ * a sú `null`, keď je obdobie na porovnanie príliš krátke.
+ */
+export interface RuleProductSales {
+  productId: number;
+  name: string | null;
+  label: string | null;
+  unitsSold: number;
+  unitsPerDay: number | null;
+  lastSaleDay: string | null;
+  daysSinceLastSale: number | null;
+  recentUnits: number | null;
+  previousUnits: number | null;
+}
+
+/** Pokryté obdobie predajnosti + metriky produktov v ňom. */
+export interface RuleSalesWindow {
+  /** Prvý a posledný deň, za ktorý appka predaje skutočne má. */
+  from: string;
+  to: string;
+  /** Počet dní so skutočnými dátami — text zistenia ho musí uviesť. */
+  daysCovered: number;
+  /** Kedy prebehla poslednná synchronizácia (ISO) — poctivosť o čerstvosti. */
+  lastSyncedAt: string | null;
+  products: RuleProductSales[];
+}
+
 export interface RuleSnapshot {
   /** Dnešný deň v logickom pásme (YYYY-MM-DD). */
   today: string;
@@ -64,6 +105,11 @@ export interface RuleSnapshot {
   campaigns: RuleCampaign[];
   allowlist: RuleAllowlistProduct[];
   variantStock: RuleVariantStock[];
+  /**
+   * Predaje za pokryté obdobie. `null` alebo chýbajúce = appka o predaji nič
+   * nevie (prvá synchronizácia ešte nebežala) a pravidlá o predajnosti mlčia.
+   */
+  sales?: RuleSalesWindow | null;
 }
 
 /* ═══════════════════════════════ 2. Výstup ════════════════════════════════ */
@@ -74,7 +120,9 @@ export type FindingKind =
   | 'partial_campaign'
   | 'needs_intervention'
   | 'key_before_start'
-  | 'low_variant_stock';
+  | 'low_variant_stock'
+  | 'no_units_sold'
+  | 'sales_declining';
 
 export type FindingTone = 'attention' | 'info';
 
@@ -129,6 +177,14 @@ export const ENDING_SOON_DAYS = 7;
 export const STALE_PRODUCT_DAYS = 30;
 /** Variant s množstvom ≤ 3 sa hlási ako nízka zásoba. */
 export const LOW_STOCK_THRESHOLD = 3;
+
+/**
+ * Koľko kusov musí byť v staršej polovici obdobia, aby sa dalo hovoriť
+ * o poklese. Pri jednom kuse je „pokles" len šum jedného nákupu, nie trend.
+ */
+export const SALES_DROP_MIN_PREVIOUS = 2;
+/** Pokles sa hlási, keď novšia polovica dosiahne najviac túto časť staršej. */
+export const SALES_DROP_RATIO = 0.5;
 
 /** Stavy, v ktorých kampaň reálne pokrýva/pokryje svoje okno. */
 const COVERING_STATUSES = new Set(['scheduled', 'running', 'done', 'partial', 'needs_key']);
@@ -310,6 +366,67 @@ function findLowVariantStock(s: RuleSnapshot): Finding[] {
   return out;
 }
 
+/** Popis pokrytého obdobia do textu zistenia — nikdy sa nesmie vynechať (P3). */
+function salesPeriodSk(sales: RuleSalesWindow): string {
+  const span =
+    sales.from === sales.to
+      ? sales.from
+      : `${sales.from} – ${sales.to}`;
+  return `${span}, ${sales.daysCovered} ${pluralSk(sales.daysCovered, 'sledovaný deň', 'sledované dni', 'sledovaných dní')}`;
+}
+
+/**
+ * 7 — produkt sa za sledované obdobie nepredal ani raz.
+ *
+ * Text POVINNE hovorí, že obdobie je krátke: pri troch dňoch je „nepredal sa"
+ * úplne normálne aj u produktu, ktorý sa predáva raz za týždeň (P3). Zistenie
+ * je preto návrh (`info`), nie zásah — appka nevie, či je to problém.
+ */
+function findNoUnitsSold(s: RuleSnapshot): Finding[] {
+  const sales = s.sales;
+  if (!sales || sales.daysCovered <= 0 || !isDay(sales.from) || !isDay(sales.to)) return [];
+  const out: Finding[] = [];
+  for (const p of sales.products) {
+    if (p.unitsSold !== 0) continue;
+    out.push({
+      id: `no_units_sold:${p.productId}`,
+      kind: 'no_units_sold',
+      tone: 'info',
+      text: `${productLabel(p)} (#${p.productId}) sa za sledované obdobie (${salesPeriodSk(sales)}) nepredal ani raz. Obdobie je krátke — produkt s predajom raz za týždeň tu vyzerá rovnako, história sa dopĺňa nočne.`,
+      href: '/produkty',
+      action: { label: 'Navrhnúť kampaň', href: drawerHref([p.productId]) },
+    });
+  }
+  return out;
+}
+
+/**
+ * 8 — predajnosť klesla: novšia polovica obdobia proti staršej.
+ *
+ * Porovnávajú sa KUSY, nie peniaze (P4), a len keď má obdobie dosť dní na
+ * rozdelenie (polovice prídu z výpočtu už hotové; `null` znamená „nemeriteľné").
+ */
+function findSalesDeclining(s: RuleSnapshot): Finding[] {
+  const sales = s.sales;
+  if (!sales || sales.daysCovered <= 0 || !isDay(sales.from) || !isDay(sales.to)) return [];
+  const out: Finding[] = [];
+  for (const p of sales.products) {
+    const { recentUnits, previousUnits } = p;
+    if (recentUnits == null || previousUnits == null) continue;
+    if (previousUnits < SALES_DROP_MIN_PREVIOUS) continue;
+    if (recentUnits > previousUnits * SALES_DROP_RATIO) continue;
+    out.push({
+      id: `sales_declining:${p.productId}`,
+      kind: 'sales_declining',
+      tone: 'info',
+      text: `${productLabel(p)} (#${p.productId}) predal v novšej polovici sledovaného obdobia ${recentUnits} ${pluralSk(recentUnits, 'kus', 'kusy', 'kusov')} proti ${previousUnits} v staršej (${salesPeriodSk(sales)}) — predajnosť klesla. Ide o počet kusov, nie o obrat.`,
+      href: '/produkty',
+      action: { label: 'Navrhnúť kampaň', href: drawerHref([p.productId]) },
+    });
+  }
+  return out;
+}
+
 /* ═══════════════════════════════ 6. Analýza ═══════════════════════════════ */
 
 const TONE_ORDER: Record<FindingTone, number> = { attention: 0, info: 1 };
@@ -327,6 +444,8 @@ export function analyze(snapshot: RuleSnapshot): Finding[] {
     ...findEndingSoon(snapshot),
     ...findStaleProducts(snapshot),
     ...findLowVariantStock(snapshot),
+    ...findNoUnitsSold(snapshot),
+    ...findSalesDeclining(snapshot),
   ];
   return findings.sort(
     (a, b) =>

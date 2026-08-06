@@ -913,7 +913,85 @@ export interface SchedulerHandle {
   isRunning(): boolean;
 }
 
-/* ═══════════════════════ 13. Health (§5, D87, D91) ═══════════════════════ */
+/* ═════════ 13. Predajnosť produktov (KONTRAKT-PREDAJNOST, P1, P4) ════════ */
+
+/**
+ * Typy predajnosti sú pomenované PO PRODUKTE, nikdy po objednávke — appka
+ * z objednávok pozná výhradne súčet predaných KUSOV na produkt a deň (P4,
+ * I8' bod 3). Peniaze tu zámerne nie sú: zaplatená suma patrí celej
+ * objednávke, nie položke, takže obrat na produkt sa priradiť NEDÁ.
+ *
+ * Nič z toho nie je obrátkovosť — na tú chýba COGS a zásoba nevariantných
+ * produktov (I11, karta „Obrátkovosť" zostáva zamknutá).
+ */
+
+/** Jeden riadok `product_sales_daily` — súčet kusov za produkt a deň. */
+export interface ProductSalesDay {
+  productId: number;
+  saleDay: DateOnly;
+  unitsSold: number;
+}
+
+/** Stav synchronizácie jedného dňa (`sales_sync_state`) — bez počtov objednávok. */
+export interface SalesSyncDay {
+  saleDay: DateOnly;
+  status: 'pending' | 'partial' | 'complete';
+  /** Kedy sa deň dokončil (ISO) — `null`, keď ešte nie je hotový. */
+  finishedAt: string | null;
+  /** Kedy sa riadok naposledy hýbal (ISO) — zdroj „naposledy synchronizované". */
+  updatedAt: string | null;
+}
+
+/**
+ * Za aké obdobie dáta NAOZAJ sú. Bez tejto hlavičky by karta klamala: okno je
+ * zámerne krátke (`SALES_WINDOW_DAYS`, P3) a nočne sa rozširuje, takže „0 kusov"
+ * môže znamenať aj „za tie tri dni sa to nepredalo", nie „nepredáva sa".
+ */
+export interface SalesCoverage {
+  /** Je synchronizácia vôbec zapnutá (`SALES_SYNC_ENABLED`)? */
+  syncEnabled: boolean;
+  /** Nastavené okno prvého behu v dňoch — len informácia, nie pokrytie. */
+  windowDays: number;
+  /** Prvý a posledný pokrytý deň; `null`, keď nie je pokrytý ani jeden. */
+  from: DateOnly | null;
+  to: DateOnly | null;
+  /** Počet dní so skutočnými dátami (`complete` + `partial`). */
+  daysCovered: number;
+  /** Z toho dní dopočítaných len čiastočne — pokrok, nie hotový deň (P6). */
+  daysPartial: number;
+  /** Kedy prebehla poslednná synchronizácia (ISO) — `null`, keď nikdy. */
+  lastSyncedAt: string | null;
+  /** `false` = appka o predaji NIČ nevie a nesmie zobraziť nuly ako fakt. */
+  hasData: boolean;
+}
+
+/** Odvodené metriky predajnosti jedného produktu allowlistu. */
+export interface ProductSalesMetrics {
+  productId: number;
+  name: string | null;
+  label: string | null;
+  /** Kusy za celé pokryté obdobie. */
+  unitsSold: number;
+  /** Kusy na deň; `null`, keď nie je pokrytý ani jeden deň (nedopočítava sa). */
+  unitsPerDay: number | null;
+  /** Posledný deň s predajom v pokrytom období; `null` = v ňom sa nepredal. */
+  lastSaleDay: DateOnly | null;
+  /** Dni od posledného predaja; `null`, keď v pokrytom období predaj nebol. */
+  daysSinceLastSale: number | null;
+  /** Kusy v novšej polovici pokrytého okna; `null`, keď je okno na delenie krátke. */
+  recentUnits: number | null;
+  /** Kusy v staršej polovici pokrytého okna; `null` z rovnakého dôvodu. */
+  previousUnits: number | null;
+}
+
+/** Telo odpovede `GET /api/sales`. */
+export interface SalesInsightsReport {
+  today: DateOnly;
+  coverage: SalesCoverage;
+  products: ProductSalesMetrics[];
+}
+
+/* ═══════════════════════ 14. Health (§5, D87, D91) ═══════════════════════ */
 
 /** `/api/health` — NIKDY neobsahuje `last4` ani nič citlivé (I1). */
 export interface HealthReport {
