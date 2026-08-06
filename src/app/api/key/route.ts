@@ -2,18 +2,31 @@
  * Aura Zľavy — `/api/key` GET/PUT/DELETE (BUILD-SPEC §5, §7, R2, D24, D53,
  * D63–D67, I1, I3).
  *
- * Jediná cesta, ktorou API kľúč shopu vstupuje do systému:
+ * Jediná cesta, ktorou API kľúč shopu vstupuje do systému. Odkedy má appka DVA
+ * kľúče (P5: `shop_write` na zápis zliav, `orders_read` na čítanie predajov),
+ * pracuje táto route s oboma druhmi — druh sa vyberá parametrom `kind`
+ * (query pri GET, telo pri PUT). Bez parametra je to vždy zápisový kľúč, takže
+ * doterajšie chovanie a doterajší klient zostávajú nezmenené.
  *
  *  - **GET** — výhradne metadáta: `last4`, časy, `verifyStatus` (D65, I1).
  *    Celý kľúč sa NEVRÁTI nikdy a nikam — repozitár (A1) ho ani nevie vydať.
- *  - **PUT** (sudo) — kľúč sa najprv overí sondou `setReduction` s
- *    `reduction=0` na neexistujúcom produkte (nikdy nič nezapíše, D53),
- *    až potom sa uloží zašifrovaný s TTL max 48 h (R2) a spustí sa
- *    auto-dopálenie kampaní v stave `needs_key`, ktoré sú stále vo svojom
- *    okne (D24, D25).
+ *  - **PUT** (sudo) — kľúč sa najprv overí u shopu a až potom uloží:
+ *      * `shop_write` sondou `setReduction` s `reduction=0` na neexistujúcom
+ *        produkte (nikdy nič nezapíše, D53), TTL max 48 h (R2), a po uložení
+ *        sa dopália kampane v stave `needs_key`, ktoré sú stále vo svojom okne
+ *        (D24, D25);
+ *      * `orders_read` sondou čítania objednávok, ktorú poskytuje VÝHRADNE
+ *        `src/lib/shop/orders-client.ts` (I8' bod 1) a route ju dostane cez
+ *        `lib/keys/orders-key-probe.ts`. TTL `ORDERS_KEY_TTL_DAYS` (P2).
+ *        Kampane sa nedopaľujú — objednávkový kľúč so zápisom nemá nič
+ *        spoločné (I8' bod 4).
+ *    Keď sonda kľúč neprejde, kľúč sa NEULOŽÍ a používateľ dostane pravdivú
+ *    hlášku — nikdy „uložené" bez uloženia.
  *  - **DELETE** (sudo) — panic button (D67): heslo + literál `KLUC UNIKOL`,
- *    wipe kľúča, zrušenie čakajúcich kampaní, audit `key_panic_wipe`
- *    a odkaz na runbook. Po incidente nič nebeží automaticky.
+ *    wipe OBOCH kľúčov (wipe procedúru pre `panic_button` vlastní repozitár
+ *    a maže cez všetky druhy naraz), zrušenie čakajúcich kampaní, audit
+ *    `key_panic_wipe` za každý zmazaný kľúč a odkaz na runbook. Po incidente
+ *    nič nebeží automaticky.
  *
  * Business logika je v `lib/*` (A1 repo, A3 klient, A9 executor) — route len
  * skladá kroky v normatívnom poradí.
@@ -44,7 +57,10 @@ import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/d
 import { conflict, unauthorized } from '@/lib/http/errors';
 import {
   apiKeyRepo as defaultApiKeyRepo,
+  ordersKeyRepo as defaultOrdersKeyRepo,
   API_KEY_MAX_TTL_HOURS,
+  ORDERS_KEY_MAX_TTL_HOURS,
+  type ApiKeyKind,
   type ApiKeyRepository,
 } from '@/lib/repo/api-key.repo';
 import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
@@ -52,6 +68,12 @@ import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import { usersRepo as defaultUsersRepo } from '@/lib/repo/users.repo';
 import { createShopClientFromSettings } from '@/lib/shop/client';
 import { newRequestId } from '@/lib/shop/correlation';
+import {
+  getOrdersKeyProbe,
+  ORDERS_PROBE_MISSING_CODE,
+  ORDERS_PROBE_MISSING_MESSAGE,
+  type OrdersKeyProbe,
+} from '@/lib/keys/orders-key-probe';
 
 /* ══════════════════════════════ konštanty ═════════════════════════════════ */
 
@@ -61,8 +83,21 @@ export const PANIC_CONFIRM_LITERAL = 'KLUC UNIKOL' as const;
 /** Runbook R5 — „kontaktuj maintainera na revokáciu kľúča" (D67). */
 export const PANIC_RUNBOOK_URL = 'docs/21-RUNBOOKY.md#r5-panic-button-kluc-unikol-d67';
 
+/**
+ * Druh kľúča. Chýbajúca hodnota = zápisový kľúč do shopu, aby staršie volania
+ * (a existujúce testy zápisovej cesty) fungovali bez zmeny.
+ */
+export const keyKindSchema = z
+  .enum(['shop_write', 'orders_read'])
+  .default('shop_write');
+
+export const keyQuerySchema = z.object({
+  kind: keyKindSchema,
+});
+
 export const putKeyBodySchema = z.object({
   apiKey: z.string().min(16).max(256),
+  kind: keyKindSchema,
 });
 
 export const deleteKeyBodySchema = z.object({
@@ -78,13 +113,22 @@ export type ExecuteCampaignById = (
 ) => Promise<ExecutorResult>;
 
 export interface KeyRouteDeps {
+  /** Repozitár ZÁPISOVÉHO kľúča (`shop_write`). */
   apiKey?: ApiKeyRepository;
+  /** Repozitár OBJEDNÁVKOVÉHO kľúča (`orders_read`, P5). */
+  ordersKey?: ApiKeyRepository;
   campaigns?: Pick<CampaignsRepo, 'findNeedsKey' | 'list' | 'setStatus'>;
   users?: { getById(id: number): Promise<{ passwordHash: string } | null> };
   verify?: typeof verifyPassword;
   audit?: typeof appendAudit;
   /** Sonda `reduction=0` (D53). Default: shop klient nad `settings` (A3). */
   probeKey?: (key: SecretRef, ctx: ShopCtx) => Promise<KeyProbeResult>;
+  /**
+   * Sonda objednávkového kľúča (I8'). Default: sonda zaregistrovaná
+   * objednávkovým klientom (`lib/keys/orders-key-probe.ts`). Keď nie je
+   * zaregistrovaná, PUT s `kind=orders_read` fail-closed odmietne uložiť kľúč.
+   */
+  probeOrdersKey?: OrdersKeyProbe;
   /** Dopálenie jednej kampane (A9). Default: `engine/executor`. */
   execute?: ExecuteCampaignById;
   now?: () => Date;
@@ -94,6 +138,7 @@ export interface KeyRouteDeps {
 
 function resolveDeps(deps: KeyRouteDeps) {
   const apiKey = deps.apiKey ?? defaultApiKeyRepo;
+  const ordersKey = deps.ordersKey ?? defaultOrdersKeyRepo;
   const campaigns = deps.campaigns ?? defaultCampaignsRepo;
   const users = deps.users ?? defaultUsersRepo;
   const verify = deps.verify ?? verifyPassword;
@@ -118,8 +163,65 @@ function resolveDeps(deps: KeyRouteDeps) {
       return 'Europe/Bratislava';
     }
   })();
-  return { apiKey, campaigns, users, verify, audit, now, probeKey, execute, timeZone };
+  return {
+    apiKey,
+    ordersKey,
+    campaigns,
+    users,
+    verify,
+    audit,
+    now,
+    probeKey,
+    probeOrdersKey: deps.probeOrdersKey ?? null,
+    execute,
+    timeZone,
+  };
 }
+
+/** Repozitár podľa druhu — route nikdy nesiaha na `kind` inak než cez toto. */
+function repoForKind(
+  resolved: Pick<ReturnType<typeof resolveDeps>, 'apiKey' | 'ordersKey'>,
+  kind: ApiKeyKind,
+): ApiKeyRepository {
+  return kind === 'orders_read' ? resolved.ordersKey : resolved.apiKey;
+}
+
+/**
+ * TTL podľa druhu kľúča. `shop_write` má `API_KEY_TTL_HOURS` so stropom 48 h
+ * (R2); `orders_read` má `ORDERS_KEY_TTL_DAYS` (default 30 dní) so stropom
+ * 90 dní — vedomá odchýlka P2, kľúč je len na čítanie a nevidí osobné údaje.
+ * Keď ENV nie je čitateľné, použije sa strop druhu (nikdy dlhšie).
+ */
+export function ttlHoursForKind(kind: ApiKeyKind): number {
+  if (kind === 'orders_read') {
+    try {
+      return Math.min(env.ORDERS_KEY_TTL_DAYS * 24, ORDERS_KEY_MAX_TTL_HOURS);
+    } catch {
+      return Math.min(30 * 24, ORDERS_KEY_MAX_TTL_HOURS);
+    }
+  }
+  try {
+    return Math.min(env.API_KEY_TTL_HOURS, API_KEY_MAX_TTL_HOURS);
+  } catch {
+    return API_KEY_MAX_TTL_HOURS;
+  }
+}
+
+/** Hlášky sondy podľa druhu kľúča — pravdivé a konkrétne, nikdy generické. */
+const PROBE_REJECTION: Record<ApiKeyKind, { invalid: string; forbidden: string }> = {
+  shop_write: {
+    invalid:
+      'Shop tento API kľúč odmietol (401) — kľúč sa NEULOŽIL. Skontroluj, či je skopírovaný celý.',
+    forbidden:
+      'Kľúč shop prijal, ale nemá scope product:edit (403) — kľúč sa NEULOŽIL. Vygeneruj kľúč so správnym scope.',
+  },
+  orders_read: {
+    invalid:
+      'Shop tento objednávkový kľúč odmietol (401) — kľúč sa NEULOŽIL. Skontroluj, či je skopírovaný celý.',
+    forbidden:
+      'Kľúč shop prijal, ale čítanie objednávok mu nepovolil (403) — kľúč sa NEULOŽIL. Vygeneruj kľúč so scope na čítanie objednávok.',
+  },
+};
 
 /** `SecretRef` nad plaintextom z tela requestu — len pre sondu (D53, D64). */
 function ephemeralSecretRef(plaintext: string): SecretRef {
@@ -222,15 +324,20 @@ export async function relightNeedsKeyCampaigns(
 /* ════════════════════════════════ GET ═════════════════════════════════════ */
 
 export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
-  const { apiKey } = resolveDeps(deps);
+  const resolved = resolveDeps(deps);
 
   return defineRoute(
     {
       method: 'GET',
       auth: 'session',
-      handler: async () => {
+      query: keyQuerySchema,
+      handler: async (ctx) => {
+        // Tvar odpovede je pre oba druhy ROVNAKÝ a plochý. Zámerne sa nevnára do
+        // poľa `…Key`: redaktor (I1) maskuje polia s koncovkou `key` celé a UI by
+        // potom tvrdilo, že kľúč chýba (presne ten bug, ktorý riešila výnimka
+        // `{present, expiresAt}` v `lib/log/redact.ts`).
         // `getMeta()` vracia VÝHRADNE last4 + časy + verifyStatus (D65, I1).
-        const meta = await apiKey.getMeta();
+        const meta = await repoForKind(resolved, ctx.query.kind).getMeta();
         return {
           present: meta.present,
           last4: meta.last4,
@@ -249,7 +356,7 @@ export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
 
 export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
   const resolved = resolveDeps(deps);
-  const { apiKey, probeKey } = resolved;
+  const { probeKey } = resolved;
 
   return defineRoute(
     {
@@ -258,48 +365,54 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
       body: putKeyBodySchema,
       rateLimit: { limit: 30, windowMs: 60_000, bucket: 'key-put' },
       handler: async (ctx) => {
-        /* 1. Sonda `reduction=0` PRED uložením — nikdy nič nezapíše (D53). */
+        const kind: ApiKeyKind = ctx.body.kind;
+        const repo = repoForKind(resolved, kind);
+
+        /* 1. Sonda PRED uložením — pre `shop_write` `reduction=0` (D53, nikdy
+         * nič nezapíše), pre `orders_read` čítanie objednávok z jediného
+         * povoleného modulu (I8'). Bez prejdenej sondy sa NEUKLADÁ nič. */
         const operationId: Ulid = newRequestId();
-        const probe = await probeKey(ephemeralSecretRef(ctx.body.apiKey), { operationId });
+        const probe = await ((): Promise<KeyProbeResult> => {
+          if (kind === 'shop_write') {
+            return probeKey(ephemeralSecretRef(ctx.body.apiKey), { operationId });
+          }
+          const ordersProbe = resolved.probeOrdersKey ?? getOrdersKeyProbe();
+          if (!ordersProbe) {
+            // Fail-closed: neoverený kľúč sa neuloží a hláška je pravdivá.
+            throw conflict(ORDERS_PROBE_MISSING_MESSAGE, ORDERS_PROBE_MISSING_CODE, {
+              logAsError: false,
+            });
+          }
+          return ordersProbe(ephemeralSecretRef(ctx.body.apiKey), { operationId });
+        })();
 
         if (probe === 'invalid') {
-          throw conflict(
-            'Shop tento API kľúč odmietol (401) — kľúč sa NEULOŽIL. Skontroluj, či je skopírovaný celý.',
-            'key_invalid',
-            { logAsError: false },
-          );
+          throw conflict(PROBE_REJECTION[kind].invalid, 'key_invalid', { logAsError: false });
         }
         if (probe === 'forbidden') {
-          throw conflict(
-            'Kľúč shop prijal, ale nemá scope product:edit (403) — kľúč sa NEULOŽIL. Vygeneruj kľúč so správnym scope.',
-            'key_invalid',
-            { logAsError: false },
-          );
+          throw conflict(PROBE_REJECTION[kind].forbidden, 'key_invalid', { logAsError: false });
         }
 
-        /* 2. Uloženie zašifrované, TTL max 48 h (R2). `store()` plaintext wipne. */
-        const ttlHours = ((): number => {
-          try {
-            return Math.min(env.API_KEY_TTL_HOURS, API_KEY_MAX_TTL_HOURS);
-          } catch {
-            return API_KEY_MAX_TTL_HOURS;
-          }
-        })();
+        /* 2. Uloženie zašifrované, TTL podľa druhu (R2 pre zápis, P2 pre
+         * objednávky). `store()` plaintext wipne. */
+        const ttlHours = ttlHoursForKind(kind);
         const plain = Buffer.from(ctx.body.apiKey, 'utf8');
-        const stored = await apiKey.store(plain, ctx.body.apiKey.slice(-4), ttlHours, undefined, {
+        const stored = await repo.store(plain, ctx.body.apiKey.slice(-4), ttlHours, undefined, {
           userId: ctx.claims.sub,
         });
 
         /* 3. Verify status podľa sondy; `unknown` (sieť) = `unverified`. */
         const verifyStatus = probe === 'valid' ? 'valid' : 'unverified';
-        await apiKey.setVerifyStatus(verifyStatus);
+        await repo.setVerifyStatus(verifyStatus);
 
-        /* 4. D24 — dopálenie `needs_key` kampaní, ktoré sú stále vo svojom okne. */
-        if (verifyStatus === 'valid') {
+        /* 4. D24 — dopálenie `needs_key` kampaní, ktoré sú stále vo svojom okne.
+         * Výhradne pre zápisový kľúč: objednávkový kľúč nemá so zápisom zliav
+         * nič spoločné (I8' bod 4), takže ním sa nikdy nič nedopaľuje. */
+        if (kind === 'shop_write' && verifyStatus === 'valid') {
           await relightNeedsKeyCampaigns(resolved, ctx.claims.sub, ctx.log);
         }
 
-        return { last4: stored.last4, expiresAt: stored.expiresAt, verifyStatus };
+        return { last4: stored.last4, expiresAt: stored.expiresAt, verifyStatus, kind };
       },
     },
     deps.routeDeps,
@@ -325,7 +438,12 @@ export function createKeyDeleteRoute(deps: KeyRouteDeps = {}): NextRouteHandler 
           throw unauthorized('Nesprávne heslo.', 'invalid_password', { logAsError: false });
         }
 
-        /* 2. Okamžitý wipe (prepis náhodnými bajtmi → DELETE → audit, D63). */
+        /* 2. Okamžitý wipe (prepis náhodnými bajtmi → DELETE → audit, D63).
+         *
+         * Jedno volanie mazá OBA kľúče: `panic_button` je v repozitári zámerne
+         * jediný dôvod, ktorý ignoruje `kind` a prejde celú tabuľku (P5, D67,
+         * akceptačné kritérium 3). Route preto NESMIE mazať po druhoch v cykle —
+         * tretí druh kľúča by taký cyklus tichým opomenutím obišiel. */
         await apiKey.wipe('panic_button', undefined, {
           actor: 'user',
           userId: ctx.claims.sub,
