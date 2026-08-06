@@ -33,6 +33,20 @@ const log = logger.child({ module: 'sales-sync' });
  */
 export const SALES_MIN_INTERVAL_MS = 20 * 60 * 60 * 1000;
 
+/**
+ * Odstup po ticku, ktorý sa nič nesynchronizoval, pretože OBJEDNÁVKOVÝ KĽÚČ
+ * ešte nie je vložený (alebo mu vypršala platnosť).
+ *
+ * Prečo vlastná, krátka hodnota: „bez kľúča" nie je vykonaná práca, len zistenie
+ * stavu. Keby sa naň nasadil plný 20-hodinový odstup (a presne to sa tu pôvodne
+ * robilo), platilo by toto: appka nabootuje bez kľúča, používateľ o pár minút
+ * kľúč v UI vloží — a synchronizácia sa nerozbehne až do zajtra alebo do
+ * restartu. Karta Predajnosť by celý ten čas pravdivo, ale zbytočne hlásila
+ * „zatiaľ bez dát". Zároveň to nesmie byť „každý tick": hľadanie kľúča je dotaz
+ * do DB a scheduler tiká každú minútu.
+ */
+export const SALES_NO_KEY_RETRY_MS = 5 * 60 * 1000;
+
 export type SalesRunOutcome =
   | 'disabled'
   | 'too_soon'
@@ -47,12 +61,17 @@ export interface SalesRunReport {
 }
 
 let running = false;
-let lastRunMs = 0;
+/**
+ * Najbližší čas (epoch ms), kedy sa smie znova skúsiť. `0` = hneď. Držíme
+ * PRIAMO ten čas, nie čas posledného behu: odstup po úspešnom behu a odstup po
+ * „bez kľúča" sú rôzne a jedna premenná „naposledy" ich nedokáže odlíšiť.
+ */
+let nextAllowedMs = 0;
 
 /** Iba pre testy — vynuluje pamäť medzi behmi. */
 export function resetSalesRunnerState(): void {
   running = false;
-  lastRunMs = 0;
+  nextAllowedMs = 0;
 }
 
 /**
@@ -64,9 +83,7 @@ export async function runSalesSyncIfDue(
 ): Promise<SalesRunReport> {
   if (!env.SALES_SYNC_ENABLED) return { outcome: 'disabled', sync: null };
   if (running) return { outcome: 'already_running', sync: null };
-  if (lastRunMs !== 0 && nowMs - lastRunMs < SALES_MIN_INTERVAL_MS) {
-    return { outcome: 'too_soon', sync: null };
-  }
+  if (nowMs < nextAllowedMs) return { outcome: 'too_soon', sync: null };
 
   running = true;
   try {
@@ -74,7 +91,8 @@ export async function runSalesSyncIfDue(
     // nie je vložený" (alebo mu vypršala platnosť a repozitár ho zmazal).
     const key = await ordersKeyRepo.loadForUse();
     if (!key) {
-      lastRunMs = nowMs; // neskúšaj to každú minútu
+      // Krátky odstup, nie celý interval — kľúč môže pribudnúť za pár minút.
+      nextAllowedMs = nowMs + SALES_NO_KEY_RETRY_MS;
       log.info('sales_sync_skipped', { reason: 'no_orders_key' });
       return { outcome: 'no_orders_key', sync: null };
     }
@@ -85,7 +103,7 @@ export async function runSalesSyncIfDue(
       salesRepo,
       logger: log,
     });
-    lastRunMs = Date.now();
+    nextAllowedMs = nowMs + SALES_MIN_INTERVAL_MS;
     log.info('sales_sync_done', {
       outcome: sync.outcome,
       windowFrom: sync.windowFrom,
@@ -98,7 +116,7 @@ export async function runSalesSyncIfDue(
   } catch (error) {
     // Poistka poslednej inštancie. `syncSales` výnimky neprepúšťa (P6), takže
     // sem by sa nemalo dať dostať — a keď áno, nesmie to nič zhodiť.
-    lastRunMs = Date.now();
+    nextAllowedMs = nowMs + SALES_MIN_INTERVAL_MS;
     log.error('sales_sync_fatal_caught', {
       error: error instanceof Error ? error.message : String(error),
     });
