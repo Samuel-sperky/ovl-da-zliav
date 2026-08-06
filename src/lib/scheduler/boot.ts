@@ -22,6 +22,7 @@ import { auditWriter } from '@/lib/audit/write';
 import { executeCampaign, type ExecutorDeps } from '@/lib/engine/executor';
 import { logger } from '@/lib/log/logger';
 import { apiKeyRepo } from '@/lib/repo/api-key.repo';
+import { runSalesSyncIfDue } from '@/lib/sales/sync-runner';
 import { auditRepo } from '@/lib/repo/audit.repo';
 import { campaignItemsRepo } from '@/lib/repo/campaign-items.repo';
 import { campaignsRepo } from '@/lib/repo/campaigns.repo';
@@ -96,6 +97,10 @@ async function runOneTick(): Promise<void> {
   try {
     if (!ticker) ticker = buildTicker(createSchedulerExecutor());
     await ticker.runTick(); // runTick nikdy nehodí výnimku (D87)
+    // Predaje AŽ PO kampaniach — zľavy majú vždy prednosť pred analytikou.
+    // Objednávkový kľúč je zámerne skrytý za `runSalesSyncIfDue()`: zápisová
+    // cesta sa o ňom nesmie dozvedieť (I8' bod 4, vynucuje to test skenom).
+    await runSalesSyncIfDue();
   } catch (error) {
     // Poistka poslednej inštancie — proces sa NESMIE zhodiť (D87).
     log.error('scheduler_tick_fatal_caught', {

@@ -713,6 +713,11 @@ function loadSources(): SourceFile[] {
 const ORDERS_REPO_ALLOWLIST: readonly string[] = [
   'src/lib/repo/api-key.repo.ts',
   'src/app/api/key/route.ts',
+  // Spúšťač synchronizácie predajov. Existuje PRÁVE PRETO, aby objednávkový
+  // kľúč nemusel byť v `scheduler/boot.ts`: scheduler vidí len nepriehľadné
+  // `runSalesSyncIfDue()`, takže zápisová cesta o kľúči ďalej nevie vôbec
+  // (I8' bod 4). Pridané pri integrácii šprintu predajnosti.
+  'src/lib/sales/sync-runner.ts',
 ];
 
 describe("I8' bod 4 — objednávkový kľúč sa nikdy nedostane k zápisu zliav", () => {

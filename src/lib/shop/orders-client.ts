@@ -32,11 +32,21 @@
  */
 import { z } from 'zod';
 
-import type { DateOnly, Logger, SecretHandle, SecretRef, ShopCtx, ShopError, Ulid } from '@/contracts';
+import type {
+  DateOnly,
+  KeyProbeResult,
+  Logger,
+  SecretHandle,
+  SecretRef,
+  ShopCtx,
+  ShopError,
+  Ulid,
+} from '@/contracts';
 
 import { env } from '@/env';
+import type { OrdersKeyProbe } from '@/lib/keys/orders-key-probe';
 import { logger as defaultLogger } from '@/lib/log/logger';
-import { shopBaseUrlFromSettings } from '@/lib/shop/client';
+import { shopBaseUrlFromSettings, todayInTimeZone } from '@/lib/shop/client';
 import {
   baseHeaders,
   correlationLogFields,
@@ -47,6 +57,7 @@ import {
   ShopConfigError,
   ShopRequestError,
   classifyFailure,
+  isShopRequestError,
   makeShopError,
   schemaDriftError,
   transportError,
@@ -616,4 +627,42 @@ export function createOrdersClientFromSettings(
     ...deps,
     baseUrl: async () => shopBaseUrlFromSettings(await settings.get()),
   });
+}
+
+/* ═════════════ 7. Sonda kľúča na objednávky (KONTRAKT-PREDAJNOST) ══════════ */
+
+/**
+ * Overí, či kľúč na shope skutočne prejde čítaním objednávok. Býva tu, a nie
+ * v `src/lib/keys/`, pretože invariant I8' dovoluje `/api/order` výhradne
+ * tomuto modulu — sonda je len najlacnejšie možné čítanie (jedna strana,
+ * jedna položka, jeden deň).
+ *
+ * Vyhodnotenie kopíruje sondu zápisového kľúča (`client.ts probeKey`):
+ * úspech = `valid`, 401 = `invalid`, 403 = `forbidden`, čokoľvek iné
+ * (429, 500, timeout, drift, zlá doména) = `unknown`. Fail-closed — kľúč sa
+ * NIKDY nevyhodnotí ako platný na základe nejasnej odpovede, takže sa neuloží
+ * kľúč, o ktorom nevieme, či funguje.
+ *
+ * Kľúč sa odtiaľ nikam nevracia ani neloguje (I1) a s `setReduction` nemá tento
+ * modul nič spoločné — objednávkový kľúč sa preto k zápisu zliav nedostane.
+ */
+export function createOrdersKeyProbe(client: OrdersClient, timeZone?: string): OrdersKeyProbe {
+  return async (key: SecretRef, ctx: ShopCtx): Promise<KeyProbeResult> => {
+    const day = todayInTimeZone(timeZone ?? env.LOGIC_TIMEZONE, Date.now());
+    try {
+      await client.listOrders({ dateFrom: day, dateTo: day, page: 1, perPage: 1 }, key, ctx);
+      return 'valid';
+    } catch (error) {
+      if (!isShopRequestError(error)) return 'unknown';
+      const { kind } = error.shopError;
+      if (kind === 'unauthorized') return 'invalid';
+      if (kind === 'forbidden') return 'forbidden';
+      return 'unknown';
+    }
+  };
+}
+
+/** Sonda nad produkčnými nastaveniami — to, čo zapája `/api/key`. */
+export function probeOrdersKeyFromSettings(settings: OrdersSettingsSource): OrdersKeyProbe {
+  return createOrdersKeyProbe(createOrdersClientFromSettings(settings));
 }

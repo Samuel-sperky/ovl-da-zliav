@@ -70,10 +70,31 @@ import { createShopClientFromSettings } from '@/lib/shop/client';
 import { newRequestId } from '@/lib/shop/correlation';
 import {
   getOrdersKeyProbe,
+  registerOrdersKeyProbe,
   ORDERS_PROBE_MISSING_CODE,
   ORDERS_PROBE_MISSING_MESSAGE,
   type OrdersKeyProbe,
 } from '@/lib/keys/orders-key-probe';
+import { probeOrdersKeyFromSettings } from '@/lib/shop/orders-client';
+
+/* ═══════════════════════════ zapojenie sondy ══════════════════════════════ */
+
+/**
+ * Sonda objednávkového kľúča sa registruje TU, v module route, a nie v
+ * `instrumentation` ani side-effect importom. Dva dôvody z minulosti tohto
+ * projektu: (1) Next.js kompiluje `instrumentation` do vlastného module grafu,
+ * takže singleton z bootu NIE JE ten istý objekt, aký vidí route handler;
+ * (2) side-effect import bez použitej hodnoty je kandidát na odstránenie
+ * bundlerom, a Turbopack v tomto projekte už raz zahodil kód, o ktorý sme sa
+ * opierali. Volanie s importovanou hodnotou je oproti tomu nespochybniteľné.
+ *
+ * `probeOrdersKeyFromSettings` len postaví closure — doménu shopu ani ENV
+ * nečíta, kým sondu niekto nezavolá (na module scope by eager ENV lámal build).
+ *
+ * Testy si registráciu čistia (`resetOrdersKeyProbe()`), takže fail-closed
+ * chovanie „bez sondy sa kľúč neuloží" sa dá ďalej overiť.
+ */
+registerOrdersKeyProbe(probeOrdersKeyFromSettings(defaultSettingsRepo));
 
 /* ══════════════════════════════ konštanty ═════════════════════════════════ */
 
