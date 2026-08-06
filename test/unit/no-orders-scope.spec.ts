@@ -127,6 +127,16 @@ const migrations = load('db/migrations', /\.sql$/, false);
  */
 const ORDERS_CLIENT = 'src/lib/shop/orders-client.ts';
 
+/**
+ * Identifikátory v DDL, ktoré smú obsahovať zakázané slovo, pretože o nich
+ * rozhodol kontrakt. Zoznam je zámerne krátky a KAŽDÝ ďalší záznam je
+ * rozhodnutie do kontraktu, nie do testu.
+ *
+ *  · `orders_seen` — POČET spracovaných objednávok za deň (P4/P6). Nie je to
+ *    id objednávky ani nič, z čoho by sa objednávka dala zrekonštruovať.
+ */
+const ALLOWED_DDL_IDENTIFIERS: readonly string[] = ['orders_seen'];
+
 /** Scopes, ktoré appka smie poznať. Nič iné (zákazníci, košíky, faktúry). */
 const ALLOWED_SCOPES = ['orders:read', 'product:edit'];
 
@@ -142,6 +152,25 @@ describe("I8' — objednávky len na súčty predaja, nikdy zákaznícke dáta",
 
   it('`/api/order` sa volá VÝHRADNE z orders-client.ts', () => {
     expect(scan(outsideOrdersClient(sources), /\/api\/orders?\b/i).join('\n')).toBe('');
+  });
+
+  /**
+   * Riadkový sken vyššie prepustí cestu zlepenú z častí (`'/api' + '/order'`) —
+   * overené nižšie priamo, aby to nebolo tvrdenie. Preto sa každý zdroj mimo
+   * whitelistu skenuje ešte raz „zlepený": bez úvodzoviek, plusov a bielych
+   * znakov. Grep nikdy nezachytí cestu skrytú v premennej, ale náhodné ani
+   * polovičné obídenie invariantu už neprejde.
+   */
+  it('`/api/order` sa nedá prepašovať ani po častiach', () => {
+    const glued = (code: string): string => code.replace(/['"`+\s]/g, '');
+    const fragmented = "'/api' + '/order'";
+    expect(/\/api\/orders?\b/i.test(fragmented)).toBe(false);
+    expect(/\/api\/orders?/i.test(glued(fragmented))).toBe(true);
+
+    const hits = outsideOrdersClient(sources)
+      .filter((file) => /\/api\/orders?/i.test(glued(file.code)))
+      .map((file) => file.path);
+    expect(hits.join('\n')).toBe('');
   });
 
   it('orders-client.ts nesmie volať zápisový endpoint shopu (setReduction)', () => {
@@ -179,14 +208,41 @@ describe("I8' — objednávky len na súčty predaja, nikdy zákaznícke dáta",
     // a suma sa dá priradiť len objednávke, nie položke.
     const forbidden =
       /\b(order|orders|customer|customers|cart|invoice|email|phone|address|surname|first_name|last_name|iban|payment|country|country_iso|total_paid)\b/i;
-    const hits = scan(
-      migrations.map((file) => ({
-        ...file,
-        // Zaujímajú nás len DDL riadky (definície tabuliek a stĺpcov).
-        lines: file.lines.map((line) => (line.trimStart().startsWith('--') ? '' : line)),
-      })),
-      forbidden,
-    );
+    /**
+     * `\b` v SQL nestačí: `_` je slovný znak, takže `order_country`,
+     * `order_total_paid` ani `buyer_email` by ŽIADNU hranicu nevytvorili
+     * a stĺpec so zákazníckymi dátami by prešiel. Preto sa každý DDL riadok
+     * skenuje DVAKRÁT — raz ako je, raz s `_` rozlomeným na medzery, takže sa
+     * kontrolujú aj JEDNOTLIVÉ časti identifikátorov.
+     */
+    const forbiddenToken =
+      /\b(order|orders|customer|customers|cart|carts|invoice|invoices|email|phone|address|surname|iban|payment|payments|country|paid)\b/i;
+    const ddlLines = (file: SourceFile): string[] =>
+      // Zaujímajú nás len DDL riadky (definície tabuliek a stĺpcov).
+      file.lines.map((line) => (line.trimStart().startsWith('--') ? '' : line));
+
+    const hits = [
+      ...scan(
+        migrations.map((file) => ({ ...file, lines: ddlLines(file) })),
+        forbidden,
+      ),
+      ...scan(
+        migrations.map((file) => ({
+          ...file,
+          lines: ddlLines(file).map((line) => {
+            // Reťazcové literály idú preč: `ENUM('shop_write','orders_read')` je
+            // NÁZOV SCOPE, nie stĺpec s objednávkami. Identifikátory tabuliek
+            // a stĺpcov sa v tomto projekte do apostrofov nikdy nepíšu.
+            let text = line.replace(/'[^']*'/g, "''");
+            for (const allowed of ALLOWED_DDL_IDENTIFIERS) {
+              text = text.split(allowed).join('allowed_identifier');
+            }
+            return text.split('_').join(' ');
+          }),
+        })),
+        forbiddenToken,
+      ),
+    ];
     expect(hits.join('\n'), 'I8: zákaznícke dáta sa neukladajú nikdy').toBe('');
   });
 

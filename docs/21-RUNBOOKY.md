@@ -133,6 +133,54 @@ curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:3070/api/health  # 401 bez
 
 ---
 
+## R1s. Zapnutie predajnosti (kľúč `orders:read`)
+
+Predajnosť je samostatná schopnosť: appka číta objednávky shopu, aby vedela,
+koľko KUSOV ktorého produktu sa predalo. Kontrakt:
+`KONTRAKT-PREDAJNOST-2026-08-06.md`.
+
+1. **Vyžiadaj si od maintainera shopu kľúč so scope `orders:read`.** Zápisový
+   kľúč (`product:edit`) na to nestačí a naopak — sú to dva rôzne kľúče a
+   appka ich drží oddelene (`api_key.kind`).
+2. V **Nastaveniach** appky vlož kľúč do formulára „kľúč na čítanie predajov".
+   Vyžaduje sudo okno (heslo). Appka kľúč **overí proti shopu ešte pred
+   uložením** — keď shop čítanie objednávok odmietne (403), kľúč sa NEULOŽÍ a
+   dozvieš sa to.
+3. Platnosť je **30 dní** (`ORDERS_KEY_TTL_DAYS`), nie 48 hodín ako pri
+   zápisovom kľúči. Je to vedomá odchýlka (rozhodnutie P2): kľúč je len na
+   čítanie a objednávkové endpointy nevracajú žiadne osobné údaje — len id,
+   dátum, sumu, menu, položky a krajinu. Po expirácii sa kľúč zmaže sám a
+   synchronizácia sa tichým spôsobom zastaví (v logu `sales_sync_skipped`
+   s dôvodom `no_orders_key`).
+4. Synchronizácia sa spustí **sama** pri najbližšom ticku schedulera a potom
+   najskôr o 20 hodín. Nie je viazaná na nočnú hodinu zámerne — appka beží na
+   pracovnom počítači, ktorý v noci býva vypnutý.
+5. Sleduj prvý beh: `docker compose logs -f ovl-zliav-app` a hľadaj
+   `sales_sync_done`. Prvý beh stiahne okno `SALES_WINDOW_DAYS` (default 3 dni)
+   a trvá jednotky minút.
+
+**Prečo je okno len 3 dni.** Zoznam objednávok nevracia položky, takže na
+predaje jedného produktu treba **jeden request na jednu objednávku**. Zmerané
+6. 8. 2026: 3 dni = 978 objednávok, celý shop 1 765 576. Deväťdesiat dní by
+bolo ~29 000 requestov proti produkčnému eshopu. Shop navyše dovoluje
+**300 requestov / 60 s na kľúč**, preto je medzi requestami pauza
+`ORDERS_PAUSE_MS` (default 250 ms, minimum 250 ms — 240 requestov/min je pod
+limitom aj pri nulovej latencii) a strop
+`ORDERS_MAX_REQUESTS_PER_RUN` (default 1500) na jeden beh.
+
+Okno sa dá rozšíriť (`SALES_WINDOW_DAYS`), ale rob to po malých krokoch a
+sleduj `sales_sync_state`. Dôsledok krátkeho okna, ktorý appka priznáva aj v
+UI: produkt, ktorý sa predáva raz za týždeň, vyzerá na začiatku ako
+nepredávaný. História sa dopĺňa každým behom, takže pokrytie časom rastie samo.
+
+**Čo predajnosť NIE JE.** Nie je to obrátkovosť — na tú treba COGS a zásobu
+nevariantných produktov a shop API ani jedno neposkytuje (požiadavky sú v
+`docs/20-BACKLOG-SHOP-API.md`). A nie je to obrat: `total_paid` patrí celej
+objednávke, nie položke, takže peniaze na produkt priradiť NEMOŽNO. Appka
+preto meria výhradne kusy.
+
+---
+
 ## R2. Trust root certifikátu Caddy (D94)
 
 Caddy používa `tls internal` — vlastnú lokálnu CA. Aby prehliadač neprotestoval:

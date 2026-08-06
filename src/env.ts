@@ -102,10 +102,13 @@ export const envSchema = z
     // ukončí, uloží pokrok a pokračuje nabudúce (P6 — fail-soft).
     ORDERS_MAX_REQUESTS_PER_RUN: intFromString({ min: 10, max: 20_000, default: 1500 }),
     // Shop dovoluje 300 requestov / 60 s NA KĽÚČ (docs/api/sperky-api.md
-    // §Rate limiting). Pri pauze 250 ms a latencii ~150 ms sme na ~150/min,
-    // teda na polovici budgetu. Spodná hranica 100 ms je tu zámerne: s nulovou
-    // pauzou by sa dal limit prekročiť aj bez zmeny kódu.
-    ORDERS_PAUSE_MS: intFromString({ min: 100, max: 10_000, default: 250 }),
+    // §Rate limiting). Requesty idú striktne sekvenčne, takže najhorší možný
+    // prípad je `60_000 / ORDERS_PAUSE_MS` requestov za minútu — pri latencii
+    // blízkej nule. Spodná hranica je preto 250 ms (240/min, teda pod limitom
+    // aj s rezervou na sondu kľúča), nie 100 ms: pri 100 ms by najhorší prípad
+    // bol 600/min, teda DVOJNÁSOBOK limitu, a limit by sa dal prekročiť čisto
+    // konfiguráciou, bez zmeny kódu. Radšej pomalšie než zabanovaný kľúč (R-2).
+    ORDERS_PAUSE_MS: intFromString({ min: 250, max: 10_000, default: 250 }),
 
     // Stropy (I2, D79, D59)
     MAX_PRODUCTS_PER_OPERATION: intFromString({ min: 1, max: 10, default: 10 }),

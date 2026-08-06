@@ -194,3 +194,27 @@ describe('I13 — dve nezávislé poistky ostrého zápisu', () => {
     }
   });
 });
+
+describe('R-2 — tempo čítania objednávok nesmie prekročiť limit shopu (300 req / 60 s na kľúč)', () => {
+  /**
+   * `ORDERS_PAUSE_MS` je jediná poistka tempa: synchronizácia posiela requesty
+   * striktne sekvenčne s touto pauzou. Najhorší prípad (nulová latencia shopu)
+   * je teda `60_000 / pauseMs` requestov za minútu — a ten MUSÍ zostať pod
+   * dokumentovaným limitom shopu, inak si appka vyrobí `rate_limited` sama
+   * (a v horšom prípade zabanovaný kľúč, čo je presne riziko R-2).
+   */
+  const SHOP_REQUESTS_PER_MINUTE = 300;
+
+  it('najnižšia povolená pauza drží tempo pod limitom shopu aj pri nulovej latencii', () => {
+    const env = envOrThrow({ ORDERS_PAUSE_MS: '250' });
+    expect(60_000 / env.ORDERS_PAUSE_MS).toBeLessThan(SHOP_REQUESTS_PER_MINUTE);
+  });
+
+  it('pauza, pri ktorej by sa limit shopu prekročil, sa nedá nakonfigurovať', () => {
+    const tooFast = Math.ceil(60_000 / SHOP_REQUESTS_PER_MINUTE) - 1; // 199 ms
+    expect(problemsFor({ ORDERS_PAUSE_MS: String(tooFast) }).join('\n')).toContain(
+      'ORDERS_PAUSE_MS',
+    );
+    expect(problemsFor({ ORDERS_PAUSE_MS: '100' }).join('\n')).toContain('ORDERS_PAUSE_MS');
+  });
+});

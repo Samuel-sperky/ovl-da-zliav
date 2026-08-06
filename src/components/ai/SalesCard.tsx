@@ -149,8 +149,8 @@ export function SalesCard() {
               </span>
               Obdobie je krátke ({daysSk(coverage.daysCovered)}). Produkt, ktorý sa predáva raz za
               týždeň, tu vyzerá rovnako ako nepredávaný. Nulu preto čítaj ako „za tieto dni sa
-              nepredal", nie ako „nepredáva sa" — história sa dopĺňa nočne a obdobie sa samo
-              rozširuje.
+              nepredal", nie ako „nepredáva sa" — história sa dopĺňa pri ďalších behoch
+              synchronizácie (najviac raz za 20 hodín, kým appka beží) a obdobie sa samo rozširuje.
             </p>
           ) : null}
 

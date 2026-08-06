@@ -392,7 +392,7 @@ function findNoUnitsSold(s: RuleSnapshot): Finding[] {
       id: `no_units_sold:${p.productId}`,
       kind: 'no_units_sold',
       tone: 'info',
-      text: `${productLabel(p)} (#${p.productId}) sa za sledované obdobie (${salesPeriodSk(sales)}) nepredal ani raz. Obdobie je krátke — produkt s predajom raz za týždeň tu vyzerá rovnako, história sa dopĺňa nočne.`,
+      text: `${productLabel(p)} (#${p.productId}) sa za sledované obdobie (${salesPeriodSk(sales)}) nepredal ani raz. Obdobie je krátke — produkt s predajom raz za týždeň tu vyzerá rovnako, história sa dopĺňa ďalšími behmi synchronizácie.`,
       href: '/produkty',
       action: { label: 'Navrhnúť kampaň', href: drawerHref([p.productId]) },
     });
