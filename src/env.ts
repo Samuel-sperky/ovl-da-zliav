@@ -89,6 +89,20 @@ export const envSchema = z
     SHOP_RETRY_MAX: intFromString({ min: 1, max: 10, default: 3 }),
     SHOP_RETRY_AFTER_CAP_S: intFromString({ min: 1, max: 600, default: 90 }),
 
+    // Predajnosť z objednávok (KONTRAKT-PREDAJNOST-2026-08-06, P2, P3, P6)
+    // Kľúč na objednávky je len na čítanie a nevidí osobné údaje, preto má
+    // vlastnú, dlhšiu platnosť než 48 h zápisového kľúča (P2, odchýlka od R2).
+    ORDERS_KEY_TTL_DAYS: intFromString({ min: 1, max: 90, default: 30 }),
+    SALES_SYNC_ENABLED: boolFromString(true),
+    // P3: okno 3 dni. Zmerané 6.8.2026 — 3 dni = 978 objednávok, a keďže
+    // zoznam objednávok nevracia položky, je to 1 request na 1 objednávku.
+    // Rozširovať opatrne: 90 dní by bolo ~29 000 requestov na produkčný shop.
+    SALES_WINDOW_DAYS: intFromString({ min: 1, max: 90, default: 3 }),
+    // Strop na JEDEN beh synchronizácie. Po jeho dosiahnutí sa beh korektne
+    // ukončí, uloží pokrok a pokračuje nabudúce (P6 — fail-soft).
+    ORDERS_MAX_REQUESTS_PER_RUN: intFromString({ min: 10, max: 20_000, default: 1500 }),
+    ORDERS_PAUSE_MS: intFromString({ min: 0, max: 10_000, default: 250 }),
+
     // Stropy (I2, D79, D59)
     MAX_PRODUCTS_PER_OPERATION: intFromString({ min: 1, max: 10, default: 10 }),
     ALLOWLIST_MAX: intFromString({ min: 1, max: 10, default: 10 }),

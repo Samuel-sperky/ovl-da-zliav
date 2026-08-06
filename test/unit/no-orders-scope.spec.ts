@@ -116,21 +116,49 @@ function scan(files: SourceFile[], pattern: RegExp): string[] {
 const sources = load('src', /\.(ts|tsx|mts|cts)$/, true);
 const migrations = load('db/migrations', /\.sql$/, false);
 
-describe('I8 — appka nikdy nesiaha na objednávky ani zákaznícke dáta', () => {
+/**
+ * I8' (KONTRAKT-PREDAJNOST-2026-08-06 §5): objednávky sa smú ČÍTAŤ, ale len
+ * kvôli súčtom predaných kusov, len z jediného modulu, a do DB sa z nich nikdy
+ * nesmie dostať riadok objednávky ani zákaznícky údaj.
+ *
+ * Jediný modul, ktorý smie volať objednávkové endpointy shopu. Whitelist je
+ * úmyselne JEDNOPRVKOVÝ — každý ďalší modul s prístupom k objednávkam je
+ * rozhodnutie, ktoré patrí do kontraktu, nie do kódu.
+ */
+const ORDERS_CLIENT = 'src/lib/shop/orders-client.ts';
+
+/** Scopes, ktoré appka smie poznať. Nič iné (zákazníci, košíky, faktúry). */
+const ALLOWED_SCOPES = ['orders:read', 'product:edit'];
+
+function outsideOrdersClient(files: SourceFile[]): SourceFile[] {
+  return files.filter((file) => file.path.split('\\').join('/') !== ORDERS_CLIENT);
+}
+
+describe("I8' — objednávky len na súčty predaja, nikdy zákaznícke dáta", () => {
   it('sanity — skenujú sa skutočné zdroje aj migrácie', () => {
     expect(sources.length).toBeGreaterThan(50);
     expect(migrations.length).toBeGreaterThanOrEqual(8);
   });
 
-  it('žiadna referencia na `/api/order`', () => {
-    expect(scan(sources, /\/api\/orders?\b/i).join('\n')).toBe('');
+  it('`/api/order` sa volá VÝHRADNE z orders-client.ts', () => {
+    expect(scan(outsideOrdersClient(sources), /\/api\/orders?\b/i).join('\n')).toBe('');
+  });
+
+  it('orders-client.ts nesmie volať zápisový endpoint shopu (setReduction)', () => {
+    const client = sources.find((f) => f.path.split('\\').join('/') === ORDERS_CLIENT);
+    // Modul nemusí existovať (invariant platí aj pred jeho vznikom), ale keď
+    // existuje, nesmie mať so zápisom zliav nič spoločné — objednávkový kľúč
+    // sa nikdy nesmie dostať k `setReduction` (I8' bod 4).
+    if (client) {
+      expect(scan([client], /setReduction/).join('\n')).toBe('');
+    }
   });
 
   it('žiadna referencia na `/api/cart`, `/api/customer` ani `/api/user` shopu', () => {
     expect(scan(sources, /\/api\/(cart|customers?|clients?|invoices?)\b/i).join('\n')).toBe('');
   });
 
-  it('žiadny scope okrem `product:edit`', () => {
+  it('žiadny scope okrem `product:edit` a `orders:read`', () => {
     const scopes = new Set<string>();
     for (const file of sources) {
       for (const match of file.code.matchAll(/['"`]([a-z_]+:[a-z_]+)['"`]/g)) {
@@ -138,17 +166,19 @@ describe('I8 — appka nikdy nesiaha na objednávky ani zákaznícke dáta', () 
         if (/^(product|order|customer|cart|invoice|user)s?:/.test(value)) scopes.add(value);
       }
     }
-    expect([...scopes].sort()).toEqual(expect.not.arrayContaining(['orders:read']));
-    for (const scope of scopes) expect(scope).toBe('product:edit');
+    for (const scope of scopes) expect(ALLOWED_SCOPES).toContain(scope);
   });
 
-  it('slovo `orders:read` sa v zdrojoch nevyskytuje ani ako komentár typu kódu', () => {
-    expect(scan(sources, /orders\s*:\s*read/i).join('\n')).toBe('');
+  it('zákaznícke scopes sú zakázané aj naďalej', () => {
+    expect(scan(sources, /['"`](customers?|carts?|invoices?|users?):/i).join('\n')).toBe('');
   });
 
   it('DB schéma neobsahuje žiadnu tabuľku ani stĺpec so zákazníckymi dátami', () => {
+    // P4: z objednávok sa ukladajú VÝHRADNE súčty (produkt, deň, kusy).
+    // Preto sú zakázané aj `country` a `total_paid` — krajina je údaj o doručení
+    // a suma sa dá priradiť len objednávke, nie položke.
     const forbidden =
-      /\b(order|orders|customer|customers|cart|invoice|email|phone|address|surname|first_name|last_name|iban|payment)\b/i;
+      /\b(order|orders|customer|customers|cart|invoice|email|phone|address|surname|first_name|last_name|iban|payment|country|country_iso|total_paid)\b/i;
     const hits = scan(
       migrations.map((file) => ({
         ...file,
@@ -161,7 +191,9 @@ describe('I8 — appka nikdy nesiaha na objednávky ani zákaznícke dáta', () 
   });
 
   it('kontrakty nedefinujú žiadny typ objednávky ani zákazníka', () => {
-    const contracts = sources.find((f) => f.path === 'src/contracts.ts');
+    // Na Windows vracia `relative()` cesty s obrátenými lomkami — porovnanie
+    // musí byť na separátore nezávislé, inak test tichým `undefined` prejde.
+    const contracts = sources.find((f) => f.path.split('\\').join('/') === 'src/contracts.ts');
     expect(contracts).toBeDefined();
     const hits = scan(
       [contracts as SourceFile],

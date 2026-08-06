@@ -18,6 +18,9 @@ export default tseslint.config(
       'test-results/**',
       'playwright-report/**',
       'next-env.d.ts',
+      // Pracovné git worktree agentov majú vlastné node_modules — bez tohto
+      // ignoru ich lint zosnímkuje a vyrobí stotisíce hlásení z cudzieho kódu.
+      '.claude/**',
     ],
   },
   js.configs.recommended,
