@@ -119,7 +119,7 @@ Príprava hotová. Ďalej:
   1. docker compose up -d --build
   2. docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-admin.ts
      (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov)
-  3. Otvor https://127.0.0.1:3050
+  3. Otvor https://localhost:3050  (funguje aj https://127.0.0.1:3050)
      - najprv basic auth (užívateľ "samuel" + heslo z kroku 5)
      - potom login do appky (účet z bodu 2)
   4. Prehliadač bude varovať pred certifikátom — Caddy si robí vlastnú lokálnu CA.

@@ -21,7 +21,10 @@
   # servers { trusted_proxies static private_ranges }
 }
 
-localhost:3050 {
+# Obe adresy zámerne: pri `https://127.0.0.1:3050` prehliadač NEPOSIELA SNI
+# (IP adresy ho nemajú), takže keby tu bol len `localhost`, Caddy by nemal ktorý
+# certifikát ponúknuť a handshake by padol na ERR_SSL_PROTOCOL_ERROR.
+localhost:3050, 127.0.0.1:3050 {
   tls internal                                   # lokálna CA (D94)
 
   basic_auth {                                   # D97 — hash žije v secrets/Caddyfile
