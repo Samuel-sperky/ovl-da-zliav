@@ -24,6 +24,10 @@ services:
       - ovl-zliav-db-data:/var/lib/mysql
       - ./secrets/db_root_password:/run/secrets/db_root_password:ro
       - ./secrets/db_app_password:/run/secrets/db_app_password:ro
+      # Migračný user (D89) — MARIADB_USER založí len app usera; mig usera
+      # s GRANT OPTION vytvára init skript pri PRVEJ inicializácii volume.
+      - ./secrets/db_mig_password:/run/secrets/db_mig_password:ro
+      - ./scripts/db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mariadb-admin", "ping", "-h", "127.0.0.1", "--silent"]
       interval: 10s

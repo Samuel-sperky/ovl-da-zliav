@@ -117,6 +117,9 @@ Write-Host @'
 Príprava hotová. Ďalej:
 
   1. docker compose up -d --build
+     (ak si stack skúšal už PRED opravou migračného usera, raz spusti
+      `docker compose down -v` — init skript DB beží len na prázdnom volume;
+      dáta neprídu nazmar, migrácie dovtedy nikdy neprebehli)
   2. docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-admin.ts
      (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov)
   3. Otvor https://localhost:3070  (funguje aj https://127.0.0.1:3070)
