@@ -1,12 +1,10 @@
 /**
- * Aura Zľavy — dashboard (A13, D1).
+ * Aura Zľavy — dashboard (KISS redizajn, plán 33 §3, sekcia C1).
  *
- * Kombinovaná hlavná obrazovka: stav kľúča (`KeyCard`), agregovaný banner
- * `needs_key` + `missed` s rovnakou vizuálnou váhou (`AlertsBanner`, D8/D33b),
- * neodklikané výsledky (`UnackedResults`, D17), mini prehľad kampaní
- * a mriežka 10 allowlist produktov s badge „podľa vlastného zápisu z DD.MM."
- * (D7, I11). Dáta číta klient z API kontraktu §5 — `next build` nezávisí
- * od bežiacej DB.
+ * KISS kompozícia: page-head s eyebrow a „+ Nová kampaň", 3 KPI karty
+ * (aktívne zľavy n/10 · vyžaduje zásah · TTL kľúča s oblúkom G6), časová os
+ * kampaní (G1), riadok najbližšieho spustenia a banner zásahu len keď n > 0.
+ * Dáta číta klient z API kontraktu §5 — `next build` nezávisí od bežiacej DB.
  */
 import type { Metadata } from 'next';
 
@@ -18,10 +16,5 @@ export const metadata: Metadata = {
 };
 
 export default function DashboardPage() {
-  return (
-    <>
-      <h1 style={{ fontSize: '1.3rem', margin: '0 0 1rem' }}>Dashboard</h1>
-      <Dashboard />
-    </>
-  );
+  return <Dashboard />;
 }

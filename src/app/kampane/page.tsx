@@ -1,12 +1,15 @@
 /**
- * Aura Zľavy — /kampane: zoznam kampaní s filtrom (A15, D14, §8).
+ * Aura Zľavy — /kampane: tab Kampane (KISS, plán 33 §3).
  *
- * Dáta číta klient z `GET /api/campaigns` (kontrakt §5) — `next build`
- * nezávisí od bežiacej DB.
+ * Toolbar štýl predlohy + tabuľka so stavovými glyfmi + drawer novej
+ * kampane (2 kroky, dry-run potvrdenie — I3). Dáta číta klient
+ * z `GET /api/campaigns` (kontrakt §5) — `next build` nezávisí od DB.
+ * `useSearchParams` v klientovi vyžaduje Suspense hranicu.
  */
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 
-import CampaignList from '@/components/campaigns/CampaignList';
+import CampaignsView from '@/components/campaigns/CampaignsView';
 import { APP_DISPLAY_NAME } from '@/version';
 
 export const metadata: Metadata = {
@@ -15,9 +18,10 @@ export const metadata: Metadata = {
 
 export default function CampaignsPage() {
   return (
-    <>
-      <h1 style={{ fontSize: '1.3rem', margin: '0 0 1rem' }}>Kampane</h1>
-      <CampaignList />
-    </>
+    <Suspense
+      fallback={<div className="ovl-card ovl-skeleton" style={{ minHeight: '10rem' }} aria-busy="true" />}
+    >
+      <CampaignsView />
+    </Suspense>
   );
 }

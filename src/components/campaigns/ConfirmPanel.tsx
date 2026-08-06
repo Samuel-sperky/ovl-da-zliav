@@ -128,7 +128,7 @@ export function ConfirmPanel({
 
         {overwriteItems.length > 0 ? (
           <div className="ovl-card ovl-card--warning" data-testid="overwrite-diff">
-            <strong>Prepísanie existujúcej zľavy (podľa vlastnej DB, D28):</strong>
+            <strong>Prepísanie existujúcej zľavy (podľa vlastnej DB):</strong>
             <ul className="ovl-small" style={{ margin: '0.25rem 0 0', paddingLeft: '1rem' }}>
               {overwriteItems.map((it) => (
                 <li key={it.productId}>
@@ -145,7 +145,7 @@ export function ConfirmPanel({
               ))}
             </ul>
             <p className="ovl-small ovl-muted" style={{ marginBottom: 0 }}>
-              Ide o posledný vlastný zápis — shop môže mať iný stav (I11).
+              Ide o posledný vlastný zápis — shop môže mať iný stav.
             </p>
           </div>
         ) : null}
@@ -177,7 +177,7 @@ export function ConfirmPanel({
               disabled={submitting}
               onChange={(e) => setOneDayAck(e.target.checked)}
             />{' '}
-            Rozumiem, že ide o <strong>jednodňovú</strong> zľavu (OD = DO) a je to zámer (D30).
+            Rozumiem, že ide o <strong>jednodňovú</strong> zľavu (OD = DO) a je to zámer.
           </label>
         ) : null}
 

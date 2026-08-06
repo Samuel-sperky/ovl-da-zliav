@@ -23,6 +23,7 @@ import DryRunTable from '@/components/campaigns/DryRunTable';
 import ExtendDialog from '@/components/campaigns/ExtendDialog';
 import ItemsTable from '@/components/campaigns/ItemsTable';
 import RetryFailedButton from '@/components/campaigns/RetryFailedButton';
+import { useWriteGate } from '@/components/campaigns/write-gate';
 import Button from '@/components/ui/Button';
 import ErrorMessage from '@/components/ui/ErrorMessage';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -37,6 +38,10 @@ export interface CampaignDetailProps {
 }
 
 export function CampaignDetail({ campaignId }: CampaignDetailProps) {
+  // Write-gate (B3, D10/D79): akcie smerujúce k zápisu do shopu (dopálenie,
+  // predĺženie, opakovanie) sa v read-only režime VYPÍNAJÚ s dôvodom.
+  // Zrušenie a „beriem na vedomie" zostávajú — menia len vlastnú DB, nie shop.
+  const gate = useWriteGate();
   const [detail, setDetail] = useState<CampaignDetailResponse | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -168,8 +173,8 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
           ) : null}
         </dl>
         <p className="ovl-small ovl-muted" style={{ marginBottom: 0 }}>
-          Všetky stavy zľavy vychádzajú z posledného VLASTNÉHO zápisu — shop môže mať iný stav (I11).
-          Už zapísaná zľava sa nedá zrušiť, len prepísať novou kampaňou (I7).
+          Všetky stavy zľavy vychádzajú z posledného VLASTNÉHO zápisu — shop môže mať iný stav.
+          Už zapísaná zľava sa nedá zrušiť, len prepísať novou kampaňou.
         </p>
       </section>
 
@@ -177,15 +182,27 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
 
       <div className="ovl-row" style={{ gap: '0.5rem', flexWrap: 'wrap' }}>
         {canExecute ? (
-          <Button variant="primary" disabled={execLoading || execPreview != null} onClick={() => void startExecuteDryRun()}>
+          <Button
+            variant="primary"
+            disabled={execLoading || execPreview != null || !gate.canWrite}
+            disabledReason={gate.reason}
+            onClick={() => void startExecuteDryRun()}
+          >
             {execLoading ? 'Pripravuje sa dry-run…' : 'Dopáliť teraz (cez dry-run)'}
           </Button>
         ) : null}
         {canExtend ? (
-          <Button onClick={() => setShowExtend(true)} disabled={showExtend}>
+          <Button
+            onClick={() => setShowExtend(true)}
+            disabled={showExtend || !gate.canWrite}
+            disabledReason={gate.reason}
+          >
             Predĺžiť
           </Button>
         ) : null}
+        <a className="ovl-btn" href={`/kampane?nova=1&podla=${c.id}`} data-testid="duplicate-campaign">
+          Duplikovať
+        </a>
         {canCancel ? (
           <Button variant="danger" disabled={cancelling} onClick={() => void cancelCampaign()}>
             {cancelling ? 'Ruší sa…' : 'Zrušiť kampaň (len plán v DB)'}
@@ -205,7 +222,7 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
 
       {execPreview ? (
         <div className="ovl-stack" style={{ gap: '1rem' }} data-testid="execute-dry-run">
-          <h2>Dry-run dopálenia (nové potvrdenie je povinné, I3)</h2>
+          <h2>Dry-run dopálenia — nové potvrdenie je povinné</h2>
           <DryRunTable
             items={execPreview.items}
             warnings={execPreview.warnings}
@@ -254,6 +271,8 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
       <RetryFailedButton
         campaign={c}
         items={detail.items}
+        disabled={!gate.canWrite}
+        disabledReason={gate.reason}
         onDone={(newId) => {
           window.location.href = `/kampane/${newId}`;
         }}

@@ -1,10 +1,12 @@
 'use client';
 
 /**
- * Aura Zľavy — filter zoznamu kampaní (D14).
+ * Aura Zľavy — filter stavu kampaní (D14; KISS toolbar podľa plánu 33 §3).
  *
- * Plná sada stavov vrátane derivovaných UI pohľadov „aktívna"/„expirovaná"
- * (§4) — tie sa na server mapujú ako `status=done` a rozlíši ich klient.
+ * Redizajn KISS: rad pilulkových čipov sa mení na kompaktný `select` do
+ * toolbaru predlohy (hľadanie + filter stavu). Plná sada stavov vrátane
+ * derivovaných UI pohľadov „aktívna"/„expirovaná" (§4) zostáva — tie sa na
+ * server mapujú ako `status=done` a rozlíši ich klient.
  */
 
 export type CampaignFilterValue =
@@ -22,8 +24,8 @@ export type CampaignFilterValue =
   | 'cancelled'
   | 'lapsed';
 
-const OPTIONS: Array<{ value: CampaignFilterValue; label: string }> = [
-  { value: 'all', label: 'všetky' },
+export const FILTER_OPTIONS: Array<{ value: CampaignFilterValue; label: string }> = [
+  { value: 'all', label: 'všetky stavy' },
   { value: 'scheduled', label: 'naplánovaná' },
   { value: 'needs_key', label: 'vyžaduje kľúč' },
   { value: 'running', label: 'beží zápis' },
@@ -38,6 +40,8 @@ const OPTIONS: Array<{ value: CampaignFilterValue; label: string }> = [
   { value: 'draft', label: 'návrh' },
 ];
 
+const VALID = new Set<string>(FILTER_OPTIONS.map((o) => o.value));
+
 export interface CampaignFiltersProps {
   value: CampaignFilterValue;
   onChange: (value: CampaignFilterValue) => void;
@@ -45,18 +49,22 @@ export interface CampaignFiltersProps {
 
 export function CampaignFilters({ value, onChange }: CampaignFiltersProps) {
   return (
-    <div className="ovl-row" style={{ gap: '0.35rem', flexWrap: 'wrap' }} data-testid="campaign-filters">
-      {OPTIONS.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          className={`ovl-btn ovl-btn--small${value === o.value ? ' ovl-btn--primary' : ''}`}
-          onClick={() => onChange(o.value)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
+    <label className="ovl-small" data-testid="campaign-filters">
+      <select
+        value={value}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (VALID.has(next)) onChange(next as CampaignFilterValue);
+        }}
+        aria-label="Filter stavu kampane"
+      >
+        {FILTER_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

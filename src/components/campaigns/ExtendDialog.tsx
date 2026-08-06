@@ -75,7 +75,7 @@ export function ExtendDialog({ campaign, onDone, onClose }: ExtendDialogProps) {
           <p className="ovl-small">
             Predĺženie pošle jeden zápis s <strong>rovnakým OD</strong> ({formatDateSk(campaign.dateFrom)}),{' '}
             <strong>rovnakým percentom</strong> ({formatPercentSk(campaign.percent)}) a novým DO. Zmena
-            percenta nie je predĺženie — je to prepis (D27).
+            percenta nie je predĺženie — je to prepis.
           </p>
           <label className="ovl-small">
             Nové DO{' '}
@@ -98,8 +98,8 @@ export function ExtendDialog({ campaign, onDone, onClose }: ExtendDialogProps) {
           ) : null}
           {overCap ? (
             <p className="ovl-small">
-              Vedomá alternatíva: vytvor <a href={`/kampane/nova?prepis=${campaign.id}`}>prepis s novým OD</a>{' '}
-              — pôjde o novú kampaň s vlastným dry-runom (D27, D28).
+              Vedomá alternatíva: vytvor <a href={`/kampane?nova=1&podla=${campaign.id}`}>prepis s novým OD</a>{' '}
+              — pôjde o novú kampaň s vlastným dry-runom.
             </p>
           ) : null}
           {error ? <ErrorMessage message={error.message} rawCode={error.code} /> : null}

@@ -106,7 +106,10 @@ test.describe('onboarding', () => {
 
     await page.goto('/produkty');
     await expect(page.getByTestId('allowlist-table')).toBeVisible();
-    await expect(page.getByTestId('allowlist-full-notice')).toBeVisible();
+    // KISS redizajn: pridanie produktu žije v draweri; pri plnom allowliste je
+    // tlačidlo „+ Pridať produkt" vypnuté a dôvod je viditeľný text (I2).
+    await expect(page.getByTestId('open-add-product')).toBeDisabled();
+    await expect(page.getByText('Allowlist je plný')).toBeVisible();
 
     const res = await api(page, 'POST', '/api/allowlist', { productId: 123 });
     expect(res.status()).toBeGreaterThanOrEqual(400);

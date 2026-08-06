@@ -6,10 +6,12 @@
  * Zobrazuje `before_snapshot` / `after_snapshot` tak, ako prišli zo servera
  * (už redigované, I1) a pri nezhode `price_at_preview` vs `price_at_write`
  * viditeľný príznak „rozhodoval si nad inou cenou" (odchýlka D39c).
+ * KISS (plán 33): detail žije v draweri sprava (C1 `Drawer`), nie v modáli.
  */
 import { useEffect, useState } from 'react';
 
 import Button from '@/components/ui/Button';
+import Drawer from '@/components/ui/Drawer';
 import ErrorMessage from '@/components/ui/ErrorMessage';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import { getAuditDetail, type AuditDetail } from '@/components/audit/api';
@@ -57,20 +59,19 @@ export function AuditDetailDrawer({ auditId, onClose }: AuditDetailDrawerProps) 
   }, [auditId]);
 
   return (
-    <div
-      className="ovl-sudo-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Audit záznam ${auditId}`}
-      data-testid="audit-detail-drawer"
+    <Drawer
+      open
+      onClose={onClose}
+      title={`Audit záznam #${auditId}`}
+      subtitle="Append-only — záznam sa nedá upraviť ani zmazať."
+      testId="audit-detail-drawer"
+      footer={
+        <Button small onClick={onClose} data-testid="audit-detail-close">
+          Zavrieť
+        </Button>
+      }
     >
-      <div className="ovl-sudo-dialog ovl-stack" style={{ maxWidth: '46rem' }}>
-        <div className="ovl-spread">
-          <h3>Audit záznam #{auditId}</h3>
-          <Button small onClick={onClose} data-testid="audit-detail-close">
-            Zavrieť
-          </Button>
-        </div>
+      <div className="ovl-stack">
         {error ? <ErrorMessage message={error} /> : null}
         {detail === null && error === null ? (
           <div className="ovl-skeleton" style={{ minHeight: '6rem' }} aria-busy="true" />
@@ -112,7 +113,7 @@ export function AuditDetailDrawer({ auditId, onClose }: AuditDetailDrawerProps) 
           </div>
         ) : null}
       </div>
-    </div>
+    </Drawer>
   );
 }
 

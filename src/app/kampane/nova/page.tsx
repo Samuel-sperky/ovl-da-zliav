@@ -1,23 +1,12 @@
 /**
- * Aura Zľavy — /kampane/nova: dvojkrokové vytvorenie kampane (A15, D2, I3).
+ * Aura Zľavy — /kampane/nova: PRESMEROVANIE na drawer (KISS, plán 33 §3, §6).
  *
- * Krok 1 (produkty / percento / okno) → dry-run → krok 2 „Zapísať do
- * PRODUKCIE". Jednokroková cesta k zápisu v UI NEEXISTUJE.
+ * Samostatná stránka novej kampane sa ruší — nahrádza ju drawer na /kampane
+ * (`?nova=1`). Dvojkrokový tok s dry-run potvrdením (I3) žije v draweri
+ * bez zmeny; staré odkazy a záložky ďalej fungujú cez toto presmerovanie.
  */
-import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 
-import NewCampaignWizard from '@/components/campaigns/NewCampaignWizard';
-import { APP_DISPLAY_NAME } from '@/version';
-
-export const metadata: Metadata = {
-  title: `Nová kampaň — ${APP_DISPLAY_NAME}`,
-};
-
-export default function NewCampaignPage() {
-  return (
-    <>
-      <h1 style={{ fontSize: '1.3rem', margin: '0 0 1rem' }}>Nová kampaň</h1>
-      <NewCampaignWizard />
-    </>
-  );
+export default function NewCampaignRedirect(): never {
+  redirect('/kampane?nova=1');
 }

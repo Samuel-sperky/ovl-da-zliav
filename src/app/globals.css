@@ -1588,3 +1588,366 @@ input::placeholder {
     display: flex !important;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   13. KISS vrstva (plán 33 §2, §3 — mäkký štýl predlohy `discountcontrolui`)
+
+   Doplnok nad B1, nie náhrada: tokeny --paper/--ink/--brand/--st-* zostávajú
+   jediným zdrojom farieb. Z predlohy sa preberá GEOMETRIA (radius, tiene,
+   focus-ring, KPI karty s kruhovým akcentom, toolbar, drawer, empty-state,
+   view-in) — farby sú namapované podľa §2: primary→--brand, primary-soft→
+   --brand-tint, eyebrow modrá→--gold. Dark: tiene → hairline + nízky ambient.
+
+   Vlastník: C1. Rozhranie pre C2/C3: --r-sm/md/lg/xl, --kiss-shadow-sm/md,
+   --kiss-focus-ring, .ovl-page-head .ovl-page-desc .ovl-lift .ovl-view-in
+   .ovl-kpi-card .ovl-kpi-{top,label,icon,value,foot} .ovl-grid--kpis
+   .ovl-toolbar .ovl-toolbar-group .ovl-input-wrap .ovl-empty .ovl-empty-icon
+   .ovl-empty-orbit .ovl-drawer-backdrop .ovl-drawer .ovl-drawer-{head,body,footer}
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Radius z predlohy (8/12/16/22) */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --kiss-transition: 180ms ease;
+  --kiss-view-in: 220ms ease;
+}
+
+/* Dark (default): tieň predlohy → hairline + veľmi nízky ambient (§1 bod 2). */
+:root,
+:root[data-theme='dark'] {
+  --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
+  --kiss-shadow-md: 0 10px 30px rgb(0 0 0 / 0.35);
+  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
+    --kiss-shadow-md: 0 10px 30px rgb(0 0 0 / 0.35);
+    --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
+  }
+}
+:root[data-theme='light'] {
+  --kiss-shadow-sm: 0 1px 2px rgb(19 27 26 / 0.04);
+  --kiss-shadow-md: 0 10px 30px rgb(19 27 26 / 0.07);
+  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent);
+}
+
+/* Page-head predlohy: eyebrow (gold) + titul vľavo, akcie vpravo. */
+.ovl-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--ovl-s5);
+  margin-bottom: var(--ovl-s5);
+  flex-wrap: wrap;
+}
+.ovl-page-head h1 {
+  margin: 0;
+}
+.ovl-kiss-eyebrow {
+  margin: 0 0 0.3rem;
+}
+.ovl-page-desc {
+  max-width: 42rem;
+  margin: 0.4rem 0 0;
+  color: var(--dim);
+  font-size: var(--ovl-fs-small);
+}
+.ovl-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+}
+
+/* Vstup obrazovky predlohy — 220 ms view-in (§1 bod 10). */
+@keyframes ovl-view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ovl-view-in {
+  animation: ovl-view-in var(--kiss-view-in) both;
+}
+
+/* Hover zdvih kariet (§1 bod 10) — jemný, bez zmeny farby. */
+.ovl-lift {
+  transition:
+    transform var(--kiss-transition),
+    box-shadow var(--kiss-transition);
+}
+.ovl-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--kiss-shadow-md);
+}
+
+/* KPI karty (grid-kpis predlohy, u nás vždy 3). */
+.ovl-grid--kpis {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .ovl-grid--kpis {
+    grid-template-columns: 1fr;
+  }
+}
+.ovl-kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  box-shadow: var(--kiss-shadow-sm);
+}
+/* Kruhový akcent v rohu — VŽDY --brand-tint, NIKDY stavová farba (§2). */
+.ovl-kpi-card[data-accent='true']::after {
+  content: '';
+  position: absolute;
+  top: -24px;
+  right: -24px;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: var(--brand-tint);
+  opacity: 0.65;
+  pointer-events: none;
+}
+.ovl-kpi-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ovl-s3);
+}
+.ovl-kpi-label {
+  color: var(--dim);
+  font-size: var(--ovl-fs-micro);
+  font-weight: 600;
+}
+.ovl-kpi-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-size: 1rem;
+  flex: 0 0 auto;
+}
+.ovl-kpi-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.ovl-kpi-value {
+  position: relative;
+  z-index: 1;
+  margin-top: var(--ovl-s4);
+  font-size: var(--ovl-fs-stat);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.ovl-kpi-foot {
+  position: relative;
+  z-index: 1;
+  margin-top: var(--ovl-s3);
+  color: var(--dim);
+  font-size: var(--ovl-fs-micro);
+}
+
+/* ⓘ tooltip pri KPI (obsah zrušenej dokumentačnej karty, §3). */
+.ovl-info-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--dim);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-style: normal;
+  cursor: help;
+  vertical-align: text-bottom;
+}
+
+/* Toolbar predlohy — jedna karta, dve skupiny, na mobile pod sebou. */
+.ovl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ovl-s3);
+  margin-bottom: var(--ovl-s4);
+  padding: var(--ovl-s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--kiss-shadow-sm);
+}
+.ovl-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ovl-s2);
+}
+.ovl-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.ovl-input-wrap > svg,
+.ovl-input-wrap > .ovl-input-glyph {
+  position: absolute;
+  left: 0.6rem;
+  width: 1rem;
+  height: 1rem;
+  color: var(--dim);
+  pointer-events: none;
+}
+.ovl-input-wrap input {
+  padding-left: 2rem;
+}
+@media (max-width: 580px) {
+  .ovl-toolbar {
+    align-items: stretch;
+  }
+  .ovl-toolbar-group,
+  .ovl-toolbar-group > * {
+    width: 100%;
+  }
+}
+
+/* Prázdny stav predlohy — ikona v soft ploche / bodkovaný orbit. */
+.ovl-empty {
+  display: flex;
+  max-width: 24rem;
+  margin-inline: auto;
+  padding: var(--ovl-s6) var(--ovl-s5);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: var(--dim);
+  gap: 0.25rem;
+}
+.ovl-empty strong {
+  color: var(--ink);
+  font-size: var(--ovl-fs-small);
+}
+.ovl-empty p {
+  margin: 0 0 var(--ovl-s3);
+  font-size: var(--ovl-fs-micro);
+}
+.ovl-empty-icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  margin-bottom: var(--ovl-s3);
+  place-items: center;
+  border-radius: 15px;
+  background: var(--surface-raised);
+  color: var(--dim);
+  font-size: 1.25rem;
+}
+.ovl-empty-icon svg {
+  width: 23px;
+  height: 23px;
+  display: block;
+}
+.ovl-empty-orbit {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  margin-bottom: var(--ovl-s3);
+  border: 1px dashed var(--line-strong);
+  border-radius: 50%;
+}
+.ovl-empty-orbit::before {
+  content: '';
+  position: absolute;
+  inset: 17px;
+  border-radius: 50%;
+  background: var(--brand-tint);
+}
+
+/* Drawer sprava (§1 bod 7) — geometria predlohy, plné plochy B1.
+   I3: drawer je len obal; dry-run + potvrdenie v obsahu zostávajú povinné. */
+@keyframes ovl-drawer-in {
+  from {
+    transform: translateX(18px);
+    opacity: 0.7;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.ovl-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(3px);
+}
+.ovl-drawer {
+  width: min(520px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--surface-solid);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--kiss-shadow-md);
+  animation: ovl-drawer-in var(--kiss-view-in) both;
+  outline: none;
+}
+.ovl-drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ovl-s3);
+  padding: var(--ovl-s5) var(--ovl-s5) var(--ovl-s4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-solid);
+}
+.ovl-drawer-body {
+  padding: var(--ovl-s5);
+}
+.ovl-drawer-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ovl-s3);
+  padding: var(--ovl-s4) var(--ovl-s5);
+  border-top: 1px solid var(--line);
+  background: var(--surface-solid);
+}
+
+/* Riadok „Najbližšie spustenie" pod grafom (§3 bod 4). */
+.ovl-nextrun {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: var(--ovl-s3) var(--ovl-s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--surface-solid) 42%, transparent);
+  font-size: var(--ovl-fs-small);
+}
+

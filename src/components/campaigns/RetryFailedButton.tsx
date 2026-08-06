@@ -19,7 +19,7 @@ import type {
 import { postJson } from '@/components/campaigns/api';
 import ConfirmPanel, { type ConfirmSubmit } from '@/components/campaigns/ConfirmPanel';
 import DryRunTable from '@/components/campaigns/DryRunTable';
-import { retryableProductIds } from '@/components/campaigns/ItemsTable';
+import { retryExcludedItems, retryableProductIds } from '@/components/campaigns/ItemsTable';
 import Button from '@/components/ui/Button';
 import ErrorMessage from '@/components/ui/ErrorMessage';
 
@@ -46,6 +46,18 @@ export function RetryFailedButton({
   const [error, setError] = useState<ApiError | null>(null);
 
   const productIds = retryableProductIds(items);
+  // D34/D49 — `not_found` položky sa opakovať NEDAJÚ (v shope neexistujú)
+  // a UI to musí povedať vetou, nie mlčaním. Dokončenie B3 (plán 33 §5 C3).
+  const excluded = retryExcludedItems(items);
+  const excludedNote =
+    excluded.length > 0 ? (
+      <p className="ovl-small ovl-muted" style={{ margin: 0 }} data-testid="retry-excluded-note">
+        Opakovanie vynechá {excluded.length === 1 ? '1 položku' : `${excluded.length} položky`} so
+        stavom <strong>nenájdený</strong> ({excluded.map((it) => `#${it.productId}`).join(', ')}) —
+        shop tieto produkty nepozná, zapísať sa nedajú. Ak sa majú zľavňovať, over ich ID
+        v <a href="/produkty">Produktoch</a>.
+      </p>
+    ) : null;
 
   async function startDryRun() {
     setError(null);
@@ -83,10 +95,20 @@ export function RetryFailedButton({
     }
   }
 
-  if (productIds.length === 0) return null;
+  if (productIds.length === 0 && excluded.length === 0) return null;
+
+  if (productIds.length === 0) {
+    // Nič na opakovanie, ale nenájdené položky sa musia pomenovať (D34).
+    return (
+      <div className="ovl-stack" data-testid="retry-failed">
+        {excludedNote}
+      </div>
+    );
+  }
 
   return (
     <div className="ovl-stack" data-testid="retry-failed">
+      {excludedNote}
       {phase === 'idle' || phase === 'previewing' ? (
         <>
           <Button
@@ -103,7 +125,7 @@ export function RetryFailedButton({
 
       {preview && (phase === 'preview' || phase === 'writing') ? (
         <div className="ovl-stack" style={{ gap: '1rem' }}>
-          <h2>Dry-run opakovania (nové potvrdenie je povinné, D16)</h2>
+          <h2>Dry-run opakovania — nové potvrdenie je povinné</h2>
           <DryRunTable
             items={preview.items}
             warnings={preview.warnings}

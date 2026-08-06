@@ -1,10 +1,13 @@
 'use client';
 
 /**
- * Aura Zľavy — kompozícia stránky `/audit` (A16, D18).
+ * Aura Zľavy — audit log: filtre + tabuľka + stránkovanie + detail drawer
+ * (A16, D18). Číta výhradne `GET /api/audit` a `GET /api/audit/[id]`
+ * (I4 — žiadna mutácia).
  *
- * Filtre + tabuľka + stránkovanie + detail drawer. Číta výhradne
- * `GET /api/audit` a `GET /api/audit/[id]` (I4 — žiadna mutácia).
+ * KISS (plán 33 §3/§6): panel už nie je samostatný tab — žije ako sekcia
+ * „Audit" v Analytike (`/analytika#audit`), preto sú nadpisy `h3` a hlavný
+ * titul dodáva hostiteľská sekcia.
  */
 import { useCallback, useEffect, useState } from 'react';
 
@@ -47,12 +50,12 @@ export function AuditPanel() {
   return (
     <div className="ovl-stack" style={{ gap: '1rem' }}>
       <section className="ovl-card">
-        <h2>Filtre</h2>
+        <h3>Filtre</h3>
         <AuditFilters value={filters} onChange={setFilters} />
       </section>
       <section className="ovl-card">
         <div className="ovl-spread">
-          <h2>Audit log</h2>
+          <h3>Záznamy</h3>
           <span className="ovl-small ovl-muted">
             {total} záznamov · strana {filters.page}/{lastPage}
           </span>

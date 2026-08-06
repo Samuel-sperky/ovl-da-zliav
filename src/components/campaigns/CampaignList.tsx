@@ -1,10 +1,13 @@
 'use client';
 
 /**
- * Aura Zľavy — zoznam kampaní s filtrom (D14, §8).
+ * Aura Zľavy — zoznam kampaní (D14, §8; KISS toolbar podľa plánu 33 §3).
  *
- * Číta `GET /api/campaigns`; farebné badge cez `StatusBadge`, derivované
- * pohľady „aktívna"/„expirovaná" (§4) filtruje klient nad `status=done`.
+ * Toolbar predlohy: hľadanie (klient filtruje načítanú stranu podľa názvu
+ * a #id) + filter stavu ako select. Tabuľka nesie stav s glyfom
+ * (`StatusBadge`), %, okno, počet produktov a spustenie (`fireAt`).
+ * Derivované pohľady „aktívna"/„expirovaná" (§4) filtruje klient nad
+ * `status=done`. Prázdny stav v štýle predlohy s akciou otvárajúcou drawer.
  */
 import { useCallback, useEffect, useState } from 'react';
 
@@ -15,9 +18,11 @@ import CampaignFilters, {
   type CampaignFilterValue,
 } from '@/components/campaigns/CampaignFilters';
 import Button from '@/components/ui/Button';
+import EmptyState from '@/components/ui/EmptyState';
 import StatusBadge from '@/components/ui/StatusBadge';
 import Table, { type TableColumn } from '@/components/ui/Table';
-import { formatDateSk, formatPercentSk } from '@/lib/ui/format';
+import Toolbar from '@/components/ui/Toolbar';
+import { formatDateSk, formatDateTimeSk, formatPercentSk } from '@/lib/ui/format';
 
 /** Derivovaný UI pohľad z `done` + dátumov okna (§4, O1). */
 export function deriveView(row: CampaignListRow): 'aktivna' | 'expirovana' | null {
@@ -29,8 +34,14 @@ export function deriveView(row: CampaignListRow): 'aktivna' | 'expirovana' | nul
   return null;
 }
 
-export function CampaignList() {
+export interface CampaignListProps {
+  /** Otvorenie drawera novej kampane (page-head aj prázdny stav). */
+  onNewCampaign?: () => void;
+}
+
+export function CampaignList({ onNewCampaign }: CampaignListProps) {
   const [filter, setFilter] = useState<CampaignFilterValue>('all');
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState<CampaignsPageData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,6 +69,12 @@ export function CampaignList() {
   let rows = data?.data ?? [];
   if (filter === 'aktivna') rows = rows.filter((r) => deriveView(r) === 'aktivna');
   if (filter === 'expirovana') rows = rows.filter((r) => deriveView(r) === 'expirovana');
+  const needle = search.trim().toLowerCase();
+  if (needle.length > 0) {
+    rows = rows.filter(
+      (r) => r.name.toLowerCase().includes(needle) || `#${r.id}`.includes(needle) || String(r.id) === needle,
+    );
+  }
 
   const columns: TableColumn<CampaignListRow>[] = [
     {
@@ -81,21 +98,66 @@ export function CampaignList() {
       render: (r) => `${formatDateSk(r.dateFrom)} – ${formatDateSk(r.dateTo)}`,
     },
     {
-      key: 'mode',
-      header: 'Režim',
-      render: (r) => (r.mode === 'eager' ? 'okamžitý zápis' : 'plánovaný'),
+      key: 'items',
+      header: 'Produkty',
+      numeric: true,
+      render: (r) => (
+        <span className="ovl-num">
+          {r.itemsTotal}
+          {r.itemsFailed > 0 ? (
+            <span className="ovl-small ovl-muted"> ({r.itemsFailed} zlyh.)</span>
+          ) : null}
+        </span>
+      ),
     },
     {
-      key: 'items',
-      header: 'Položky (ok/zlyhané/spolu)',
-      numeric: true,
-      render: (r) => `${r.itemsOk}/${r.itemsFailed}/${r.itemsTotal}`,
+      key: 'fireAt',
+      header: 'Spustenie',
+      render: (r) =>
+        r.fireAt ? (
+          <span className="ovl-num ovl-small">{formatDateTimeSk(r.fireAt)}</span>
+        ) : (
+          <span className="ovl-muted ovl-small">
+            {r.mode === 'eager' ? 'okamžitý zápis' : '—'}
+          </span>
+        ),
     },
   ];
 
+  const filtersActive = needle.length > 0 || filter !== 'all';
+
   return (
-    <div className="ovl-stack" style={{ gap: '1rem' }} data-testid="campaign-list">
-      <div className="ovl-spread">
+    <div className="ovl-stack ovl-view-in" style={{ gap: '0.25rem' }} data-testid="campaign-list">
+      <Toolbar
+        ariaLabel="Hľadanie a filter kampaní"
+        actions={
+          filtersActive ? (
+            <Button
+              small
+              onClick={() => {
+                setSearch('');
+                setFilter('all');
+                setPage(1);
+              }}
+            >
+              Vyčistiť filtre
+            </Button>
+          ) : undefined
+        }
+      >
+        <span className="ovl-input-wrap">
+          <span className="ovl-input-glyph" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            type="search"
+            className="ovl-input--sm"
+            placeholder="Hľadať kampaň…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            data-testid="campaign-search"
+          />
+        </span>
         <CampaignFilters
           value={filter}
           onChange={(v) => {
@@ -103,10 +165,7 @@ export function CampaignList() {
             setPage(1);
           }}
         />
-        <a className="ovl-btn ovl-btn--primary" href="/kampane/nova" data-testid="new-campaign-link">
-          + Nová kampaň
-        </a>
-      </div>
+      </Toolbar>
 
       {loading && !data ? (
         <div className="ovl-card ovl-skeleton" style={{ minHeight: '8rem' }} aria-busy="true" />
@@ -114,11 +173,33 @@ export function CampaignList() {
         <p className="ovl-error" role="alert">
           Kampane sa nepodarilo načítať. Skús obnoviť stránku.
         </p>
+      ) : rows.length === 0 ? (
+        <div className="ovl-card">
+          <EmptyState
+            title={filtersActive ? 'Žiadne kampane pre zvolený filter' : 'Zatiaľ žiadne kampane'}
+            action={
+              !filtersActive && onNewCampaign ? (
+                <Button variant="primary" onClick={onNewCampaign}>
+                  + Nová kampaň
+                </Button>
+              ) : undefined
+            }
+          >
+            {filtersActive
+              ? 'Skús zmeniť hľadanie alebo filter stavu.'
+              : 'Prvá kampaň vzniká dvojkrokovo: výber a dry-run náhľad, až potom zápis.'}
+          </EmptyState>
+        </div>
       ) : (
         <>
-          <Table columns={columns} rows={rows} rowKey={(r) => r.id} emptyLabel="Žiadne kampane pre zvolený filter." />
+          <Table
+            columns={columns}
+            rows={rows}
+            rowKey={(r) => r.id}
+            emptyLabel="Žiadne kampane pre zvolený filter."
+          />
           {data && data.total > data.perPage ? (
-            <div className="ovl-row" style={{ gap: '0.5rem', alignItems: 'center' }}>
+            <div className="ovl-row" style={{ gap: '0.5rem', alignItems: 'center', marginTop: '0.75rem' }}>
               <Button small disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                 ← Predchádzajúca
               </Button>
