@@ -122,14 +122,12 @@ Príprava hotová. Ďalej:
       dáta neprídu nazmar, migrácie dovtedy nikdy neprebehli)
   2. docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-admin.ts
      (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov)
-  3. Otvor https://localhost:3070  (funguje aj https://127.0.0.1:3070)
+  3. Otvor http://localhost:3070  (funguje aj http://127.0.0.1:3070)
      - najprv basic auth (užívateľ "samuel" + heslo z kroku 5)
      - potom login do appky (účet z bodu 2)
-  4. Prehliadač bude varovať pred certifikátom — Caddy si robí vlastnú lokálnu CA.
-     Buď varovanie preklikni, alebo root cert pridaj medzi dôveryhodné:
-       docker compose cp ovl-zliav-caddy:/data/caddy/pki/authorities/local/root.crt .
-     a nainštaluj root.crt do "Trusted Root Certification Authorities".
-  5. V appke prejdi onboarding: doména shopu -> API kľúč -> allowlist (max 10 ID).
+     (HTTP bez TLS je vedomá voľba — appka žije len na 127.0.0.1 za basic auth;
+      Secure cookie na localhoste funguje, prehliadače mu dôverujú)
+  4. V appke prejdi onboarding: doména shopu -> API kľúč -> allowlist (max 10 ID).
 
 ZÁPISY SÚ ZATIAĽ VYPNUTÉ (WRITES_ENABLED=false v .env) — appka fyzicky nemôže
 zmeniť cenu v shope. Preklikaj si dry-run naprázdno; zápisy zapni až vtedy, keď

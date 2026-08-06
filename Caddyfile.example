@@ -21,17 +21,20 @@
   # servers { trusted_proxies static private_ranges }
 }
 
-# Obe adresy zámerne: pri `https://127.0.0.1:3070` prehliadač NEPOSIELA SNI
-# (IP adresy ho nemajú), takže keby tu bol len `localhost`, Caddy by nemal ktorý
-# certifikát ponúknuť a handshake by padol na ERR_SSL_PROTOCOL_ERROR.
+# HTTP bez TLS — vedomé rozhodnutie Samuela (6.8.2026, odchýlka od D94):
+# appka beží výhradne na 127.0.0.1 za basic auth, TLS s lokálnou CA robil viac
+# trenia než úžitku (neznámy cert, trust root). Session cookie zostáva Secure —
+# prehliadače považujú localhost aj 127.0.0.1 za dôveryhodný pôvod, takže
+# Secure cookie cez http://localhost FUNGUJE. Mimo localhostu by nefungovala,
+# čo je ďalšia poistka proti expozícii (I5).
+#
+# Explicitná schéma http:// vypína automatické HTTPS aj presmerovania.
 #
 # ZMENA PORTU: číslo musí sedieť na DVOCH miestach — tu (obe adresy) a
 # v `docker-compose.yml` (`127.0.0.1:PORT:PORT` pri ovl-zliav-caddy). Strážny
 # test `test/unit/compose-bind.spec.ts` a `scripts/check-compose-bind.ts` majú
-# port zapísaný tiež, takže po zmene ich treba upraviť tiež — je to zámer,
-# nech sa port nedá zmeniť omylom (I5).
-localhost:3070, 127.0.0.1:3070 {
-  tls internal                                   # lokálna CA (D94)
+# port zapísaný tiež — je to zámer, nech sa port nedá zmeniť omylom (I5).
+http://localhost:3070, http://127.0.0.1:3070 {
 
   basic_auth {                                   # D97 — hash žije v secrets/Caddyfile
     samuel NAHRAD-BCRYPT-HASHOM
@@ -42,7 +45,7 @@ localhost:3070, 127.0.0.1:3070 {
     X-Content-Type-Options "nosniff"
     X-Frame-Options "DENY"
     Referrer-Policy "no-referrer"
-    Strict-Transport-Security "max-age=31536000"
+    # HSTS vypnuté — platí len pre HTTPS; na HTTP by bol mätúci šum.
     -Server
   }
 
