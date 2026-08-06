@@ -62,6 +62,25 @@ for f in db_root_password db_app_password db_mig_password; do
   fi
 done
 
+krok "3b/6  Práva pre kontajnery"
+# Appka beží ako uid 10050 (non-root) a číta master.key, session.key,
+# db_app_password a db_mig_password; DB init skript beží ako uid 999 (mysql)
+# a číta db_mig_password. Na Linuxe/WSL s repom v linuxovom FS treba preto
+# vlastníctvo a práva nastaviť; Docker Desktop na Windows práva bind mountov
+# ignoruje (všetko je čitateľné), tam sa tento krok v tichosti preskočí.
+chmod 644 secrets/db_mig_password 2>/dev/null || true   # 10050 aj 999; dir je 700
+APP_FILES="secrets/master.key secrets/session.key secrets/db_app_password"
+if [ "$(id -u)" = "0" ]; then
+  chown 10050:10050 $APP_FILES secrets/db_mig_password 2>/dev/null || true
+  info "vlastníctvo nastavené na uid 10050 (appka v kontajneri)"
+elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  sudo chown 10050:10050 $APP_FILES secrets/db_mig_password
+  info "vlastníctvo nastavené na uid 10050 cez sudo"
+else
+  info "chown na 10050 sa nepodaril (bez root/sudo) — na Docker Desktop to nevadí;"
+  info "na Linuxe spusti: sudo chown 10050:10050 $APP_FILES secrets/db_mig_password"
+fi
+
 krok "4/6  .env pre Docker"
 if [ -f .env ]; then
   info ".env už existuje — NEPREPISUJEM (skontroluj ho ručne)"
@@ -138,7 +157,9 @@ Príprava hotová. Ďalej:
       `docker compose down -v` — init skript DB beží len na prázdnom volume;
       dáta neprídu nazmar, migrácie dovtedy nikdy neprebehli)
   2. docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-admin.ts
-     (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov)
+     (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov;
+      spúšťaj v NORMÁLNOM termináli — maskovanie hesla potrebuje skutočné TTY,
+      cez rúru/skript sa preruší)
   3. Otvor http://localhost:3070  (funguje aj http://127.0.0.1:3070)
      - najprv basic auth (užívateľ "samuel" + heslo z kroku 5)
      - potom login do appky (účet z bodu 2)

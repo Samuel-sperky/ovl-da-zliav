@@ -50,6 +50,13 @@ foreach ($f in 'db_root_password', 'db_app_password', 'db_mig_password') {
   }
 }
 
+Krok '3b/6  Práva pre kontajnery'
+# Docker Desktop na Windows práva bind mountov ignoruje (kontajnery čítajú
+# všetko), takže tu netreba nič robiť. Ak by si repo presunul do WSL
+# linuxového FS, sprav tam: chmod 644 secrets/db_mig_password a
+# sudo chown 10050:10050 secrets/master.key secrets/session.key secrets/db_app_password secrets/db_mig_password
+Info 'Docker Desktop: práva bind mountov sa neriešia (viď komentár v skripte)'
+
 Krok '4/6  .env pre Docker'
 if (Test-Path .env) {
   Info '.env už existuje — NEPREPISUJEM (skontroluj ho ručne)'
@@ -121,7 +128,9 @@ Príprava hotová. Ďalej:
       `docker compose down -v` — init skript DB beží len na prázdnom volume;
       dáta neprídu nazmar, migrácie dovtedy nikdy neprebehli)
   2. docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-admin.ts
-     (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov)
+     (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov;
+      spúšťaj v NORMÁLNOM termináli — maskovanie hesla potrebuje skutočné TTY,
+      cez rúru/skript sa preruší)
   3. Otvor http://localhost:3070  (funguje aj http://127.0.0.1:3070)
      - najprv basic auth (užívateľ "samuel" + heslo z kroku 5)
      - potom login do appky (účet z bodu 2)
