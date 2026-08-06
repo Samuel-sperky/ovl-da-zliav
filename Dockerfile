@@ -40,6 +40,12 @@ COPY --from=build --chown=10050:10050 /app/scripts ./scripts
 # migrate.ts importuje `mariadb` — standalone trace ho obsahuje (src/db/pool.ts),
 # ale pre istotu skopírujeme driver explicitne.
 COPY --from=deps --chown=10050:10050 /app/node_modules/mariadb ./node_modules/mariadb
+# seed-admin.ts importuje `argon2` (natívny addon s musl prebuildom) — standalone
+# trace skriptov nepokrýva, preto explicitne aj s runtime závislosťami (§E krok 0b).
+COPY --from=deps --chown=10050:10050 /app/node_modules/argon2 ./node_modules/argon2
+COPY --from=deps --chown=10050:10050 /app/node_modules/@phc ./node_modules/@phc
+COPY --from=deps --chown=10050:10050 /app/node_modules/node-gyp-build ./node_modules/node-gyp-build
+COPY --from=deps --chown=10050:10050 /app/node_modules/node-addon-api ./node_modules/node-addon-api
 
 RUN chmod +x /app/scripts/entrypoint.sh
 
