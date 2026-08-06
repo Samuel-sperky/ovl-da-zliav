@@ -258,10 +258,14 @@ export async function syncSales(
       }
 
       const startedAt = previous?.startedAt ?? now();
+      // `ordersSeen` sa pri značke „prebieha" ZÁMERNE nenuluje: je to jediná
+      // TRVALÁ miera toho, ako úplný bol posledný prepočet dňa, a chráni deň
+      // pred prepísaním horším výsledkom (viď `wouldDowngrade` nižšie). Keby sa
+      // vynulovalo, pád procesu uprostred dňa by tú ochranu vypol.
       await repo.saveSyncState(day, {
-        ordersSeen: 0,
+        ordersSeen: previous?.ordersSeen ?? 0,
         status: 'pending',
-        requestsUsed: 0,
+        requestsUsed: previous?.requestsUsed ?? 0,
         lastError: null,
         startedAt: now(),
         finishedAt: null,
@@ -302,7 +306,16 @@ export async function syncSales(
         }
 
         if (listed.value.data.length === 0) break;
-        if (page * perPage >= listed.value.total) break;
+        // Koniec stránkovania sa počíta podľa `per_page`, ktoré vrátil SHOP, nie
+        // podľa toho, o aké sme požiadali. Keď shop stránku zmenší (jeho strop
+        // sa môže kedykoľvek zmeniť), počítanie podľa pýtanej hodnoty by čítanie
+        // ukončilo po prvej strane a deň by sa uzavrel ako `complete`
+        // s chýbajúcimi objednávkami — teda tichá strata dát.
+        const effectivePerPage =
+          Number.isInteger(listed.value.perPage) && listed.value.perPage > 0
+            ? Math.min(listed.value.perPage, perPage)
+            : perPage;
+        if (page * effectivePerPage >= listed.value.total) break;
       }
 
       /* 5.2 detail každej objednávky — kusy po produkte */
@@ -337,10 +350,18 @@ export async function syncSales(
       /* 5.3 zápis súčtov */
       const status: SalesSyncStatus = dayComplete && dayError === null ? 'complete' : 'partial';
 
-      // Nikdy nezhoršiť dáta: neúplný prepočet už uzavretého dňa by absolútnym
-      // prepisom zmazal to, čo predtým vyšlo správne. Pokrok sa v takom prípade
-      // uloží len do stavu a deň sa dopočíta v ďalšom behu.
-      const wouldDowngrade = status === 'partial' && previous?.status === 'complete';
+      // Nikdy nezhoršiť dáta. Zápis je ABSOLÚTNY prepis dňa, takže neúplný
+      // prepočet vie deň nielen zneúplniť, ale úplne vymazať — stačí, aby prvý
+      // request dňa skončil na `rate_limited` a `units` zostane prázdna.
+      // Deň sa preto prepisuje len vtedy, keď nový prepočet NIE JE horší než ten
+      // predchádzajúci:
+      //   · uzavretý (`complete`) deň neúplný beh neprepíše nikdy,
+      //   · a ani deň, ktorý bol predtým dopočítaný z VIAC objednávok.
+      // Pokrok sa v oboch prípadoch uloží len do stavu a deň sa dopočíta
+      // v ďalšom behu (P6) — nikdy sa nezobrazí vymyslená nula (I11).
+      const wouldDowngrade =
+        status === 'partial' &&
+        (previous?.status === 'complete' || ordersSeen < (previous?.ordersSeen ?? 0));
       let productsTouched = 0;
       let written = false;
       if (!wouldDowngrade) {

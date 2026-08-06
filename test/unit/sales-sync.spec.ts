@@ -434,3 +434,73 @@ describe('sales-sync — kľúč a stav (I1)', () => {
     expect(fromEnv.perPage).toBe(100);
   });
 });
+
+/* ═══════ „nikdy nezhorš dáta" a poctivá paginácia (review 6. 8. 2026) ══════ */
+
+describe('sales-sync — neúplný beh nesmie zhoršiť už uložený deň', () => {
+  it('prerušený beh NEPREPÍŠE deň, ktorý mal predtým viac spracovaných objednávok', async () => {
+    // 1. beh: detail objednávky 5 spadne na 500 → deň je `partial`, ale kusy
+    //    z objednávky 4 sú uložené a `ordersSeen` je 1.
+    mock.state.failDetailFor = 5;
+    const first = await syncSales({ ...deps(), flags: flags({ windowDays: 1 }) }, { today: TODAY });
+    expect(first.days[0]?.status).toBe('partial');
+    const savedUnits = repo.unitsFor('2026-08-06');
+    expect(savedUnits).toEqual({ 11: 4, 13: 1 });
+    expect((await repo.getSyncState('2026-08-06'))?.ordersSeen).toBe(1);
+
+    // 2. beh: shop odpovedá už len `rate_limited`, takže sa nespracuje ANI JEDNA
+    //    objednávka. Absolútny prepis by deň vymazal a UI by tvrdilo „0 kusov" —
+    //    to je nesprávne dáta, nie fail-soft.
+    mock.state.reset().always('rate_limited');
+    const second = await syncSales({ ...deps(), flags: flags({ windowDays: 1 }) }, { today: TODAY });
+
+    expect(second.days[0]?.status).toBe('partial');
+    expect(second.days[0]?.written).toBe(false);
+    expect(repo.unitsFor('2026-08-06')).toEqual(savedUnits);
+  });
+
+  it('lepší beh deň prepísať SMIE — ochrana nesmie dáta zamrznúť', async () => {
+    mock.state.failDetailFor = 5;
+    await syncSales({ ...deps(), flags: flags({ windowDays: 1 }) }, { today: TODAY });
+
+    mock.state.reset();
+    const second = await syncSales({ ...deps(), flags: flags({ windowDays: 1 }) }, { today: TODAY });
+
+    expect(second.days[0]?.status).toBe('complete');
+    expect(second.days[0]?.written).toBe(true);
+    expect(repo.unitsFor('2026-08-06')).toEqual({ 11: 4, 13: 3 });
+  });
+});
+
+describe('sales-sync — paginácia verí odpovedi, nie svojmu prianiu', () => {
+  it('shop, ktorý `per_page` zmenší, nesmie spôsobiť tichú stratu objednávok', async () => {
+    // Appka pýta 100 na stranu, shop dovolí len 5. Keby sa strany počítali
+    // podľa PÝTANEJ hodnoty, po prvej strane by `1 × 100 >= 12` ukončilo
+    // čítanie a deň by sa uzavrel ako `complete` so 7 chýbajúcimi objednávkami.
+    const small = await startMockOrders({
+      maxPerPage: 5,
+      orders: Array.from({ length: 12 }, (_, i) =>
+        order(2_000 + i, '2026-08-06 10:00:00', [{ id: 7, qty: 1 }]),
+      ),
+    });
+    try {
+      const smallClient = createOrdersClient({
+        baseUrl: small.baseUrl,
+        logger: collectingLogger(logs),
+        sleepFn: async (ms) => {
+          pauses.push(ms);
+        },
+      });
+      const result = await syncSales(
+        { ...deps(), ordersClient: smallClient, flags: flags({ windowDays: 1 }) },
+        { today: TODAY },
+      );
+
+      expect(result.days[0]?.status).toBe('complete');
+      expect(repo.unitsFor('2026-08-06')).toEqual({ 7: 12 });
+      expect(small.state.detailRequests()).toHaveLength(12);
+    } finally {
+      await small.close();
+    }
+  });
+});
