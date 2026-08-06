@@ -30,13 +30,13 @@ ide o zvolenú možnosť z dotazníka.
 | R1 | Appka MUSÍ držať v DB allowlist maximálne 10 konkrétnych product ID a MUSÍ fail-closed odmietnuť akékoľvek ID mimo allowlistu ešte pred volaním shop API; jedna operácia MUSÍ zapisovať maximálne 10 produktov. | ot. 1 |
 | R2 | API kľúč sa MUSÍ zadávať výhradne v UI, ukladať šifrovane (AES-256-GCM) s TTL 48 h a po expirácii automaticky wipovať; kľúč NESMIE byť nikdy v repozitári, v `.env`, v obraze ani v zálohe. | ot. 2 |
 | R3 | Appka MUSÍ byť postavená na Node 22 + Next.js 16 (App Router, `output: 'standalone'`) + React 19 + TypeScript + MariaDB 11.4 s numerovanými migráciami a `defineRoute()` pipeline (auth → rateLimit → zod → handler). | ot. 3 |
-| R4 | Appka MUSÍ byť dostupná výhradne lokálne — jediný publikovaný port `127.0.0.1:3050` obsluhuje Caddy (TLS + basic auth + security hlavičky); tunel ani verejná expozícia sa NESMIE konfigurovať. | ot. 4 |
+| R4 | Appka MUSÍ byť dostupná výhradne lokálne — jediný publikovaný port `127.0.0.1:3070` obsluhuje Caddy (TLS + basic auth + security hlavičky); tunel ani verejná expozícia sa NESMIE konfigurovať. | ot. 4 |
 | R5 | Appka MUSÍ považovať `sperky-eshop.sk` za produkčný shop bez stagingu, preto dry-run náhľad a explicitné potvrdenie pred každým zápisom MUSÍ byť povinné a nevypnuteľné; doména sa NESMIE zapisovať do repozitára. | ot. 5 |
 | R6 | Appka NESMIE implementovať rušenie zľavy (ani hack s `to` do minulosti) — zľavy len prirodzene expirujú; appka vie zľavu zakladať, prepísať a predĺžiť. | ot. 6 |
 | R7 | Appka MUSÍ podporovať manuálne zápisy aj plánované kampane so schedulerom. | ot. 7 |
 | R8 | Appka MUSÍ pracovať výhradne so scope `product:edit` a NESMIE pýtať ani použiť `orders:read` (žiadne zákaznícke dáta). | ot. 8 |
 | R9 | Appka MUSÍ viesť plný append-only audit každej operácie so snapshotom pred/po a allowlist držať v DB; prihlasuje sa jediný admin (Samuel), roly sa neimplementujú. | ot. 9 |
-| R10 | Appka MUSÍ používať port 3050, kontajnery `ovl-zliav-app` + `ovl-zliav-db` + `ovl-zliav-caddy`, DB `ovl_zliav`, cookie `ovl_zliav_session` a zobrazovaný názov „Aura Zľavy". | ot. 10 |
+| R10 | Appka MUSÍ používať port 3070, kontajnery `ovl-zliav-app` + `ovl-zliav-db` + `ovl-zliav-caddy`, DB `ovl_zliav`, cookie `ovl_zliav_session` a zobrazovaný názov „Aura Zľavy". | ot. 10 |
 
 ---
 
@@ -167,7 +167,7 @@ ide o zvolenú možnosť z dotazníka.
 | D93 | Všetky ENV premenné MUSIA prejsť zod schémou pri boote s fail-fast a vymenovaním chýbajúcich/zlých hodnôt. | 93a |
 | D94 | Caddy MUSÍ používať `tls internal` (lokálna CA) a repo MUSÍ obsahovať návod na trust root certifikátu v OS. | 94a |
 | D95 | Caddy MUSÍ posielať `Content-Security-Policy` (`default-src 'self'`, zladené s Next.js), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy` a HSTS (len s TLS); COOP/COEP sa nepridáva. | 95a |
-| D96 | Publikovaný MUSÍ byť výhradne jediný port `127.0.0.1:3050` obsluhovaný Caddy; `ovl-zliav-app` a `ovl-zliav-db` NESMÚ publikovať žiadny port. | 96a |
+| D96 | Publikovaný MUSÍ byť výhradne jediný port `127.0.0.1:3070` obsluhovaný Caddy; `ovl-zliav-app` a `ovl-zliav-db` NESMÚ publikovať žiadny port. | 96a |
 | D97 | Caddy basic auth **aj** aplikačný login MUSIA byť aktívne súčasne; bcrypt hash MUSÍ byť v súbore mimo gitu a v repe MUSÍ byť len `Caddyfile.example`. | 97a |
 | D98 | Kontajner appky MUSÍ bežať ako non-root s `read_only: true` rootfs, `tmpfs: /tmp`, `cap_drop: [ALL]` a `security_opt: no-new-privileges:true`; vlastný seccomp profil sa nepridáva. | 98a |
 | D99 | CI MUSÍ na push spustiť lint + typecheck + vitest + build a na PR Playwright; testy MUSIA bežať výhradne proti mock shop serveru a `npm audit` + `gitleaks` MUSIA blokovať pri high/critical. | 99a |
@@ -232,7 +232,7 @@ Ak ich implementácia nedokáže splniť, úloha sa NEDOKONČÍ a nahlási sa ko
 | **I2** | **Max 10 produktov, fail-closed.** Allowlist má maximálne 10 aktívnych záznamov (vynútené aj na úrovni DB), jedna operácia zapíše maximálne 10 produktov a akékoľvek product ID mimo aktívneho allowlistu MUSÍ byť odmietnuté **pred** volaním shop API. Pri pochybnosti sa NESMIE zapísať. (R1) |
 | **I3** | **Žiadny zápis bez potvrdenia.** Každý ostrý zápis MUSÍ mať v DB doložený predchádzajúci dry-run tej istej sady parametrov, potvrdenie používateľa a platné sudo okno (D70). Neexistuje cesta kódu, ktorá zapíše do shopu bez týchto troch vecí. Výnimka je jedine schedulerový fire kampane, ktorá potvrdením prešla pri vytvorení. (R5, D2, D16, D70) |
 | **I4** | **Audit je append-only.** Aplikačný kód NESMIE obsahovať `UPDATE`/`DELETE` nad `audit_log` a DB user na to NESMIE mať grant. Audit sa nemaže nikdy. (D74, D75) |
-| **I5** | **Bind len na 127.0.0.1.** Jediný publikovaný port je `127.0.0.1:3050` (Caddy). `ovl-zliav-app` a `ovl-zliav-db` NESMÚ mať `ports:`. Startup assertion + CI kontrola compose konfigurácie sú povinné. (R4, D78, D96) |
+| **I5** | **Bind len na 127.0.0.1.** Jediný publikovaný port je `127.0.0.1:3070` (Caddy). `ovl-zliav-app` a `ovl-zliav-db` NESMÚ mať `ports:`. Startup assertion + CI kontrola compose konfigurácie sú povinné. (R4, D78, D96) |
 | **I6** | **Testy len proti mocku.** Žiadny test (unit, integračný, e2e) NESMIE poslať request na reálnu doménu shopu. Test setup MUSÍ globálne zablokovať `fetch` na iný host než lokálny mock a pokus o reálny host MUSÍ test zhodiť. (D99, R5) |
 | **I7** | **Žiadne rušenie zľavy.** V kóde NESMIE existovať cesta, ktorá pošle `setReduction` s `to` v minulosti za účelom zrušenia, ani žiadna funkcia pojmenovaná ako `clear`/`cancel` zľavy v shope. Rušiť sa dá len **kampaň v našej DB**, nie zľava v shope. (R6) |
 | **I8** | **Len scope `product:edit`.** Appka NESMIE volať žiadny endpoint pod `/api/order` ani ukladať čokoľvek zo zákazníckych dát. (R8) |
@@ -280,6 +280,6 @@ sa len uvedené miesto v `11-BUILD-SPEC.md`.
 | O2 | Prenos potvrdenej dry-run sady do zápisu | Podpísaný `preview_token` (JWT, TTL 15 min) obsahujúci hash sady parametrov a `price_at_preview` per produkt; zápis bez platného tokenu sa odmietne (podpora I3). |
 | O3 | Kde žije heartbeat, write-lock a runaway počítadlo | Tabuľka `scheduler_state` (heartbeat, tick metriky) a `settings` (write lock); runaway počet sa počíta dotazom nad `audit_log` (append-only, teda neobíditeľné). |
 | O4 | Brute-force lockout musí prežiť restart | Tabuľka `login_attempts`; in-memory riešenie je zakázané. |
-| O5 | „Bind 127.0.0.1" vs. dosiahnuteľnosť z Caddy kontajnera | V kontajneri appka počúva na `0.0.0.0` **internej compose siete** a nepublikuje port; localhost-only garanciu dáva publikovaný mapping Caddy `127.0.0.1:3050` + CI kontrola, že `ovl-zliav-app`/`ovl-zliav-db` nemajú `ports:`. Startup assertion kontroluje deklarovaný `PUBLIC_BIND` a odmietne štart, ak nie je `127.0.0.1`. |
+| O5 | „Bind 127.0.0.1" vs. dosiahnuteľnosť z Caddy kontajnera | V kontajneri appka počúva na `0.0.0.0` **internej compose siete** a nepublikuje port; localhost-only garanciu dáva publikovaný mapping Caddy `127.0.0.1:3070` + CI kontrola, že `ovl-zliav-app`/`ovl-zliav-db` nemajú `ports:`. Startup assertion kontroluje deklarovaný `PUBLIC_BIND` a odmietne štart, ak nie je `127.0.0.1`. |
 | O6 | Notifikačný panel (D17) bez ďalšej tabuľky | Stĺpec `result_ack_at` na `campaigns`; „neodkliknuté" = `status IN (done, partial, failed, missed, lapsed) AND result_ack_at IS NULL`. |
 | O7 | Kto vlastní `package.json` | Úloha A0 vytvorí `package.json` s **kompletnou** sadou závislostí pre celý projekt; žiadna ďalšia úloha ho NESMIE upravovať (viď `12-SPRINT-PLAN.md`). |

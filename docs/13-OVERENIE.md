@@ -53,7 +53,7 @@ DB schémy použité pri overení: `ovl_zliav_test` (vitest), `ovl_zliav_e2e`
 | 2 | `npm run lint` (`eslint .`) | ✅ **PREŠLO** (exit 0) | *pôvodne padalo — 2 chyby, opravené, viď A.2* |
 | 3 | `npm run build` (`next build`, `output:'standalone'`) | ✅ **PREŠLO** (exit 0) | *pôvodne padalo — opravené, viď A.2* |
 | 4 | `npx vitest run` | ✅ **PREŠLO** — **38 súborov / 614 testov**, 0 zlyhaných, 0 preskočených | integračné testy bežali proti **skutočnej** MariaDB, nie proti mocku DB (overené: `test/integration/repo.spec.ts` = 24 testov prešlo, `describe.skipIf(!available)` sa neaktivoval) |
-| 5 | `npm run check-compose-bind` | ✅ **PREŠLO** | „jediný publikovaný port je 127.0.0.1:3050:3050 na ovl-zliav-caddy (I5)" |
+| 5 | `npm run check-compose-bind` | ✅ **PREŠLO** | „jediný publikovaný port je 127.0.0.1:3070:3070 na ovl-zliav-caddy (I5)" |
 | 6 | `npm audit --audit-level=high` | ✅ **PREŠLO** — `found 0 vulnerabilities` | CI to má ako blokujúce (D99) |
 | 7 | `gitleaks detect` | ⚠️ **NESPUSTENÉ** — binárka nie je v prostredí | CI ju spúšťa v kontejneri `zricethezav/gitleaks:v8.28.0` ako blokujúci krok; nahradené ručným grepom (§B, I1) |
 | 8 | `docker compose config` | ✅ **PREŠLO** (exit 0) | vyžadovalo obídenie chýbajúceho `.env` — viď §C.1 |
@@ -346,13 +346,13 @@ GRANT SELECT, INSERT ON `{{DB_NAME}}`.audit_log TO '{{APP_USER}}'@'%';  -- I4
 ### I5 — Bind len na 127.0.0.1 ✅
 
 **Vynútené:** `docker-compose.yml` — jediné `ports:` je
-`"127.0.0.1:3050:3050"` na `ovl-zliav-caddy`; `ovl-zliav-app` aj `ovl-zliav-db`
+`"127.0.0.1:3070:3070"` na `ovl-zliav-caddy`; `ovl-zliav-app` aj `ovl-zliav-db`
 majú namiesto portov komentár „ŽIADNE ports: (I5, D96)"; boot assertion na
 `PUBLIC_BIND`; CI kontrola.
 
 **Čím overené:**
 - `npm run check-compose-bind` → *„OK — jediný publikovaný port je
-  127.0.0.1:3050:3050 na ovl-zliav-caddy (I5)"*; v CI ako samostatný krok.
+  127.0.0.1:3070:3070 na ovl-zliav-caddy (I5)"*; v CI ako samostatný krok.
 - `test/unit/compose-bind.spec.ts` (v 614 zelených).
 - `test/unit/env.spec.ts` → `describe('I5 — PUBLIC_BIND musí byť presne 127.0.0.1')`.
 - **Živý fail-fast na zbuildovanom artefakte** (viď aj I14):
@@ -527,7 +527,7 @@ Overené v jej výstupe: `read_only: true`, `cap_drop: [ALL]`,
 `stop_grace_period: 30s`, `tmpfs: [/tmp, /app/.next/cache]`,
 `logging: json-file max-size 10m / max-file 5`, service names `ovl-zliav-app`,
 `ovl-zliav-db`, `ovl-zliav-caddy` (nie `app`/`db`/`caddy` — pasca R10),
-jediné `ports:` = `127.0.0.1:3050:3050` na Caddy.
+jediné `ports:` = `127.0.0.1:3070:3070` na Caddy.
 
 `npm run check-compose-bind` (≡ `scripts/check-compose-bind.ts`) → **OK**.
 
@@ -569,7 +569,7 @@ docker compose config                        # už validované, ale nech si potv
 docker compose build ovl-zliav-app           # NIKDY neoverené — pozor na §D.1
 docker compose up -d
 docker compose ps                            # všetky healthy
-curl -k https://localhost:3050/api/health    # 200 + {"status":"ok"}  (po basic auth)
+curl -k https://localhost:3070/api/health    # 200 + {"status":"ok"}  (po basic auth)
 curl http://127.0.0.1:3000                   # MUSÍ zlyhať (I5)
 docker compose logs ovl-zliav-app | head -30 # boot_ok, žiadne boot_assertions_failed
 docker inspect ovl-zliav-app | grep -i -E 'master|password|api.?key'   # nesmie nič vypísať (I1)
@@ -815,7 +815,7 @@ nespustí (D88, I14).
 ### 7. Overiť bind (I5) a health
 
 ```sh
-curl -k https://localhost:3050/api/health     # 200, {"status":"ok","db":true,…} (po basic auth)
+curl -k https://localhost:3070/api/health     # 200, {"status":"ok","db":true,…} (po basic auth)
 curl http://127.0.0.1:3000                    # MUSÍ zlyhať — connection refused
 docker inspect ovl-zliav-app | grep -iE 'master|password|api.?key'   # nesmie nič vypísať (I1)
 ```
@@ -852,7 +852,7 @@ git status --short          # secrets/ ani .env sa NESMÚ objaviť
 
 ### 11. Nastaviť doménu shopu (D55, D80) a vložiť API kľúč
 
-V UI (`https://localhost:3050`, prihlás sa) prejdi **onboarding**:
+V UI (`https://localhost:3070`, prihlás sa) prejdi **onboarding**:
 
 1. **Doména** — len `https://`, vyžaduje heslo, pred uložením prebehne
    **canary GET**. Bez úspešného canary sa doména neuloží (D55).
@@ -875,7 +875,7 @@ V UI (`https://localhost:3050`, prihlás sa) prejdi **onboarding**:
 ```sh
 # v .env:  WRITES_ENABLED=true
 docker compose up -d ovl-zliav-app
-curl -k https://localhost:3050/api/health     # "writesEnabled": true
+curl -k https://localhost:3070/api/health     # "writesEnabled": true
 ```
 Prvý ostrý zápis urob na **jednom** produkte, s malou zľavou a krátkym oknom,
 a hneď skontroluj shop ručne. Appka ti nikdy nepovie, aký je skutočný stav

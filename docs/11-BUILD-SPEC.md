@@ -861,7 +861,7 @@ services:
       ovl-zliav-app:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3050:3050"      # JEDINÝ publikovaný port (R4, D96, I5)
+      - "127.0.0.1:3070:3070"      # JEDINÝ publikovaný port (R4, D96, I5)
     volumes:
       - ./secrets/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./secrets/basicauth.hash:/etc/caddy/basicauth.hash:ro   # bcrypt mimo gitu (D97)
@@ -891,7 +891,7 @@ Repo obsahuje **len** example; reálny `secrets/Caddyfile` s hashom je mimo gitu
   # servers { trusted_proxies static private_ranges }
 }
 
-localhost:3050 {
+localhost:3070 {
   tls internal                                   # D94
 
   basic_auth {                                   # D97
@@ -1010,7 +1010,7 @@ produkcii je jeho prítomnosť fail-fast chyba.
 | `test/unit/guards.spec.ts` | product ID mimo allowlistu, 11 produktov, percento 0/31/12,5, okno 4 mesiace, `from` v minulosti — všetko odmietnuté **pred** volaním klienta (I2, I9) |
 | `test/integration/no-write-without-confirm.spec.ts` | `POST /api/campaigns` bez `previewToken`, s expirovaným tokenom a s tokenom pre inú sadu → 4xx a **nula** requestov na mock (I3) |
 | `test/integration/audit-append-only.spec.ts` | pokus o `UPDATE`/`DELETE` na `audit_log` app userom → chyba grantu (I4) |
-| `test/unit/compose-bind.spec.ts` | `docker-compose.yml`: `ovl-zliav-app` a `ovl-zliav-db` nemajú `ports:`, `ovl-zliav-caddy` publikuje výhradne `127.0.0.1:3050:3050`; service names nie sú `app`/`db`/`caddy` (I5, R10) |
+| `test/unit/compose-bind.spec.ts` | `docker-compose.yml`: `ovl-zliav-app` a `ovl-zliav-db` nemajú `ports:`, `ovl-zliav-caddy` publikuje výhradne `127.0.0.1:3070:3070`; service names nie sú `app`/`db`/`caddy` (I5, R10) |
 | `test/setup.ts` guard | globálny `fetch` wrapper zhodí test pri hostname ≠ `127.0.0.1`/`localhost` (I6) |
 | `test/unit/no-clear-reduction.spec.ts` | grep zdrojov: žiadny `setReduction` s `to` v minulosti, žiadna funkcia `clearReduction`/`cancelReduction` voči shopu (I7) |
 | `test/unit/no-orders-scope.spec.ts` | grep zdrojov: žiadny výskyt `/api/order` ani `orders:read` (I8) |

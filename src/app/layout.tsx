@@ -52,7 +52,7 @@ export default function RootLayout({
         <main className="ovl-main ovl-anim-in">{children}</main>
         <footer className="ovl-footer">
           Aura Zľavy v{APP_VERSION} · beží výhradne lokálne na{' '}
-          <code>127.0.0.1:3050</code> · stavy zliav sú „posledný vlastný zápis“,
+          <code>127.0.0.1:3070</code> · stavy zliav sú „posledný vlastný zápis“,
           nie stav shopu
         </footer>
       </body>

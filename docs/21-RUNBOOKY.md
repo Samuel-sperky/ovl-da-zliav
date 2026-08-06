@@ -70,7 +70,7 @@ Predpoklady: Docker + Docker Compose v2, Node 22 (na generovanie kľúčov).
 
 9. **Smoke test:**
    ```sh
-   curl -k https://localhost:3050/api/health    # očakávaj 200 (po basic auth)
+   curl -k https://localhost:3070/api/health    # očakávaj 200 (po basic auth)
    curl http://127.0.0.1:3000                   # MUSÍ zlyhať — app port nie je publikovaný (I5)
    ```
 
@@ -116,7 +116,7 @@ Zápisy MUSIA byť počas migrácie blokované — postup drž presne v tomto po
    ```
    Entrypoint spustí migrácie fail-fast (D88); ak zlyhajú, appka nenabehne —
    NEOPAKUJ up naslepo, pozri logy a rieš manuálne (rollback je vždy manuálny).
-5. **Smoke test:** `curl -k https://localhost:3050/api/health` → 200 a
+5. **Smoke test:** `curl -k https://localhost:3070/api/health` → 200 a
    `scheduler.heartbeat` čerstvý.
 6. Pri zlyhaní: obnov zálohu (R4) a vráť sa na predchádzajúci git tag.
 

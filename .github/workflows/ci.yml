@@ -48,7 +48,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      # I5 — compose smie publikovať výhradne 127.0.0.1:3050 (Caddy).
+      # I5 — compose smie publikovať výhradne 127.0.0.1:3070 (Caddy).
       - name: compose-bind (I5)
         run: npm run check-compose-bind
 

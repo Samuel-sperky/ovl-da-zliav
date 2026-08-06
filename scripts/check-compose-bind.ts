@@ -3,7 +3,7 @@
  *
  * Zlyhá (exit 1), ak:
  *  - `ovl-zliav-app` alebo `ovl-zliav-db` majú `ports:`,
- *  - `ovl-zliav-caddy` publikuje čokoľvek iné než presne `127.0.0.1:3050:3050`,
+ *  - `ovl-zliav-caddy` publikuje čokoľvek iné než presne `127.0.0.1:3070:3070`,
  *  - existuje služba pomenovaná `app`, `db`, `web` alebo `caddy` (pasca R10 —
  *    kolízia network aliasov v rodine stackov),
  *  - chýba niektorá z povinných služieb.
@@ -21,7 +21,7 @@ import { join } from 'node:path';
 
 export interface ComposeService {
   name: string;
-  /** riadky publikovaných portov, napr. '127.0.0.1:3050:3050' */
+  /** riadky publikovaných portov, napr. '127.0.0.1:3070:3070' */
   ports: string[];
 }
 
@@ -33,7 +33,7 @@ export interface ComposeCheckResult {
 
 const REQUIRED_SERVICES = ['ovl-zliav-app', 'ovl-zliav-db', 'ovl-zliav-caddy'] as const;
 const FORBIDDEN_SERVICE_NAMES = ['app', 'db', 'web', 'caddy'] as const;
-const ONLY_ALLOWED_PORT = '127.0.0.1:3050:3050';
+const ONLY_ALLOWED_PORT = '127.0.0.1:3070:3070';
 const CADDY_SERVICE = 'ovl-zliav-caddy';
 
 /** Zmaž komentár mimo úvodzoviek (postačuje pre náš compose formát). */
@@ -82,7 +82,7 @@ export function parseComposeServices(yamlText: string): ComposeService[] {
     if (indent === 4) {
       if (trimmed === 'ports:' || trimmed.startsWith('ports:')) {
         inPorts = true;
-        // inline flow zoznam: ports: ["127.0.0.1:3050:3050"]
+        // inline flow zoznam: ports: ["127.0.0.1:3070:3070"]
         const inline = trimmed.match(/^ports:\s*\[(.*)\]\s*$/);
         if (inline) {
           for (const item of inline[1].split(',')) {

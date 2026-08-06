@@ -39,8 +39,8 @@ describe('docker-compose.yml — invariant I5 + R10', () => {
     expect(byName.get('ovl-zliav-db')?.ports).toEqual([]);
   });
 
-  it('ovl-zliav-caddy publikuje výhradne 127.0.0.1:3050:3050 (I5, D96)', () => {
-    expect(byName.get('ovl-zliav-caddy')?.ports).toEqual(['127.0.0.1:3050:3050']);
+  it('ovl-zliav-caddy publikuje výhradne 127.0.0.1:3070:3070 (I5, D96)', () => {
+    expect(byName.get('ovl-zliav-caddy')?.ports).toEqual(['127.0.0.1:3070:3070']);
   });
 
   it('celý repo check prechádza (vrátane override súborov)', () => {
@@ -71,17 +71,17 @@ describe('checkComposeText — detekcia porušení', () => {
     expect(result.errors.some((e) => e.includes('ovl-zliav-db'))).toBe(true);
   });
 
-  it('zlyhá, keď caddy publikuje iný bind než 127.0.0.1:3050:3050', () => {
-    const mutated = composeText.replace('127.0.0.1:3050:3050', '0.0.0.0:3050:3050');
+  it('zlyhá, keď caddy publikuje iný bind než 127.0.0.1:3070:3070', () => {
+    const mutated = composeText.replace('127.0.0.1:3070:3070', '0.0.0.0:3070:3070');
     const result = checkComposeText(mutated);
     expect(result.ok).toBe(false);
-    expect(result.errors.some((e) => e.includes('0.0.0.0:3050:3050'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('0.0.0.0:3070:3070'))).toBe(true);
   });
 
   it('zlyhá, keď caddy pridá druhý publikovaný port', () => {
     const mutated = composeText.replace(
-      '      - "127.0.0.1:3050:3050"',
-      '      - "127.0.0.1:3050:3050"\n      - "127.0.0.1:8443:8443"',
+      '      - "127.0.0.1:3070:3070"',
+      '      - "127.0.0.1:3070:3070"\n      - "127.0.0.1:8443:8443"',
     );
     const result = checkComposeText(mutated);
     expect(result.ok).toBe(false);
@@ -89,7 +89,7 @@ describe('checkComposeText — detekcia porušení', () => {
 
   it('zlyhá na zakázané meno služby (R10)', () => {
     const result = checkComposeText(
-      ['services:', '  app:', '    image: x', '  ovl-zliav-caddy:', '    ports:', '      - "127.0.0.1:3050:3050"'].join(
+      ['services:', '  app:', '    image: x', '  ovl-zliav-caddy:', '    ports:', '      - "127.0.0.1:3070:3070"'].join(
         '\n',
       ),
       { requireAll: false },

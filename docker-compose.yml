@@ -3,7 +3,7 @@
 # PASCA R10: service names MUSIA byť `ovl-zliav-*`. Názvy `app`, `db`, `web`,
 # `caddy` sú ZAKÁZANÉ — network alias by kolidoval s iným stackom na hoste.
 #
-# INVARIANT I5: jediný publikovaný port je 127.0.0.1:3050 na ovl-zliav-caddy.
+# INVARIANT I5: jediný publikovaný port je 127.0.0.1:3070 na ovl-zliav-caddy.
 # `ovl-zliav-app` a `ovl-zliav-db` NESMÚ mať `ports:` — vynucuje to
 # scripts/check-compose-bind.ts a test/unit/compose-bind.spec.ts.
 
@@ -78,7 +78,7 @@ services:
       ovl-zliav-app:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3050:3050"      # JEDINÝ publikovaný port (R4, D96, I5)
+      - "127.0.0.1:3070:3070"      # JEDINÝ publikovaný port (R4, D96, I5)
     volumes:
       # Hash basic auth je priamo v tomto Caddyfile (mimo gitu, D97) — Caddy
       # nevie načítať súbor do placeholdera, preto sa samostatný .hash nemountuje.
