@@ -2,15 +2,19 @@
  * Aura Zľavy — /ai-agent: tab AI agent (plán 33 §4, sekcia C3).
  *
  * Poctivý rozsah: V1 „Zistenia" (deterministické pravidlá nad vlastnými
- * dátami, bez LLM) + V2 zamknutá „Obrátkovosť" (presný zoznam chýbajúcich
- * dát) + V3 karta „Agent" (vyžaduje konfiguráciu). Nič na tejto stránke
- * nepredstiera dáta, ktoré appka nemá (I11), nič nezapisuje (I3) a nič
- * nesiaha na objednávky (I8).
+ * dátami, bez LLM) + „Predajnosť" (počet predaných kusov za obdobie, ktoré je
+ * v DB skutočne pokryté) + V2 zamknutá „Obrátkovosť" (presný zoznam
+ * chýbajúcich dát) + V3 karta „Agent" (vyžaduje konfiguráciu).
+ *
+ * Nič na tejto stránke nepredstiera dáta, ktoré appka nemá (I11), a nič
+ * nezapisuje (I3): predajnosť sú kusy, nie obrat, a obrátkovosť zostáva
+ * zamknutá, kým shop nedá COGS a zásobu nevariantných produktov.
  */
 import type { Metadata } from 'next';
 
 import AgentCard from '@/components/ai/AgentCard';
 import InsightsCard from '@/components/ai/InsightsCard';
+import SalesCard from '@/components/ai/SalesCard';
 import TurnoverCard from '@/components/ai/TurnoverCard';
 import Eyebrow from '@/components/ui/Eyebrow';
 import { APP_DISPLAY_NAME } from '@/version';
@@ -35,6 +39,7 @@ export default function AiAgentPage() {
 
       <div className="ovl-stack" style={{ gap: '1rem' }}>
         <InsightsCard />
+        <SalesCard />
         {/* grid-halves predlohy — `.ovl-grid--halves` v B1 nie je, preto inline */}
         <div
           className="ovl-grid"

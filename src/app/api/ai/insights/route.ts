@@ -6,8 +6,13 @@
  * (`present` + `expiresAt`, NIKDY viac — I1) a spustí deterministické
  * pravidlá zo `src/lib/ai/rules.ts`. Žiadne LLM, žiadne volanie shopu,
  * žiadny zápis — teda ani cesta, ktorá by obišla dry-run potvrdenie (I3).
- * Žiadne orders dáta (I8): zásoba je výhradne `quantity` variantov
- * z poslednej obnovy katalógu.
+ * Zásoba je výhradne `quantity` variantov z poslednej obnovy katalógu.
+ *
+ * Predajnosť (KONTRAKT-PREDAJNOST, P1): do snímky ide počet predaných KUSOV
+ * na produkt za obdobie, ktoré je v DB SKUTOČNE pokryté — čítané z vlastných
+ * tabuliek súčtov, nikdy zo siete. Keď pokrytý nie je ani jeden deň, snímka
+ * predaje vôbec nedostane (`sales: null`) a pravidlá o predajnosti mlčia:
+ * nula bez dát by vyzerala ako „nepredáva sa" (I11).
  *
  * Vlastník: C3.
  */
@@ -19,6 +24,7 @@ import {
   analyze,
   variantStockFromRaw,
   type RuleCampaign,
+  type RuleSalesWindow,
   type RuleSnapshot,
   type RuleVariantStock,
 } from '@/lib/ai/rules';
@@ -27,6 +33,12 @@ import { apiKeyRepo as defaultApiKeyRepo } from '@/lib/repo/api-key.repo';
 import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
 import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
 import { insightsRepo as defaultInsightsRepo } from '@/lib/repo/insights.repo';
+import {
+  dailyUnits as defaultDailyUnits,
+  salesMetrics,
+  summarizeCoverage,
+  syncDays as defaultSyncDays,
+} from '@/lib/sales/insights';
 
 /** Okno, v ktorom sa hľadajú kampane s produktmi (±~3 mesiace od dneška). */
 const WINDOW_DAYS = 95;
@@ -36,8 +48,14 @@ export interface AiInsightsDeps {
   insightsRepo?: Pick<typeof defaultInsightsRepo, 'campaignWindows' | 'discountDepth'>;
   catalogRepo?: Pick<typeof defaultCatalogRepo, 'getMany'>;
   apiKey?: { getMeta(): Promise<{ present: boolean; expiresAt: Date | null }> };
+  salesInsights?: {
+    syncDays: typeof defaultSyncDays;
+    dailyUnits: typeof defaultDailyUnits;
+  };
   now?: () => Date;
   timeZone?: string;
+  syncEnabled?: boolean;
+  windowDays?: number;
 }
 
 export function createAiInsightsGet(
@@ -48,6 +66,10 @@ export function createAiInsightsGet(
   const insights = overrides.insightsRepo ?? defaultInsightsRepo;
   const catalog = overrides.catalogRepo ?? defaultCatalogRepo;
   const apiKey = overrides.apiKey ?? defaultApiKeyRepo;
+  const sales = overrides.salesInsights ?? {
+    syncDays: defaultSyncDays,
+    dailyUnits: defaultDailyUnits,
+  };
   const now = overrides.now ?? (() => new Date());
 
   return defineRoute(
@@ -146,6 +168,34 @@ export function createAiInsightsGet(
           keyExpiresAt = null;
         }
 
+        /* 6. Predajnosť za SKUTOČNE pokryté obdobie. Bez pokrytia zostáva
+              `null` — pravidlá o predaji potom nepovedia nič (I11). */
+        let salesWindow: RuleSalesWindow | null = null;
+        try {
+          const coverage = summarizeCoverage(await sales.syncDays(), {
+            syncEnabled: overrides.syncEnabled ?? env.SALES_SYNC_ENABLED,
+            windowDays: overrides.windowDays ?? env.SALES_WINDOW_DAYS,
+          });
+          if (coverage.hasData && coverage.from != null && coverage.to != null) {
+            const days = await sales.dailyUnits(
+              allowlist.map((p) => p.productId),
+              coverage.from,
+              coverage.to,
+            );
+            salesWindow = {
+              from: coverage.from,
+              to: coverage.to,
+              daysCovered: coverage.daysCovered,
+              lastSyncedAt: coverage.lastSyncedAt,
+              products: salesMetrics({ products: allowlist, days, coverage, today }),
+            };
+          }
+        } catch {
+          // Fail-soft (P6): keď tabuľky predaja nie sú dostupné, zistenia
+          // o kampaniach a zásobe fungujú ďalej a o predaji sa nič netvrdí.
+          salesWindow = null;
+        }
+
         const snapshot: RuleSnapshot = {
           today,
           keyPresent,
@@ -153,6 +203,7 @@ export function createAiInsightsGet(
           campaigns: [...byId.values()],
           allowlist,
           variantStock,
+          sales: salesWindow,
         };
 
         return {

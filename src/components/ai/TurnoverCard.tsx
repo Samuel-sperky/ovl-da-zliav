@@ -4,8 +4,13 @@
  * Samuel chce návrhy kampaní podľa obrátkovosti `(Ø zásoba × počet dní) / COGS`.
  * Dnes sa vzorec vypočítať NEDÁ a táto karta to hovorí presne — čo chýba,
  * odkiaľ by to muselo prísť a kto o tom rozhoduje. NIČ tu nepredstiera dáta,
- * ktoré appka nemá (I11); predaje by navyše vyžadovali scope na čítanie
- * objednávok, ktorý je vylúčený rozhodnutím 8 a vynucovaný I8.
+ * ktoré appka nemá (I11).
+ *
+ * Aktualizované 6.8.2026 (KONTRAKT-PREDAJNOST): **predaje už nechýbajú** —
+ * appka pozná počet predaných kusov a zobrazuje ho na karte „Predajnosť".
+ * Chýbajú stále dva vstupy zo strany shopu: COGS a zásoba nevariantných
+ * produktov. Karta preto zostáva ZAMKNUTÁ a dopočítavať COGS z predajnej
+ * ceny je zakázané — bol by to vymyslený vstup, nie odhad.
  */
 
 export function TurnoverCard() {
@@ -33,25 +38,28 @@ export function TurnoverCard() {
       </p>
 
       <p className="ovl-small ovl-muted" style={{ margin: '0 0 0.35rem' }}>
-        Výpočet sa dnes NEDÁ urobiť — chýbajú tri vstupy:
+        Výpočet sa dnes NEDÁ urobiť — chýbajú dva vstupy a oba musia prísť od maintainera shopu:
       </p>
       <ol className="ovl-small" style={{ margin: 0, paddingLeft: '1.25rem' }}>
-        <li>
-          <strong>COGS</strong> — shop API ho neposkytuje vôbec (požiadavka je v backlogu na
-          maintainera shopu).
+        <li data-testid="turnover-missing-cogs">
+          <strong>COGS</strong> — nákupná cena. Shop API ju neposkytuje vôbec, žiadnym endpointom.
+          Dopočítať ju z predajnej ceny by bol vymyslený vstup, preto to appka nerobí. Požiadavka je
+          v backlogu na maintainera shopu.
         </li>
-        <li>
-          <strong>Zásoba nevariantných produktov</strong> — API vracia množstvá len pri variantoch
-          (backlog na maintainera).
-        </li>
-        <li>
-          <strong>Predaje</strong> — vyžadujú scope na čítanie objednávok, ktorý appka rozhodnutím
-          nemá; zmena je na Samuelovi a znamenala by nový kľúč s týmto oprávnením.
+        <li data-testid="turnover-missing-stock">
+          <strong>Zásoba nevariantných produktov</strong> — API vracia množstvá len pri variantoch,
+          takže pri produkte bez variantov appka zásobu nepozná. Tiež backlog na maintainera shopu.
         </li>
       </ol>
+      <p className="ovl-small" style={{ margin: '0.75rem 0 0' }} data-testid="turnover-sales-ok">
+        <strong>Predaje už nechýbajú.</strong> Appka pozná počet predaných kusov na produkt a
+        zobrazuje ho na karte <strong>Predajnosť</strong>. Predajnosť ale obrátkovosť NIE JE: je to
+        počet kusov, nie pomer zásoby k nákladom — a peniaze na produkt sa priradiť nedajú, lebo
+        zaplatená suma patrí celej objednávke, nie položke.
+      </p>
       <p className="ovl-small ovl-muted" style={{ margin: '0.75rem 0 0' }}>
-        Karta sa odomkne, keď budú vstupy k dispozícii — dovtedy appka obrátkovosť nepočíta ani
-        neodhaduje.
+        Karta sa odomkne, keď shop začne poskytovať COGS a zásobu nevariantných produktov — dovtedy
+        appka obrátkovosť nepočíta ani neodhaduje.
       </p>
     </section>
   );
