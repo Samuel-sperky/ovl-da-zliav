@@ -5,6 +5,10 @@
  *
  * Doména (heslo + canary), API kľúč (bez zobrazenia kľúča, I1), default eager
  * write, odomknutie zápisov po runaway strope a panic button s runbookom.
+ *
+ * Keď načítanie spadne na CHÝBAJÚCU SESSION (401 `unauthorized`), stránka to
+ * nehlási ako poruchu appky, ale ako „nie si prihlásený" s odkazom na login —
+ * inak používateľ vidí len červený obdĺžnik a nevie, že mu stačí prihlásiť sa.
  */
 import { useCallback, useEffect, useState } from 'react';
 
@@ -13,7 +17,8 @@ import DomainForm from '@/components/settings/DomainForm';
 import EagerWriteToggle from '@/components/settings/EagerWriteToggle';
 import PanicButton from '@/components/settings/PanicButton';
 import UnlockWritesForm from '@/components/settings/UnlockWritesForm';
-import ErrorMessage from '@/components/ui/ErrorMessage';
+import ActionFailurePanel from '@/components/ui/ActionFailure';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
   getKeyMeta,
   getSettings,
@@ -24,16 +29,16 @@ import {
 export function SettingsPanel() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [keyMeta, setKeyMeta] = useState<KeyMetaView | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
 
   const load = useCallback(async () => {
     const [s, k] = await Promise.all([getSettings(), getKeyMeta()]);
     if (s.ok) {
       setSettings(s.data);
-      setError(null);
+      setFailure(null);
     } else {
       setSettings(null);
-      setError(s.error.message);
+      setFailure(describeActionFailure(s.error, { action: 'Načítanie nastavení' }));
     }
     setKeyMeta(k.ok ? k.data : null);
   }, []);
@@ -42,8 +47,8 @@ export function SettingsPanel() {
     void load();
   }, [load]);
 
-  if (error) {
-    return <ErrorMessage message={`Nastavenia sa nepodarilo načítať. ${error}`} />;
+  if (failure) {
+    return <ActionFailurePanel failure={failure} testId="settings-failure" />;
   }
 
   if (settings === null) {

@@ -9,10 +9,11 @@
  */
 import { useState } from 'react';
 
+import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import ErrorMessage from '@/components/ui/ErrorMessage';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import { formatDateTimeSk } from '@/lib/ui/format';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
   SUDO_REQUIRED_CODE,
   putDomain,
@@ -31,48 +32,52 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
   const [domain, setDomain] = useState(shopDomain ?? 'https://');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [rawCode, setRawCode] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [canary, setCanary] = useState<{ ok: boolean; total: number } | null>(null);
   const [connection, setConnection] = useState<CanaryView | null>(null);
   const [needSudo, setNeedSudo] = useState(false);
 
+  /** Neúspech je vždy hlasný a pri chýbajúcej session ľudský (401). */
+  function fail(error: { code?: string | null; message?: string | null } | null) {
+    setCanary(null);
+    setFailure(describeActionFailure(error, { action: 'Uloženie domény shopu' }));
+  }
+
   async function save() {
-    setRawCode(null);
     setCanary(null);
     // Lokálna validácia pred odoslaním — https-only (D80).
     const localError = validateDomain(domain);
     if (localError) {
-      setError(localError);
+      fail({ code: 'validation_failed', message: localError });
       return;
     }
     if (password.length === 0) {
-      setError('Zmena domény vyžaduje tvoje heslo.');
+      fail({ code: 'validation_failed', message: 'Zmena domény vyžaduje tvoje heslo.' });
       return;
     }
-    setError(null);
+    setFailure(null);
     setBusy(true);
     const res = await putDomain(domain.trim(), password);
     setBusy(false);
     if (res.ok) {
       setPassword('');
+      setFailure(null);
       setCanary(res.data.canary);
       onSaved();
       return;
     }
     if (res.error.code === SUDO_REQUIRED_CODE) {
+      // Sudo okno vypršalo — to NIE je odhlásenie; pýtame heslo, nie login.
       setNeedSudo(true);
       return;
     }
     setPassword('');
-    setError(res.error.message);
-    setRawCode(res.error.code);
+    fail(res.error);
   }
 
   async function test() {
     setBusy(true);
-    setError(null);
-    setRawCode(null);
+    setFailure(null);
     const res = await testConnection();
     setBusy(false);
     if (res.ok) {
@@ -80,8 +85,7 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
       return;
     }
     setConnection(null);
-    setError(res.error.message);
-    setRawCode(res.error.code);
+    setFailure(describeActionFailure(res.error, { action: 'Test spojenia so shopom' }));
   }
 
   return (
@@ -151,7 +155,7 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
               : `Spojenie zlyhalo — HTTP ${connection.httpStatus ?? '—'}.`}
           </p>
         ) : null}
-        {error ? <ErrorMessage message={error} rawCode={rawCode} /> : null}
+        <ActionFailurePanel failure={failure} testId="domain-failure" />
         <p className="ovl-small ovl-muted">
           Doména je jedna a nemenná pre celú appku. Blokovanie privátnych IP
           rozsahov sa neimplementuje — zodpovednosť za správnu doménu je na tebe.

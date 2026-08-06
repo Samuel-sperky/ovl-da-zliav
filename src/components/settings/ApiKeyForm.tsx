@@ -11,14 +11,21 @@
  * Po úspešnom uložení UI informuje, koľko kampaní v stave „vyžaduje kľúč"
  * server automaticky dopálil (D24) — presný počet zistí obnovenie zoznamu
  * kampaní, preto sa tvrdí len to, čo appka vie.
+ *
+ * TICHÝ NEÚSPECH JE ZAKÁZANÝ. Kľúč ide do PRODUKČNÉHO shopu, takže dojem
+ * „uložilo sa" bez uloženia je najhorší možný výsledok. Preto po každom
+ * neúspechu: (a) zmizne akékoľvek staršie hlásenie o úspechu, (b) zobrazí sa
+ * výslovné „kľúč sa NEULOŽIL", (c) pri chýbajúcej session (401) sa nezobrazí
+ * generická červená chyba, ale veta „nie si prihlásený" s odkazom na login.
  */
 import { useState } from 'react';
 
+import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import Countdown from '@/components/ui/Countdown';
-import ErrorMessage from '@/components/ui/ErrorMessage';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import { formatDateTimeSk } from '@/lib/ui/format';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
   SUDO_REQUIRED_CODE,
   putKey,
@@ -41,20 +48,24 @@ export interface ApiKeyFormProps {
 export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [rawCode, setRawCode] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [stored, setStored] = useState<{ last4: string; verifyStatus: string } | null>(null);
   const [needSudo, setNeedSudo] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
 
+  /** Neúspech je vždy hlasný: úspešné hlásenie zmizne, chyba sa pomenuje. */
+  function fail(error: { code?: string | null; message?: string | null } | null) {
+    setStored(null);
+    setFailure(describeActionFailure(error, { action: 'Uloženie API kľúča' }));
+  }
+
   async function submit(value: string) {
-    setRawCode(null);
     const localError = validateApiKey(value);
     if (localError) {
-      setError(localError);
+      fail({ code: 'validation_failed', message: localError });
       return;
     }
-    setError(null);
+    setFailure(null);
     setBusy(true);
     const res = await putKey(value.trim());
     setBusy(false);
@@ -62,19 +73,22 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
       // Plaintext kľúča držíme len po dobu requestu a hneď ho zahadzujeme (I1).
       setApiKey('');
       setPending(null);
+      setFailure(null);
       setStored({ last4: res.data.last4, verifyStatus: res.data.verifyStatus });
       onStored();
       return;
     }
     if (res.error.code === SUDO_REQUIRED_CODE) {
+      // Sudo okno vypršalo — to NIE je odhlásenie; pýtame heslo, nie login.
       setPending(value);
       setNeedSudo(true);
       return;
     }
+    // Plaintext kľúča nedržíme ani po neúspechu (I1) — používateľ ho vloží
+    // znova. Preto MUSÍ byť na obrazovke nepochybné, že sa nič neuložilo.
     setApiKey('');
     setPending(null);
-    setError(res.error.message);
-    setRawCode(res.error.code);
+    fail(res.error);
   }
 
   const verify = keyMeta?.verifyStatus ? VERIFY_LABELS[keyMeta.verifyStatus] : null;
@@ -150,7 +164,15 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
             v sekcii Kampane.
           </div>
         ) : null}
-        {error ? <ErrorMessage message={error} rawCode={rawCode} /> : null}
+        {failure ? (
+          <div className="ovl-stack" style={{ gap: '0.35rem' }}>
+            <p className="ovl-badge ovl-badge--danger" data-testid="api-key-not-stored">
+              Kľúč sa NEULOŽIL — v databáze zostáva pôvodný stav a do shopu sa
+              nič neposlalo. Po oprave príčiny ho vlož znova.
+            </p>
+            <ActionFailurePanel failure={failure} testId="api-key-failure" />
+          </div>
+        ) : null}
         <p className="ovl-small ovl-muted">
           Kľúč sa ukladá zašifrovaný, jeho plaintext neopustí pamäť requestu a
           UI ani logy ho nikdy nezobrazia. Pred uložením appka spustí sondu
