@@ -1,0 +1,18 @@
+# Aura Zľavy — normalizácia koncov riadkov.
+#
+# PASCA: pri klone na Windows s `core.autocrlf=true` dostanú shell skripty CRLF.
+# Kontajner potom padá na `exec /app/scripts/entrypoint.sh: no such file or
+# directory` — shebang s \r nie je platná cesta. To isté platí pre init skripty
+# MariaDB v scripts/db-init/, ktoré sa mountujú priamo do kontajnera.
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+Caddyfile.example text eol=lf
+
+# Windows PowerShell 5.1 číta skripty bez BOM ako ANSI a na diakritike sa
+# rozsype parsovanie — preto .ps1 zostáva CRLF a v repe má UTF-8 BOM.
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.ico binary

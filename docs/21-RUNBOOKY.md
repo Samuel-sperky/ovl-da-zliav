@@ -84,6 +84,55 @@ Predpoklady: Docker + Docker Compose v2, Node 22 (na generovanie kľúčov).
 
 ---
 
+## R1w. Prvý setup na Windows (Docker Desktop)
+
+Overené 6. 8. 2026 na Windows 11 + Docker Desktop 29.6, celý stack nabootoval.
+Postup je rovnaký ako R1, ale Windows má tri pasce, ktoré R1 nepokrýva.
+
+1. **Konce riadkov.** Pri `core.autocrlf=true` dostanú shell skripty CRLF a
+   kontajner padne na `exec /app/scripts/entrypoint.sh: no such file or
+   directory` — shebang s `\r` nie je platná cesta. To isté platí pre
+   `scripts/db-init/`, ktoré sa mountuje do MariaDB. Rieši to `.gitattributes`
+   (`*.sh text eol=lf`); v už pokazenom klone stačí:
+   ```sh
+   git add --renormalize . && git checkout -- .
+   ```
+
+2. **Práva tajomstiev.** Boot assertion (D61, I14) vyžaduje na `master.key`
+   práva 400. Docker Desktop u bind mountov unixové práva neprenáša a hlási
+   777, takže appka v `NODE_ENV=production` odmietne nabootovať s
+   `boot_assertions_failed`. Invariant sa **neoslabuje** — tajomstvá sa načítajú
+   z named volume na linuxovom FS, kde práva 400 reálne platia:
+   ```powershell
+   cp docker-compose.override.windows.example.yml docker-compose.override.yml
+   .\scripts\sync-secrets-volume.ps1        # naplní volume, chmod 400, chown 10050
+   ```
+   V `.env` musia `MASTER_KEY_FILE`, `SESSION_SECRET_FILE`, `DB_PASSWORD_FILE`
+   a `DB_MIGRATION_PASSWORD_FILE` ukazovať do `/run/keys/` (nie `/run/secrets/`)
+   — compose zoznamy `volumes:` zlučuje pridávaním, takže bind mounty z
+   `docker-compose.yml` sa nedajú odstrániť a mount na to isté miesto by 777
+   práva vrátil späť. **Po každej rotácii kľúča spusti skript znova.**
+
+3. **PowerShell 5.1 a diakritika.** `powershell.exe` číta skripty bez BOM ako
+   ANSI a parsovanie sa na diakritike rozsype. `.ps1` v repe preto majú UTF-8
+   BOM (drží to `.gitattributes`). Ak si skript upravíš iným editorom, ulož ho
+   s BOM, alebo použi `pwsh` (PowerShell 7).
+
+4. **Migračný DB user.** Init skript beží len na PRÁZDNOM volume. Ak si stack
+   skúšal s pokazenými koncami riadkov, urob raz `docker compose down -v` —
+   dovtedy migrácie aj tak nikdy neprebehli, takže o nič neprídeš.
+
+5. Seed admina spúšťaj v **normálnom termináli** — maskovanie hesla potrebuje
+   skutočné TTY, cez rúru sa preruší.
+
+Smoke test na Windows (HTTP bez TLS, odchýlka od D94 z 6. 8. 2026):
+```powershell
+curl.exe -u samuel:HESLO http://127.0.0.1:3070/api/health   # 200, {"db":true}
+curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:3070/api/health  # 401 bez auth
+```
+
+---
+
 ## R2. Trust root certifikátu Caddy (D94)
 
 Caddy používa `tls internal` — vlastnú lokálnu CA. Aby prehliadač neprotestoval:

@@ -1,4 +1,4 @@
-# Aura Zľavy — jednorazová lokálna príprava pre Windows (docs/13-OVERENIE.md §E).
+﻿# Aura Zľavy — jednorazová lokálna príprava pre Windows (docs/13-OVERENIE.md §E).
 #
 # Vytvorí secrets/, vygeneruje master key, session key a DB heslá, pripraví .env
 # pre Docker a Caddyfile s bcrypt hashom basic auth.
@@ -51,11 +51,12 @@ foreach ($f in 'db_root_password', 'db_app_password', 'db_mig_password') {
 }
 
 Krok '3b/6  Práva pre kontajnery'
-# Docker Desktop na Windows práva bind mountov ignoruje (kontajnery čítajú
-# všetko), takže tu netreba nič robiť. Ak by si repo presunul do WSL
-# linuxového FS, sprav tam: chmod 644 secrets/db_mig_password a
-# sudo chown 10050:10050 secrets/master.key secrets/session.key secrets/db_app_password secrets/db_mig_password
-Info 'Docker Desktop: práva bind mountov sa neriešia (viď komentár v skripte)'
+# POZOR: Docker Desktop na Windows unixové práva bind mountov neprenáša a
+# kontajneru hlási 777. Boot assertion (D61, I14) taký master key ODMIETNE a
+# appka v NODE_ENV=production nenabootuje. Invariant sa neoslabuje — tajomstvá
+# pre appku žijú v named volume, kde práva 400 reálne platia (runbook R1w).
+Info 'Windows: tajomstvá appky idú do named volume — spusti .\scripts\sync-secrets-volume.ps1'
+Info 'a používaj docker-compose.override.windows.example.yml (viď docs/21-RUNBOOKY.md R1w)'
 
 Krok '4/6  .env pre Docker'
 if (Test-Path .env) {
@@ -63,12 +64,19 @@ if (Test-Path .env) {
 } else {
   # Docker: appka beží v kontajneri, DB je na compose sieti pod menom služby.
   # WRITES_ENABLED zostáva false — zapneš ho vedome až po otestovaní dry-runu.
+  # Cesty *_FILE ukazujú do /run/keys — tam appka vidí named volume so správnymi
+  # právami 400 (krok 3b, runbook R1w), nie bind mount hlásiaci 777.
   (Get-Content .env.example) `
     -replace '^NODE_ENV=.*', 'NODE_ENV=production' `
     -replace '^DB_HOST=.*', 'DB_HOST=ovl-zliav-db' `
-    -replace '^PORT=.*', 'PORT=3000' |
+    -replace '^PORT=.*', 'PORT=3000' `
+    -replace '^MASTER_KEY_FILE=.*', 'MASTER_KEY_FILE=/run/keys/master.key' `
+    -replace '^SESSION_SECRET_FILE=.*', 'SESSION_SECRET_FILE=/run/keys/session.key' `
+    -replace '^DB_PASSWORD_FILE=.*', 'DB_PASSWORD_FILE=/run/keys/db_app_password' `
+    -replace '^DB_MIGRATION_PASSWORD_FILE=.*', 'DB_MIGRATION_PASSWORD_FILE=/run/keys/db_mig_password' |
     Set-Content .env -Encoding UTF8
   Info '.env vytvorený (NODE_ENV=production, DB_HOST=ovl-zliav-db, WRITES_ENABLED=false)'
+  Info 'tajomstvá appky sa čítajú z /run/keys (named volume, R1w)'
 }
 
 Krok '5/6  Caddyfile s basic auth'
@@ -123,6 +131,10 @@ Write-Host @'
 
 Príprava hotová. Ďalej:
 
+  0. cp docker-compose.override.windows.example.yml docker-compose.override.yml
+     .\scripts\sync-secrets-volume.ps1
+     (bez tohto appka nenabootuje — bind mount na Windows hlási práva 777 a
+      boot assertion D61 taký master key odmietne; runbook R1w)
   1. docker compose up -d --build
      (ak si stack skúšal už PRED opravou migračného usera, raz spusti
       `docker compose down -v` — init skript DB beží len na prázdnom volume;
