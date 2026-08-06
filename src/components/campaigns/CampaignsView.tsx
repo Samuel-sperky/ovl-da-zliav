@@ -50,14 +50,25 @@ export function CampaignsView() {
   const searchParams = useSearchParams();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [prefill, setPrefill] = useState<NewCampaignPrefill | null>(null);
-  const [consumedQuery, setConsumedQuery] = useState(false);
+  // Spotrebovaná query sa pamätá PODĽA HODNOTY — druhé `?nova=1` (aj s inými
+  // parametrami) v tom istom mounte sa spracuje tiež, nie len prvé.
+  const [consumedQuery, setConsumedQuery] = useState<string | null>(null);
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
+  // Zmena kľúča vynúti refetch zoznamu kampaní (po vytvorení kampane).
+  const [listRefreshKey, setListRefreshKey] = useState(0);
 
   // URL → drawer (presmerovanie z /kampane/nova, akcie AI agenta,
   // duplikovanie). Query sa spotrebuje raz a z URL sa uprace.
   useEffect(() => {
-    if (consumedQuery || searchParams == null) return;
-    if (searchParams.get('nova') !== '1') return;
-    setConsumedQuery(true);
+    if (searchParams == null) return;
+    if (searchParams.get('nova') !== '1') {
+      // URL sa upratala — ďalšie `?nova=1` sa smie spotrebovať znova.
+      if (consumedQuery !== null) setConsumedQuery(null);
+      return;
+    }
+    const queryKey = searchParams.toString();
+    if (consumedQuery === queryKey) return;
+    setConsumedQuery(queryKey);
 
     const podla = searchParams.get('podla');
     const fromQuery = parsePrefillFromQuery(searchParams);
@@ -69,11 +80,19 @@ export function CampaignsView() {
             productIds: [...new Set(res.data.items.map((it) => it.productId))],
             percent: res.data.campaign.percent,
           });
+          setPrefillNotice(null);
+        } else {
+          // Duplikovanie zlyhalo — drawer sa otvorí prázdny S vysvetlením.
+          setPrefill(null);
+          setPrefillNotice(
+            'Kampaň na duplikovanie sa nepodarilo načítať — formulár začína prázdny.',
+          );
         }
         setDrawerOpen(true);
       });
     } else {
       setPrefill(fromQuery);
+      setPrefillNotice(null);
       setDrawerOpen(true);
     }
     router.replace('/kampane');
@@ -81,6 +100,7 @@ export function CampaignsView() {
 
   function openDrawer() {
     setPrefill(null);
+    setPrefillNotice(null);
     setDrawerOpen(true);
   }
 
@@ -101,12 +121,14 @@ export function CampaignsView() {
         </div>
       </div>
 
-      <CampaignList onNewCampaign={openDrawer} />
+      <CampaignList onNewCampaign={openDrawer} refreshKey={listRefreshKey} />
 
       <NewCampaignDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         prefill={prefill}
+        notice={prefillNotice}
+        onCreated={() => setListRefreshKey((k) => k + 1)}
       />
     </div>
   );

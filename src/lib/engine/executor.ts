@@ -54,7 +54,7 @@ import { computePayloadHash } from '@/lib/crypto/preview-token';
 import { resolveFinalStatus } from '@/lib/domain/status';
 import { logger as defaultLogger } from '@/lib/log/logger';
 import { redact } from '@/lib/log/redact';
-import { apiKeyRepo as defaultApiKeyRepo } from '@/lib/repo/api-key.repo';
+import { ApiKeyError, apiKeyRepo as defaultApiKeyRepo } from '@/lib/repo/api-key.repo';
 import { allowlistRepo as defaultAllowlistRepo } from '@/lib/repo/allowlist.repo';
 import { auditRepo as defaultAuditRepo } from '@/lib/repo/audit.repo';
 import { campaignItemsRepo as defaultCampaignItemsRepo } from '@/lib/repo/campaign-items.repo';
@@ -170,6 +170,15 @@ const defaultSleep = (ms: number): Promise<void> =>
  * I3 — kampaň musí mať doložený dry-run + potvrdenie + sudo. Hash sa
  * prepočítava z reálnej sady položiek: podvrhnutá kampaň s cudzím hashom
  * neprejde a na shop nedorazí žiadny request.
+ *
+ * D25 — pri dopálení s posunutým `date_from` (scheduler/relight po zadaní
+ * kľúča) je pôvodné potvrdenie počítané nad PÔVODNÝM `from`, ktorý žije
+ * v `date_from_original` a posun je doložený auditom `campaign_from_shifted`.
+ * Preto sa akceptuje hash nad aktuálnym `date_from` (bežná cesta aj manuálne
+ * dopálenie s čerstvým tokenom) ALEBO nad `date_from_original` (posunuté okno
+ * s pôvodným potvrdením). Nič iné — podvrhnutá sada stále neprejde: percento,
+ * produkty, `to` aj `kind` musia sedieť presne, `from` len v týchto dvoch
+ * doložených podobách.
  */
 export function assertConfirmed(campaign: CampaignRecord, items: CampaignItemRecord[]): void {
   if (campaign.confirmedAt === null || campaign.confirmPayloadHash === null) {
@@ -186,14 +195,20 @@ export function assertConfirmed(campaign: CampaignRecord, items: CampaignItemRec
       { campaignId: campaign.id },
     );
   }
-  const expected = computePayloadHash({
-    kind: campaign.kind,
-    productIds: items.map((i) => i.productId).sort((a, b) => a - b),
-    percent: campaign.percent,
-    from: campaign.dateFrom,
-    to: campaign.dateTo,
-  });
-  if (expected !== campaign.confirmPayloadHash) {
+  const productIds = items.map((i) => i.productId).sort((a, b) => a - b);
+  const hashFor = (from: CampaignRecord['dateFrom']): string =>
+    computePayloadHash({
+      kind: campaign.kind,
+      productIds,
+      percent: campaign.percent,
+      from,
+      to: campaign.dateTo,
+    });
+  const accepted = [campaign.dateFrom];
+  if (campaign.dateFromOriginal !== null && campaign.dateFromOriginal !== campaign.dateFrom) {
+    accepted.push(campaign.dateFromOriginal);
+  }
+  if (!accepted.some((from) => hashFor(from) === campaign.confirmPayloadHash)) {
     throw new EngineError(
       'confirmation_mismatch',
       'Potvrdený dry-run sa nezhoduje so skutočnou sadou kampane — zápis je odmietnutý (I3).',
@@ -382,6 +397,9 @@ export function createExecutor(deps: ExecutorDeps): {
       if (campaign.status !== 'running') {
         // `missed` tu ZÁMERNE nie je (D33b): zmeškanú kampaň smie claimnúť len
         // manuálna route s NOVÝM potvrdením — executor ju z `missed` neprevezme.
+        // `draft` tu NAOPAK byť musí: `POST /api/campaigns` s `mode='eager'`
+        // (D22) vkladá kampaň ako `draft` a executor si ju claimne sám
+        // (spúšťač `create_eager`, §4 `draft → running`).
         const claimed = await campaignsRepo.claim(campaign.id, ['scheduled', 'needs_key', 'draft']);
         if (!claimed) {
           throw new EngineError(
@@ -389,12 +407,36 @@ export function createExecutor(deps: ExecutorDeps): {
             `Kampaň ${campaign.id} sa nedá spustiť zo stavu „${campaign.status}" — pravdepodobne ju už spracúva iný beh (D84).`,
           );
         }
+
+        // Dopálenie z `needs_key` (D24, D51/D52, D85): položky `interrupted`
+        // z prerušeného behu sa vracajú na `pending`, inak by sa už nikdy
+        // nedopísali a kampaň by sa uzavrela `partial` s nulou nových zápisov.
+        let resetInterrupted = 0;
+        if (campaign.status === 'needs_key') {
+          for (const item of items) {
+            if (item.status !== 'interrupted') continue;
+            item.status = 'pending';
+            await itemsRepo.update(item.id, {
+              status: 'pending',
+              errorCode: null,
+              errorMessage: null,
+              finishedAt: null,
+            });
+            resetInterrupted += 1;
+          }
+        }
+
         await audit.appendAudit({
           actor,
           eventType: 'campaign_claimed',
           ok: true,
           campaignId: campaign.id,
           operationId,
+          ...(resetInterrupted > 0
+            ? {
+                message: `Dopálenie z „needs_key": ${resetInterrupted} prerušených položiek vrátených na „pending" a dopíšu sa v tomto behu.`,
+              }
+            : {}),
         });
       }
       await campaignsRepo.setStatus(campaign.id, 'running', { startedAt: now() });
@@ -575,7 +617,46 @@ export function createExecutor(deps: ExecutorDeps): {
           });
         }
 
-        const result = await deps.shopClient.setReduction(params, keyRef, ctx);
+        /* D21/D63 — kľúč sa dešifruje až v kliente; ak medzičasom expiroval
+         * alebo bol wipnutý, `SecretRef` hodí `ApiKeyError`. To NIE JE sieťová
+         * chyba: žiadny retry/backoff, položka a zvyšok dávky `interrupted`
+         * a kampaň ide do `needs_key` (konzistentne s 401/403, D51/D52). */
+        let result: Awaited<ReturnType<typeof deps.shopClient.setReduction>>;
+        try {
+          result = await deps.shopClient.setReduction(params, keyRef, ctx);
+        } catch (error) {
+          if (!(error instanceof ApiKeyError)) throw error;
+          item.status = 'interrupted';
+          await itemsRepo.update(item.id, {
+            status: 'interrupted',
+            errorCode: 'key_unavailable',
+            errorMessage:
+              'API kľúč nebol v momente zápisu k dispozícii (expiroval alebo bol vymazaný) — zápis sa neodoslal.',
+            finishedAt: now(),
+          });
+          await audit.appendAudit({
+            actor,
+            eventType: 'write_failed',
+            ok: false,
+            campaignId: campaign.id,
+            campaignItemId: item.id,
+            productId: item.productId,
+            operationId,
+            requestId,
+            message:
+              'API kľúč expiroval/zmizol uprostred dávky — položka aj zvyšok dávky sú prerušené, kampaň čaká na kľúč (D21).',
+          });
+          await itemsRepo.markRemaining(
+            campaign.id,
+            item.position + 1,
+            'interrupted',
+            'Prerušené — API kľúč expiroval/zmizol uprostred dávky (D21).',
+          );
+          for (const rest of ordered.slice(index + 1)) {
+            if (rest.status === 'pending') rest.status = 'interrupted';
+          }
+          return toNeedsKey(campaign, ordered, 'key_unavailable', actor);
+        }
         await apiKeyRepo.touchLastUsed();
         const finishedAt = now();
 

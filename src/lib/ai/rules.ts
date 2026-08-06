@@ -16,6 +16,7 @@
  *
  * Vlastník: C3.
  */
+import { fireAtUtc, todayInZone } from '@/lib/domain/dates';
 
 /* ═══════════════════════════════ 1. Vstup ═════════════════════════════════ */
 
@@ -248,12 +249,19 @@ function findNeedsIntervention(s: RuleSnapshot): Finding[] {
     }));
 }
 
-/** 5 — kľúč expiruje (alebo chýba) pred štartom naplánovanej kampane. */
+/**
+ * 5 — kľúč expiruje (alebo chýba) pred štartom naplánovanej kampane.
+ *
+ * Porovnáva sa OKAMIH: `fire_at` kampane (`date_from` o čase spustenia
+ * v logickej zóne, `fireAtUtc`) proti UTC okamihu expirácie kľúča. Porovnanie
+ * UTC `slice(0,10)` s lokálnym `dateFrom` by okolo polnoci dávalo ±1 deň
+ * falošné poplachy aj falošné ticho.
+ */
 function findKeyBeforeStart(s: RuleSnapshot): Finding[] {
   const out: Finding[] = [];
-  const expiresDay =
+  const expiresAt =
     s.keyExpiresAt != null && !Number.isNaN(new Date(s.keyExpiresAt).getTime())
-      ? s.keyExpiresAt.slice(0, 10)
+      ? new Date(s.keyExpiresAt)
       : null;
   for (const c of s.campaigns) {
     if (c.status !== 'scheduled') continue;
@@ -269,12 +277,13 @@ function findKeyBeforeStart(s: RuleSnapshot): Finding[] {
       });
       continue;
     }
-    if (expiresDay != null && expiresDay < c.dateFrom) {
+    if (expiresAt != null && expiresAt.getTime() < fireAtUtc(c.dateFrom).getTime()) {
+      const expiresDayLocal = todayInZone(expiresAt);
       out.push({
         id: `key_before_start:${c.id}`,
         kind: 'key_before_start',
         tone: 'attention',
-        text: `API kľúč expiruje ${expiresDay}, teda pred štartom kampane „${c.name}" (${c.dateFrom}) — bez nového kľúča sa zápis nevykoná.`,
+        text: `API kľúč expiruje ${expiresDayLocal}, teda pred štartom kampane „${c.name}" (${c.dateFrom}) — bez nového kľúča sa zápis nevykoná.`,
         href: `/kampane/${c.id}`,
         action: { label: 'Vložiť nový kľúč v Nastaveniach', href: '/nastavenia' },
       });

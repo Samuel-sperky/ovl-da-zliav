@@ -30,6 +30,7 @@ import ErrorMessage from '@/components/ui/ErrorMessage';
 import Eyebrow from '@/components/ui/Eyebrow';
 import KpiCard from '@/components/ui/KpiCard';
 import KeyTtlArc from '@/components/charts/KeyTtlArc';
+import { todayDateOnly } from '@/components/campaigns/api';
 import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
 import {
   getAllowlist,
@@ -158,7 +159,9 @@ export function Dashboard() {
     );
   }
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  // U5: „dnes" MUSÍ byť lokálny deň (todayDateOnly), nie UTC — inak medzi
+  // 22:00–24:00 UTC KPI „Aktívne zľavy" nesedí so zoznamom kampaní.
+  const todayIso = todayDateOnly();
   const allowlist = data.allowlist ?? [];
   const activeCount = allowlist.filter((item) => hasActiveOwnWrite(item, todayIso)).length;
   const interventionCount = data.needsKey.length + data.missed.length + data.partialCount;

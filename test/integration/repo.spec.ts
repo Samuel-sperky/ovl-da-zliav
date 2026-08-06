@@ -18,6 +18,7 @@ import { campaignsRepo } from '@/lib/repo/campaigns.repo';
 import { catalogRepo } from '@/lib/repo/catalog.repo';
 import { schedulerStateRepo } from '@/lib/repo/scheduler-state.repo';
 import { settingsRepo } from '@/lib/repo/settings.repo';
+import { computeReminders } from '@/lib/scheduler/reminders';
 
 import { dbAvailable, setupTestDb, truncateAll, withMigrationConn } from '../helpers/db';
 import { makeCreateCampaignInput, testDay, testUlid } from '../helpers/factories';
@@ -246,6 +247,22 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
       expect(loaded?.percent).toBe(15);
       expect(loaded?.status).toBe('scheduled');
       expect(loaded?.operationId).toBe(input.operationId);
+    });
+
+    it('findScheduled() proti reálnej DB: kampaň o 30 h → reminder pásmo 48 (D26, E5)', async () => {
+      // Sentinel dátum (new Date(8.64e15)) MariaDB v `fire_at <= ?` skráti
+      // s warningom a porovnanie je vždy false — preto reminderom slúži
+      // findScheduled() bez dátumovej podmienky.
+      const fireAt = new Date(Date.now() + 30 * 3_600_000); // o 30 h → pásmo 48
+      const created = await campaignsRepo.create(
+        scheduledInput({ fireAt, dateFrom: testDay(2), dateTo: testDay(9) }),
+      );
+
+      const scheduled = await campaignsRepo.findScheduled();
+      expect(scheduled.map((c) => c.id)).toContain(created.id);
+
+      const reminders = computeReminders(scheduled, new Date());
+      expect(reminders.find((r) => r.campaignId === created.id)?.band).toBe(48);
     });
 
     it('claim() je atomický — dva paralelné claimy uspejú presne raz (D84, I12)', async () => {

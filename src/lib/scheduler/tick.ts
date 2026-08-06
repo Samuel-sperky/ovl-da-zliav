@@ -55,7 +55,14 @@ export interface TickDeps {
   campaigns: Pick<
     CampaignsRepo,
     'findDue' | 'findMissedCandidates' | 'findNeedsKey' | 'findRunningUnfinished' | 'claim' | 'setStatus'
-  >;
+  > & {
+    /**
+     * Všetky `scheduled` kampane bez dátumovej podmienky (D26) — sentinel
+     * dátum vo `findDue()` MariaDB skráti a porovnanie je vždy false.
+     * Implementuje `CampaignsRepoExt` (`lib/repo/campaigns.repo.ts`).
+     */
+    findScheduled(): Promise<import('@/contracts').CampaignRecord[]>;
+  };
   items: Pick<CampaignItemsRepo, 'listByCampaign' | 'update'>;
   apiKey: Pick<ApiKeyRepo, 'getMeta' | 'loadForUse' | 'wipe'>;
   settings: Pick<SettingsRepo, 'get'>;
@@ -157,7 +164,9 @@ export function createTicker(deps: TickDeps): Ticker {
         result.needsKey = due.needsKey;
 
         // 6. Reminders (D26) — len výpočet, nikam sa nič neposiela (D17).
-        const scheduled = await deps.campaigns.findDue(new Date(8_640_000_000_000_000));
+        // POZOR: žiadny sentinel dátum do `findDue()` — MariaDB by ho skrátila
+        // s warningom a `fire_at <= ?` by bolo vždy false (banner D26 by neexistoval).
+        const scheduled = await deps.campaigns.findScheduled();
         const needingKey = await deps.campaigns.findNeedsKey();
         setActiveReminders(computeReminders([...scheduled, ...needingKey], clock.now()));
 

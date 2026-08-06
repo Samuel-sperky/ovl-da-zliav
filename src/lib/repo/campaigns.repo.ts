@@ -70,6 +70,16 @@ const SQL_FIND_DUE =
   `SELECT ${COLUMNS} FROM campaigns WHERE status = 'scheduled' AND fire_at IS NOT NULL ` +
   'AND fire_at <= ? ORDER BY fire_at ASC, id ASC';
 
+/**
+ * D26: VŠETKY `scheduled` kampane bez dátumovej podmienky — pre výpočet
+ * reminderov. Sentinel dátum (napr. `new Date(8.64e15)`) v `fire_at <= ?`
+ * MariaDB skráti s warningom na neplatnú hodnotu a porovnanie je vždy false,
+ * preto tu podmienka na dátum ÚMYSELNE nie je.
+ */
+const SQL_FIND_SCHEDULED =
+  `SELECT ${COLUMNS} FROM campaigns WHERE status = 'scheduled' ` +
+  'ORDER BY fire_at ASC, id ASC';
+
 const SQL_FIND_MISSED =
   `SELECT ${COLUMNS} FROM campaigns WHERE status = 'scheduled' AND fire_at IS NOT NULL ` +
   'AND fire_at < ? ORDER BY fire_at ASC, id ASC';
@@ -210,12 +220,21 @@ const PATCH_COLUMNS: Record<string, string> = {
 
 /* ──────────────────────────────── factory ──────────────────────────────── */
 
+/**
+ * Rozšírenie kontraktu o `findScheduled()` (D26) — scheduler potrebuje všetky
+ * `scheduled` kampane bez dátumovej podmienky (viď `SQL_FIND_SCHEDULED`).
+ * Kontrakt v `src/contracts.ts` vlastní iná úloha, preto rozšírenie žije tu.
+ */
+export interface CampaignsRepoExt extends CampaignsRepo {
+  findScheduled(conn?: Queryable): Promise<CampaignRecord[]>;
+}
+
 export interface CampaignsRepoDeps {
   /** Výhradne pre testy: spojenie namiesto poolu. */
   defaultConn?: Queryable;
 }
 
-export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo {
+export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepoExt {
   const run = async <T>(conn: Queryable | undefined, sql: string, values: unknown[]): Promise<T> => {
     const target = conn ?? deps.defaultConn;
     if (target) return (await target.query(sql, values)) as T;
@@ -231,7 +250,7 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
     return (Array.isArray(rows) ? rows : []).map(mapRow);
   };
 
-  const repo: CampaignsRepo = {
+  const repo: CampaignsRepoExt = {
     async create(input: CreateCampaignInput, conn?: Queryable): Promise<CampaignRecord> {
       // Validácie hodnôt (percento, okno, dátumy) vlastní A7 — DB constrainty
       // sú posledná poistka (ck_campaigns_percent, ck_campaigns_window).
@@ -346,6 +365,10 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
       return selectMany(conn, SQL_FIND_DUE, [now]);
     },
 
+    async findScheduled(conn?: Queryable): Promise<CampaignRecord[]> {
+      return selectMany(conn, SQL_FIND_SCHEDULED, []);
+    },
+
     async findMissedCandidates(threshold: UtcDate, conn?: Queryable): Promise<CampaignRecord[]> {
       return selectMany(conn, SQL_FIND_MISSED, [threshold]);
     },
@@ -415,4 +438,4 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
 }
 
 /** Singleton pre route-y, engine a scheduler. */
-export const campaignsRepo: CampaignsRepo = createCampaignsRepo();
+export const campaignsRepo: CampaignsRepoExt = createCampaignsRepo();

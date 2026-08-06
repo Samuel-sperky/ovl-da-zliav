@@ -161,8 +161,13 @@ export type NextRouteHandler = (request: Request, args?: NextRouteArgs) => Promi
 export function clientIp(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
+    // `X-Forwarded-For` je zoznam „client, proxy1, proxy2, …": ĽAVÉ tokeny
+    // posiela klient a môže si ich podvrhnúť (rotáciou by obišiel rate limit
+    // a zašpinil IP v audite — S1). Dôveryhodný je len PRAVÝ (posledný)
+    // token: ten pridal náš Caddy, jediná proxy priamo pred appkou.
+    const parts = forwarded.split(',');
+    const last = parts[parts.length - 1]?.trim();
+    if (last) return last;
   }
   const real = request.headers.get('x-real-ip');
   if (real && real.trim()) return real.trim();

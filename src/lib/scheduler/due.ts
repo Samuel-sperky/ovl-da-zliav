@@ -170,19 +170,10 @@ export async function processDue(
         continue;
       }
 
-      // D84 — atomický claim; pri `affectedRows ≠ 1` fire patrí niekomu inému.
-      const claimed = await deps.campaigns.claim(campaign.id, ['scheduled']);
-      if (!claimed) continue;
-      await deps.audit.appendAudit({
-        actor: 'scheduler',
-        eventType: 'campaign_claimed',
-        ok: true,
-        campaignId: campaign.id,
-        operationId,
-        message: 'Scheduler prevzal kampaň atomickým claim (D84).',
-      });
-
-      // D25 — prepočet okna v momente fire.
+      // D25 — prepočet okna PRED claimom (ako v manuálnej `/execute` route):
+      // prepadnutá kampaň sa NIKDY neclaimne — prechod `running → lapsed`
+      // v stavovom stroji neexistuje a claim by vyrobil falošný audit
+      // `campaign_claimed` pre kampaň, ktorá nič nezapíše.
       const window = resolveFireWindow(campaign.dateFrom, campaign.dateTo, today);
       if (window.action === 'lapse') {
         await deps.campaigns.setStatus(campaign.id, 'lapsed', {
@@ -200,6 +191,18 @@ export async function processDue(
         outcome.lapsed += 1;
         continue;
       }
+
+      // D84 — atomický claim; pri `affectedRows ≠ 1` fire patrí niekomu inému.
+      const claimed = await deps.campaigns.claim(campaign.id, ['scheduled']);
+      if (!claimed) continue;
+      await deps.audit.appendAudit({
+        actor: 'scheduler',
+        eventType: 'campaign_claimed',
+        ok: true,
+        campaignId: campaign.id,
+        operationId,
+        message: 'Scheduler prevzal kampaň atomickým claim (D84).',
+      });
 
       let effective = campaign;
       if (window.action === 'shift_from') {

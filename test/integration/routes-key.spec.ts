@@ -440,6 +440,55 @@ describe('DELETE /api/key (panic button, D67)', () => {
     expect(audits.filter((a) => a.eventType === 'campaign_cancelled')).toHaveLength(2);
   });
 
+  it('zruší aj viac než 100 čakajúcich kampaní napriek clampu perPage (E9)', async () => {
+    const apiKey = makeApiKeyFake({ last4: '0001' });
+    const campaigns = Array.from({ length: 150 }, (_, i) =>
+      makeCampaign({ id: i + 1, status: 'scheduled' }),
+    );
+    // Repo s rovnakým clampom ako produkčný `campaigns.repo`: perPage max 100.
+    const repo: NonNullable<KeyRouteDeps['campaigns']> = {
+      async findNeedsKey() {
+        return [];
+      },
+      async list(filter) {
+        const perPage = Math.min(100, Math.max(1, Math.trunc(filter.perPage ?? 20)));
+        const page = Math.max(1, Math.trunc(filter.page ?? 1));
+        const statuses = Array.isArray(filter.status)
+          ? filter.status
+          : filter.status
+            ? [filter.status]
+            : null;
+        const matching = campaigns.filter(
+          (c) => statuses === null || statuses.includes(c.status),
+        );
+        return {
+          data: matching.slice((page - 1) * perPage, page * perPage),
+          page,
+          perPage,
+          total: matching.length,
+        };
+      },
+      async setStatus(id, status) {
+        const target = campaigns.find((c) => c.id === id);
+        if (target) target.status = status;
+      },
+    };
+    const route = createKeyDeleteRoute(baseDeps({ apiKey: apiKey.repo, campaigns: repo }));
+
+    const response = await route(
+      makeRequest({
+        method: 'DELETE',
+        body: { password: GOOD_PASSWORD, confirm: PANIC_CONFIRM_LITERAL },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await readBody(response);
+    // Pred opravou: perPage 1000 → clamp 100 → 50 kampaní zostalo čakať.
+    expect(body.data?.cancelledCampaigns).toBe(150);
+    expect(campaigns.every((c) => c.status === 'cancelled')).toBe(true);
+  });
+
   it('zlý literál odmietne zod 400 a nič sa newipne', async () => {
     const apiKey = makeApiKeyFake({ last4: '0001' });
     const route = createKeyDeleteRoute(baseDeps({ apiKey: apiKey.repo }));

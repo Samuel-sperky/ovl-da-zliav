@@ -10,13 +10,16 @@
  *    `scheduler_state.last_error` (D87),
  *  - poradie krokov ticku je normatívne (§9) a implementuje ho `tick.ts`.
  *
- * Executor dávky (`engine/executor.ts`, A9) sa pripája dynamicky — kým nie je
- * k dispozícii, due kampane idú fail-closed do `needs_key`
- * (dôvod `executor_unavailable`), NIKDY sa nezapisuje do shopu odtiaľto.
+ * Executor dávky (`engine/executor.ts`, A9) je pripojený STATICKY cez adaptér
+ * `createSchedulerExecutor()` — dynamický import s `webpackIgnore` na `@/`
+ * alias v standalone Node builde nikdy nefungoval a nekompatibilná signatúra
+ * (`executeCampaign(campaignId, deps, opts)` vs `(campaign, key, ctx)`) by aj
+ * po ňom zápis rozbila. Adaptér prekladá volanie schedulera na volanie engine.
  */
 import { env, writesAllowedByEnv } from '@/env';
 
 import { auditWriter } from '@/lib/audit/write';
+import { executeCampaign, type ExecutorDeps } from '@/lib/engine/executor';
 import { logger } from '@/lib/log/logger';
 import { apiKeyRepo } from '@/lib/repo/api-key.repo';
 import { auditRepo } from '@/lib/repo/audit.repo';
@@ -35,26 +38,19 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let ticker: Ticker | null = null;
 
 /**
- * Dynamické pripojenie `engine/executor.ts` (A9). Cesta je zámerne
- * v premennej — modul môže v čase buildu tejto úlohy ešte neexistovať
- * a scheduler musí zostať fail-closed funkčný aj bez neho.
+ * Adaptér scheduler → engine (A10 → A9). Scheduler volá executor podpisom
+ * `(campaign, key, ctx)`; engine má `executeCampaign(campaignId, deps, opts)`.
+ * Kľúč z parametra sa NEPOUŽÍVA — executor si ho načíta sám cez
+ * `apiKeyRepo.loadForUse()` (D21, D63), aby medzi guardom a zápisom nikdy
+ * nežila kópia mimo repozitára. `overrides` sú výhradne pre testy (mock shop,
+ * in-memory repozitáre); produkčný boot volá funkciu bez argumentov.
  */
-async function resolveExecutor(): Promise<ExecuteCampaignFn | null> {
-  const modulePath = '@/lib/engine/executor';
-  try {
-    const mod = (await import(/* webpackIgnore: true */ `${modulePath}`)) as Record<
-      string,
-      unknown
-    >;
-    const candidate = mod.executeCampaign ?? mod.default;
-    if (typeof candidate === 'function') return candidate as ExecuteCampaignFn;
-  } catch {
-    // engine ešte nie je k dispozícii — fail-closed režim.
-  }
-  log.warn('scheduler_executor_unavailable', {
-    detail: 'engine/executor (A9) sa nenašiel — due kampane pôjdu do needs_key (fail-closed).',
-  });
-  return null;
+export function createSchedulerExecutor(
+  overrides: Partial<ExecutorDeps> = {},
+): ExecuteCampaignFn {
+  const shopClient = overrides.shopClient ?? createShopClientFromSettings(settingsRepo);
+  return (campaign, _key, _ctx) =>
+    executeCampaign(campaign.id, { ...overrides, shopClient }, { actor: 'scheduler' });
 }
 
 function buildTicker(executor: ExecuteCampaignFn | null): Ticker {
@@ -98,7 +94,7 @@ export function startScheduler(): void {
 
 async function runOneTick(): Promise<void> {
   try {
-    if (!ticker) ticker = buildTicker(await resolveExecutor());
+    if (!ticker) ticker = buildTicker(createSchedulerExecutor());
     await ticker.runTick(); // runTick nikdy nehodí výnimku (D87)
   } catch (error) {
     // Poistka poslednej inštancie — proces sa NESMIE zhodiť (D87).

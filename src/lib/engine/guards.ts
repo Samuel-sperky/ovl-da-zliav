@@ -34,12 +34,15 @@ import type {
 import { env } from '@/env';
 import { auditWriter as defaultAuditWriter } from '@/lib/audit/write';
 import {
+  assertNotMidnightFrozen,
+  DEFAULT_MIDNIGHT_FREEZE_SECONDS,
   isDateOnly,
   isWithinMaxWindow,
   isSameOrAfter,
   todayInZone,
   LOGIC_TIME_ZONE,
 } from '@/lib/domain/dates';
+import { DOMAIN_ERROR_CODES, DomainError } from '@/lib/domain/errors';
 import { isValidPercent, PERCENT_INVALID_MESSAGE } from '@/lib/domain/percent';
 import { auditRepo as defaultAuditRepo } from '@/lib/repo/audit.repo';
 import { allowlistRepo as defaultAllowlistRepo } from '@/lib/repo/allowlist.repo';
@@ -58,6 +61,7 @@ export const GUARD_CODES = {
   invalidDates: 'invalid_dates',
   rangeTooLong: 'range_too_long',
   toInPast: 'to_in_past',
+  midnightFreeze: 'midnight_freeze',
 } as const;
 
 export type GuardCode = (typeof GUARD_CODES)[keyof typeof GUARD_CODES];
@@ -77,6 +81,8 @@ export interface GuardFlags {
   writesEnabled: boolean;
   maxProductsPerOperation: number;
   runawayLimitPerHour: number;
+  /** D59 — polnočné zamrznutie ±s. Voliteľné kvôli existujúcim fixtures; default 60. */
+  midnightFreezeSeconds?: number;
 }
 
 export function guardFlagsFromEnv(): GuardFlags {
@@ -85,6 +91,7 @@ export function guardFlagsFromEnv(): GuardFlags {
     writesEnabled: env.WRITES_ENABLED,
     maxProductsPerOperation: env.MAX_PRODUCTS_PER_OPERATION,
     runawayLimitPerHour: env.RUNAWAY_LIMIT_PER_HOUR,
+    midnightFreezeSeconds: env.MIDNIGHT_FREEZE_SECONDS,
   };
 }
 
@@ -275,6 +282,20 @@ export async function runPreWriteGuards(
 
   const allowlistCheck = await checkAllowlist(params.productIds, deps);
   if (!allowlistCheck.ok) return allowlistCheck;
+
+  // D59 — polnočné zamrznutie ±freeze s: na hrane dňa sa dátumy neprepočítavajú
+  // a zápis sa odmieta fail-closed. MUSÍ bežať PRED `checkWriteWindow`, ktorý
+  // počíta „dnes" — presne ten prepočet je na hrane dňa zakázaný. Scheduler má
+  // rovnakú kontrolu v `due.ts`; tu chráni manuálne zápisy (eager/execute/retry).
+  const freezeSeconds = d.flags().midnightFreezeSeconds ?? DEFAULT_MIDNIGHT_FREEZE_SECONDS;
+  try {
+    assertNotMidnightFrozen(d.now(), freezeSeconds, d.timeZone);
+  } catch (err) {
+    if (err instanceof DomainError && err.code === DOMAIN_ERROR_CODES.midnightFreeze) {
+      return refuse(GUARD_CODES.midnightFreeze, err.message, { freezeSeconds });
+    }
+    throw err;
+  }
 
   return checkWriteWindow(params, deps);
 }

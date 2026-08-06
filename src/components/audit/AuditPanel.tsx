@@ -9,7 +9,7 @@
  * „Audit" v Analytike (`/analytika#audit`), preto sú nadpisy `h3` a hlavný
  * titul dodáva hostiteľská sekcia.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AuditDetailDrawer from '@/components/audit/AuditDetailDrawer';
 import AuditFilters from '@/components/audit/AuditFilters';
@@ -23,14 +23,39 @@ import {
   type AuditPage,
 } from '@/components/audit/api';
 
+/**
+ * Sekvenčný strážca proti race-u odpovedí (U9): každá požiadavka dostane
+ * rastúci token a do stavu smie len odpoveď s posledným vydaným tokenom —
+ * stará (pomalšia) odpoveď tak nikdy neprepíše novšiu.
+ */
+export function createStaleGuard(): {
+  begin(): number;
+  isCurrent(token: number): boolean;
+} {
+  let current = 0;
+  return {
+    begin() {
+      current += 1;
+      return current;
+    },
+    isCurrent(token: number) {
+      return token === current;
+    },
+  };
+}
+
 export function AuditPanel() {
   const [filters, setFilters] = useState<AuditFilterState>({ ...EMPTY_FILTERS });
   const [page, setPage] = useState<AuditPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const guard = useRef(createStaleGuard());
 
   const load = useCallback(async (f: AuditFilterState) => {
+    const token = guard.current.begin();
     const res = await getAudit(f);
+    // U9: pri rýchlej zmene filtrov sa stará odpoveď zahodí.
+    if (!guard.current.isCurrent(token)) return;
     if (res.ok) {
       setPage(res.data);
       setError(null);

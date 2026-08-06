@@ -10,7 +10,7 @@
  *
  * Odpočet zostávajúceho okna v hlavičke dodáva B3 (`sudoSecondsLeft()`).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import Button from '@/components/ui/Button';
 import ErrorMessage from '@/components/ui/ErrorMessage';
@@ -26,6 +26,20 @@ export function SudoPrompt({ actionLabel, onSuccess, onCancel }: SudoPromptProps
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Escape zavrie LEN sudo dialóg — nie drawer pod ním. Capture fáza +
+  // preventDefault/stopPropagation, aby sa Escape nedostal k listeneru drawera
+  // (ten by inak zavrel celý drawer a zahodil rozpracované potvrdenie).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!submitting) onCancel();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [submitting, onCancel]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

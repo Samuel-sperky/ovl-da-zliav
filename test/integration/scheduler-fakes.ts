@@ -185,6 +185,9 @@ export function makeWorld(options: WorldOptions = {}): World {
           (c) => c.status === 'scheduled' && c.fireAt != null && c.fireAt.getTime() <= now.getTime(),
         );
       },
+      async findScheduled() {
+        return [...campaigns.values()].filter((c) => c.status === 'scheduled');
+      },
       async findMissedCandidates(threshold) {
         return [...campaigns.values()].filter(
           (c) =>

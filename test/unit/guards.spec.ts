@@ -198,3 +198,35 @@ describe('runPreWriteGuards — poradie a celok (§9)', () => {
     expect((await runPreWriteGuards(validParams, deps)).ok).toBe(true);
   });
 });
+
+
+describe('D59 — polnočné zamrznutie manuálnych zápisov (midnight freeze)', () => {
+  // 2026-08-05 23:59:30 Europe/Bratislava (CEST, UTC+2) = 21:59:30Z.
+  const FROZEN_NOW = new Date('2026-08-05T21:59:30.000Z');
+  // 23:58:00 lokálne — mimo pásma ±60 s.
+  const SAFE_NOW = new Date('2026-08-05T21:58:00.000Z');
+
+  it('o 23:59:30 sa zápis odmietne kódom midnight_freeze (fail-closed)', async () => {
+    const { deps } = world();
+    const result = await runPreWriteGuards(validParams, { ...deps, now: () => FROZEN_NOW });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(GUARD_CODES.midnightFreeze);
+  });
+
+  it('tesne po polnoci (00:00:30) je zápis rovnako zamrznutý', async () => {
+    const { deps } = world();
+    // 2026-08-06 00:00:30 lokálne = 2026-08-05T22:00:30Z.
+    const result = await runPreWriteGuards(validParams, {
+      ...deps,
+      now: () => new Date('2026-08-05T22:00:30.000Z'),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(GUARD_CODES.midnightFreeze);
+  });
+
+  it('mimo pásma ±60 s zápis prechádza', async () => {
+    const { deps } = world();
+    const result = await runPreWriteGuards(validParams, { ...deps, now: () => SAFE_NOW });
+    expect(result.ok).toBe(true);
+  });
+});

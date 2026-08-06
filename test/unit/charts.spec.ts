@@ -88,6 +88,25 @@ describe('G5 segmenty a G1 pomôcky', () => {
     expect(segments.some((s) => s.key === 'pending')).toBe(false); // nuly sa nekreslia
   });
 
+  it('neznámy stav zo servera sa nevypustí — ide do segmentu „neznámy stav“', () => {
+    // Server môže poslať stav, ktorý UI (ešte) nepozná — súčet MUSÍ sedieť.
+    const tally = { ok: 3, failed: 1, zvlastny_novy_stav: 2 };
+    expect(tallyTotal(tally)).toBe(6);
+    const segments = itemSegments(tally);
+    expect(segments.reduce((s, x) => s + x.count, 0)).toBe(6);
+    const other = segments.find((s) => s.key === 'other');
+    expect(other?.count).toBe(2);
+    expect(other?.visual.label).toBe('neznámy stav');
+  });
+
+  it('viac neznámych stavov sa zbalí do jedného segmentu, nuly sa ignorujú', () => {
+    const tally = { ok: 1, stav_a: 1, stav_b: 2, stav_c: 0 };
+    expect(tallyTotal(tally)).toBe(4);
+    const segments = itemSegments(tally);
+    expect(segments.filter((s) => s.key === 'other')).toHaveLength(1);
+    expect(segments.find((s) => s.key === 'other')?.count).toBe(3);
+  });
+
   it('okno vrátane oboch koncov: 1.–3. = 3 dni', () => {
     expect(windowLengthDays('2026-08-01', '2026-08-03')).toBe(3);
   });

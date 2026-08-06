@@ -60,6 +60,8 @@ export function formatPercentSk(percent: number): string {
  */
 export function formatCountdownSk(secondsLeft: number | null | undefined): string {
   if (secondsLeft == null) return '—';
+  // U11: NaN/Infinity (napr. z rozbitého `expiresAt`) nesmie dať „NaN h NaN min".
+  if (!Number.isFinite(secondsLeft)) return '—';
   if (secondsLeft <= 0) return 'expirovaný';
   const s = Math.floor(secondsLeft);
   const h = Math.floor(s / 3600);

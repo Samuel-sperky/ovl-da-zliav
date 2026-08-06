@@ -391,12 +391,21 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
     let handle: SecretHandle | null = null;
     let response: Response;
 
+    // D64: dešifrovanie tesne pred odoslaním — ale MIMO transportného
+    // try/catch. Chyba `SecretRef` (typicky `ApiKeyError`: kľúč expiroval
+    // alebo bol wipnutý) NIE JE sieťová chyba: nesmie sa klasifikovať ako
+    // retryable `network` a točiť backoff — nechá sa preletieť volajúcemu,
+    // ktorý ju mapuje na `needs_key` (D21). Request sa v tom prípade
+    // NEODOŠLE, takže niet čo upratovať.
+    if (spec.key !== undefined) {
+      handle = await spec.key();
+    }
+
     try {
-      if (spec.key !== undefined) {
-        // D64: dešifrovanie tesne pred odoslaním. Plaintext existuje ako string
-        // len v tejto hlavičke a len po dobu jedného requestu; `finally` ho maže
-        // a `release()` prepíše Buffer nulami. NIKDY sa neloguje (I1).
-        handle = await spec.key();
+      if (handle !== null) {
+        // Plaintext existuje ako string len v tejto hlavičke a len po dobu
+        // jedného requestu; `finally` ho maže a `release()` prepíše Buffer
+        // nulami. NIKDY sa neloguje (I1).
         headers['X-Api-Key'] = handle.value.toString('utf8');
       }
 

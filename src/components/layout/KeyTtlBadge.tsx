@@ -24,6 +24,16 @@ export interface KeyTtlBadgeProps {
 const SIX_HOURS = 6 * 3600;
 const ONE_HOUR = 3600;
 
+/**
+ * Zvyšné sekundy do `expiresAt`. Neplatný/neparsovateľný string → `null`
+ * (U11) — badge vtedy zobrazí „kľúč chýba" namiesto „kľúč: NaN h NaN min".
+ */
+export function secondsLeftFrom(expiresAt: string, nowMs: number): number | null {
+  const expiryMs = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiryMs)) return null;
+  return Math.floor((expiryMs - nowMs) / 1000);
+}
+
 export function KeyTtlBadge({ present, expiresAt }: KeyTtlBadgeProps) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -32,7 +42,10 @@ export function KeyTtlBadge({ present, expiresAt }: KeyTtlBadgeProps) {
     return () => clearInterval(id);
   }, []);
 
-  if (!present || !expiresAt) {
+  // U11: neplatný `expiresAt` sa správa ako chýbajúci kľúč (fail-closed).
+  const left = expiresAt ? secondsLeftFrom(expiresAt, now) : null;
+
+  if (!present || !expiresAt || left === null) {
     return (
       <ToneBadge
         tone="critical"
@@ -45,8 +58,6 @@ export function KeyTtlBadge({ present, expiresAt }: KeyTtlBadgeProps) {
       </ToneBadge>
     );
   }
-
-  const left = Math.floor((new Date(expiresAt).getTime() - now) / 1000);
 
   if (left <= 0) {
     return (

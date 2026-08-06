@@ -228,3 +228,29 @@ describe('reminders — pásma 48/24/2 h (D26)', () => {
     ]);
   });
 });
+
+
+describe('D25 — prepadnuté okno pri fire sa NEclaimuje (E7)', () => {
+  it('kampaň s to < dnes ide do lapsed bez claimu a bez falošného campaign_claimed', async () => {
+    const world = makeWorld();
+    world.addCampaign(
+      makeConfirmedCampaign({
+        id: 5,
+        status: 'scheduled',
+        fireAt: new Date(TEST_NOW.getTime() - 1 * MINUTE), // due, ešte nie missed
+        dateFrom: '2026-07-01',
+        dateTo: '2026-08-01', // celé okno v minulosti (dnes je 2026-08-05)
+      }),
+    );
+
+    const result = await world.ticker.runTick();
+
+    expect(world.statusOf(5)).toBe('lapsed');
+    expect(result.fired).toBe(0);
+    expect(world.executorCalls).toHaveLength(0);
+    expect(world.auditEvents()).toContain('campaign_lapsed');
+    // Pred opravou: claim PRED prepočtom okna → falošný campaign_claimed
+    // a neexistujúci prechod running → lapsed.
+    expect(world.auditEvents()).not.toContain('campaign_claimed');
+  });
+});

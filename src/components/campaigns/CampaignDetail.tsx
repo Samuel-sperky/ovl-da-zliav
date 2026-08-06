@@ -47,6 +47,9 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   const [error, setError] = useState<ApiError | null>(null);
   const [showExtend, setShowExtend] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Inline „Naozaj?" — zrušenie kampane nejde na jeden klik (rovnaký vzor ako
+  // odobranie produktu z allowlistu).
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [execPreview, setExecPreview] = useState<PreviewResponse | null>(null);
   const [execWriting, setExecWriting] = useState(false);
   const [execLoading, setExecLoading] = useState(false);
@@ -93,12 +96,14 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   const canAck = (FINISHED as readonly string[]).includes(c.status);
 
   async function cancelCampaign() {
+    if (cancelling) return;
     setError(null);
     setCancelling(true);
     const res = await postJson<{ status: string }>(`/api/campaigns/${campaignId}/cancel`, {
       reason: 'zrušené používateľom v detaile kampane',
     });
     setCancelling(false);
+    setConfirmingCancel(false);
     if (res.ok) void load();
     else setError(res.error);
   }
@@ -204,9 +209,32 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
           Duplikovať
         </a>
         {canCancel ? (
-          <Button variant="danger" disabled={cancelling} onClick={() => void cancelCampaign()}>
-            {cancelling ? 'Ruší sa…' : 'Zrušiť kampaň (len plán v DB)'}
-          </Button>
+          confirmingCancel ? (
+            <span className="ovl-row" style={{ gap: '0.3rem', alignItems: 'center' }} role="group">
+              <span className="ovl-small">
+                <strong>Naozaj zrušiť?</strong>
+              </span>
+              <Button
+                variant="danger"
+                disabled={cancelling}
+                onClick={() => void cancelCampaign()}
+                data-testid="cancel-campaign-confirm"
+              >
+                {cancelling ? 'Ruší sa…' : 'Áno, zrušiť'}
+              </Button>
+              <Button disabled={cancelling} onClick={() => setConfirmingCancel(false)}>
+                Nie
+              </Button>
+            </span>
+          ) : (
+            <Button
+              variant="danger"
+              onClick={() => setConfirmingCancel(true)}
+              data-testid="cancel-campaign"
+            >
+              Zrušiť kampaň (len plán v DB)
+            </Button>
+          )
         ) : null}
         {canAck ? (
           <Button

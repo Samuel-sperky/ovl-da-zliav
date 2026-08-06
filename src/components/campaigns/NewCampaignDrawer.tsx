@@ -18,7 +18,7 @@
  * predvyplnenie je len pohodlie: prienik s allowlistom sa robí vždy a celý
  * tok vrátane potvrdení zostáva povinný.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   AllowlistProduct,
@@ -70,9 +70,19 @@ export interface NewCampaignDrawerProps {
   open: boolean;
   onClose: () => void;
   prefill?: NewCampaignPrefill | null;
+  /** Zavolá sa po ÚSPEŠNOM vytvorení kampane — volajúci si refetchne zoznam. */
+  onCreated?: () => void;
+  /** Vysvetľujúca veta pre používateľa (napr. zlyhané duplikovanie cez ?podla=). */
+  notice?: string | null;
 }
 
-export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerProps) {
+export function NewCampaignDrawer({
+  open,
+  onClose,
+  prefill,
+  onCreated,
+  notice,
+}: NewCampaignDrawerProps) {
   const gate = useWriteGate();
   const [phase, setPhase] = useState<Phase>('draft');
   const [allowlist, setAllowlist] = useState<AllowlistProduct[] | null>(null);
@@ -89,24 +99,41 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
   const [namedSets, setNamedSets] = useState<ProductSet[]>([]);
   const [setName, setSetName] = useState('');
   const [setNote, setSetNote] = useState<string | null>(null);
-  const [prefillApplied, setPrefillApplied] = useState(false);
+  // Aplikovaný prefill sa viaže na IDENTITU objektu — nový prefill (druhé
+  // `?nova=1` v tom istom mounte) sa tak aplikuje tiež, starý sa neopakuje.
+  const [appliedPrefill, setAppliedPrefill] = useState<NewCampaignPrefill | null>(null);
+  const [allowlistFailed, setAllowlistFailed] = useState(false);
+  // Generácia zavretia: odpoveď dry-runu rozbehnutého PRED zavretím sa zahodí.
+  const closeGen = useRef(0);
+
+  // Zlyhanie fetchu allowlistu NIE JE prázdny allowlist — drží sa samostatný
+  // error stav s možnosťou opakovania, inak by sa poškodil prefill aj sady.
+  const loadAllowlist = useCallback(() => {
+    setAllowlist(null);
+    setAllowlistFailed(false);
+    void getJson<AllowlistProduct[]>('/api/allowlist').then((res) => {
+      if (res.ok) {
+        setAllowlist(res.data.filter((p) => p.slot != null));
+      } else {
+        setAllowlistFailed(true);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
-    void getJson<AllowlistProduct[]>('/api/allowlist').then((res) => {
-      setAllowlist(res.ok ? res.data.filter((p) => p.slot != null) : []);
-    });
+    loadAllowlist();
     void getJson<{ eagerWriteDefault: boolean }>('/api/settings').then((res) => {
       if (res.ok) setEagerDefault(res.data.eagerWriteDefault);
     });
     setLastSet(readLastSet());
     setNamedSets(readNamedSets());
-  }, [open]);
+  }, [open, loadAllowlist]);
 
   // Prefill sa aplikuje raz po načítaní allowlistu — VŽDY len prienik
   // s aktuálnym allowlistom (výber mimo allowlistu neexistuje, I2).
   useEffect(() => {
-    if (!open || prefillApplied || allowlist == null || !prefill) return;
+    if (!open || allowlist == null || !prefill || appliedPrefill === prefill) return;
     const allowed = new Set(allowlist.map((p) => p.productId));
     if (prefill.productIds && prefill.productIds.length > 0) {
       const usable = prefill.productIds.filter((id) => allowed.has(id));
@@ -129,8 +156,8 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
         setTo(t);
       }
     }
-    setPrefillApplied(true);
-  }, [open, prefillApplied, allowlist, prefill]);
+    setAppliedPrefill(prefill);
+  }, [open, appliedPrefill, allowlist, prefill]);
 
   const selectedWithOwnWrite = useMemo(() => {
     if (!allowlist) return [];
@@ -162,12 +189,24 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
     setResult(null);
     setSetName('');
     setSetNote(null);
-    setPrefillApplied(false);
+    setAppliedPrefill(null);
   }
 
   function close() {
-    // Po výsledku začína ďalšie otvorenie odznova; rozrobený výber zostáva.
-    if (phase === 'result') resetAll();
+    // Počas zápisu sa drawer zavrieť NEDÁ — výsledok operácie musí byť vidieť.
+    if (phase === 'writing') return;
+    closeGen.current += 1;
+    if (phase === 'result') {
+      // Po výsledku začína ďalšie otvorenie odznova.
+      resetAll();
+    } else {
+      // Preview token je jednorazový a expiruje — pri zavretí sa zahadzuje,
+      // aby drawer nezamrzol v kroku 2 so spáleným tokenom. Rozrobený výber
+      // (produkty/percento/dátumy) zostáva ako draft.
+      setPhase('draft');
+      setPreview(null);
+      setError(null);
+    }
     onClose();
   }
 
@@ -201,6 +240,7 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
     if (!localValid || percent == null || !gate.canWrite) return;
     setError(null);
     setPhase('previewing');
+    const gen = closeGen.current;
     const res = await postJson<PreviewResponse>('/api/campaigns/preview', {
       productIds: [...selected].sort((a, b) => a - b),
       percent,
@@ -212,6 +252,8 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
       // v `acknowledgements.oneDay` ešte pred spálením preview tokenu (I3, D30).
       ...(from === to ? { oneDayAcknowledged: true } : {}),
     });
+    // Drawer sa medzitým zavrel — odpoveď (aj token) sa zahadzuje.
+    if (gen !== closeGen.current) return;
     if (res.ok) {
       setPreview(res.data);
       setPhase('preview');
@@ -222,6 +264,8 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
   }
 
   async function confirm(submit: ConfirmSubmit) {
+    // In-flight guard: kým beží zápis, druhé potvrdenie sa nespustí.
+    if (phase === 'writing') return;
     if (!preview || percent == null) return;
     setError(null);
     setPhase('writing');
@@ -236,6 +280,7 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
       setLastSet(readLastSet());
       setResult(res.data);
       setPhase('result');
+      onCreated?.();
     } else {
       setError(res.error);
       setPhase('preview');
@@ -346,6 +391,11 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
       {/* ── krok 1: výber ── */}
       {!step2 && phase !== 'result' ? (
         <div className="ovl-stack" style={{ gap: '1.25rem' }} data-testid="wizard-step1">
+          {notice ? (
+            <p className="ovl-small" role="status" style={{ margin: 0 }} data-testid="prefill-notice">
+              {notice}
+            </p>
+          ) : null}
           <section className="ovl-stack" style={{ gap: '0.5rem' }}>
             <h3 style={{ margin: 0 }}>1. Produkty (len allowlist, max 10)</h3>
 
@@ -379,7 +429,18 @@ export function NewCampaignDrawer({ open, onClose, prefill }: NewCampaignDrawerP
               </p>
             ) : null}
 
-            {allowlist == null ? (
+            {allowlistFailed ? (
+              <div className="ovl-stack" style={{ gap: '0.4rem' }}>
+                <p className="ovl-error ovl-small" role="alert" style={{ margin: 0 }} data-testid="allowlist-error">
+                  Allowlist sa nepodarilo načítať — výber produktov zatiaľ nie je k dispozícii.
+                </p>
+                <div>
+                  <Button small onClick={loadAllowlist} data-testid="allowlist-retry">
+                    Skúsiť znova
+                  </Button>
+                </div>
+              </div>
+            ) : allowlist == null ? (
               <div className="ovl-skeleton" style={{ minHeight: '4rem' }} aria-busy="true" />
             ) : allowlist.length === 0 ? (
               <p className="ovl-muted" style={{ margin: 0 }}>

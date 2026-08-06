@@ -257,3 +257,35 @@ describe('variantStockFromRaw — fail-closed parsovanie cache', () => {
     expect(variantStockFromRaw(8, null, { attributes: [{ quantity: 'veľa' }] }, null)).toBeNull();
   });
 });
+
+
+describe('key_before_start — porovnávajú sa OKAMIHY, nie UTC dni (E10)', () => {
+  it('kľúč platný cez fire_at nehlási nič, aj keď UTC deň expirácie je pred date_from', () => {
+    // Expirácia 2026-08-09T23:30Z = 10. 8. 01:30 bratislavského času; fire_at
+    // kampane z 10. 8. je 9. 8. 22:05Z — kľúč fire prežije. Porovnanie UTC
+    // slice(0,10) ('2026-08-09' < '2026-08-10') by tu vyrobilo falošný poplach.
+    const findings = analyze(
+      snapshot({
+        keyExpiresAt: '2026-08-09T23:30:00.000Z',
+        campaigns: [
+          campaign({ id: 9, status: 'scheduled', dateFrom: '2026-08-10', dateTo: '2026-08-25' }),
+        ],
+      }),
+    );
+    expect(findings.find((x) => x.kind === 'key_before_start')).toBeUndefined();
+  });
+
+  it('kľúč expirujúci pred fire_at sa hlási aj tesne okolo polnoci', () => {
+    // Expirácia 2026-08-09T22:00Z je PRED fire_at 2026-08-09T22:05Z (10. 8.
+    // 00:05 lokálne) — zápis by skončil v needs_key, nález je oprávnený.
+    const f = analyze(
+      snapshot({
+        keyExpiresAt: '2026-08-09T22:00:00.000Z',
+        campaigns: [
+          campaign({ id: 10, status: 'scheduled', dateFrom: '2026-08-10', dateTo: '2026-08-25' }),
+        ],
+      }),
+    ).find((x) => x.kind === 'key_before_start');
+    expect(f).toBeDefined();
+  });
+});

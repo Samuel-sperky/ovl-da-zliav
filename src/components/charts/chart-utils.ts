@@ -354,15 +354,28 @@ export const SEGMENT_ORDER = [
 ] as const;
 
 export function itemSegments(tally: Readonly<Record<string, number>>): Segment[] {
-  return SEGMENT_ORDER.filter((key) => (tally[key] ?? 0) > 0).map((key) => ({
+  const segments: Segment[] = SEGMENT_ORDER.filter((key) => (tally[key] ?? 0) > 0).map((key) => ({
     key,
     count: tally[key] ?? 0,
     visual: itemVisual(key),
   }));
+  // Stav, ktorý UI (ešte) nepozná, sa nesmie ticho vypustiť — súčet segmentov
+  // MUSÍ sedieť so `spolu`. Neznáme stavy sa zbalia do jedného segmentu.
+  const KNOWN: ReadonlySet<string> = new Set(SEGMENT_ORDER);
+  const otherCount = Object.entries(tally)
+    .filter(([key, count]) => !KNOWN.has(key) && Number.isFinite(count) && count > 0)
+    .reduce((sum, [, count]) => sum + count, 0);
+  if (otherCount > 0) segments.push({ key: 'other', count: otherCount, visual: UNKNOWN_VISUAL });
+  return segments;
 }
 
 export function tallyTotal(tally: Readonly<Record<string, number>>): number {
-  return SEGMENT_ORDER.reduce((sum, key) => sum + (tally[key] ?? 0), 0);
+  // Súčet VŠETKÝCH stavov (aj neznámych) — inak by počítadlá pod grafom
+  // nesedeli so segmentmi ani so `spolu`.
+  return Object.values(tally).reduce(
+    (sum, count) => sum + (Number.isFinite(count) && count > 0 ? count : 0),
+    0,
+  );
 }
 
 /* ═══════════════════════ 7. TTL oblúk (G6) ════════════════════════════════ */

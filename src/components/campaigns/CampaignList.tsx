@@ -9,7 +9,7 @@
  * Derivované pohľady „aktívna"/„expirovaná" (§4) filtruje klient nad
  * `status=done`. Prázdny stav v štýle predlohy s akciou otvárajúcou drawer.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { CampaignListRow, CampaignsPageData } from '@/components/campaigns/api';
 import { getJson, todayDateOnly } from '@/components/campaigns/api';
@@ -37,22 +37,29 @@ export function deriveView(row: CampaignListRow): 'aktivna' | 'expirovana' | nul
 export interface CampaignListProps {
   /** Otvorenie drawera novej kampane (page-head aj prázdny stav). */
   onNewCampaign?: () => void;
+  /** Zmena hodnoty vynúti refetch (napr. po vytvorení kampane v draweri). */
+  refreshKey?: number;
 }
 
-export function CampaignList({ onNewCampaign }: CampaignListProps) {
+export function CampaignList({ onNewCampaign, refreshKey = 0 }: CampaignListProps) {
   const [filter, setFilter] = useState<CampaignFilterValue>('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState<CampaignsPageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  // Sekvenčný token proti race: stará odpoveď NIKDY neprepíše novšiu
+  // (rýchle prepínanie strán/filtrov).
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     const status = filterToStatusQuery(filter);
     const qs = new URLSearchParams({ page: String(page), perPage: '20' });
     if (status) qs.set('status', status);
     const res = await getJson<CampaignsPageData>(`/api/campaigns?${qs.toString()}`);
+    if (seq !== requestSeq.current) return; // medzitým odišla novšia požiadavka
     if (res.ok) {
       setData(res.data);
       setFailed(false);
@@ -60,7 +67,8 @@ export function CampaignList({ onNewCampaign }: CampaignListProps) {
       setFailed(true);
     }
     setLoading(false);
-  }, [filter, page]);
+    // `refreshKey` je zámerná závislosť — jeho zmena vynúti nový fetch.
+  }, [filter, page, refreshKey]);
 
   useEffect(() => {
     void load();
@@ -125,6 +133,11 @@ export function CampaignList({ onNewCampaign }: CampaignListProps) {
   ];
 
   const filtersActive = needle.length > 0 || filter !== 'all';
+  // Derivované pohľady (aktívna/expirovaná) filtruje KLIENT nad načítanou
+  // stranou `status=done` — stránkovanie podľa serverového `total` by tu
+  // ukazovalo prázdne strany a zlé počty, preto sa skrýva (poctivá verzia;
+  // serverový filter je TODO pre vlastníka route `/api/campaigns`).
+  const derivedFilter = filter === 'aktivna' || filter === 'expirovana';
 
   return (
     <div className="ovl-stack ovl-view-in" style={{ gap: '0.25rem' }} data-testid="campaign-list">
@@ -198,7 +211,13 @@ export function CampaignList({ onNewCampaign }: CampaignListProps) {
             rowKey={(r) => r.id}
             emptyLabel="Žiadne kampane pre zvolený filter."
           />
-          {data && data.total > data.perPage ? (
+          {derivedFilter && data && data.total > data.perPage ? (
+            <p className="ovl-small ovl-muted" style={{ marginTop: '0.75rem' }} data-testid="derived-filter-note">
+              Filter aktívna/expirovaná sa vyhodnocuje len nad načítanými kampaňami — staršie
+              zapísané kampane sa v tomto pohľade nemusia zobraziť.
+            </p>
+          ) : null}
+          {!derivedFilter && data && data.total > data.perPage ? (
             <div className="ovl-row" style={{ gap: '0.5rem', alignItems: 'center', marginTop: '0.75rem' }}>
               <Button small disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                 ← Predchádzajúca

@@ -24,6 +24,7 @@ import { z } from 'zod';
 
 import type {
   CampaignRecord,
+  CampaignStatus,
   CampaignsRepo,
   ExecutorResult,
   KeyProbeResult,
@@ -331,29 +332,39 @@ export function createKeyDeleteRoute(deps: KeyRouteDeps = {}): NextRouteHandler 
           message: `panic button „${PANIC_CONFIRM_LITERAL}" — kľúč unikol (D67)`,
         });
 
-        /* 3. Zrušenie VŠETKÝCH čakajúcich kampaní — po incidente nič nebeží samo. */
+        /* 3. Zrušenie VŠETKÝCH čakajúcich kampaní — po incidente nič nebeží samo.
+         * Repozitár `list()` clampuje `perPage` na 100, preto sa stránkuje:
+         * zrušené kampane z filtra vypadnú, takže sa vždy číta 1. stránka,
+         * kým nie je prázdna. Tvrdý strop iterácií je poistka proti zacykleniu,
+         * keby `setStatus` stav nezmenil. */
         let cancelled = 0;
         // `draft`/`scheduled`/`needs_key`/`missed` — zrušiteľné stavy (§4).
-        const waiting = await campaigns.list({
-          status: ['draft', 'scheduled', 'needs_key', 'missed'],
-          page: 1,
-          perPage: 1000,
-        });
-        for (const campaign of waiting.data) {
-          await campaigns.setStatus(campaign.id, 'cancelled', {
-            statusReason: 'panic_button: kľúč unikol, kampaň zrušená (D67).',
-            finishedAt: now(),
+        const waitingStatuses: CampaignStatus[] = ['draft', 'scheduled', 'needs_key', 'missed'];
+        for (let pass = 0; pass < 1000; pass += 1) {
+          const waiting = await campaigns.list({
+            status: waitingStatuses,
+            page: 1,
+            perPage: 100,
           });
-          await audit({
-            actor: 'user',
-            userId: ctx.claims.sub,
-            eventType: 'campaign_cancelled',
-            ok: true,
-            campaignId: campaign.id,
-            operationId: campaign.operationId,
-            message: 'Zrušené panic buttonom (D67).',
-          });
-          cancelled += 1;
+          if (waiting.data.length === 0) break;
+          for (const campaign of waiting.data) {
+            await campaigns.setStatus(campaign.id, 'cancelled', {
+              statusReason: 'panic_button: kľúč unikol, kampaň zrušená (D67).',
+              finishedAt: now(),
+            });
+            await audit({
+              actor: 'user',
+              userId: ctx.claims.sub,
+              eventType: 'campaign_cancelled',
+              ok: true,
+              campaignId: campaign.id,
+              operationId: campaign.operationId,
+              message: 'Zrušené panic buttonom (D67).',
+            });
+            cancelled += 1;
+          }
+          // Táto dávka pokryla všetko, čo filter ešte videl.
+          if (waiting.data.length >= waiting.total) break;
         }
 
         return { wiped: true, cancelledCampaigns: cancelled, runbookUrl: PANIC_RUNBOOK_URL };

@@ -172,6 +172,19 @@ export async function buildPreview(
       const found = await campaignsRepo.findFutureOverlaps([productId], input.from, input.to);
       for (const campaign of found) {
         if (campaign.id === input.parentCampaignId) continue;
+        // D28: `kind='overwrite'` je EXPLICITNÝ prepis už ZAPÍSANEJ zľavy.
+        // Okno dobehnutej kampane (`done`/`partial`) nie je „budúca kampaň" —
+        // je to presne to, čo sa vedome prepisuje (diff starý → nový nesú
+        // warnings `overwrite` nižšie). Bez tejto výnimky bol legitímny
+        // prepis VŽDY zablokovaný, keď UI neposlalo `parentCampaignId`.
+        // Prekryv s kampaňou, ktorá ešte len zapíše (`scheduled`/`needs_key`/
+        // `missed`) alebo práve zapisuje (`running`), blokuje aj prepis.
+        if (
+          input.kind === 'overwrite' &&
+          (campaign.status === 'done' || campaign.status === 'partial')
+        ) {
+          continue;
+        }
         conflicts.push({
           productId,
           campaignId: campaign.id,

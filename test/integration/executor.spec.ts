@@ -30,6 +30,8 @@ import {
 import { createShopClient } from '@/lib/shop/client';
 import { newOperationContext } from '@/lib/shop/correlation';
 
+import { ApiKeyError } from '@/lib/repo/api-key.repo';
+
 import { useMockShop, VALID_API_KEY } from '../helpers/mock';
 import { makeCampaign } from '../helpers/factories';
 
@@ -418,6 +420,63 @@ describe('dry-run náhľad (preview, O2/D39c)', () => {
     expect(mock.state.writeRequests()).toHaveLength(0);
   });
 
+  it("kind='overwrite' bez parentCampaignId neblokuje okno dobehnutej kampane (D28)", async () => {
+    const productIds = [201];
+    mock.state.setProducts([{ id: 201, name: 'Šperk 201', price: 10, has_attributes: false }]);
+    const allowlistRepo = createMemoryAllowlistRepo(productIds);
+    const tokens = createPreviewTokenService({ secret: Buffer.alloc(32, 7) });
+    const overlapping: CampaignRecord = {
+      ...makeCampaign({ id: 77, status: 'done', productIds }),
+      dateFrom: day(1),
+      dateTo: day(5),
+    };
+    const campaignsRepo = {
+      async lastOwnWrite() {
+        return null;
+      },
+      async findFutureOverlaps() {
+        return [overlapping];
+      },
+    };
+    const previewDeps = {
+      shopClient: shopClient(),
+      allowlistRepo: allowlistRepo as never,
+      campaignsRepo,
+      catalogRepo: null,
+      previewTokens: tokens,
+    };
+    const inputBase = { userId: 1, productIds, percent: 10, from: day(1), to: day(5) };
+
+    // Explicitný prepis dobehnutej (done) kampane NIE JE blokovaný — presne
+    // na to `kind='overwrite'` existuje; UI parentCampaignId neposiela.
+    const overwrite = await buildPreview(
+      { ...inputBase, kind: 'overwrite' as const },
+      previewDeps,
+      newOperationContext(),
+    );
+    expect(overwrite.blockers).toEqual([]);
+    expect(overwrite.previewToken).not.toBe('');
+
+    // `kind='new'` na tom istom okne zostáva blokovaný (D28).
+    const asNew = await buildPreview(
+      { ...inputBase, kind: 'new' as const },
+      previewDeps,
+      newOperationContext(),
+    );
+    expect(asNew.blockers.some((b) => b.code === 'future_overlap')).toBe(true);
+    expect(asNew.previewToken).toBe('');
+
+    // Prekryv s kampaňou, ktorá ešte LEN zapíše, blokuje aj prepis.
+    overlapping.status = 'scheduled';
+    const overwriteVsScheduled = await buildPreview(
+      { ...inputBase, kind: 'overwrite' as const },
+      previewDeps,
+      newOperationContext(),
+    );
+    expect(overwriteVsScheduled.blockers.some((b) => b.code === 'future_overlap')).toBe(true);
+    expect(overwriteVsScheduled.previewToken).toBe('');
+  });
+
   it('produkt mimo allowlistu je blokátor a token sa nevydá (I2, fail-closed)', async () => {
     const allowlistRepo = createMemoryAllowlistRepo([201]);
     const world = createMemoryCampaignWorld();
@@ -435,5 +494,150 @@ describe('dry-run náhľad (preview, O2/D39c)', () => {
     );
     expect(preview.previewToken).toBe('');
     expect(preview.blockers.length).toBeGreaterThan(0);
+  });
+});
+
+
+/** Deň v logickej zóne (Europe/Bratislava) — pre posun `date_from` na „dnes". */
+const zonedDay = (offset: number): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bratislava' }).format(
+    new Date(Date.now() + offset * 86_400_000),
+  );
+
+describe('D25 — dopálenie s posunutým date_from (relight po zadaní kľúča)', () => {
+  it('potvrdenie nad pôvodným from (date_from_original) prejde a dávka sa zapíše', async () => {
+    const originalFrom = zonedDay(-3);
+    const { executor, world } = makeWorld({ from: originalFrom, to: day(10) });
+
+    // Stav po posune D25 (scheduler/relight): from → dnes, pôvodné from
+    // v date_from_original, confirm_payload_hash stále nad pôvodným from.
+    const campaign = world.campaignsRepo.campaigns.get(1)!;
+    campaign.status = 'needs_key';
+    campaign.dateFrom = zonedDay(0);
+    campaign.dateFromOriginal = originalFrom;
+
+    const result = await executor.executeCampaign(1);
+
+    // Pred opravou: confirmation_mismatch navždy — kampaň sa nedala dopáliť.
+    expect(result.status).toBe('done');
+    expect(mock.state.writeRequests()).toHaveLength(3);
+  });
+
+  it('podvrhnutá sada neprejde ani s date_from_original (I3 sa neoslabuje)', async () => {
+    const originalFrom = zonedDay(-3);
+    const { executor, world } = makeWorld({ from: originalFrom, to: day(10) });
+    const campaign = world.campaignsRepo.campaigns.get(1)!;
+    campaign.status = 'needs_key';
+    campaign.dateFrom = zonedDay(0);
+    campaign.dateFromOriginal = originalFrom;
+    campaign.percent = 30; // iné percento než potvrdené
+
+    await expect(executor.executeCampaign(1)).rejects.toMatchObject({
+      code: 'confirmation_mismatch',
+    });
+    expect(mock.state.requestCount).toBe(0);
+  });
+});
+
+describe('dopálenie z needs_key — interrupted položky sa dopíšu (E3)', () => {
+  it('claim z needs_key vráti interrupted na pending a položka sa zapíše', async () => {
+    const { executor, world, audit } = makeWorld({ productIds: [201, 202, 203] });
+
+    // Stav po 401 wipe uprostred dávky (D51): 201 ok, 202 failed, 203 interrupted.
+    const campaign = world.campaignsRepo.campaigns.get(1)!;
+    campaign.status = 'needs_key';
+    const seeded = [...world.campaignItemsRepo.items.values()];
+    seeded[0]!.status = 'ok';
+    seeded[1]!.status = 'failed';
+    seeded[2]!.status = 'interrupted';
+
+    const result = await executor.executeCampaign(1);
+
+    // Pred opravou: 203 zostal interrupted, mock nedostal NIČ a kampaň sa
+    // uzavrela partial s nulou nových zápisov.
+    const after = await world.campaignItemsRepo.listByCampaign(1);
+    expect(after.map((i) => i.status)).toEqual(['ok', 'failed', 'ok']);
+    expect(mock.state.writeRequests().map((r) => r.body.id)).toEqual(['203']);
+    expect(result.status).toBe('partial');
+    const claimAudit = audit.byEvent('campaign_claimed');
+    expect(claimAudit).toHaveLength(1);
+    expect(claimAudit[0]?.message).toContain('prerušených');
+  });
+});
+
+describe('kľúč expiruje uprostred dávky — ApiKeyError nie je sieťová chyba (E4)', () => {
+  it('žiadne retry/backoff: zvyšok interrupted a kampaň needs_key', async () => {
+    const productIds = [201, 202, 203];
+    mock.state.setProducts(
+      productIds.map((id) => ({ id, name: `Šperk ${id}`, price: 19.99, has_attributes: false })),
+    );
+
+    const world = createMemoryCampaignWorld();
+    const audit = createMemoryAudit();
+    const from = day(1);
+    const to = day(10);
+    const campaign: CampaignRecord = {
+      ...makeCampaign({ productIds, percent: 15, status: 'scheduled' }),
+      dateFrom: from,
+      dateTo: to,
+      confirmedAt: new Date(),
+      sudoAt: new Date(),
+      confirmPayloadHash: computePayloadHash({ kind: 'new', productIds, percent: 15, from, to }),
+    };
+    world.seedCampaign(
+      campaign,
+      productIds.map((productId) => ({ productId, priceAtPreview: '19.99' })),
+    );
+
+    // Kľúč, ktorý po prvom použití „expiruje": ďalšie dešifrovanie hodí
+    // ApiKeyError presne ako produkčný repozitár (D63, TTL wipe).
+    let keyLoads = 0;
+    const expiringApiKeyRepo = {
+      async loadForUse() {
+        return async () => {
+          keyLoads += 1;
+          if (keyLoads > 1) {
+            throw new ApiKeyError('expired', 'API kľúč expiroval (TTL 48 h) — zadaj nový v UI (R2).');
+          }
+          const buffer = Buffer.from(VALID_API_KEY, 'utf8');
+          return {
+            value: buffer,
+            release() {
+              buffer.fill(0);
+            },
+          };
+        };
+      },
+      async wipe() {
+        return true;
+      },
+      async touchLastUsed() {},
+    };
+
+    const executor = createExecutor({
+      shopClient: shopClient(),
+      campaignsRepo: world.campaignsRepo,
+      campaignItemsRepo: world.campaignItemsRepo,
+      allowlistRepo: createMemoryAllowlistRepo(productIds),
+      settingsRepo: createMemorySettingsRepo(),
+      auditRepo: audit,
+      apiKeyRepo: expiringApiKeyRepo,
+      audit,
+      mutex: createWriteMutex({ dbLock: null }),
+      flags: FLAGS,
+    });
+
+    const result = await executor.executeCampaign(1);
+
+    // Pred opravou: ApiKeyError → „network" → 3× backoff na KAŽDÚ položku
+    // a kampaň failed/partial namiesto needs_key.
+    expect(result.status).toBe('needs_key');
+    expect(world.campaignsRepo.campaigns.get(1)?.status).toBe('needs_key');
+    expect(world.campaignsRepo.campaigns.get(1)?.statusReason).toBe('key_unavailable');
+    const items = await world.campaignItemsRepo.listByCampaign(1);
+    expect(items.map((i) => i.status)).toEqual(['ok', 'interrupted', 'interrupted']);
+    // Presne 1 zápis odišiel a kľúč sa skúšal presne 2× — ŽIADNY retry.
+    expect(mock.state.writeRequests().map((r) => r.body.id)).toEqual(['201']);
+    expect(keyLoads).toBe(2);
   });
 });

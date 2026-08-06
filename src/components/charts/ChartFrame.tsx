@@ -92,14 +92,54 @@ export interface ChartTooltipApi {
  * a čítačky dostávajú tú istú informáciu cez `<title>` priamo v marku, takže
  * tooltip nikdy nie je jediný nosič údaja.
  */
+/** Odsadenie tooltipu od kurzora. */
+export const TOOLTIP_OFFSET_PX = 12;
+/** `max-width: 18rem` tooltipu v px (16 px root) — horná hranica jeho šírky. */
+export const TOOLTIP_MAX_WIDTH_PX = 288;
+/** Odhad výšky tooltipu (2–3 riadky micro textu) pre preklopenie pri spodku. */
+export const TOOLTIP_EST_HEIGHT_PX = 72;
+
+/**
+ * CSS transform tooltipu (U10): štandardne sa kreslí vpravo dole od kurzora;
+ * keď by na pravom/spodnom okraji grafu pretiekol (x + šírka > rect.width),
+ * preklopí sa cez `translate(-100%)` na opačnú stranu kurzora — percentá
+ * rieši prehliadač zo skutočnej šírky, takže netreba merať DOM.
+ */
+export function tooltipTransform(
+  x: number,
+  y: number,
+  rectWidth: number,
+  rectHeight: number,
+): string {
+  const flipX = rectWidth > 0 && x + TOOLTIP_OFFSET_PX + TOOLTIP_MAX_WIDTH_PX > rectWidth;
+  const flipY = rectHeight > 0 && y + TOOLTIP_OFFSET_PX + TOOLTIP_EST_HEIGHT_PX > rectHeight;
+  const dx = Math.round(flipX ? x - TOOLTIP_OFFSET_PX : x + TOOLTIP_OFFSET_PX);
+  const dy = Math.round(flipY ? y - TOOLTIP_OFFSET_PX : y + TOOLTIP_OFFSET_PX);
+  const base = `translate(${dx}px, ${dy}px)`;
+  if (!flipX && !flipY) return base;
+  return `${base} translate(${flipX ? '-100%' : '0'}, ${flipY ? '-100%' : '0'})`;
+}
+
 export function useChartTooltip(): ChartTooltipApi {
   const box = useRef<HTMLDivElement | null>(null);
-  const [tip, setTip] = useState<{ x: number; y: number; content: ReactNode } | null>(null);
+  const [tip, setTip] = useState<{
+    x: number;
+    y: number;
+    rectWidth: number;
+    rectHeight: number;
+    content: ReactNode;
+  } | null>(null);
 
   const show = useCallback((event: ReactMouseEvent, content: ReactNode) => {
     const rect = box.current?.getBoundingClientRect();
     if (!rect) return;
-    setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, content });
+    setTip({
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
+      content,
+    });
   }, []);
 
   const hide = useCallback(() => setTip(null), []);
@@ -112,7 +152,7 @@ export function useChartTooltip(): ChartTooltipApi {
           position: 'absolute',
           left: 0,
           top: 0,
-          transform: `translate(${Math.round(tip.x + 12)}px, ${Math.round(tip.y + 12)}px)`,
+          transform: tooltipTransform(tip.x, tip.y, tip.rectWidth, tip.rectHeight),
           maxWidth: '18rem',
           pointerEvents: 'none',
           zIndex: 5,
