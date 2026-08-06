@@ -15,7 +15,12 @@ Beží výhradne na `https://localhost:3050` (Caddy, TLS internal, basic auth) �
   scope výhradne `product:edit`) na max 10 allowlist produktoch,
 - plánuje kampane so schedulerom (fire o 00:05 času shopu),
 - vedie append-only audit každej operácie so snapshotom pred/po,
-- **nikdy neruší zľavu v shope** (API to neumožňuje; zľavy len expirujú, R6/I7).
+- **nikdy neruší zľavu v shope** (API to neumožňuje; zľavy len expirujú, R6/I7),
+- **číta predaje** (scope `orders:read`, druhý kľúč) a ukazuje predajnosť
+  allowlist produktov: kusy za obdobie, kusy/deň, dni od posledného predaja.
+  Z objednávok si ukladá VÝHRADNE súčty po produkte a dni — žiadny riadok
+  objednávky, žiadna krajina, žiadne zákaznícke údaje (I8').
+  Nie je to obrátkovosť ani obrat, dôvody sú v `docs/21-RUNBOOKY.md` → R1s.
 
 ## Stack
 
@@ -45,6 +50,7 @@ testovací dry-run (D20).
 | --- | --- |
 | API kľúč nikdy v repe, logoch, audite, UI ani zálohe (I1) | AES-256-GCM + TTL 48 h + wipe; centrálny redaktor; gitleaks v CI; `backup.sh --ignore-table=ovl_zliav.api_key` |
 | Max 10 produktov, fail-closed (I2) | allowlist v DB (UNIQUE slot 1–10) + guardy pred volaním API |
+| Objednávky len na súčty predaja, nikdy zákaznícke dáta (I8') | `/api/order` výhradne v `src/lib/shop/orders-client.ts`; povolené presne dva scopes; DDL kontrola zakazuje `order`/`customer`/`country`/`total_paid`; objednávkový kľúč je mimo zápisovej cesty (`src/lib/sales/sync-runner.ts`) — všetko vynucuje `test/unit/no-orders-scope.spec.ts` a `test/integration/orders-key.spec.ts` |
 | Žiadny zápis bez dry-run + potvrdenia + sudo okna (I3) | preview token (JWT, 15 min) + server-side kontrola |
 | Len `127.0.0.1:3050` (I5) | jediné `ports:` má Caddy; `scripts/check-compose-bind.ts` + `test/unit/compose-bind.spec.ts` v CI; boot assertion `PUBLIC_BIND` |
 | Zápis len pri `NODE_ENV=production` **a** `WRITES_ENABLED=true` (I13) | env poistky, inak vynútený dry-run |

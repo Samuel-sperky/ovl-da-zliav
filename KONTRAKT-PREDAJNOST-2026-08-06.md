@@ -36,7 +36,8 @@ Dopočítavanie COGS z predajnej ceny je ZAKÁZANÉ (I11 — appka nepredstiera 
 ### ÁNO
 - Nový klient shopu pre `GET /api/order` a `GET /api/order/get` — v JEDINOM
   module, ktorý má na to povolenie.
-- Synchronizácia predajov: 90 dní pri prvom behu, potom nočné dopĺňanie.
+- Synchronizácia predajov: **3 dni** pri prvom behu (P3 — okno skrátené z 90
+  z bezpečnosti), potom priebežné dopĺňanie.
 - Nová tabuľka so **súčtami po produktoch a dňoch** — `(id_produktu, deň, kusy)`.
 - Druhý API kľúč (`orders:read`) s vlastnou platnosťou 30 dní, šifrovaný rovnako
   ako shop kľúč, vkladaný v UI, mazateľný panic buttonom.
@@ -74,7 +75,10 @@ ukladať nič zo zákazníckych dát. Scope výhradne `product:edit`.
 **Nové I8':**
 1. Appka smie volať **výhradne** `GET /api/order` a `GET /api/order/get`, a to
    **iba z jediného modulu** `src/lib/shop/orders-client.ts`. Odkiaľkoľvek inde
-   je referencia na objednávkový endpoint chyba.
+   je referencia na objednávkový endpoint chyba. Objednávkový REPOZITÁR
+   (`ordersKeyRepo`) smú vysloviť tri menované moduly: `api-key.repo.ts`,
+   `/api/key/route.ts` a `src/lib/sales/sync-runner.ts` — ten tretí existuje
+   práve preto, aby kľúč nemusel byť v `scheduler/boot.ts` (bod 4).
 2. Povolené scopes sú **presne dva**: `product:edit` (zápis zliav) a
    `orders:read` (čítanie predajov). Žiadny iný.
 3. Do databázy sa **nikdy** nedostane riadok objednávky, id objednávky, krajina
@@ -90,8 +94,8 @@ ostatné zakáže ďalej. Uvoľnenie je úzke a menované, nie plošné.
 
 ## 6. Akceptačné kritériá
 
-1. `npm run typecheck`, `npm run lint` a `npm run test` sú zelené (okrem 10
-   známych Windows-only zlyhaní, ktoré rieši samostatná úloha).
+1. `npm run typecheck`, `npm run lint` a `npm run test` sú zelené (okrem **9**
+   známych Windows-only zlyhaní v 4 súboroch, ktoré rieši samostatná úloha).
 2. Test I8' padne, keď sa objednávkový endpoint zavolá mimo whitelistovaného
    modulu, keď sa pridá tretí scope, alebo keď sa do schémy dostane zákaznícky
    stĺpec. Dokázané zámerne pokazeným pokusom, nie tvrdením.
@@ -113,12 +117,84 @@ ostatné zakáže ďalej. Uvoľnenie je úzke a menované, nie plošné.
 | # | Riziko | Ako sa rieši |
 | --- | --- | --- |
 | R-1 | ~~Objem objednávok nie je zmeraný.~~ **ZMERANÉ 6.8.2026:** okno 3 dní = **978 objednávok**, teda ~988 requestov na prvý beh (978 detailov + 10 strán zoznamu). Shop má celkovo 1 765 576 objednávok, denný prírastok je ~326, takže nočné dopĺňanie je ~330 requestov. Pre porovnanie: pôvodných 90 dní by bolo ~29 000 requestov. | Riziko je uzavreté. Strop na beh je `ORDERS_MAX_REQUESTS_PER_RUN=1500` (pokrýva prvý beh aj rezervu), throttle 250 ms medzi requestami → prvý beh trvá ~4 minúty. |
-| R-2 | `rate_limited` nemá v dokumentácii `Retry-After` ani limit. | Konzervatívny throttle + exponenciálny backoff + strop na beh. Radšej pomalšie než zabanovaný kľúč. |
+| R-2 | ~~`rate_limited` nemá v dokumentácii `Retry-After` ani limit.~~ **NEPRAVDA, opravené pri review:** `docs/api/sperky-api.md` §Rate limiting dokumentuje oboje — **300 requestov / 60 s NA KĽÚČ** a `Retry-After` v sekundách. (Chýbalo to len v md súbore, ktorý dodal Samuel.) | Klient čaká dlhšiu z dvoch hodnôt (hlavička vs. vlastný backoff 5/20/60 s), strop 120 s. `ORDERS_PAUSE_MS` má **spodnú hranicu 250 ms** (~240/min): pri 100 ms by sekvenčný beh v najhoršom prípade dal 600/min, teda dvojnásobok limitu — limit sa tak nedá prekročiť ani konfiguráciou. |
 | R-3 | ~~Pole `total` možno nerešpektuje filtre.~~ **OVERENÉ 6.8.2026:** rešpektuje (978 vs 1 765 576). | Riziko je uzavreté. |
 | R-4 | 30-dňová platnosť kľúča je odchýlka od zásady „kľúče expirujú do 48 h". | Zapísané ako P2. Kľúč je read-only, bez osobných údajov, mazateľný panic buttonom; TTL je v UI viditeľné. |
 | R-5 | Zmena schémy `api_key` sa dotýka existujúcej cesty pre shop kľúč. | mysqldump do `backups/` PRED migráciou (posledné 3 zálohy). Testy existujúcej cesty musia zostať zelené bez úprav. |
 | R-6 | Objednávky idú do appky zo siete — nová odchádzajúca komunikácia. | Povinná bezpečnostná prehliadka v kvalitnej bráne. |
 
-## 8. Výsledok
+## 8. Výsledok (6. 8. 2026)
 
-*(dopĺňa sa po dokončení šprintu)*
+**Postavené a overené.** Branch `claude/local-eshop-discount-app-qm5fzg`.
+Stav: `npm run typecheck` a `npm run lint` čisté, **866 testov prešlo** (pred
+šprintom 625), 9 známych Windows-only zlyhaní v 4 súboroch nedotknutých.
+Stack prestavený, `boot_ok`, migrácia 0009 aplikovaná.
+
+Postup: 3 agenti paralelne v izolovaných worktree (klient objednávok + sync /
+druhý kľúč / karta a pravidlá), integrácia hlavným agentom, potom nezávislý
+review na plnom modeli s povinnou bezpečnostnou prehliadkou.
+
+**Čo review našiel — a bez čoho by to nesmelo ísť do produkcie:**
+
+1. **BLOKUJÚCE: neúplný beh mazal už uložený deň.** Zápis dňa je absolútny
+   prepis; keď prvý list-request skončil na `rate_limited`, `units` zostala
+   prázdna a `replaceDayUnits(day, [])` zmazal kusy, ktoré už boli uložené.
+   Poistka kryla len dni v stave `complete`, nie `partial`. Appka by tak bola
+   tichým generátorom nepravdivých núl.
+2. **Tichá strata objednávok pri stránkovaní**: koniec stránkovania sa počítal
+   z PÝTANÉHO `per_page`, nie z toho, ktoré vrátil shop — deň sa uzavrel ako
+   `complete` s chýbajúcimi objednávkami.
+3. **Po vložení kľúča sa sync nerozbehol 20 hodín**: tick bez kľúča si nasadil
+   plný odstup. Teraz je pre stav „bez kľúča" vlastný 5-minútový interval.
+   Overené naživo v Dockeri (16:55 → 17:01).
+4. **Limit shopu sa dal prekročiť konfiguráciou**: `ORDERS_PAUSE_MS` mal
+   minimum 100 ms = 600 req/min pri sekvenčnom behu, teda dvojnásobok
+   dokumentovaných 300/60 s. Spodná hranica zvýšená na 250 ms.
+5. **Invariant I8' sa dal oklamať dvoma cestami**, obe predvedené pred opravou:
+   cesta zlepená z častí (`'/api' + '/order'`) prešla riadkovým skenom, a
+   migrácia so stĺpcami `order_country`, `buyer_email` prešla DDL kontrolou,
+   pretože `_` je slovný znak a `\b` nikdy nesedelo. Oboje zaplátané.
+6. Karta tvrdila „história sa dopĺňa nočne", pričom beh je intervalový.
+
+**Overené proti skutočnému shopu** (nie z dokumentácie): obal `result`,
+polia zoznamu, rešpektovaný `per_page`, detail s `products[]` (`id`, `qty`),
+`date_add` v tvare `YYYY-MM-DD HH:MM:SS`. Okno 3 dní = 978 objednávok,
+shop celkovo 1 765 576.
+
+**Bezpečnosť** (overené v kóde a v reálnom dumpe, nie z komentárov): kľúč ide
+výhradne do hlavičky, nikdy do URL, logu, `last_error`, auditu ani odpovede;
+`GET /api/key` má bajt na bajt rovnaký tvar ako pred šprintom; panic button
+maže oba kľúče jedným SQL a píše audit za každý; záloha vylučuje celú tabuľku
+`api_key`, v dumpe nie je ani `CREATE TABLE`, ani jeden `INSERT`; `setReduction`
+má ďalej jediného volajúceho a berie výhradne zápisový kľúč.
+
+### Odchýlky od kontraktu (schválené pri integrácii)
+
+| # | Odchýlka | Dôvod |
+| --- | --- | --- |
+| O1 | Sync beží na **20-hodinovom intervale**, nie „nočne" (a 5 min, keď chýba kľúč). | Appka beží na pracovnom počítači, ktorý je v noci vypnutý — nočné okno by znamenalo, že sync neprebehne nikdy. |
+| O2 | Sonda kľúča sa registruje na **module scope** `/api/key/route.ts`. | `instrumentation` má vlastný module graf a side-effect import je kandidát na odstránenie bundlerom; oboje tento projekt už spálilo. |
+| O3 | Whitelist `ordersKeyRepo` má **3 moduly** namiesto 2. | `sync-runner.ts` existuje práve preto, aby kľúč nebol v zápisovej ceste. |
+
+### Zostáva pre Samuela
+
+1. Vložiť kľúč `orders:read` v Nastaveniach (postup: `docs/21-RUNBOOKY.md` R1s).
+   Kľúč, ktorý bol počas šprintu použitý na meranie, **treba rotovať** — bol
+   v plaintexte v Downloads a v prepise konverzácie.
+2. Nastaviť doménu shopu a naplniť allowlist (10 product ID).
+3. Akceptačné kritérium 10 (preklik v prehliadači + screenshot) **nie je
+   splnené**: basic auth sa z agenta vyplniť nedá. Overené je HTTP a
+   vyrenderované HTML (`/ai-agent` obsahuje kartu Predajnosť aj zamknutú
+   Obrátkovosť, `/api/sales` hlási `hasData:false`).
+
+### Otvorené body (flagnuté ako samostatné úlohy, nie súčasť tohto šprintu)
+
+- **Redaktor, vrstva 3 nie je zapojená** (pre-existujúce): `setActiveSecretForScan`
+  nemá v `src/` volajúceho, takže substring scan na skutočný kľúč je vypnutý.
+- `product_sales_daily` ukladá kusy pre **všetky** produkty z objednávok, nie
+  len pre allowlist — rastie celým katalógom × dni.
+- `api_key.id` je `TINYINT UNSIGNED AUTO_INCREMENT` a `store()` maže + vkladá,
+  takže 255 vložení bez restartu vyčerpá rozsah (po restarte sa počítadlo hojí).
+- `insights.ts` počíta deň cez `toISOString()`, `sales.repo.ts` cez lokálne
+  zložky. Zhodné len preto, že kontejner beží v UTC — nastavenie `TZ` na
+  Europe/Bratislava by posunulo dni v `/api/sales`.
