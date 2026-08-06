@@ -611,22 +611,34 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
     .filter((f) => f.endsWith('.ts'))
     .map((f) => ({ file: f, text: readFileSync(resolve(dir, f), 'utf8') }));
 
-  it('má všetkých 6 súborov modulu', () => {
+  /**
+   * I8' (KONTRAKT-PREDAJNOST-2026-08-06 §5) povolil objednávky, ale VÝHRADNE
+   * v jedinom module. Ten je preto zo skenu vyňatý menovite — uvoľnenie je
+   * úzke a menované, nie plošné. Celý invariant vynucuje
+   * `test/unit/no-orders-scope.spec.ts`.
+   */
+  const ORDERS_CLIENT_FILE = 'orders-client.ts';
+  const withoutOrdersClient = sources.filter((s) => s.file !== ORDERS_CLIENT_FILE);
+
+  it('má všetkých 7 súborov modulu', () => {
     expect(sources.map((s) => s.file).sort()).toEqual([
       'client.ts',
       'correlation.ts',
       'errors.ts',
       'messages.sk.ts',
+      ORDERS_CLIENT_FILE,
       'retry.ts',
       'schemas.ts',
     ]);
   });
 
-  it('I8: žiadny objednávkový endpoint ani jeho scope', () => {
+  it("I8': objednávkový endpoint je len v orders-client.ts, scope nikde", () => {
     const ordersPath = `/api/${'order'}`;
     const ordersScope = `orders${':'}read`;
-    for (const { file, text } of sources) {
+    for (const { file, text } of withoutOrdersClient) {
       expect(text.includes(ordersPath), `${file} nesmie volať objednávky`).toBe(false);
+    }
+    for (const { file, text } of sources) {
       expect(text.includes(ordersScope), `${file} nesmie pýtať scope objednávok`).toBe(false);
     }
   });
