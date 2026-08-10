@@ -1,20 +1,22 @@
 /**
- * Aura Zľavy — dashboard (KISS redizajn, plán 33 §3, sekcia C1).
+ * Aura Zľavy — TAB 1: Prehľad (V9, architektúra §1).
  *
- * KISS kompozícia: page-head s eyebrow a „+ Nová kampaň", 3 KPI karty
- * (aktívne zľavy n/10 · vyžaduje zásah · TTL kľúča s oblúkom G6), časová os
- * kampaní (G1), riadok najbližšieho spustenia a banner zásahu len keď n > 0.
- * Dáta číta klient z API kontraktu §5 — `next build` nezávisí od bežiacej DB.
+ * Prístrojová doska: čo sa práve zapisuje, čo čaká na rozhodnutie, ako sa
+ * predáva a ktoré zľavy bežia. Štyri sekcie, jedna dominanta, žiadny rozklik.
+ *
+ * Stránka je zámerne chudobná — všetko vykresľuje klientský `Overview`, ktorý
+ * číta štyri čítacie endpointy. `next build` tak nezávisí od bežiacej
+ * databázy ani od kľúča do eshopu.
  */
 import type { Metadata } from 'next';
 
-import Dashboard from '@/components/dashboard/Dashboard';
+import Overview from '@/components/dashboard/Overview';
 import { APP_DISPLAY_NAME } from '@/version';
 
 export const metadata: Metadata = {
-  title: `Dashboard — ${APP_DISPLAY_NAME}`,
+  title: `Prehľad — ${APP_DISPLAY_NAME}`,
 };
 
-export default function DashboardPage() {
-  return <Dashboard />;
+export default function OverviewPage() {
+  return <Overview />;
 }

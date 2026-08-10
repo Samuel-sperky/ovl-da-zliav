@@ -13,7 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { closePool } from '@/db/pool';
 import { allowlistRepo } from '@/lib/repo/allowlist.repo';
-import { campaignItemsRepo } from '@/lib/repo/campaign-items.repo';
+import { campaignItemsRepo, MAX_ITEMS_PER_CAMPAIGN } from '@/lib/repo/campaign-items.repo';
 import { campaignsRepo } from '@/lib/repo/campaigns.repo';
 import { catalogRepo } from '@/lib/repo/catalog.repo';
 import { schedulerStateRepo } from '@/lib/repo/scheduler-state.repo';
@@ -337,7 +337,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
       const c1 = await campaignsRepo.create(scheduledInput());
       const c2 = await campaignsRepo.create(scheduledInput({ status: 'draft' }));
       await campaignItemsRepo.createMany(c1.id, [
-        { productId: 701, position: 1, priceAtPreview: '10.00', hasAttributes: false },
+        { productId: 701, position: 1, percent: 10, priceAtPreview: '10.00', hasAttributes: false },
       ]);
 
       const byStatus = await campaignsRepo.list({ status: 'draft' });
@@ -358,7 +358,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
         scheduledInput({ dateFrom: testDay(2), dateTo: testDay(6) }),
       );
       await campaignItemsRepo.createMany(campaign.id, [
-        { productId: 801, position: 1, priceAtPreview: null, hasAttributes: false },
+        { productId: 801, position: 1, percent: 10, priceAtPreview: null, hasAttributes: false },
       ]);
 
       const overlaps = await campaignsRepo.findFutureOverlaps([801], testDay(5), testDay(9));
@@ -376,7 +376,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
         scheduledInput({ percent: 20, dateFrom: testDay(0), dateTo: testDay(3) }),
       );
       await campaignItemsRepo.createMany(campaign.id, [
-        { productId: 901, position: 1, priceAtPreview: '50.00', hasAttributes: false },
+        { productId: 901, position: 1, percent: 10, priceAtPreview: '50.00', hasAttributes: false },
       ]);
       expect(await campaignsRepo.lastOwnWrite(901)).toBeNull();
 
@@ -403,9 +403,9 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
         makeCreateCampaignInput({ operationId: testUlid(), createdBy: userId }),
       );
       await campaignItemsRepo.createMany(campaign.id, [
-        { productId: 12, position: 2, priceAtPreview: '12.00', hasAttributes: false },
-        { productId: 11, position: 1, priceAtPreview: '11.00', hasAttributes: true },
-        { productId: 13, position: 3, priceAtPreview: null, hasAttributes: false },
+        { productId: 12, position: 2, percent: 10, priceAtPreview: '12.00', hasAttributes: false },
+        { productId: 11, position: 1, percent: 10, priceAtPreview: '11.00', hasAttributes: true },
+        { productId: 13, position: 3, percent: 10, priceAtPreview: null, hasAttributes: false },
       ]);
       const items = await campaignItemsRepo.listByCampaign(campaign.id);
       expect(items.map((i) => i.productId)).toEqual([11, 12, 13]);
@@ -415,17 +415,50 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
       expect(items[0]?.reductionUnverifiable).toBe(true);
     });
 
-    it('createMany() odmietne viac než 10 položiek (I2)', async () => {
+    /**
+     * PREPÍSANÉ TVRDENIE, nie oslabené (K11 bod 4).
+     *
+     * Pôvodne: „createMany() odmietne viac než 10 položiek (I2)". Strop 10 bol
+     * poistka pilotu a KONTRAKT V3 ho nahradil režimom rozsahu (K1): strop na
+     * jednu zľavu je `max_products_per_campaign` (max 10 000, `CHECK` v DB),
+     * a v režime `pilot` ho drží guard `checkScope`, nie repozitár. Repozitár
+     * preto stráži už len tvrdý strop 10 000 — to isté číslo, aké má
+     * `ck_campaigns_items_total`.
+     */
+    it('createMany() odmietne viac než 10 000 položiek (K1 bod 3)', async () => {
       const campaign = await campaignsRepo.create(
         makeCreateCampaignInput({ operationId: testUlid(), createdBy: userId }),
       );
-      const tooMany = Array.from({ length: 11 }, (_, i) => ({
-        productId: 1000 + i,
+      const tooMany = Array.from({ length: MAX_ITEMS_PER_CAMPAIGN + 1 }, (_, i) => ({
+        productId: 1_000_000 + i,
         position: i + 1,
+        percent: 10,
         priceAtPreview: null,
         hasAttributes: false,
       }));
-      await expect(campaignItemsRepo.createMany(campaign.id, tooMany)).rejects.toThrow(/maximum je 10/);
+      await expect(campaignItemsRepo.createMany(campaign.id, tooMany)).rejects.toThrow(
+        /maximum je 10000/,
+      );
+    });
+
+    /**
+     * K3: percento sa rozhoduje pri POTVRDENÍ a bez neho sa nezapíše nič.
+     * Migrácia 0010 urobila stĺpec `NOT NULL` bez DEFAULT — repozitár to má
+     * povedať zrozumiteľne, nie nechať bublať SQL hlášku.
+     */
+    it('createMany() bez percenta neuloží ani jednu položku (K3)', async () => {
+      const campaign = await campaignsRepo.create(
+        makeCreateCampaignInput({ operationId: testUlid(), createdBy: userId }),
+      );
+      const bezPercenta = [
+        { productId: 31, position: 1, percent: 10, priceAtPreview: null, hasAttributes: false },
+        // druhá položka percento nemá — dávka musí padnúť ako celok
+        { productId: 32, position: 2, priceAtPreview: null, hasAttributes: false },
+      ] as never;
+      await expect(campaignItemsRepo.createMany(campaign.id, bezPercenta)).rejects.toThrow(
+        /percento/i,
+      );
+      expect(await campaignItemsRepo.listByCampaign(campaign.id)).toEqual([]);
     });
 
     it('update() zapíše výsledok zápisu vrátane price_mismatch (D39c)', async () => {
@@ -433,7 +466,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
         makeCreateCampaignInput({ operationId: testUlid(), createdBy: userId }),
       );
       await campaignItemsRepo.createMany(campaign.id, [
-        { productId: 21, position: 1, priceAtPreview: '10.00', hasAttributes: false },
+        { productId: 21, position: 1, percent: 10, priceAtPreview: '10.00', hasAttributes: false },
       ]);
       const [item] = await campaignItemsRepo.listByCampaign(campaign.id);
       await campaignItemsRepo.update(item!.id, {
@@ -469,8 +502,9 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
       await campaignItemsRepo.createMany(
         campaign.id,
         [1, 2, 3, 4].map((n) => ({
-          productId: 30 + n,
+          productId: 40 + n,
           position: n,
+          percent: 10,
           priceAtPreview: null,
           hasAttributes: false,
         })),
@@ -512,7 +546,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
     await campaignsRepo.claim(campaign.id, ['scheduled']);
     await campaignsRepo.setStatus(campaign.id, 'done', { finishedAt: new Date() });
     await campaignItemsRepo.createMany(campaign.id, [
-      { productId: 9001, position: 1, priceAtPreview: null, hasAttributes: false },
+      { productId: 9001, position: 1, percent: 10, priceAtPreview: null, hasAttributes: false },
     ]);
     await campaignItemsRepo.markRemaining(campaign.id, 1, 'skipped', 'test');
 

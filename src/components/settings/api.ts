@@ -16,6 +16,15 @@ export const SUDO_REQUIRED_CODE = 'sudo_required';
 /** Presný literál potvrdenia panic buttonu (D67) — bez diakritiky. */
 export const PANIC_CONFIRM_LITERAL = 'KLUC UNIKOL';
 
+/** Režim rozsahu podľa kontraktu V3 (bod K-jedna). Na povrchu nikdy surový. */
+export type ScopeModeValue = 'pilot' | 'plny';
+
+/** Slovenské meno režimu — obrazovka si ho nevymýšľa. */
+export const SCOPE_MODE_LABELS: Readonly<Record<ScopeModeValue, string>> = {
+  pilot: 'pilotný',
+  plny: 'plný',
+};
+
 export interface SettingsView {
   shopDomain: string | null;
   domainConfirmedAt: string | null;
@@ -23,6 +32,45 @@ export interface SettingsView {
   writesLocked: boolean;
   writesLockedReason: string | null;
   onboardingDoneAt: string | null;
+  /* ── rozsah a rozpočet (kontrakt V3) ─────────────────────────────────── */
+  scopeMode: ScopeModeValue;
+  /** Koľko produktov smie mať jedna zľava v platnom režime. */
+  maxProducts: number;
+  /** Uložený strop pre plný režim (v pilotnom sa nepoužíva). */
+  maxProductsPerCampaign: number;
+  /** Strop pilotného režimu — desať, a je vynútený aj v databáze. */
+  pilotMaxProducts: number;
+  /** `true` = hodnoty sú bezpečný predvolený stav, nie čítanie z databázy. */
+  scopeFailClosed: boolean;
+  /** Koľko zápisov smie appka minúť za jeden deň. */
+  dailyWriteBudget: number;
+}
+
+/** Odpoveď prepnutia režimu rozsahu. */
+export interface ScopeModeResult {
+  scopeMode: ScopeModeValue;
+  maxProducts: number;
+  maxProductsPerCampaign: number;
+  dailyWriteBudget: number;
+  previousScopeMode: ScopeModeValue;
+  pilotMaxProducts: number;
+}
+
+/** Stav rozpočtu zápisov za dnešný deň (čítané, nikdy dopočítavané). */
+export interface BudgetStatusView {
+  day: string;
+  budget: number;
+  spent: number;
+  remaining: number;
+  exhausted: boolean;
+}
+
+/** To, čo z fronty potrebujú Nastavenia: rozpočet a veľkosť fronty. */
+export interface QueueView {
+  budget: BudgetStatusView | null;
+  queue: { pending: number; total: number; done: number; campaigns: number };
+  estimate: { pending: number; perDay: number; days: number; date: string } | null;
+  heartbeat: { lastTickAt: string | null; staleMs: number | null; stale: boolean };
 }
 
 export interface KeyMetaView {
@@ -75,6 +123,19 @@ async function sendJson<T>(
 
 export const getSettings = () => getJson<SettingsView>('/api/settings');
 export const getKeyMeta = () => getJson<KeyMetaView>('/api/key');
+
+/** Rozpočet a fronta pre sekciu Rozpočet. Čisto čítacie. */
+export const getQueue = () => getJson<QueueView>('/api/queue');
+
+/**
+ * Prepnutie režimu rozsahu. Uvoľnenie (pilotný → plný) si server vypýta heslom;
+ * sprísnenie späť je vždy voľné, aby sa dalo pribrzdiť aj v núdzi.
+ */
+export const postScopeMode = (mode: ScopeModeValue, maxProductsPerCampaign?: number) =>
+  postJson<ScopeModeResult>(
+    '/api/settings/scope-mode',
+    maxProductsPerCampaign === undefined ? { mode } : { mode, maxProductsPerCampaign },
+  );
 
 /**
  * Stav OBJEDNÁVKOVÉHO kľúča (`orders_read`, P2/P5). Tvar odpovede je rovnaký

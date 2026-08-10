@@ -45,7 +45,42 @@ const FLAGS: ExecutorFlags = {
   writesEnabled: true,
   maxProductsPerOperation: 10,
   runawayLimitPerHour: 60,
+  // K2 — rozpočet je tu dosť veľký na to, aby dávku nezastavil; frontu
+  // a jej vyčerpanie testuje `fronta-rozpocet.spec.ts`.
+  dailyWriteBudget: 200,
+  // Pauza ≥ 3 s je injektovaná závislosť (K2) — inak by test bežal minúty.
   writePauseMs: 5,
+};
+
+/**
+ * K3 — percento zápisu je na POLOŽKE (`campaign_items.percent`), rozhodnuté
+ * pri potvrdení. `createMemoryCampaignWorld()` (A9) ho zatiaľ neseje, takže ho
+ * testy dopĺňajú tu. Executor ho z hlavičky kampane NIKDY nedopočíta —
+ * položka bez percenta sa zámerne nezapíše.
+ */
+function setItemPercents(
+  world: ReturnType<typeof createMemoryCampaignWorld>,
+  percent: number,
+): void {
+  for (const item of world.campaignItemsRepo.items.values()) {
+    Object.assign(item, { percent });
+  }
+}
+
+/** Rozpočet, ktorý sa v týchto testoch nikdy neminie (K2). */
+const roomyBudget = {
+  async spentToday() {
+    return 0;
+  },
+  async remainingToday() {
+    return {
+      day: '2026-08-10',
+      budget: 200,
+      spent: 0,
+      remaining: 200,
+      exhausted: false,
+    };
+  },
 };
 
 function shopClient(opts: { writeTimeoutMs?: number } = {}) {
@@ -95,14 +130,25 @@ function makeWorld(opts: WorldOptions = {}) {
     dateTo: to,
     confirmedAt: confirm ? new Date() : null,
     sudoAt: confirm ? new Date() : null,
+    // K4 — hash nad SKUTOČNÝMI trojicami `id:percent:price` (nie nad hlavičkou).
     confirmPayloadHash: confirm
-      ? computePayloadHash({ kind: 'new', productIds, percent, from, to })
+      ? computePayloadHash({
+          kind: 'new',
+          from,
+          to,
+          items: productIds.map((productId) => ({
+            productId,
+            percent,
+            priceAtPreview: '19.99' as const,
+          })),
+        })
       : null,
   };
   world.seedCampaign(
     campaign,
     productIds.map((productId) => ({ productId, priceAtPreview: '19.99' })),
   );
+  setItemPercents(world, percent);
 
   const executor = createExecutor({
     shopClient: shopClient({
@@ -116,6 +162,7 @@ function makeWorld(opts: WorldOptions = {}) {
     apiKeyRepo,
     audit,
     mutex,
+    budget: roomyBudget,
     flags: { ...FLAGS, ...(opts.flags ?? {}) },
   });
 
@@ -243,10 +290,13 @@ describe('I3 — bez potvrdenia žiadny request', () => {
     const campaign = world.campaignsRepo.campaigns.get(1)!;
     campaign.confirmPayloadHash = computePayloadHash({
       kind: 'new',
-      productIds: [201, 202, 203],
-      percent: 30, // iné percento než potvrdené
       from: campaign.dateFrom,
       to: campaign.dateTo,
+      items: [201, 202, 203].map((productId) => ({
+        productId,
+        percent: 30, // iné percento než potvrdené
+        priceAtPreview: '19.99' as const,
+      })),
     });
     await expect(executor.executeCampaign(1)).rejects.toMatchObject({
       code: 'confirmation_mismatch',
@@ -301,6 +351,7 @@ describe('D85 — SIGTERM počas dávky', () => {
       apiKeyRepo: createMemoryApiKeyRepo(VALID_API_KEY),
       audit,
       mutex: createWriteMutex({ dbLock: null }),
+      budget: roomyBudget,
       flags: FLAGS,
       isStopping: () => audit.byEvent('write_ok').length >= 1,
     });
@@ -530,12 +581,34 @@ describe('D25 — dopálenie s posunutým date_from (relight po zadaní kľúča
     campaign.status = 'needs_key';
     campaign.dateFrom = zonedDay(0);
     campaign.dateFromOriginal = originalFrom;
-    campaign.percent = 30; // iné percento než potvrdené
+
+    // K3/K4 — potvrdenie sa počíta z trojíc `id:percent:price` na POLOŽKÁCH,
+    // takže podvrh sa robí tam. (Pred V3 sa menilo `campaign.percent`; to už
+    // do hashu nevstupuje a do shopu nešlo nikdy — viď test nižšie.)
+    const [first] = [...world.campaignItemsRepo.items.values()];
+    Object.assign(first as object, { percent: 30 });
 
     await expect(executor.executeCampaign(1)).rejects.toMatchObject({
       code: 'confirmation_mismatch',
     });
     expect(mock.state.requestCount).toBe(0);
+  });
+});
+
+describe('K3 — hlavičkové percento kampane nie je zdroj pravdy', () => {
+  it('zmena campaigns.percent nezmení hash ani to, čo sa zapíše', async () => {
+    const { executor, world } = makeWorld({ productIds: [201, 202], percent: 15 });
+
+    // `campaigns.percent` je len hlavička pre zoznamy (najvyššie percento
+    // pásiem). Executor ju nepoužíva ani na hash, ani na zápis — nesmie teda
+    // ovplyvniť nič, čo odíde do shopu.
+    const campaign = world.campaignsRepo.campaigns.get(1)!;
+    campaign.percent = 30;
+
+    const result = await executor.executeCampaign(1);
+
+    expect(result.status).toBe('done');
+    expect(mock.state.writeRequests().map((r) => r.body.reduction)).toEqual(['15', '15']);
   });
 });
 
@@ -582,12 +655,22 @@ describe('kľúč expiruje uprostred dávky — ApiKeyError nie je sieťová chy
       dateTo: to,
       confirmedAt: new Date(),
       sudoAt: new Date(),
-      confirmPayloadHash: computePayloadHash({ kind: 'new', productIds, percent: 15, from, to }),
+      confirmPayloadHash: computePayloadHash({
+        kind: 'new',
+        from,
+        to,
+        items: productIds.map((productId) => ({
+          productId,
+          percent: 15,
+          priceAtPreview: '19.99' as const,
+        })),
+      }),
     };
     world.seedCampaign(
       campaign,
       productIds.map((productId) => ({ productId, priceAtPreview: '19.99' })),
     );
+    setItemPercents(world, 15);
 
     // Kľúč, ktorý po prvom použití „expiruje": ďalšie dešifrovanie hodí
     // ApiKeyError presne ako produkčný repozitár (D63, TTL wipe).
@@ -624,6 +707,7 @@ describe('kľúč expiruje uprostred dávky — ApiKeyError nie je sieťová chy
       apiKeyRepo: expiringApiKeyRepo,
       audit,
       mutex: createWriteMutex({ dbLock: null }),
+      budget: roomyBudget,
       flags: FLAGS,
     });
 

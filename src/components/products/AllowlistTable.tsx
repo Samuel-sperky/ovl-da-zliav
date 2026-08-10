@@ -120,7 +120,7 @@ export function AllowlistTable({ rows, onChanged }: AllowlistTableProps) {
             disabled={busyId === r.productId}
             data-testid={`remove-product-${r.productId}`}
           >
-            {busyId === r.productId ? 'Odoberám…' : 'Odobrať z allowlistu'}
+            {busyId === r.productId ? 'Odoberám…' : 'Odobrať z povolených'}
           </Button>
           {errors[r.productId] ? (
             <ErrorMessage
@@ -139,7 +139,7 @@ export function AllowlistTable({ rows, onChanged }: AllowlistTableProps) {
         columns={columns}
         rows={rows}
         rowKey={(r) => r.productId}
-        emptyLabel="Allowlist je prázdny — pridaj prvý produkt nižšie. Bez allowlistu appka nezapíše nič."
+        emptyLabel="Zoznam povolených produktov je prázdny — pridaj prvý produkt nižšie. Bez neho appka nezapíše nič."
         caption="Stavy zliav sú „posledný vlastný zápis“, nie stav shopu."
       />
     </div>

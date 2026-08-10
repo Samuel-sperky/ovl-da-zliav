@@ -6,8 +6,22 @@
  *
  * Poradie krokov (normatívne, §9):
  *   mutex (D37, I12) → guardy (I2/I9/I12/I13, D79) → potvrdenie (I3) → kľúč
- *   → per položka: pre-write GET (D48) → D36 skip → audit `write_attempt`
- *   → `setReduction` → vyhodnotenie → pauza 250 ms (D46, I10).
+ *   → per položka: runaway (D79) → denný rozpočet (K2) → pre-write GET (D48)
+ *   → D36 skip → audit `write_attempt` → `setReduction` → vyhodnotenie
+ *   → pauza ≥ 3 s (K2, D46, I10).
+ *
+ * Čo sa mení s KONTRAKTOM V3:
+ *   - **K2 (fronta)** — zápis nie je akcia, je to fronta, ktorá beží týždne.
+ *     Pred KAŽDOU položkou sa kontroluje denný rozpočet; pri vyčerpaní kampaň
+ *     prejde do `queued`, zvyšné položky zostanú `pending` a druhý deň sa
+ *     pokračuje presne tam, kde sa skončilo. `queued` NIE JE `failed` ani
+ *     `partial` — vyčerpaný rozpočet je informácia, nie chyba (odpoveď 59).
+ *   - **K2 (rýchlosť)** — pauza medzi položkami je ≥ 3 s (20 zápisov/min),
+ *     nie 250 ms z D46. I10 tým nie je dotknuté: stále striktne sekvenčne.
+ *   - **K3 (pásma)** — percento zápisu sa berie z `campaign_items.percent`,
+ *     NIKDY z `campaigns.percent`. Pásma sa vyhodnotili pri POTVRDENÍ; executor
+ *     ich nikdy nepočíta. Položka bez platného percenta sa nezapíše — je to
+ *     rozbitý stav, nie dôvod hádať číslo.
  *
  * Tvrdé pravidlá:
  *   - **I10** — položky idú prísne sekvenčne podľa `position`; v tomto súbore
@@ -35,12 +49,11 @@ import type {
   AuditWriter,
   CampaignItemRecord,
   CampaignRecord,
-  CampaignsRepo,
-  CampaignItemsRepo,
   AllowlistRepo,
   ApiKeyRepo,
-  SettingsRepo,
   ExecutorResult,
+  ItemStatus,
+  LastOwnWrite,
   SecretRef,
   ShopClient,
   ShopCtx,
@@ -50,7 +63,11 @@ import type {
 
 import { env } from '@/env';
 import { auditWriter as defaultAuditWriter } from '@/lib/audit/write';
-import { computePayloadHash } from '@/lib/crypto/preview-token';
+import {
+  PreviewTokenError,
+  computePayloadHash,
+  payloadHashItemsFromRows,
+} from '@/lib/crypto/preview-token';
 import { resolveFinalStatus } from '@/lib/domain/status';
 import { logger as defaultLogger } from '@/lib/log/logger';
 import { redact } from '@/lib/log/redact';
@@ -58,17 +75,23 @@ import { ApiKeyError, apiKeyRepo as defaultApiKeyRepo } from '@/lib/repo/api-key
 import { allowlistRepo as defaultAllowlistRepo } from '@/lib/repo/allowlist.repo';
 import { auditRepo as defaultAuditRepo } from '@/lib/repo/audit.repo';
 import { campaignItemsRepo as defaultCampaignItemsRepo } from '@/lib/repo/campaign-items.repo';
-import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
+import {
+  campaignsRepo as defaultCampaignsRepo,
+  type CampaignStatusV3,
+} from '@/lib/repo/campaigns.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import { newRequestId } from '@/lib/shop/correlation';
 import { setReductionPayload } from '@/lib/shop/client';
 
+import { createBudget, type BudgetSource, type WriteAttemptCounter } from '@/lib/engine/budget';
 import {
   checkRunawayAndMaybeLock,
   guardFlagsFromEnv,
   runPreWriteGuards,
+  type CatalogScopeSource,
   type GuardFlags,
   type GuardsDeps,
+  type ScopeSettingsSource,
 } from '@/lib/engine/guards';
 import { writeMutex as defaultWriteMutex } from '@/lib/engine/mutex';
 import { takePreWriteSnapshot } from '@/lib/engine/snapshot';
@@ -124,24 +147,105 @@ export function installSigtermHandler(): void {
   });
 }
 
+/* ═══════════════════════════ typy V3 (K2, K3) ═════════════════════════════ */
+
+/**
+ * Kampaň, ako ju vidí executor. `src/contracts.ts` (vlastník A0) stav `queued`
+ * ešte nepozná; `late` je voliteľné, aby sem pasovali aj staršie tvary.
+ */
+export type ExecutorCampaign = Omit<CampaignRecord, 'status'> & {
+  status: CampaignStatusV3;
+  late?: boolean;
+};
+
+/**
+ * Položka, ako ju vidí executor. `percent` je K3 — rozhodnuté pri POTVRDENÍ.
+ * Je voliteľné len typovo (kontrakt A0 ho nemá); v behu je jeho absencia
+ * rozbitý stav a položka sa NEZAPÍŠE.
+ */
+export type ExecutorItem = CampaignItemRecord & { percent?: number };
+
+type ExecutorCampaignPatch = Partial<
+  Pick<
+    CampaignRecord,
+    | 'statusReason'
+    | 'needsKeySince'
+    | 'startedAt'
+    | 'finishedAt'
+    | 'itemsTotal'
+    | 'itemsOk'
+    | 'itemsFailed'
+    | 'itemsUncertain'
+    | 'resultAckAt'
+  >
+>;
+
+export interface ExecutorCampaignsRepo {
+  getById(id: number): Promise<ExecutorCampaign | null>;
+  claim(id: number, allowedFrom: CampaignStatusV3[]): Promise<boolean>;
+  setStatus(id: number, status: CampaignStatusV3, patch?: ExecutorCampaignPatch): Promise<void>;
+  lastOwnWrite(productId: number): Promise<LastOwnWrite | null>;
+}
+
+export interface ExecutorItemsRepo {
+  listByCampaign(campaignId: number): Promise<ExecutorItem[]>;
+  update(
+    id: number,
+    patch: Partial<Omit<CampaignItemRecord, 'id' | 'campaignId' | 'productId'>>,
+  ): Promise<void>;
+  markRemaining(
+    campaignId: number,
+    fromPosition: number,
+    status: ItemStatus,
+    reason: string,
+  ): Promise<void>;
+}
+
+/** Výsledok dávky vrátane stavu `queued` (K2). */
+export interface ExecutorResultV3 extends Omit<ExecutorResult, 'status' | 'items'> {
+  status: ExecutorResult['status'] | 'queued';
+  items: CampaignItemRecord[];
+}
+
 /* ═══════════════════════════ závislosti ═══════════════════════════════════ */
 
+/**
+ * K2 — minimálna pauza medzi zápismi. Shop dovolí 20 zápisov/min, takže
+ * 60 000 / 20 = 3 000 ms. Nahrádza doterajších 250 ms z D46.
+ */
+export const MIN_WRITE_PAUSE_MS = 3_000;
+
 export interface ExecutorFlags extends GuardFlags {
-  /** Pauza medzi zápismi (D46, I10). Default `SHOP_WRITE_PAUSE_MS` (250). */
+  /**
+   * Pauza medzi zápismi (K2, D46, I10). Produkčne VŽDY ≥ `MIN_WRITE_PAUSE_MS`
+   * — o to sa stará `executorFlagsFromEnv()`. Nižšia hodnota sa dá injektovať
+   * len v testoch, rovnako ako env poistky v `guardFlagsFromEnv()` (I13);
+   * inak by jeden test s reálnou pauzou bežal hodinu.
+   */
   writePauseMs: number;
 }
 
 export function executorFlagsFromEnv(): ExecutorFlags {
-  return { ...guardFlagsFromEnv(), writePauseMs: env.SHOP_WRITE_PAUSE_MS };
+  // ENV sa číta vo funkcii, nie na module scope — inak sa láme `next build`.
+  return {
+    ...guardFlagsFromEnv(),
+    writePauseMs: Math.max(MIN_WRITE_PAUSE_MS, env.SHOP_WRITE_PAUSE_MS),
+  };
 }
 
 export interface ExecutorDeps {
   shopClient: Pick<ShopClient, 'getProduct' | 'setReduction'>;
-  campaignsRepo?: Pick<CampaignsRepo, 'getById' | 'claim' | 'setStatus' | 'lastOwnWrite'>;
-  campaignItemsRepo?: Pick<CampaignItemsRepo, 'listByCampaign' | 'update' | 'markRemaining'>;
+  campaignsRepo?: ExecutorCampaignsRepo;
+  campaignItemsRepo?: ExecutorItemsRepo;
   allowlistRepo?: Pick<AllowlistRepo, 'areAllActive' | 'markShopStatus'>;
-  settingsRepo?: Pick<SettingsRepo, 'get' | 'lockWrites'>;
+  settingsRepo?: ScopeSettingsSource;
+  /** K1 bod 2 — rozsah v režime `plny`. */
+  catalogRepo?: CatalogScopeSource;
   auditRepo?: { countWritesInLastHour(): Promise<number> };
+  /** K2 — počítadlo `write_attempt` za UTC deň (default `SELECT` nad auditom). */
+  writeAttemptCounter?: WriteAttemptCounter;
+  /** K2 — celý rozpočet naraz; má prednosť pred `writeAttemptCounter`. */
+  budget?: BudgetSource;
   apiKeyRepo?: Pick<ApiKeyRepo, 'loadForUse' | 'wipe' | 'touchLastUsed'>;
   audit?: AuditWriter;
   mutex?: WriteMutex;
@@ -164,6 +268,17 @@ export interface ExecuteOptions {
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 
+/**
+ * K3 — percento pásma z položky. `null` = položka ho nemá alebo je mimo 1–30
+ * (I9). Fallback na `campaigns.percent` tu ZÁMERNE nie je: bol by to tichý
+ * zápis iného čísla, než aké používateľ potvrdil.
+ */
+export function itemPercent(item: ExecutorItem): number | null {
+  const value = item.percent;
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null;
+  return value >= 1 && value <= 30 ? value : null;
+}
+
 /* ═══════════════════════════ potvrdenie (I3) ══════════════════════════════ */
 
 /**
@@ -171,16 +286,25 @@ const defaultSleep = (ms: number): Promise<void> =>
  * prepočítava z reálnej sady položiek: podvrhnutá kampaň s cudzím hashom
  * neprejde a na shop nedorazí žiadny request.
  *
+ * K4 — hash sa počíta STREAMOVO nad trojicami `product_id:percent:price` zo
+ * SKUTOČNÝCH riadkov `campaign_items` (`payloadHashItemsFromRows`), nie nad
+ * hlavičkovým percentom kampane. Pri pásmach (K3) je to jediný tvar, ktorý sa
+ * môže zhodovať s tým, čo podpísal dry-run.
+ *
+ * Položka bez platného percenta (1–30) preto neprejde už tu: hash sa z nej
+ * nedá poskladať a I3 znamená, že bez zhody sa neodošle ani jeden request.
+ * Zápis „radšej s hlavičkovým percentom" by bol presne to, čo K3 zakazuje.
+ *
  * D25 — pri dopálení s posunutým `date_from` (scheduler/relight po zadaní
  * kľúča) je pôvodné potvrdenie počítané nad PÔVODNÝM `from`, ktorý žije
  * v `date_from_original` a posun je doložený auditom `campaign_from_shifted`.
  * Preto sa akceptuje hash nad aktuálnym `date_from` (bežná cesta aj manuálne
  * dopálenie s čerstvým tokenom) ALEBO nad `date_from_original` (posunuté okno
- * s pôvodným potvrdením). Nič iné — podvrhnutá sada stále neprejde: percento,
- * produkty, `to` aj `kind` musia sedieť presne, `from` len v týchto dvoch
- * doložených podobách.
+ * s pôvodným potvrdením). Nič iné — podvrhnutá sada stále neprejde: percentá,
+ * ceny z náhľadu, produkty, `to` aj `kind` musia sedieť presne, `from` len
+ * v týchto dvoch doložených podobách.
  */
-export function assertConfirmed(campaign: CampaignRecord, items: CampaignItemRecord[]): void {
+export function assertConfirmed(campaign: ExecutorCampaign, items: ExecutorItem[]): void {
   if (campaign.confirmedAt === null || campaign.confirmPayloadHash === null) {
     throw new EngineError(
       'confirmation_missing',
@@ -195,15 +319,44 @@ export function assertConfirmed(campaign: CampaignRecord, items: CampaignItemRec
       { campaignId: campaign.id },
     );
   }
-  const productIds = items.map((i) => i.productId).sort((a, b) => a - b);
-  const hashFor = (from: CampaignRecord['dateFrom']): string =>
-    computePayloadHash({
-      kind: campaign.kind,
-      productIds,
-      percent: campaign.percent,
-      from,
-      to: campaign.dateTo,
-    });
+  // K3/K4 — hash z riadkov položiek. Bez percenta sa hash nedá poskladať a
+  // I3 tak zápis odmieta ešte pred prvým requestom.
+  const broken = items.filter((item) => itemPercent(item) === null).map((i) => i.productId);
+  if (broken.length > 0) {
+    throw new EngineError(
+      'confirmation_mismatch',
+      'Aspoň jedna položka nemá percento pásma (campaign_items.percent) — potvrdenie sa nedá prepočítať a zápis je odmietnutý (K3, I3).',
+      { campaignId: campaign.id, productIds: broken.slice(0, 20) },
+    );
+  }
+  const hashItems = payloadHashItemsFromRows(
+    items.map((item) => ({
+      productId: item.productId,
+      percent: itemPercent(item) as number,
+      priceAtPreview: item.priceAtPreview,
+    })),
+  );
+  const hashFor = (from: ExecutorCampaign['dateFrom']): string => {
+    try {
+      return computePayloadHash({
+        kind: campaign.kind,
+        from,
+        to: campaign.dateTo,
+        items: hashItems,
+      });
+    } catch (error) {
+      // `PreviewTokenError('bad_input')` = sada sa nedá kanonizovať (rozbitá
+      // cena, duplicita, obrátené okno). Fail-closed: žiadny zápis.
+      if (error instanceof PreviewTokenError) {
+        throw new EngineError(
+          'confirmation_mismatch',
+          `Sada kampane sa nedá kanonizovať pre potvrdzovací hash: ${error.message} (K4, I3).`,
+          { campaignId: campaign.id },
+        );
+      }
+      throw error;
+    }
+  };
   const accepted = [campaign.dateFrom];
   if (campaign.dateFromOriginal !== null && campaign.dateFromOriginal !== campaign.dateFrom) {
     accepted.push(campaign.dateFromOriginal);
@@ -220,10 +373,10 @@ export function assertConfirmed(campaign: CampaignRecord, items: CampaignItemRec
 /* ═══════════════════════════ executor ═════════════════════════════════════ */
 
 export function createExecutor(deps: ExecutorDeps): {
-  executeCampaign(campaignId: number, opts?: ExecuteOptions): Promise<ExecutorResult>;
+  executeCampaign(campaignId: number, opts?: ExecuteOptions): Promise<ExecutorResultV3>;
 } {
-  const campaignsRepo = deps.campaignsRepo ?? defaultCampaignsRepo;
-  const itemsRepo = deps.campaignItemsRepo ?? defaultCampaignItemsRepo;
+  const campaignsRepo: ExecutorCampaignsRepo = deps.campaignsRepo ?? defaultCampaignsRepo;
+  const itemsRepo: ExecutorItemsRepo = deps.campaignItemsRepo ?? defaultCampaignItemsRepo;
   const allowlistRepo = deps.allowlistRepo ?? defaultAllowlistRepo;
   const settingsRepo = deps.settingsRepo ?? defaultSettingsRepo;
   const auditRepo = deps.auditRepo ?? defaultAuditRepo;
@@ -248,12 +401,31 @@ export function createExecutor(deps: ExecutorDeps): {
     audit,
     flags: () => flagsOf(),
     now,
+    ...(deps.catalogRepo !== undefined ? { catalogRepo: deps.catalogRepo } : {}),
+    ...(deps.writeAttemptCounter !== undefined
+      ? { writeAttemptCounter: deps.writeAttemptCounter }
+      : {}),
     ...(deps.timeZone !== undefined ? { timeZone: deps.timeZone } : {}),
   };
 
+  /**
+   * K2 — rozpočet. Výška ide z `settings.daily_write_budget` (alebo z flags,
+   * keď ju volajúci už načítal), spotreba VÝHRADNE z auditu.
+   */
+  const budget: BudgetSource =
+    deps.budget ??
+    createBudget({
+      ...(deps.writeAttemptCounter !== undefined ? { counter: deps.writeAttemptCounter } : {}),
+      ...(flagsOf().dailyWriteBudget !== undefined
+        ? { dailyBudget: flagsOf().dailyWriteBudget as number }
+        : {}),
+      settingsRepo,
+      now,
+    });
+
   async function loadCampaign(campaignId: number): Promise<{
-    campaign: CampaignRecord;
-    items: CampaignItemRecord[];
+    campaign: ExecutorCampaign;
+    items: ExecutorItem[];
   }> {
     const campaign = await campaignsRepo.getById(campaignId);
     if (campaign === null) {
@@ -264,10 +436,10 @@ export function createExecutor(deps: ExecutorDeps): {
   }
 
   async function finishCampaign(
-    campaign: CampaignRecord,
-    items: CampaignItemRecord[],
+    campaign: ExecutorCampaign,
+    items: ExecutorItem[],
     actor: 'user' | 'scheduler',
-  ): Promise<ExecutorResult> {
+  ): Promise<ExecutorResultV3> {
     const statuses = items.map((i) => i.status);
     const finalStatus = resolveFinalStatus(statuses);
     const itemsOk = statuses.filter((s) => s === 'ok' || s === 'skipped').length;
@@ -303,11 +475,11 @@ export function createExecutor(deps: ExecutorDeps): {
   }
 
   async function toNeedsKey(
-    campaign: CampaignRecord,
-    items: CampaignItemRecord[],
+    campaign: ExecutorCampaign,
+    items: ExecutorItem[],
     reason: string,
     actor: 'user' | 'scheduler',
-  ): Promise<ExecutorResult> {
+  ): Promise<ExecutorResultV3> {
     await campaignsRepo.setStatus(campaign.id, 'needs_key', {
       statusReason: reason,
       needsKeySince: now(),
@@ -334,16 +506,70 @@ export function createExecutor(deps: ExecutorDeps): {
     };
   }
 
+  /**
+   * K2 — kampaň sa vracia do fronty. Zvyšné položky zostávajú `pending`:
+   * NIČ sa neoznačuje ako `blocked` ani `interrupted`, lebo sa nič nepokazilo.
+   * Druhý deň sa pokračuje presne tam, kde sa skončilo — žiadna položka sa
+   * nezapíše druhý raz a žiadna sa nepreskočí.
+   *
+   * `finished_at` sa ZÁMERNE nenastavuje (kampaň nedobehla) a `result_ack_at`
+   * sa nedotýka — `queued` nie je výsledok, ktorý by mal niekto odklikávať.
+   */
+  async function toQueued(
+    campaign: ExecutorCampaign,
+    items: ExecutorItem[],
+    reason: string,
+    actor: 'user' | 'scheduler',
+  ): Promise<ExecutorResultV3> {
+    const statuses = items.map((i) => i.status);
+    const itemsOk = statuses.filter((s) => s === 'ok' || s === 'skipped').length;
+    const itemsUncertain = statuses.filter((s) => s === 'uncertain').length;
+    const itemsFailed = statuses.filter(
+      (s) => s === 'failed' || s === 'not_found' || s === 'blocked' || s === 'interrupted',
+    ).length;
+
+    await campaignsRepo.setStatus(campaign.id, 'queued', {
+      statusReason: reason,
+      itemsTotal: statuses.length,
+      itemsOk,
+      itemsFailed,
+      itemsUncertain,
+    });
+
+    // Audit event `campaign_queued` v `AuditEventType` (A0) zatiaľ nie je,
+    // takže tento prechod nesie `campaigns.status_reason` a stdout log. Keď
+    // A2 event doplní, patrí sem `appendAudit({ eventType: 'campaign_queued' })`.
+    log.info('campaign_queued', {
+      actor,
+      campaignId: campaign.id,
+      operationId: campaign.operationId,
+      reason,
+      pending: statuses.filter((s) => s === 'pending').length,
+    });
+
+    return {
+      campaignId: campaign.id,
+      status: 'queued',
+      itemsTotal: statuses.length,
+      itemsOk,
+      itemsFailed,
+      itemsUncertain,
+      items,
+    };
+  }
+
   /** D36 — retry preskočí produkt s potvrdeným OK zápisom identických parametrov. */
   async function isAlreadyWritten(
-    campaign: CampaignRecord,
-    productId: number,
+    campaign: ExecutorCampaign,
+    item: ExecutorItem,
+    percent: number,
   ): Promise<boolean> {
     if (campaign.kind !== 'retry') return false;
-    const last = await campaignsRepo.lastOwnWrite(productId);
+    const last = await campaignsRepo.lastOwnWrite(item.productId);
     return (
       last !== null &&
-      last.percent === campaign.percent &&
+      // K3 — porovnáva sa percento POLOŽKY, nie hlavičky kampane.
+      last.percent === percent &&
       last.from === campaign.dateFrom &&
       last.to === campaign.dateTo
     );
@@ -352,7 +578,7 @@ export function createExecutor(deps: ExecutorDeps): {
   async function executeCampaign(
     campaignId: number,
     opts: ExecuteOptions = {},
-  ): Promise<ExecutorResult> {
+  ): Promise<ExecutorResultV3> {
     installSigtermHandler();
     const actor = opts.actor ?? 'user';
 
@@ -400,7 +626,15 @@ export function createExecutor(deps: ExecutorDeps): {
         // `draft` tu NAOPAK byť musí: `POST /api/campaigns` s `mode='eager'`
         // (D22) vkladá kampaň ako `draft` a executor si ju claimne sám
         // (spúšťač `create_eager`, §4 `draft → running`).
-        const claimed = await campaignsRepo.claim(campaign.id, ['scheduled', 'needs_key', 'draft']);
+        // K2: `queued` PATRÍ medzi claimovateľné stavy — je to kampaň, ktorá
+        // včera minula rozpočet a dnes pokračuje. Bez toho by fronta po prvom
+        // vyčerpaní rozpočtu už nikdy nenaskočila.
+        const claimed = await campaignsRepo.claim(campaign.id, [
+          'scheduled',
+          'needs_key',
+          'draft',
+          'queued',
+        ]);
         if (!claimed) {
           throw new EngineError(
             'campaign_not_claimable',
@@ -439,14 +673,20 @@ export function createExecutor(deps: ExecutorDeps): {
             : {}),
         });
       }
-      await campaignsRepo.setStatus(campaign.id, 'running', { startedAt: now() });
+      // `status_reason` sa pri prevzatí čistí: dôvod, prečo kampaň čakala
+      // (`budget_exhausted`, `no_key`, …), už neplatí a nesmie zostať visieť
+      // na dobehnutej kampani (K2, K10 — na povrchu je to veta pre človeka).
+      await campaignsRepo.setStatus(campaign.id, 'running', {
+        startedAt: now(),
+        statusReason: null,
+      });
 
-      /* 6. Sekvenčná dávka (I10, D46). ŽIADNY Promise.all. */
+      /* 6. Sekvenčná dávka (I10, D46, K2). ŽIADNY Promise.all. */
       const ordered = [...items].sort((a, b) => a.position - b.position);
       const flags = flagsOf();
 
       for (let index = 0; index < ordered.length; index += 1) {
-        const item = ordered[index] as CampaignItemRecord;
+        const item = ordered[index] as ExecutorItem;
         if (item.status !== 'pending') continue;
 
         /* D85 — SIGTERM: aktuálny produkt dobehol, zvyšok `interrupted`. */
@@ -476,6 +716,52 @@ export function createExecutor(deps: ExecutorDeps): {
             if (rest.status === 'pending') rest.status = 'blocked';
           }
           break;
+        }
+
+        /*
+         * K2 — denný rozpočet pred KAŽDOU položkou. Spotreba sa číta z auditu
+         * (`write_attempt` za UTC deň), takže sa počíta aj to, čo zapísal
+         * predchádzajúci beh alebo iná kampaň.
+         *
+         * Pri vyčerpaní kampaň prejde do `queued`, položky zostávajú `pending`
+         * a NIČ sa neoznačuje ako chyba — vyčerpaný rozpočet je informácia.
+         * Nečitateľný rozpočet je fail-closed to isté: radšej zajtra než
+         * naslepo (`budget_unknown` sa líši len dôvodom v `status_reason`).
+         */
+        let budgetStatus;
+        try {
+          budgetStatus = await budget.remainingToday();
+        } catch (error) {
+          opLog.error('budget_read_failed', {
+            campaignId: campaign.id,
+            reason: error instanceof Error ? error.message : 'neznáma chyba',
+          });
+          return toQueued(campaign, ordered, 'budget_unknown', actor);
+        }
+        if (budgetStatus.exhausted) {
+          opLog.info('daily_write_budget_exhausted', {
+            campaignId: campaign.id,
+            day: budgetStatus.day,
+            budget: budgetStatus.budget,
+            spent: budgetStatus.spent,
+          });
+          return toQueued(campaign, ordered, 'budget_exhausted', actor);
+        }
+
+        /*
+         * K3 — percento zápisu je na POLOŽKE, rozhodnuté pri potvrdení.
+         * `campaigns.percent` je len hlavička (najvyššie percento pásiem) a do
+         * shopu sa NIKDY nedostane. `assertConfirmed()` už zaručil, že každá
+         * položka percento má (bez neho sa nedá prepočítať hash, K4) — tento
+         * riadok je posledná poistka, nie druhá cesta k číslu.
+         */
+        const percent = itemPercent(item);
+        if (percent === null) {
+          throw new EngineError(
+            'confirmation_mismatch',
+            `Položka ${item.id} (produkt ${item.productId}) nemá percento pásma — zápis je odmietnutý (K3, I3).`,
+            { campaignId: campaign.id, productId: item.productId },
+          );
         }
 
         const requestId: Ulid = newRequestId();
@@ -550,7 +836,7 @@ export function createExecutor(deps: ExecutorDeps): {
         const { snapshot } = outcome;
 
         /* 6b. D36 — idempotentný retry: identický potvrdený zápis sa preskočí. */
-        if (await isAlreadyWritten(campaign, item.productId)) {
+        if (await isAlreadyWritten(campaign, item, percent)) {
           item.status = 'skipped';
           await itemsRepo.update(item.id, {
             status: 'skipped',
@@ -575,12 +861,14 @@ export function createExecutor(deps: ExecutorDeps): {
           continue;
         }
 
-        /* 6c. Zápis. Payload je presne to, čo pošle klient (D50). */
+        /* 6c. Zápis. Payload je presne to, čo pošle klient (D50).
+         * `reduction` je percento POLOŽKY (K3) — `campaign.percent` je len
+         * hlavička pre zoznamy a do shopu sa nikdy neposiela. */
         const params = {
           id: item.productId,
           from: campaign.dateFrom,
           to: campaign.dateTo,
-          reduction: campaign.percent,
+          reduction: percent,
         };
         const sentPayload = setReductionPayload(params);
 
@@ -765,7 +1053,9 @@ export function createExecutor(deps: ExecutorDeps): {
           }
         }
 
-        /* 6d. Pauza 250 ms medzi zápismi (D46, I10) — nie po poslednom. */
+        /* 6d. Pauza ≥ 3 s medzi zápismi (K2, D46, I10) — nie po poslednom.
+         * Shop dovolí 20 zápisov/min; `executorFlagsFromEnv()` drží podlahu
+         * `MIN_WRITE_PAUSE_MS`, spánok je závislosť kvôli testom. */
         const remaining = ordered.slice(index + 1).some((i) => i.status === 'pending');
         if (remaining) await sleepFn(flags.writePauseMs);
       }
@@ -788,6 +1078,6 @@ export async function executeCampaign(
   campaignId: number,
   deps: ExecutorDeps,
   opts: ExecuteOptions = {},
-): Promise<ExecutorResult> {
+): Promise<ExecutorResultV3> {
   return createExecutor(deps).executeCampaign(campaignId, opts);
 }

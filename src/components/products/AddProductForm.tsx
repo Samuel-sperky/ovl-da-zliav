@@ -61,7 +61,7 @@ export function AddProductForm({
 
   return (
     <form className="ovl-stack" onSubmit={submit} data-testid="add-product-form">
-      <h3>Pridať produkt do allowlistu</h3>
+      <h3>Pridať medzi povolené produkty</h3>
       <p className="ovl-small ovl-muted">
         Zľavu je možné zapísať výhradne produktu z tohto zoznamu. Strop je{' '}
         <strong>

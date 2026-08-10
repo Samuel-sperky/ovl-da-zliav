@@ -1,0 +1,135 @@
+/*
+ * Aura Zľavy — geometria Prehľadu (V9).
+ *
+ * Zámerne LEN rozloženie, žiadne nové komponenty ani farby. Všetky vizuálne
+ * prvky (.sec, .prog-lg, .bar, .suggest, .zrow, .kpi, .chart …) žijú
+ * v `globals.css` a vlastní ich V2 — tento súbor je presne to, čo mali
+ * mockupy `design/v3/prehlad*.html` vo svojom `<style>` bloku.
+ *
+ * Vlastník: V9.
+ */
+
+/*
+ * Štyri sekcie pod sebou. Zámerne NIE `.ovl-stack` — ten má
+ * `align-items: flex-start` a sekcie by sa scvrkli na šírku obsahu.
+ */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Dominanta: číslo vľavo, dve tlačidlá vpravo (prehlad.html). */
+.top {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 20px;
+  align-items: end;
+}
+
+/* „Čaká na vás": návrhy vľavo, pozornosť vpravo. */
+.mid {
+  display: grid;
+  grid-template-columns: 1fr 500px;
+  gap: 12px;
+  align-items: start;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.actions :global(.btn) {
+  justify-content: center;
+}
+
+/* Nadpis stĺpca nad riadkami návrhov. */
+.colh {
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-size: 10px;
+  font-weight: 650;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Tržby: tri čísla vľavo, graf vpravo. */
+.salesGrid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.kpiCol {
+  grid-template-columns: 1fr;
+}
+
+/* Graf v Prehľade nemá vlastný rám — rámom je sekcia. */
+.chartPlain {
+  border: 0;
+  box-shadow: none;
+  padding: 0 0 0 8px;
+}
+
+/* Pokojný stav: „Všetko beží" je dominanta, ale menšia než číslo fronty. */
+.calmBig {
+  font-size: 46px;
+  line-height: 1.02;
+}
+
+/* Zoznam zliav naživo sedí v sekcii bez dvojitého rámu. */
+.flush {
+  padding: 0;
+}
+
+.flushList {
+  border: 0;
+  border-radius: 0;
+}
+
+/*
+ * Riadok zľavy je celý preklikom. `.wrap a` farbí odkazy akcentom, čo by
+ * z každého riadku urobilo modrý pruh — farbu si preto riadok berie z okolia
+ * a odkaz zostáva len tvarom kurzora a fokusom.
+ */
+.rowLink {
+  color: inherit;
+  cursor: pointer;
+}
+
+.rowLink:hover {
+  background: var(--paper3);
+}
+
+/* Jeden riadok pod akciou — chyba akcie, nikdy nie vymyslené číslo. */
+.actionNote {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--st-attention);
+}
+
+/*
+ * Červený príznak. `globals.css` má `.flag` (jantár) a `.flag.neutral` (sivá);
+ * kritický tón vlastnú variantu nemá, takže sa tu prefarbí existujúcim
+ * tokenom — nová farba sa nevymýšľa. Použije sa VÝHRADNE na stratu dát
+ * a zastavený zápis (architektúra §4).
+ */
+.flagCritical {
+  color: var(--st-critical);
+}
+
+/*
+ * Pod 1100 px sa stĺpce skladajú pod seba. Appka beží na jednom počítači
+ * v 1440, ale zúžené okno nesmie vyrobiť vodorovný skrol (P4).
+ */
+@media (max-width: 1100px) {
+  .top,
+  .mid,
+  .salesGrid {
+    grid-template-columns: 1fr;
+  }
+}

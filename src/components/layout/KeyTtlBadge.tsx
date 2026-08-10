@@ -9,6 +9,12 @@
  *
  * I1: badge nesie výhradne zostávajúci čas — nikdy kľúč, nikdy `last4`.
  * `data-state` (`missing|ok|warning|critical`) je stabilné rozhranie pre e2e.
+ *
+ * POZOR (V3): tento badge UŽ NIE JE v hlavičke. Hlavička má podľa
+ * `design/v3/ARCHITEKTURA.md` §0 presne tri veci vpravo (rozpočet zápisov,
+ * fronta, prepínač témy) a nič iné. Komponent zostáva, lebo miesto pre neho je
+ * v Nastaveniach — kotva „Kľúče a rozpočet" (§3.6). Kým ho tam V12 nezavesí, nikde sa
+ * nevykresľuje. Nemazať bez toho, aby sa tá informácia objavila inde.
  */
 import { useEffect, useState } from 'react';
 

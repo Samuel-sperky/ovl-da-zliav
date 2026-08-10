@@ -1,11 +1,17 @@
 'use client';
 
 /**
- * Aura Zľavy — default pre eager write (A16, D22, odchýlka D33b).
+ * Aura Zľavy — predvolený čas zápisu (V12; pôvodne A16).
  *
- * Eager write („zapíš hneď aj s budúcim `from`") je hlavná cesta a default je
- * zapnutý. Prepínač mení len PREDVOLENÚ hodnotu vo formulári kampane —
- * samotný zápis stále vyžaduje dry-run a samostatné potvrdenie (I3).
+ * Appka vie zľavu zapísať hneď pri potvrdení (aj s oknom, ktoré začne až
+ * o týždne), alebo ju nechať na deň štartu. Zapisovať dopredu je HLAVNÁ cesta:
+ * zmeškané spustenie sa totiž nikdy nedobieha automaticky, a čo je zapísané
+ * dopredu, to sa nedá zmeškať.
+ *
+ * Prepínač mení LEN predvoľbu vo formulári novej zľavy. Samotný zápis vždy
+ * prejde skúškou naprázdno a samostatným potvrdením — to sa vypnúť nedá.
+ *
+ * Kreslí sa ako riadok vnútri sekcie Poistky, preto nemá vlastný rám.
  */
 import { useState } from 'react';
 
@@ -30,8 +36,8 @@ export function EagerWriteToggle({ enabled, onChanged }: EagerWriteToggleProps) 
     const res = await putEagerWriteDefault(!enabled);
     setBusy(false);
     if (!res.ok) {
-      // Nastavenie sa NEuložilo — pri chýbajúcej session to povieme ľudsky.
-      setFailure(describeActionFailure(res.error, { action: 'Uloženie nastavenia' }));
+      // Nastavenie sa NEuložilo — pri chýbajúcej relácii to povieme ľudsky.
+      setFailure(describeActionFailure(res.error, { action: 'Uloženie predvoľby' }));
       return;
     }
     setFailure(null);
@@ -39,31 +45,24 @@ export function EagerWriteToggle({ enabled, onChanged }: EagerWriteToggleProps) 
   }
 
   return (
-    <section className="ovl-card" data-testid="eager-write-toggle">
-      <h2>Predvolený režim zápisu</h2>
-      <div className="ovl-stack">
-        <div className="ovl-spread">
-          <span>
-            Eager write:{' '}
-            <span className={`ovl-badge ovl-badge--${enabled ? 'ok' : 'neutral'}`}>
-              {enabled ? 'zapnutý (predvolené)' : 'vypnutý'}
-            </span>
-          </span>
-          <Button onClick={() => void toggle()} disabled={busy} data-testid="eager-write-switch">
-            {busy ? 'Ukladám…' : enabled ? 'Vypnúť' : 'Zapnúť'}
-          </Button>
+    <>
+      <span className="k">Predvolený čas zápisu</span>
+      <span className="v" data-testid="eager-write-state">
+        {enabled ? 'zapisovať dopredu' : 'zapisovať až v deň štartu'}
+      </span>
+      <span>
+        <Button small onClick={() => void toggle()} disabled={busy} data-testid="eager-write-switch">
+          {busy ? 'Ukladám…' : 'Zmeniť'}
+        </Button>
+      </span>
+      {/* Chyba zaberá celý riadok mriežky — `div` vnútri `span` by bol
+          neplatný dokument a React by na ňom padal pri hydratácii. */}
+      {failure ? (
+        <div style={{ gridColumn: '1 / -1' }}>
+          <ActionFailurePanel failure={failure} testId="eager-write-failure" />
         </div>
-        <p className="ovl-small ovl-muted">
-          Pri zapnutom eager write appka zapíše zľavu do shopu hneď pri potvrdení
-          kampane, aj keď má okno začať v budúcnosti. Takýto zápis sa už nedá
-          zrušiť — dá sa len prepísať iným zápisom. Pri vypnutom sa kampaň
-          naplánuje a zapíše ju scheduler v deň začiatku. Nastavenie mení iba
-          predvolenú hodnotu vo formulári; každý zápis stále prejde dry-runom
-          a samostatným potvrdením.
-        </p>
-        <ActionFailurePanel failure={failure} testId="eager-write-failure" />
-      </div>
-    </section>
+      ) : null}
+    </>
   );
 }
 

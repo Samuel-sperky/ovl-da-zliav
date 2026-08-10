@@ -20,10 +20,7 @@ import { ulid } from 'ulid';
 import type {
   ApiKeyRepo,
   AuditWriter,
-  CampaignRecord,
-  CampaignsRepo,
   CanaryResult,
-  ExecutorResult,
   Logger,
   SecretRef,
   SettingsRepo,
@@ -34,16 +31,27 @@ import type {
 
 import { resolveFireWindow } from '@/lib/domain/campaign-rules';
 import { isMidnightFrozen, todayInZone } from '@/lib/domain/dates';
+import type { ExecutorResultV3 } from '@/lib/engine/executor';
 
-/** Podpis executora dávky (`engine/executor.ts`, A9). */
+import type { SchedulerCampaign, SchedulerCampaignsRepo } from './types';
+
+/**
+ * Podpis executora dávky (`engine/executor.ts`, A9).
+ *
+ * `campaign` je `SchedulerCampaign` (viď `types.ts`), aby sa doň zmestil aj
+ * produkčný `campaignsRepoV3` so stavom `queued`, a návratový typ je priamo
+ * typ `executeCampaign()` (K2 pridala stav `queued`). Bez toho by wiring v
+ * `boot.ts` potreboval `as` — a pretypovanie na nekompatibilnú signatúru je
+ * presne nález E1, po ktorom scheduler nikdy nič nezapísal.
+ */
 export type ExecuteCampaignFn = (
-  campaign: CampaignRecord,
+  campaign: SchedulerCampaign,
   key: SecretRef,
   ctx: ShopCtx,
-) => Promise<ExecutorResult>;
+) => Promise<ExecutorResultV3>;
 
 export interface DueDeps {
-  campaigns: Pick<CampaignsRepo, 'findDue' | 'claim' | 'setStatus'>;
+  campaigns: Pick<SchedulerCampaignsRepo, 'findDue' | 'claim' | 'setStatus'>;
   apiKey: Pick<ApiKeyRepo, 'getMeta' | 'loadForUse'>;
   settings: Pick<SettingsRepo, 'get'>;
   audit: AuditWriter;
@@ -71,7 +79,7 @@ export interface DueOutcome {
 
 async function toNeedsKey(
   deps: DueDeps,
-  campaign: CampaignRecord,
+  campaign: SchedulerCampaign,
   reason: string,
   operationId: Ulid,
   now: UtcDate,

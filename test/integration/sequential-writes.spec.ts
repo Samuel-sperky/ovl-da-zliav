@@ -1,16 +1,27 @@
 /**
- * Aura Zľavy — sekvenčný determinizmus zápisu (A9; I10, D46).
+ * Aura Zľavy — sekvenčný determinizmus zápisu (V5; I10, D46, KONTRAKT V3 K2).
  *
- * Dávka 10 produktov MUSÍ ísť sériovo s pauzou ≥ 250 ms — overené timestampmi
- * mocku (`writeGapsMs()` z monotónneho času), NIKDY paralelne. Poradie zápisov
- * je deterministické podľa `position` (vzostupné product_id).
+ * Dávka 10 produktov MUSÍ ísť sériovo, NIKDY paralelne, a poradie je
+ * deterministické podľa `position` (vzostupné product_id).
+ *
+ * Prečo sa tvrdenie o pauze prepísalo (nie oslabilo): D46 hovorilo 250 ms,
+ * K2 hovorí **≥ 3 s** (shop dovolí 20 zápisov/min). Merať 9 skutočných
+ * trojsekundových páuz by znamenalo 27 sekúnd čakania v jednom teste, takže
+ * sa tu meria SEKVENČNOSŤ s injektovanou pauzou — a osobitne sa tvrdí, že
+ * produkčná hodnota má podlahu `MIN_WRITE_PAUSE_MS`. Podlaha je jediné, čo
+ * o rýchlosti rozhoduje; jej meranie stopkami by nič nedokázalo navyše.
  */
 import { describe, expect, it } from 'vitest';
 
 import type { CampaignRecord } from '@/contracts';
 
 import { computePayloadHash } from '@/lib/crypto/preview-token';
-import { createExecutor, type ExecutorFlags } from '@/lib/engine/executor';
+import {
+  MIN_WRITE_PAUSE_MS,
+  createExecutor,
+  executorFlagsFromEnv,
+  type ExecutorFlags,
+} from '@/lib/engine/executor';
 import { createWriteMutex } from '@/lib/engine/mutex';
 import {
   createMemoryAllowlistRepo,
@@ -29,8 +40,8 @@ const mock = useMockShop();
 const day = (offset: number): string =>
   new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 
-/** Reálna pauza z D46 — presne to, čo meria akceptačné kritérium. */
-const PAUSE_MS = 250;
+/** Injektovaná pauza — dosť veľká na zmeranie odstupu, dosť malá na CI. */
+const PAUSE_MS = 60;
 /** setTimeout smie vystreliť o ~1–2 ms skôr; meranie nechceme flakey. */
 const TOLERANCE_MS = 15;
 
@@ -39,11 +50,29 @@ const FLAGS: ExecutorFlags = {
   writesEnabled: true,
   maxProductsPerOperation: 10,
   runawayLimitPerHour: 60,
+  dailyWriteBudget: 200,
   writePauseMs: PAUSE_MS,
 };
 
-describe('I10 — sekvenčné zápisy s pauzou 250 ms', () => {
-  it('10 produktov ide sériovo, v deterministickom poradí, s odstupom ≥ 250 ms', async () => {
+/** Rozpočet, ktorý sa v tomto teste nikdy neminie (K2). */
+const roomyBudget = {
+  async spentToday() {
+    return 0;
+  },
+  async remainingToday() {
+    return { day: '2026-08-10', budget: 200, spent: 0, remaining: 200, exhausted: false };
+  },
+};
+
+describe('K2 — produkčná pauza medzi zápismi je ≥ 3 s (20/min)', () => {
+  it('executorFlagsFromEnv() drží podlahu bez ohľadu na SHOP_WRITE_PAUSE_MS', () => {
+    expect(MIN_WRITE_PAUSE_MS).toBe(3000);
+    expect(executorFlagsFromEnv().writePauseMs).toBeGreaterThanOrEqual(MIN_WRITE_PAUSE_MS);
+  });
+});
+
+describe('I10 — sekvenčné zápisy s pauzou medzi položkami', () => {
+  it('10 produktov ide sériovo, v deterministickom poradí, s odstupom ≥ pauza', async () => {
     const productIds = Array.from({ length: 10 }, (_, i) => 301 + i);
     mock.state.setProducts(
       productIds.map((id) => ({ id, name: `Šperk ${id}`, price: 12.5, has_attributes: false })),
@@ -59,13 +88,27 @@ describe('I10 — sekvenčné zápisy s pauzou 250 ms', () => {
       dateTo: to,
       confirmedAt: new Date(),
       sudoAt: new Date(),
-      confirmPayloadHash: computePayloadHash({ kind: 'new', productIds, percent: 20, from, to }),
+      // K4 — hash nad trojicami `id:percent:price` zo skutočných položiek.
+      confirmPayloadHash: computePayloadHash({
+        kind: 'new',
+        from,
+        to,
+        items: productIds.map((productId) => ({
+          productId,
+          percent: 20,
+          priceAtPreview: '12.50' as const,
+        })),
+      }),
     };
     // Položky sa seedujú v zamiešanom poradí — poradie zápisu určuje `position`.
     world.seedCampaign(
       campaign,
       [...productIds].reverse().map((productId) => ({ productId, priceAtPreview: '12.50' })),
     );
+    // K3 — percento je na položke; `createMemoryCampaignWorld()` (A9) ho neseje.
+    for (const item of world.campaignItemsRepo.items.values()) {
+      Object.assign(item, { percent: 20 });
+    }
 
     const executor = createExecutor({
       shopClient: createShopClient({
@@ -82,6 +125,7 @@ describe('I10 — sekvenčné zápisy s pauzou 250 ms', () => {
       apiKeyRepo: createMemoryApiKeyRepo(VALID_API_KEY),
       audit,
       mutex: createWriteMutex({ dbLock: null }),
+      budget: roomyBudget,
       flags: FLAGS,
     });
 
@@ -94,7 +138,7 @@ describe('I10 — sekvenčné zápisy s pauzou 250 ms', () => {
     // Deterministické poradie (I10): vzostupné product_id = position 1…10.
     expect(writes.map((w) => Number(w.body.id))).toEqual(productIds);
 
-    // Sériovo s pauzou ≥ 250 ms — timestampy mocku, žiadny prekryv.
+    // Sériovo s pauzou — timestampy mocku, žiadny prekryv.
     const gaps = mock.state.writeGapsMs();
     expect(gaps).toHaveLength(9);
     for (const gap of gaps) {

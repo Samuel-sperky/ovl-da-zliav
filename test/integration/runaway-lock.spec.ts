@@ -1,9 +1,15 @@
 /**
- * Aura Zľavy — runaway strop 60 zápisov / hodina (A9; D79, I12).
+ * Aura Zľavy — runaway strop (V5; D79, I12, KONTRAKT V3 K2).
  *
- * 61. zápis v hodine NESMIE prebehnúť: zápisy sa fail-closed zamknú
+ * Zápis nad stropom NESMIE prebehnúť: zápisy sa fail-closed zamknú
  * (`settings.writes_locked`), zapíše sa audit `writes_locked` a zvyšok dávky
  * skončí `blocked`. Odomknúť ich možno len manuálne.
+ *
+ * Prečo sa tvrdenie prepísalo (nie oslabilo): D79 malo fixných 60/h, K2 hovorí
+ * `daily_write_budget + 20 %` s podlahou 60/h — pri 200 zápisoch na deň by
+ * 60/h zamklo zápisy počas úplne normálnej prevádzky. Testy preto stoja na
+ * rozpočte, ktorý strop určuje, nie na konštante, ktorá už neplatí. Sila
+ * tvrdenia je rovnaká: na strope sa zamyká, pod ním nie.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -31,12 +37,28 @@ const mock = useMockShop();
 const day = (offset: number): string =>
   new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
 
+/**
+ * K2: strop = `max(podlaha 60/h, rozpočet + 20 %)`. Rozpočet 50/deň dáva
+ * `ceil(60) = 60`, takže tieto testy hovoria o tom istom čísle ako predtým —
+ * len ho odvodzujú z kontraktu, nie z konštanty.
+ */
 const FLAGS: ExecutorFlags = {
   nodeEnv: 'production',
   writesEnabled: true,
   maxProductsPerOperation: 10,
   runawayLimitPerHour: 60,
+  dailyWriteBudget: 50,
   writePauseMs: 5,
+};
+
+/** Rozpočet, ktorý sa v tomto teste nikdy neminie — brzdí runaway, nie K2. */
+const roomyBudget = {
+  async spentToday() {
+    return 0;
+  },
+  async remainingToday() {
+    return { day: '2026-08-10', budget: 50, spent: 0, remaining: 50, exhausted: false };
+  },
 };
 
 function makeWorld(opts: { productIds: number[]; seededWrites: number }) {
@@ -56,18 +78,26 @@ function makeWorld(opts: { productIds: number[]; seededWrites: number }) {
     dateTo: to,
     confirmedAt: new Date(),
     sudoAt: new Date(),
+    // K4 — hash nad trojicami `id:percent:price` zo skutočných položiek.
     confirmPayloadHash: computePayloadHash({
       kind: 'new',
-      productIds: opts.productIds,
-      percent: 10,
       from,
       to,
+      items: opts.productIds.map((productId) => ({
+        productId,
+        percent: 10,
+        priceAtPreview: '9.90' as const,
+      })),
     }),
   };
   world.seedCampaign(
     campaign,
     opts.productIds.map((productId) => ({ productId, priceAtPreview: '9.90' })),
   );
+  // K3 — percento je na položke; `createMemoryCampaignWorld()` (A9) ho neseje.
+  for (const item of world.campaignItemsRepo.items.values()) {
+    Object.assign(item, { percent: 10 });
+  }
 
   const executor = createExecutor({
     shopClient: createShopClient({
@@ -84,13 +114,14 @@ function makeWorld(opts: { productIds: number[]; seededWrites: number }) {
     apiKeyRepo: createMemoryApiKeyRepo(VALID_API_KEY),
     audit,
     mutex: createWriteMutex({ dbLock: null }),
+    budget: roomyBudget,
     flags: FLAGS,
   });
 
   return { executor, world, settingsRepo, audit };
 }
 
-describe('D79 — runaway strop 60/h', () => {
+describe('D79 + K2 — runaway strop 60/h pri rozpočte 50/deň', () => {
   it('60 zápisov v hodine → nová dávka sa vôbec nezačne a zápisy sa zamknú', async () => {
     const { executor, settingsRepo, audit } = makeWorld({
       productIds: [401, 402],

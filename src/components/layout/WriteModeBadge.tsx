@@ -17,6 +17,12 @@
  * ho v takom prostredí uspáva. `/api/health` navyše `NODE_ENV` nehlási (I1) a
  * hlásiť ho ani nebude — badge preto tvrdí len to, čo naozaj vie:
  * ostré zápisy sú vypnuté a všetko beží ako dry-run.
+ *
+ * POZOR (V3): tento badge UŽ NIE JE v hlavičke. Hlavička má podľa
+ * `design/v3/ARCHITEKTURA.md` §0 presne tri veci vpravo (rozpočet zápisov,
+ * fronta, prepínač témy) a nič iné. Komponent zostáva, lebo miesto pre neho je
+ * v Nastaveniach — kotva „Kľúče a rozpočet" (§3.6). Kým ho tam V12 nezavesí, nikde sa
+ * nevykresľuje. Nemazať bez toho, aby sa tá informácia objavila inde.
  */
 import ToneBadge, { type StatusTone } from '@/components/ui/ToneBadge';
 

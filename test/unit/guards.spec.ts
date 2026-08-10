@@ -1,21 +1,37 @@
 /**
- * Aura Zľavy — unit testy guardov engine (A9; I2, I7, I9, I12, I13, D77, D79).
+ * Aura Zľavy — unit testy guardov engine (V5; I2, I7, I9, I12, I13, D77, D79;
+ * KONTRAKT V3: K1, K2).
  *
  * Guardy sú fail-closed brána pred KAŽDÝM zápisom. Testy bežia bez DB —
- * všetko dodáva in-memory svet z `src/lib/engine/testing.ts`.
+ * repozitáre sú in-memory fakes.
+ *
+ * Čo sa oproti V2 zmenilo a PREČO sa tvrdenia prepísali (nie oslabili):
+ *  - `checkAllowlist` → `checkScope` (K1). Tvrdenie „max 10 a všetko
+ *    v allowliste" ZOSTÁVA — ale len pre režim `pilot`, ktorý je predvolený.
+ *    Pribudlo tvrdenie pre režim `plny`: strop je `max_products_per_campaign`
+ *    a rozsah overuje katalóg.
+ *  - runaway strop nie je fixných 60/h, ale `daily_write_budget + 20 %` (K2)
+ *    s podlahou 60/h. Pôvodný test „na 60 zamkne" preto stojí na rozpočte,
+ *    ktorý 60 dáva — nie na konštante, ktorá už neplatí.
  */
 import { describe, expect, it } from 'vitest';
 
 import {
   GUARD_CODES,
-  checkAllowlist,
+  checkDailyBudget,
   checkRunawayAndMaybeLock,
+  checkScope,
   checkWriteWindow,
   checkWritesEnabled,
+  effectiveRunawayLimit,
+  readScopeForWrite,
   runPreWriteGuards,
+  type CatalogScopeSource,
   type GuardFlags,
   type GuardsDeps,
+  type ScopeSettingsSource,
 } from '@/lib/engine/guards';
+import { budgetDay, type WriteAttemptCounter } from '@/lib/engine/budget';
 import {
   createMemoryAllowlistRepo,
   createMemoryAudit,
@@ -29,26 +45,81 @@ const PROD_FLAGS: GuardFlags = {
   runawayLimitPerHour: 60,
 };
 
-function world(opts: {
-  flags?: Partial<GuardFlags>;
-  activeIds?: number[];
-  seededWrites?: number;
-  writesLocked?: boolean;
-} = {}) {
-  const settingsRepo = createMemorySettingsRepo(
+/** Tvar, ktorý vracia `settings.repo.readScope()` (V4, K1). */
+interface ScopeRow {
+  mode: 'pilot' | 'plny';
+  maxProductsPerCampaign: number;
+  dailyWriteBudget: number;
+  failClosed: boolean;
+}
+
+/** Katalóg pre režim `plny` — mapa ID → stav v shope (K1 bod 2). */
+function memoryCatalog(
+  rows: Array<[number, string]>,
+  opts: { throws?: boolean } = {},
+): CatalogScopeSource {
+  const map = new Map(rows.map(([id, shopStatus]) => [id, { shopStatus }]));
+  return {
+    async getMany(productIds: number[]) {
+      if (opts.throws === true) throw new Error('katalóg nie je dostupný');
+      const result = new Map<number, { shopStatus?: string | null }>();
+      for (const id of productIds) {
+        const row = map.get(id);
+        if (row !== undefined) result.set(id, row);
+      }
+      return result;
+    },
+  };
+}
+
+/** Počítadlo `write_attempt` za UTC deň (K2). */
+function memoryCounter(byDay: Record<string, number>): WriteAttemptCounter {
+  return {
+    async countWriteAttemptsOn(day: string) {
+      return byDay[day] ?? 0;
+    },
+  };
+}
+
+function world(
+  opts: {
+    flags?: Partial<GuardFlags>;
+    activeIds?: number[];
+    seededWrites?: number;
+    writesLocked?: boolean;
+    scope?: ScopeRow;
+    scopeThrows?: boolean;
+    catalog?: CatalogScopeSource;
+    spentToday?: number;
+  } = {},
+) {
+  const memorySettings = createMemorySettingsRepo(
     opts.writesLocked ? { writesLocked: true, writesLockedReason: 'test' } : {},
   );
+  const settingsRepo: ScopeSettingsSource =
+    opts.scope === undefined && opts.scopeThrows !== true
+      ? memorySettings
+      : Object.assign(memorySettings, {
+          async readScope(): Promise<ScopeRow> {
+            if (opts.scopeThrows === true) throw new Error('DB nie je dostupná');
+            return opts.scope as ScopeRow;
+          },
+        });
+
   const allowlistRepo = createMemoryAllowlistRepo(opts.activeIds ?? [201, 202, 203]);
   const audit = createMemoryAudit();
   if (opts.seededWrites) audit.seedWrites(opts.seededWrites);
+
   const deps: GuardsDeps = {
     settingsRepo,
     allowlistRepo,
     auditRepo: audit,
     audit,
     flags: { ...PROD_FLAGS, ...(opts.flags ?? {}) },
+    ...(opts.catalog !== undefined ? { catalogRepo: opts.catalog } : {}),
+    writeAttemptCounter: memoryCounter({ [budgetDay()]: opts.spentToday ?? 0 }),
   };
-  return { deps, settingsRepo, allowlistRepo, audit };
+  return { deps, settingsRepo: memorySettings, allowlistRepo, audit };
 }
 
 // Deň počítaný v zóne appky (Europe/Bratislava), nie v UTC — guardy porovnávajú
@@ -94,14 +165,22 @@ describe('writes_locked (D79)', () => {
   });
 });
 
-describe('runaway strop 60/h (D79, I12)', () => {
-  it('pod stropom prejde', async () => {
-    const { deps } = world({ seededWrites: 59 });
+describe('runaway strop = rozpočet + 20 % (K2, D79, I12)', () => {
+  it('pri rozpočte 200/deň je strop 240/h, nie 60/h', async () => {
+    const { deps } = world({ flags: { dailyWriteBudget: 200 } });
+    expect(await effectiveRunawayLimit(deps)).toBe(240);
+  });
+
+  it('239 zápisov v hodine pri rozpočte 200 ešte prejde (60/h by tu už zamklo)', async () => {
+    const { deps } = world({ flags: { dailyWriteBudget: 200 }, seededWrites: 239 });
     expect((await checkRunawayAndMaybeLock(deps)).ok).toBe(true);
   });
 
   it('na strope fail-closed ZAMKNE zápisy a zapíše audit writes_locked', async () => {
-    const { deps, settingsRepo, audit } = world({ seededWrites: 60 });
+    const { deps, settingsRepo, audit } = world({
+      flags: { dailyWriteBudget: 200 },
+      seededWrites: 240,
+    });
     const result = await checkRunawayAndMaybeLock(deps);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(GUARD_CODES.runawayLimit);
@@ -110,8 +189,15 @@ describe('runaway strop 60/h (D79, I12)', () => {
     expect(audit.byEvent('writes_locked')).toHaveLength(1);
   });
 
+  it('rozpočet nastavený nadol NEZNÍŽI runaway strop pod podlahu 60/h', async () => {
+    // Pri rozpočte 10/deň by 12/h zamklo zápisy pri prvom manuálnom retry.
+    const { deps } = world({ flags: { dailyWriteBudget: 10 }, seededWrites: 59 });
+    expect(await effectiveRunawayLimit(deps)).toBe(60);
+    expect((await checkRunawayAndMaybeLock(deps)).ok).toBe(true);
+  });
+
   it('write_uncertain sa počíta do stropu rovnako ako write_ok', async () => {
-    const { deps, audit } = world();
+    const { deps, audit } = world({ flags: { dailyWriteBudget: 50 } });
     for (let i = 0; i < 60; i += 1) {
       audit.records.push({ actor: 'system', eventType: 'write_uncertain', ok: null });
     }
@@ -119,10 +205,34 @@ describe('runaway strop 60/h (D79, I12)', () => {
   });
 });
 
-describe('allowlist (I2, fail-closed)', () => {
+describe('checkDailyBudget — denný rozpočet (K2)', () => {
+  it('pod rozpočtom prejde a povie, koľko ešte zostáva', async () => {
+    const { deps } = world({ flags: { dailyWriteBudget: 200 }, spentToday: 199 });
+    const result = await checkDailyBudget(deps);
+    expect(result.ok).toBe(true);
+    expect(result.status).toMatchObject({ budget: 200, spent: 199, remaining: 1 });
+  });
+
+  it('na rozpočte vráti budget_exhausted — informáciu, nie chybu', async () => {
+    const { deps } = world({ flags: { dailyWriteBudget: 200 }, spentToday: 200 });
+    const result = await checkDailyBudget(deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(GUARD_CODES.budgetExhausted);
+    expect(result.status).toMatchObject({ remaining: 0, exhausted: true });
+  });
+
+  it('rozpočet NIE JE súčasťou runPreWriteGuards — brána ho neodmieta (K2)', async () => {
+    const { deps } = world({ flags: { dailyWriteBudget: 1 }, spentToday: 999 });
+    // Vyčerpaný rozpočet znamená `queued`, o čom rozhoduje executor. Keby to
+    // brána odmietla, kampaň by skončila ako chyba — presne to K2 zakazuje.
+    expect((await runPreWriteGuards(validParams, deps)).ok).toBe(true);
+  });
+});
+
+describe('checkScope — režim pilot (K1, I2, fail-closed)', () => {
   it('produkt mimo aktívneho allowlistu je odmietnutý', async () => {
     const { deps } = world({ activeIds: [201, 202] });
-    const result = await checkAllowlist([201, 202, 999], deps);
+    const result = await checkScope([201, 202, 999], deps);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(GUARD_CODES.notInAllowlist);
   });
@@ -130,15 +240,15 @@ describe('allowlist (I2, fail-closed)', () => {
   it('viac než 10 produktov je odmietnutých', async () => {
     const ids = Array.from({ length: 11 }, (_, i) => 201 + i);
     const { deps } = world({ activeIds: ids });
-    const result = await checkAllowlist(ids, deps);
+    const result = await checkScope(ids, deps);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe(GUARD_CODES.tooManyProducts);
   });
 
   it('prázdna dávka a duplicity sú odmietnuté', async () => {
     const { deps } = world();
-    expect((await checkAllowlist([], deps)).ok).toBe(false);
-    expect((await checkAllowlist([201, 201], deps)).ok).toBe(false);
+    expect((await checkScope([], deps)).ok).toBe(false);
+    expect((await checkScope([201, 201], deps)).ok).toBe(false);
   });
 
   it('výnimka repozitára = fail-closed odmietnutie (pri pochybnosti sa nezapisuje)', async () => {
@@ -151,7 +261,114 @@ describe('allowlist (I2, fail-closed)', () => {
         },
       },
     };
-    expect((await checkAllowlist([201], broken)).ok).toBe(false);
+    expect((await checkScope([201], broken)).ok).toBe(false);
+  });
+
+  it('strop 10 platí aj keď nastavenia hovoria o 10 000 (K1, tabuľka režimov)', async () => {
+    const ids = Array.from({ length: 11 }, (_, i) => 301 + i);
+    const { deps } = world({
+      activeIds: ids,
+      scope: {
+        mode: 'pilot',
+        maxProductsPerCampaign: 10_000,
+        dailyWriteBudget: 200,
+        failClosed: false,
+      },
+    });
+    const result = await checkScope(ids, deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(GUARD_CODES.tooManyProducts);
+  });
+});
+
+describe('checkScope — režim plny (K1 bod 2)', () => {
+  const plny: ScopeRow = {
+    mode: 'plny',
+    maxProductsPerCampaign: 3,
+    dailyWriteBudget: 200,
+    failClosed: false,
+  };
+
+  it('produkt v katalógu prejde aj keď v allowliste nie je', async () => {
+    const { deps } = world({
+      scope: plny,
+      activeIds: [], // allowlist sa v `plny` nevynucuje
+      catalog: memoryCatalog([
+        [501, 'ok'],
+        [502, 'ok'],
+      ]),
+    });
+    expect((await checkScope([501, 502], deps)).ok).toBe(true);
+  });
+
+  it('produkt, ktorý appka nikdy nevidela, je odmietnutý', async () => {
+    const { deps } = world({ scope: plny, catalog: memoryCatalog([[501, 'ok']]) });
+    const result = await checkScope([501, 999], deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe(GUARD_CODES.notInCatalog);
+      expect(result.detail).toMatchObject({ productIds: [999] });
+    }
+  });
+
+  it('produkt označený not_found je odmietnutý (D49)', async () => {
+    const { deps } = world({
+      scope: plny,
+      catalog: memoryCatalog([
+        [501, 'ok'],
+        [502, 'not_found'],
+      ]),
+    });
+    const result = await checkScope([501, 502], deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(GUARD_CODES.notInCatalog);
+  });
+
+  it('nečitateľný katalóg = fail-closed odmietnutie', async () => {
+    const { deps } = world({ scope: plny, catalog: memoryCatalog([], { throws: true }) });
+    const result = await checkScope([501], deps);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(GUARD_CODES.notInCatalog);
+  });
+
+  it('strop je max_products_per_campaign, nie 10', async () => {
+    const { deps } = world({
+      scope: plny,
+      catalog: memoryCatalog([
+        [501, 'ok'],
+        [502, 'ok'],
+        [503, 'ok'],
+        [504, 'ok'],
+      ]),
+    });
+    expect((await checkScope([501, 502, 503], deps)).ok).toBe(true);
+    const tooMany = await checkScope([501, 502, 503, 504], deps);
+    expect(tooMany.ok).toBe(false);
+    if (!tooMany.ok) expect(tooMany.code).toBe(GUARD_CODES.tooManyProducts);
+  });
+});
+
+describe('režim rozsahu je fail-closed (K1 bod 1)', () => {
+  it('nečitateľné nastavenia znamenajú pilot, nie plny', async () => {
+    const { deps } = world({ scopeThrows: true, activeIds: [201] });
+    const scope = await readScopeForWrite(deps);
+    expect(scope).toMatchObject({ mode: 'pilot', maxProducts: 10, failClosed: true });
+  });
+
+  it('neznáma hodnota režimu znamená pilot (allowlist sa vynucuje ďalej)', async () => {
+    const { deps } = world({
+      activeIds: [201],
+      scope: {
+        mode: 'nieco_ine' as unknown as 'plny',
+        maxProductsPerCampaign: 10_000,
+        dailyWriteBudget: 200,
+        failClosed: false,
+      },
+    });
+    expect((await readScopeForWrite(deps)).mode).toBe('pilot');
+    // Produkt mimo allowlistu teda NEPREJDE — fail-closed sa nedá obísť
+    // rozbitou hodnotou v stĺpci.
+    expect((await checkScope([999], deps)).ok).toBe(false);
   });
 });
 
@@ -198,7 +415,6 @@ describe('runPreWriteGuards — poradie a celok (§9)', () => {
     expect((await runPreWriteGuards(validParams, deps)).ok).toBe(true);
   });
 });
-
 
 describe('D59 — polnočné zamrznutie manuálnych zápisov (midnight freeze)', () => {
   // 2026-08-05 23:59:30 Europe/Bratislava (CEST, UTC+2) = 21:59:30Z.

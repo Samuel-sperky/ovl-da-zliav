@@ -1,30 +1,29 @@
 'use client';
 
 /**
- * Aura Zľavy — stavová časť hlavičky (D5, D10, D77, D79, D87).
+ * Aura Zľavy — pravá strana hlavičky (ARCHITEKTURA §0, K2).
  *
- * Polluje `/api/health` a kreslí `KeyTtlBadge`, `SchedulerBadge`,
- * `WriteModeBadge`, prepínač témy a pod hlavičkou `ReadOnlyNotice`. Keď health
- * endpoint neodpovedá, shell to priznáva (degradovaný badge) — nič nepredstiera.
+ * Presne tri veci a nič viac: **rozpočet zápisov**, **stav fronty**, **prepínač
+ * témy**. Žiadne vyhľadávanie, žiadne notifikácie, žiadne stavové badge —
+ * platnosť kľúčov a detail rozpočtu majú svoje miesto v Nastaveniach
+ * (ARCHITEKTURA §3.6, kotva „Kľúče a rozpočet"), nie v každom riadku hlavičky.
  *
- * A NEPREDSTIERA ANI OPAČNE: keď stav nie je známy len preto, že požiadavka
- * prebehla bez session (401), hlavička to hlási ako „stav po prihlásení",
- * neutrálnym tónom. Predtým sa tento prípad zliewal s nedostupnosťou a appka
- * o sebe červeno tvrdila, že nebeží, hoci bežala úplne v poriadku.
+ * DVE VECI, KTORÉ SA TU NESMÚ POKAZIŤ:
  *
- * Mobil (plán §2 bod 19, K8): `KeyTtlBadge` je viditeľný VŽDY — D5 to vyžaduje
- * a skrývať ho nesmieme. Skladá sa len scheduler a režim zápisov za prepínač
- * „stav appky"; na šírke ≥ 720 px sú aj tie stále viditeľné (CSS).
+ * 1. **Vyčerpaný rozpočet nie je chyba.** Pri 200/200 sa mení len text na
+ *    „Zápisy 200/200 · pokračujem o 02:00" a zostáva NEUTRÁLNY (K2, odpoveď
+ *    59). Červená je vyhradená pre stratu dát a zastavený zápis.
+ * 2. **Neznáme číslo sa nedopĺňa.** Kým `/api/queue` nedodá V8 (alebo keď
+ *    appka neodpovedá), hlavička píše pomlčku a povie prečo. Appka zapisuje do
+ *    produkčného shopu — číslo „0/200" by tu bolo tvrdenie, nie medzera.
  */
-import { useState } from 'react';
+import Link from 'next/link';
 
-import KeyTtlBadge from '@/components/layout/KeyTtlBadge';
-import ReadOnlyNotice from '@/components/layout/ReadOnlyNotice';
-import SchedulerBadge from '@/components/layout/SchedulerBadge';
-import ThemeToggle from '@/components/layout/ThemeToggle';
-import WriteModeBadge from '@/components/layout/WriteModeBadge';
 import { useHealth, type HealthData } from '@/components/layout/health';
-import ToneBadge, { type StatusTone } from '@/components/ui/ToneBadge';
+import { formatCount, formatResumeTime, useQueueHeader } from '@/components/layout/queue';
+import ReadOnlyNotice from '@/components/layout/ReadOnlyNotice';
+import ThemeToggle from '@/components/layout/ThemeToggle';
+import type { StatusTone } from '@/components/ui/ToneBadge';
 
 /** Vstup čistého rozhodovania — presne to, čo `useHealth()` vie. */
 export interface HeaderStatusInput {
@@ -60,6 +59,9 @@ export const HEALTH_UNREACHABLE_LABEL = 'stav appky nedostupný';
  * `unauthenticated` má prednosť: keď vieme, že stav nepoznáme len pre chýbajúcu
  * session, NESMIEME hlásiť poruchu. Neznámy dôvod bez dát je fail-closed
  * `unreachable` — radšej priznaná nevedomosť než predstieraná pohoda.
+ *
+ * Funkcia zostáva aj po prechode na V3: hlavička už nekreslí stavový badge,
+ * ale podľa nej sa rozhoduje, či sa čísla rozpočtu a fronty dajú tvrdiť.
  */
 export function headerStatusView(input: HeaderStatusInput): HeaderStatusView {
   if (input.loading) return { kind: 'loading' };
@@ -84,81 +86,145 @@ export function headerStatusView(input: HeaderStatusInput): HeaderStatusView {
   return { kind: 'ok' };
 }
 
-/** Stav „nič nevieme" — vedie na fail-closed `unreachable`. */
-const EMPTY_INPUT: HeaderStatusInput = {
-  loading: false,
-  unauthenticated: false,
-  unreachable: true,
-  health: null,
-};
+const BUDGET_UNKNOWN_TITLE =
+  'Koľko zápisov dnes prebehlo, sa zatiaľ nepodarilo zistiť — číslo preto nedopĺňame.';
 
-export function HeaderBadges() {
-  const { health, loading, unreachable, unauthenticated } = useHealth();
-  const [moreOpen, setMoreOpen] = useState(false);
-  const view = headerStatusView({ loading, unauthenticated, unreachable, health });
-
-  if (view.kind === 'loading') {
+/** Meradlo denného rozpočtu. Vyčerpaný rozpočet zostáva neutrálny (K2). */
+function BudgetMeter({
+  spentToday,
+  budget,
+  resumeAt,
+}: {
+  spentToday: number | null;
+  budget: number | null;
+  resumeAt: string | null;
+}) {
+  if (spentToday === null || budget === null) {
     return (
-      <>
-        <span className="ovl-badge ovl-shimmer" aria-hidden>
-          načítavam stav…
-        </span>
-        <ThemeToggle />
-      </>
-    );
-  }
-  /* `ok` bez dát je podľa `headerStatusView()` nemožné; `health` sa tu overuje
-     len preto, aby TypeScript videl zúženie na ne-null. */
-  if (view.kind !== 'ok' || health === null) {
-    const badge = view.kind === 'ok' ? headerStatusView({ ...EMPTY_INPUT }) : view;
-    if (badge.kind === 'loading' || badge.kind === 'ok') return null;
-    return (
-      <>
-        <ToneBadge
-          tone={badge.tone}
-          glyph={badge.glyph}
-          data-testid={
-            badge.kind === 'unauthenticated' ? 'health-unauthenticated' : 'health-unreachable'
-          }
-          title={badge.title}
-        >
-          {badge.label}
-        </ToneBadge>
-        <ThemeToggle />
-      </>
-    );
-  }
-  return (
-    <>
-      <KeyTtlBadge present={health.key.present} expiresAt={health.key.expiresAt} />
-      <button
-        type="button"
-        className="ovl-theme-pill ovl-status-more"
-        onClick={() => setMoreOpen((v) => !v)}
-        aria-expanded={moreOpen}
-        title="Stav schedulera a režim zápisov"
-      >
-        stav appky {moreOpen ? '▴' : '▾'}
-      </button>
-      <span className="ovl-status-secondary" data-open={moreOpen ? 'true' : 'false'}>
-        <SchedulerBadge
-          lastTickAt={health.scheduler.lastTickAt}
-          ageSec={health.scheduler.ageSec}
-        />
-        <WriteModeBadge
-          writesEnabled={health.writesEnabled}
-          writesLocked={health.writesLocked}
-        />
+      <span className="hmeter" data-testid="header-budget" data-state="unknown" title={BUDGET_UNKNOWN_TITLE}>
+        Zápisy <b>—</b> dnes
       </span>
-      <ThemeToggle />
-    </>
+    );
+  }
+
+  if (spentToday >= budget) {
+    return (
+      <span
+        className="hmeter"
+        data-testid="header-budget"
+        data-state="exhausted"
+        title="Denný rozpočet zápisov je vyčerpaný. Nie je to chyba — fronta pokračuje po obnovení rozpočtu."
+      >
+        Zápisy{' '}
+        <b>
+          {formatCount(spentToday)}/{formatCount(budget)}
+        </b>{' '}
+        · pokračujem o {formatResumeTime(resumeAt)}
+      </span>
+    );
+  }
+
+  const pct = Math.max(0, Math.min(100, Math.round((spentToday / budget) * 100)));
+  return (
+    <span className="hmeter" data-testid="header-budget" data-state="ok" title="Denný rozpočet zápisov">
+      Zápisy{' '}
+      <b>
+        {formatCount(spentToday)}/{formatCount(budget)}
+      </b>{' '}
+      dnes
+      <span className="hbar" aria-hidden="true">
+        <i style={{ width: `${pct}%` }} />
+      </span>
+    </span>
   );
+}
+
+/** Súhrn všetkých bežiacich front. Klik vedie na tab Zľavy. */
+function QueueLink({ done, total }: { done: number | null; total: number | null }) {
+  const empty = done === null || total === null || total === 0;
+  return (
+    <Link
+      className={empty ? 'hqueue off' : 'hqueue'}
+      href="/zlavy"
+      data-testid="header-queue"
+      data-state={empty ? 'empty' : 'running'}
+      title="Súhrn všetkých bežiacich front — klik otvorí Zľavy"
+    >
+      {empty ? (
+        'Fronta prázdna'
+      ) : (
+        <>
+          Fronta{' '}
+          <b>
+            {formatCount(done)}/{formatCount(total)}
+          </b>
+        </>
+      )}
+    </Link>
+  );
+}
+
+/**
+ * Pravá strana hlavičky. Vykresľuje sa aj na prihlasovacej obrazovke — vtedy
+ * sú čísla neznáme a hlavička to prizná namiesto toho, aby mlčala alebo
+ * hádala.
+ */
+export function HeaderRight() {
+  const { health, loading, unreachable, unauthenticated } = useHealth();
+  const view = headerStatusView({ loading, unauthenticated, unreachable, health });
+  const { writes, queue } = useQueueHeader();
+
+  // Kým sa nevie, či appka odpovedá, čísla sa netvrdia.
+  const trusted = view.kind === 'ok';
+
+  return (
+    <div className="hdr-r">
+      <BudgetMeter
+        spentToday={trusted && writes !== null ? writes.spentToday : null}
+        budget={trusted && writes !== null ? writes.budget : null}
+        resumeAt={writes?.resumeAt ?? null}
+      />
+      <span className="hsep" aria-hidden="true" />
+      <QueueLink
+        done={trusted && queue !== null ? queue.done : null}
+        total={trusted && queue !== null ? queue.total : null}
+      />
+      <ThemeToggle />
+    </div>
+  );
+}
+
+/**
+ * Pruh pod hlavičkou pri vypnutých ostrých zápisoch (I13, ARCHITEKTURA §1).
+ * `WRITES_ENABLED` sa v UI NEZOBRAZUJE ako prepínač — len ako tento fakt.
+ *
+ * Pruh je NEUTRÁLNY, nie červený: vypnuté zápisy sú najbezpečnejší možný stav
+ * appky, ktorá inak píše do produkčného shopu. Červená by klamala o závažnosti.
+ */
+export function HeaderWritesStrip() {
+  const { health, loading } = useHealth(60_000);
+  if (loading || health === null) return null;
+  if (health.writesLocked) {
+    return (
+      <div className="hdr-strip" role="status" data-testid="writes-strip" data-state="locked">
+        Zápisy sú zamknuté poistkou
+      </div>
+    );
+  }
+  if (!health.writesEnabled) {
+    return (
+      <div className="hdr-strip calm" role="status" data-testid="writes-strip" data-state="disabled">
+        Ostrý zápis vypnutý
+      </div>
+    );
+  }
+  return null;
 }
 
 /** Samostatný full-bleed pruh pod hlavičkou — read-only výzva (D10). */
 export function HeaderReadOnlyNotice() {
   const { health, loading } = useHealth(60_000);
-  if (loading || !health) return null;
+  if (loading || health === null) return null;
   const expired =
     health.key.expiresAt != null && new Date(health.key.expiresAt).getTime() <= Date.now();
   return <ReadOnlyNotice keyPresent={health.key.present && !expired} />;

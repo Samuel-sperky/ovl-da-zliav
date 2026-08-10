@@ -39,7 +39,6 @@ import type {
   CampaignRecord,
   CampaignStatus,
   CampaignsRepo,
-  ExecutorResult,
   KeyProbeResult,
   SecretRef,
   ShopCtx,
@@ -52,7 +51,11 @@ import { appendAudit } from '@/lib/audit/write';
 import { wipeBuffer } from '@/lib/crypto/secret-box';
 import { resolveFireWindow } from '@/lib/domain/campaign-rules';
 import { todayInZone } from '@/lib/domain/dates';
-import { executeCampaign, type ExecuteOptions } from '@/lib/engine/executor';
+import {
+  executeCampaign,
+  type ExecuteOptions,
+  type ExecutorResultV3,
+} from '@/lib/engine/executor';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 import { conflict, unauthorized } from '@/lib/http/errors';
 import {
@@ -128,10 +131,17 @@ export const deleteKeyBodySchema = z.object({
 
 /* ═══════════════════════════ závislosti route ═════════════════════════════ */
 
+/**
+ * Dopálenie jednej kampane. Návratový typ je `ExecutorResultV3` (K2): odkedy je
+ * zápis fronta, smie dávka skončiť aj v stave `queued` — vyčerpaný denný
+ * rozpočet nie je chyba, je to informácia (odpoveď 59). `ExecutorResult`
+ * z kontraktov ten stav nepozná; typ preto ide z engine, nie z `contracts.ts` —
+ * inak by zmena v engine skončila ako `as` a tichá diera (nález E1).
+ */
 export type ExecuteCampaignById = (
   campaignId: number,
   opts: ExecuteOptions,
-) => Promise<ExecutorResult>;
+) => Promise<ExecutorResultV3>;
 
 export interface KeyRouteDeps {
   /** Repozitár ZÁPISOVÉHO kľúča (`shop_write`). */
@@ -477,8 +487,19 @@ export function createKeyDeleteRoute(deps: KeyRouteDeps = {}): NextRouteHandler 
          * kým nie je prázdna. Tvrdý strop iterácií je poistka proti zacykleniu,
          * keby `setStatus` stav nezmenil. */
         let cancelled = 0;
-        // `draft`/`scheduled`/`needs_key`/`missed` — zrušiteľné stavy (§4).
-        const waitingStatuses: CampaignStatus[] = ['draft', 'scheduled', 'needs_key', 'missed'];
+        // `draft`/`scheduled`/`needs_key`/`missed` — zrušiteľné stavy (§4) —
+        // a `queued` (K2). Kampaň čakajúca vo fronte JE čakajúca kampaň: keby
+        // tu chýbala, panic button by ju nechal bežať a fronta by po vložení
+        // nového kľúča pokračovala v zápise do shopu, z ktorého kľúč unikol.
+        // `CampaignStatus` (A0) `queued` zatiaľ nevie pomenovať — repozitár si
+        // hodnotu sám whitelistuje proti DB enumu z migrácie `0010`.
+        const waitingStatuses: CampaignStatus[] = [
+          'draft',
+          'scheduled',
+          'needs_key',
+          'missed',
+          'queued' as CampaignStatus,
+        ];
         for (let pass = 0; pass < 1000; pass += 1) {
           const waiting = await campaigns.list({
             status: waitingStatuses,

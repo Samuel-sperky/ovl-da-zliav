@@ -1,12 +1,17 @@
 'use client';
 
 /**
- * Aura Zľavy — panic button „kľúč unikol" (A16, D67, R5).
+ * Aura Zľavy — ČERVENÁ ZÓNA: kľúč unikol (V12; pôvodne A16).
  *
  * Vyžaduje heslo A doslovné opísanie textu `KLUC UNIKOL` (bez diakritiky).
- * Po vykonaní: kľúč je wipnutý, všetky čakajúce kampane zrušené a UI zobrazí
- * runbook — appka kľúč revokovať NEVIE, skutočná revokácia je na maintainerovi
- * shopu. Po incidente nebeží nič automaticky.
+ * Po vykonaní sú oba kľúče z appky zmazané, všetky čakajúce zľavy zrušené a na
+ * obrazovke je postup, čo robiť ďalej. Appka kľúč revokovať NEVIE — vie ho len
+ * zabudnúť; skutočnú revokáciu robí správca eshopu. Po incidente nebeží nič
+ * automaticky.
+ *
+ * Sekcia je jediné miesto v Nastaveniach s červeným rámom. Je to zámer:
+ * červená je vyhradená pre stratu dát a zastavený zápis, takže keď ju
+ * používateľ uvidí inde, vie, že ide o vážnu vec.
  */
 import { useState } from 'react';
 
@@ -23,11 +28,11 @@ import {
 } from '@/components/settings/api';
 
 const RUNBOOK_STEPS: readonly string[] = [
-  'OBA kľúče (zápisový aj objednávkový) sú z appky wipnuté (prepis ciphertextu + zmazanie) a všetky čakajúce kampane sú zrušené. Nič nebeží automaticky.',
-  'Kontaktuj maintainera shopu a požiadaj o REVOKÁCIU oboch kľúčov na strane shopu — appka kľúč revokovať nevie, vie ho len zabudnúť.',
-  'Skontroluj audit log (filtre podľa dátumu a typu „zápis") a admin shopu, či medzitým neprebehli neočakávané zmeny zliav.',
-  'Po revokácii vygeneruj v shope nový kľúč so scope výhradne product:edit a vlož ho v Nastaveniach. Objednávkový kľúč vlož znova až vtedy, keď ho znova potrebuješ — bez neho appka len nevidí predajnosť.',
-  'Skontroluj kampane v stave „vyžaduje kľúč" a rozhodni, ktoré chceš dopáliť novým dry-runom.',
+  'Oba kľúče (na zápis zliav aj na objednávky) sú z appky zmazané a všetky čakajúce zľavy zrušené. Nič nebeží automaticky.',
+  'Kontaktuj správcu eshopu a požiadaj o zneplatnenie oboch kľúčov na strane eshopu — appka kľúč zneplatniť nevie, vie ho len zabudnúť.',
+  'Pozri sa do histórie (filter podľa dátumu a typu „zápis") a do administrácie eshopu, či medzitým neprebehli neočakávané zmeny zliav.',
+  'Po zneplatnení vygeneruj v eshope nový kľúč, ktorý smie výhradne meniť produkty, a vlož ho v sekcii Kľúče. Kľúč na objednávky vlož znova až vtedy, keď ho potrebuješ — bez neho appka len nevidí, čo sa predáva.',
+  'Skontroluj zľavy, ktoré čakajú na kľúč, a rozhodni, ktoré chceš zapísať znova. Každá pôjde znova cez skúšku naprázdno a samostatné potvrdenie.',
 ];
 
 export interface PanicButtonProps {
@@ -48,11 +53,11 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
   const confirmOk = confirm === PANIC_CONFIRM_LITERAL;
 
   const fail = (error: { code?: string | null; message?: string | null } | null) =>
-    setFailure(describeActionFailure(error, { action: 'Wipnutie kľúča' }));
+    setFailure(describeActionFailure(error, { action: 'Zmazanie kľúčov' }));
 
   async function submit(pwd: string) {
     if (pwd.length === 0) {
-      fail({ code: 'validation_failed', message: 'Panic button vyžaduje tvoje heslo.' });
+      fail({ code: 'validation_failed', message: 'Zmazanie kľúčov vyžaduje tvoje heslo.' });
       return;
     }
     if (!confirmOk) {
@@ -76,7 +81,6 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
       return;
     }
     if (res.error.code === SUDO_REQUIRED_CODE) {
-      // Sudo okno vypršalo — to NIE je odhlásenie; pýtame heslo, nie login.
       setPending(pwd);
       setNeedSudo(true);
       return;
@@ -88,14 +92,17 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
 
   if (result) {
     return (
-      <section className="ovl-card ovl-card--danger" data-testid="panic-result">
-        <h2>Kľúč bol wipnutý</h2>
-        <p className="ovl-small">
-          Zrušených čakajúcich kampaní: <strong>{result.cancelledCampaigns}</strong>. Appka je od
-          teraz len na čítanie, kým nevložíš nový kľúč.
+      <section className="sec danger-zone" id="cervena" data-testid="panic-result">
+        <div className="sec-h">
+          <h2>Kľúče sú zmazané</h2>
+        </div>
+        <p className="set-note">
+          Zrušených čakajúcich zliav: <b>{result.cancelledCampaigns}</b>. Appka
+          teraz do eshopu nezapíše nič, kým nevložíš nový kľúč. Už zapísané zľavy
+          v eshope zostanú a dobehnú.
         </p>
         <RunbookPanel
-          title="Runbook R5 — kľúč unikol"
+          title="Čo robiť teraz"
           steps={RUNBOOK_STEPS}
           runbookUrl={result.runbookUrl}
         />
@@ -104,29 +111,40 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
   }
 
   return (
-    <section className="ovl-card ovl-card--danger" data-testid="panic-button">
-      <h2>Panic button — kľúč unikol</h2>
-      <p className="ovl-small">
-        Okamžite zmaže OBA API kľúče z appky (zápisový aj objednávkový), zruší
-        všetky čakajúce kampane a zapíše audit event za každý zmazaný kľúč. Už zapísané zľavy v shope zostanú a dobehnú — appka ich
-        zrušiť nedokáže. Skutočnú revokáciu kľúča vie urobiť len maintainer shopu.
-      </p>
+    <section className="sec danger-zone" id="cervena" data-testid="panic-button">
+      <div className="sec-h">
+        <h2>Červená zóna</h2>
+      </div>
+
+      <div className="dz-row">
+        <span>
+          Kľúč unikol — zmazať oba kľúče a zrušiť všetky čakajúce zľavy. Už
+          zapísané zľavy v eshope zostanú a dobehnú.
+        </span>
+        {!open ? (
+          <span className="dz-a">
+            <Button variant="danger" small onClick={() => setOpen(true)} data-testid="panic-open">
+              Kľúč unikol
+            </Button>
+          </span>
+        ) : null}
+      </div>
+
       {!keyPresent ? (
-        <p className="ovl-small ovl-muted">
-          Kľúč momentálne nie je uložený (ani zápisový, ani objednávkový), ale panic button môžeš použiť aj tak —
-          zruší čakajúce kampane a zapíše incident do auditu.
-        </p>
+        <div className="dz-row lvl-3">
+          <span>
+            Teraz nie je uložený ani jeden kľúč. Zmazanie sa dá spustiť aj tak —
+            zruší čakajúce zľavy a zapíše incident do histórie.
+          </span>
+        </div>
       ) : null}
-      {!open ? (
-        <Button variant="danger" onClick={() => setOpen(true)} data-testid="panic-open">
-          Kľúč unikol — otvoriť panic button
-        </Button>
-      ) : (
-        <div className="ovl-stack">
-          <label>
-            <span className="ovl-small">Heslo</span>
-            <br />
+
+      {open ? (
+        <div className="set-form" data-testid="panic-editor">
+          <label className="field set-w">
+            <span className="lb">Heslo</span>
             <input
+              className="inp"
               type="password"
               autoComplete="current-password"
               value={password}
@@ -135,12 +153,10 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
               data-testid="panic-password"
             />
           </label>
-          <label>
-            <span className="ovl-small">
-              Opíš presne text <code>{PANIC_CONFIRM_LITERAL}</code>
-            </span>
-            <br />
+          <label className="field set-w">
+            <span className="lb">Opíš presne text {PANIC_CONFIRM_LITERAL}</span>
             <input
+              className="inp"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               disabled={busy}
@@ -148,19 +164,17 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
               data-testid="panic-confirm"
             />
           </label>
-          <div className="ovl-row">
+          <div className="row">
             <Button
               variant="danger"
               onClick={() => void submit(password)}
               disabled={busy || !confirmOk || password.length === 0}
               disabledReason={
-                !confirmOk
-                  ? `Najprv opíš text ${PANIC_CONFIRM_LITERAL}.`
-                  : 'Zadaj heslo.'
+                !confirmOk ? `Najprv opíš text ${PANIC_CONFIRM_LITERAL}.` : 'Zadaj heslo.'
               }
               data-testid="panic-submit"
             >
-              {busy ? 'Wipujem kľúč…' : 'Wipnúť kľúč a zrušiť kampane'}
+              {busy ? 'Mažem kľúče…' : 'Zmazať kľúče a zrušiť čakajúce zľavy'}
             </Button>
             <Button
               onClick={() => {
@@ -171,15 +185,16 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
               }}
               disabled={busy}
             >
-              Zrušiť
+              Späť
             </Button>
           </div>
           <ActionFailurePanel failure={failure} testId="panic-failure" />
         </div>
-      )}
+      ) : null}
+
       {needSudo ? (
         <SudoPrompt
-          actionLabel="panic button — wipnutie kľúča"
+          actionLabel="zmazanie kľúčov po úniku"
           onSuccess={() => {
             setNeedSudo(false);
             const pwd = pending;

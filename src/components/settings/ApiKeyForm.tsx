@@ -1,30 +1,27 @@
 'use client';
 
 /**
- * Aura Zľavy — vloženie a rotácia API kľúča (A16, D65, D53, D24, I1).
+ * Aura Zľavy — vloženie a obnova kľúča na ZÁPIS ZLIAV (V12; pôvodne A16).
  *
- * UI NIKDY nezobrazí kľúč — ani po vložení, ani „na kontrolu". Jediné, čo
- * o kľúči hovorí, sú posledné 4 znaky, čas uloženia, živý odpočet TTL a
- * výsledok sondy `reduction=0`. Vstupné pole je `type="password"`, hodnota sa
- * po odoslaní okamžite zahodí a nikde sa neloguje.
+ * UI kľúč NIKDY nezobrazí — ani po vložení, ani „na kontrolu". Jediné, čo
+ * o ňom hovorí, sú posledné štyri znaky, čas uloženia a živý odpočet platnosti.
+ * Vstupné pole je typu heslo, hodnota sa po odoslaní okamžite zahodí a nikde
+ * sa nezapisuje.
  *
- * Po úspešnom uložení UI informuje, koľko kampaní v stave „vyžaduje kľúč"
- * server automaticky dopálil (D24) — presný počet zistí obnovenie zoznamu
- * kampaní, preto sa tvrdí len to, čo appka vie.
- *
- * TICHÝ NEÚSPECH JE ZAKÁZANÝ. Kľúč ide do PRODUKČNÉHO shopu, takže dojem
+ * TICHÝ NEÚSPECH JE ZAKÁZANÝ. Kľúč ide do PRODUKČNÉHO eshopu, takže dojem
  * „uložilo sa" bez uloženia je najhorší možný výsledok. Preto po každom
- * neúspechu: (a) zmizne akékoľvek staršie hlásenie o úspechu, (b) zobrazí sa
- * výslovné „kľúč sa NEULOŽIL", (c) pri chýbajúcej session (401) sa nezobrazí
- * generická červená chyba, ale veta „nie si prihlásený" s odkazom na login.
+ * neúspechu: (a) zmizne akékoľvek staršie hlásenie o úspechu, (b) na obrazovke
+ * je výslovné „kľúč sa NEULOŽIL", (c) pri chýbajúcej prihlásenej relácii sa
+ * nezobrazí generická červená chyba, ale veta „nie si prihlásený" s odkazom.
+ *
+ * Formulár sa kreslí vnútri sekcie Kľúče, preto nemá vlastný rám ani nadpis
+ * sekcie — hostiteľ ich dodáva.
  */
 import { useState } from 'react';
 
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import Countdown from '@/components/ui/Countdown';
 import SudoPrompt from '@/components/ui/SudoPrompt';
-import { formatDateTimeSk } from '@/lib/ui/format';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
   SUDO_REQUIRED_CODE,
@@ -33,11 +30,12 @@ import {
   type KeyMetaView,
 } from '@/components/settings/api';
 
+/** Výsledok overenia kľúča → veta. Kód overenia na povrch nepatrí. */
 const VERIFY_LABELS: Record<string, { label: string; tone: string }> = {
-  valid: { label: 'overený sondou reduction=0', tone: 'ok' },
-  unverified: { label: 'neoverený (sonda neprebehla)', tone: 'neutral' },
-  invalid: { label: 'neplatný', tone: 'danger' },
-  forbidden: { label: 'chýba scope product:edit', tone: 'danger' },
+  valid: { label: 'overený u eshopu', tone: 'ok' },
+  unverified: { label: 'neoverený', tone: 'idle' },
+  invalid: { label: 'eshop ho neprijal', tone: 'bad' },
+  forbidden: { label: 'nemá právo meniť produkty', tone: 'bad' },
 };
 
 export interface ApiKeyFormProps {
@@ -56,7 +54,7 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
   /** Neúspech je vždy hlasný: úspešné hlásenie zmizne, chyba sa pomenuje. */
   function fail(error: { code?: string | null; message?: string | null } | null) {
     setStored(null);
-    setFailure(describeActionFailure(error, { action: 'Uloženie API kľúča' }));
+    setFailure(describeActionFailure(error, { action: 'Uloženie kľúča na zápis zliav' }));
   }
 
   async function submit(value: string) {
@@ -70,7 +68,7 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
     const res = await putKey(value.trim());
     setBusy(false);
     if (res.ok) {
-      // Plaintext kľúča držíme len po dobu requestu a hneď ho zahadzujeme (I1).
+      // Kľúč držíme len po dobu odoslania a hneď ho zahadzujeme.
       setApiKey('');
       setPending(null);
       setFailure(null);
@@ -79,13 +77,13 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
       return;
     }
     if (res.error.code === SUDO_REQUIRED_CODE) {
-      // Sudo okno vypršalo — to NIE je odhlásenie; pýtame heslo, nie login.
+      // Vypršané okno hesla NIE JE odhlásenie; pýtame heslo, nie prihlásenie.
       setPending(value);
       setNeedSudo(true);
       return;
     }
-    // Plaintext kľúča nedržíme ani po neúspechu (I1) — používateľ ho vloží
-    // znova. Preto MUSÍ byť na obrazovke nepochybné, že sa nič neuložilo.
+    // Kľúč nedržíme ani po neúspechu — používateľ ho vloží znova. Preto MUSÍ
+    // byť na obrazovke nepochybné, že sa nič neuložilo.
     setApiKey('');
     setPending(null);
     fail(res.error);
@@ -94,94 +92,81 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
   const verify = keyMeta?.verifyStatus ? VERIFY_LABELS[keyMeta.verifyStatus] : null;
 
   return (
-    <section className="ovl-card" data-testid="api-key-form">
-      <h2>API kľúč</h2>
-      <div className="ovl-stack">
-        {keyMeta?.present ? (
-          <div className="ovl-stack" style={{ gap: '0.2rem' }} data-testid="api-key-meta">
-            <div>
-              uložený kľúč <code>····{keyMeta.last4 ?? '????'}</code>
-              {verify ? (
-                <span className={`ovl-badge ovl-badge--${verify.tone}`} style={{ marginLeft: '0.4rem' }}>
-                  {verify.label}
-                </span>
-              ) : null}
-            </div>
-            <div className="ovl-small ovl-muted">uložený {formatDateTimeSk(keyMeta.savedAt)}</div>
-            <div className="ovl-small">
-              expiruje za{' '}
-              <strong>
-                <Countdown expiresAt={keyMeta.expiresAt} expiredLabel="expirovaný" />
-              </strong>{' '}
-              <span className="ovl-muted">
-                (TTL max 48 h — po expirácii sa kľúč zmaže a appka je len na čítanie)
-              </span>
-            </div>
-          </div>
-        ) : (
-          <p className="ovl-badge ovl-badge--warning" data-testid="api-key-missing">
-            Kľúč nie je uložený — appka je v režime len na čítanie a naplánované
-            kampane skončia v stave „vyžaduje kľúč".
-          </p>
-        )}
+    <div data-testid="api-key-form">
+      {keyMeta?.present === true ? (
+        <div className="lvl-3" data-testid="api-key-meta">
+          Uložený kľúč končí na {keyMeta.last4 ?? '????'}
+          {verify ? (
+            <>
+              {' · '}
+              <span className={`sig ${verify.tone}`}>{verify.label}</span>
+            </>
+          ) : null}
+        </div>
+      ) : (
+        <div className="lvl-3" data-testid="api-key-missing">
+          Bez tohto kľúča appka do eshopu nič nezapíše. Fronta počká, nič sa
+          nestratí.
+        </div>
+      )}
 
-        <form
-          className="ovl-stack"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!busy) void submit(apiKey);
-          }}
-        >
-          <label>
-            <span className="ovl-small">
-              {keyMeta?.present ? 'Nový kľúč (rotácia)' : 'API kľúč zo shopu'}
-            </span>
-            <br />
-            <input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              disabled={busy}
-              placeholder="vlož kľúč — nikdy sa nezobrazí"
-              data-testid="api-key-input"
-              style={{ minWidth: '20rem' }}
-            />
-          </label>
-          <div className="ovl-row">
-            <Button type="submit" variant="primary" disabled={busy} data-testid="api-key-save">
-              {busy ? 'Ukladám…' : keyMeta?.present ? 'Rotovať kľúč' : 'Uložiť kľúč'}
-            </Button>
-          </div>
-        </form>
+      <form
+        className="set-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!busy) void submit(apiKey);
+        }}
+      >
+        <label className="field set-w">
+          <span className="lb">
+            {keyMeta?.present === true ? 'Nový kľúč na zápis zliav' : 'Kľúč na zápis zliav'}
+          </span>
+          <input
+            className="inp"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            disabled={busy}
+            placeholder="vlož kľúč — nikdy sa nezobrazí"
+            data-testid="api-key-input"
+          />
+        </label>
+        <div className="row">
+          <Button type="submit" variant="primary" disabled={busy} data-testid="api-key-save">
+            {busy ? 'Ukladám…' : 'Uložiť kľúč'}
+          </Button>
+          <span className="lvl-3">appka kľúč najprv overí u eshopu</span>
+        </div>
+      </form>
 
-        {stored ? (
-          <div className="ovl-badge ovl-badge--ok" data-testid="api-key-stored">
-            Kľúč <code>····{stored.last4}</code> uložený (
-            {VERIFY_LABELS[stored.verifyStatus]?.label ?? stored.verifyStatus}). Kampane, ktoré
-            čakali na kľúč a stále sú vo svojom okne, server automaticky dopálil — skontroluj ich
-            v sekcii Kampane.
-          </div>
-        ) : null}
-        {failure ? (
-          <div className="ovl-stack" style={{ gap: '0.35rem' }}>
-            <p className="ovl-badge ovl-badge--danger" data-testid="api-key-not-stored">
-              Kľúč sa NEULOŽIL — v databáze zostáva pôvodný stav a do shopu sa
-              nič neposlalo. Po oprave príčiny ho vlož znova.
-            </p>
-            <ActionFailurePanel failure={failure} testId="api-key-failure" />
-          </div>
-        ) : null}
-        <p className="ovl-small ovl-muted">
-          Kľúč sa ukladá zašifrovaný, jeho plaintext neopustí pamäť requestu a
-          UI ani logy ho nikdy nezobrazia. Pred uložením appka spustí sondu
-          `reduction=0`, ktorá nič nemení.
+      {stored ? (
+        <p className="set-note" data-testid="api-key-stored">
+          Kľúč končiaci na {stored.last4} je uložený (
+          {VERIFY_LABELS[stored.verifyStatus]?.label ?? 'stav overenia neznámy'}). Zľavy,
+          ktoré na kľúč čakali a sú ešte vo svojom okne, appka dopísala sama.
         </p>
-      </div>
+      ) : null}
+
+      {failure ? (
+        <div className="stack">
+          <p className="sig bad" data-testid="api-key-not-stored">
+            Kľúč sa NEULOŽIL — v appke zostáva pôvodný stav a do eshopu sa nič
+            neposlalo.
+          </p>
+          <ActionFailurePanel failure={failure} testId="api-key-failure" />
+        </div>
+      ) : null}
+
+      <p className="set-note">
+        Kľúč sa ukladá zašifrovaný, neopustí pamäť odoslania a UI ani záznamy ho
+        nikdy nezobrazia.
+      </p>
+
       {needSudo ? (
         <SudoPrompt
-          actionLabel="uloženie API kľúča"
+          actionLabel="uloženie kľúča na zápis zliav"
           onSuccess={() => {
             setNeedSudo(false);
             const value = pending;
@@ -194,7 +179,7 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
           }}
         />
       ) : null}
-    </section>
+    </div>
   );
 }
 

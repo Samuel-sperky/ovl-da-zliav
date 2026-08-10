@@ -1,11 +1,18 @@
 'use client';
 
 /**
- * Aura Zľavy — odomknutie zápisov po runaway strope (A16, D79, I12).
+ * Aura Zľavy — ZÁMOK ZÁPISOV (V12; pôvodne A16).
  *
- * Prekročenie 60 zápisov/h zamkne zápisy fail-closed. Odomknutie je výhradne
- * manuálne, vyžaduje heslo aj platné sudo okno a zapíše audit event
- * `writes_unlocked`. Appka sa NIKDY neodomkne sama.
+ * Keď appka zapisuje rýchlejšie, než je bezpečné, sama sa zastaví a zámok
+ * zostane, kým ho niekto ručne neotvorí heslom. Appka sa NIKDY neodomkne sama
+ * a odomknutie sa zapíše do histórie.
+ *
+ * Zámok je jedna z dvoch vecí, ktoré smú byť červené (druhá je strata dát).
+ * Vyčerpaný denný rozpočet červený NIE JE — to je informácia, nie chyba, a má
+ * svoje miesto v sekcii Rozpočet.
+ *
+ * Kreslí sa vnútri sekcie Poistky; v pokojnom stave je to jeden riadok, po
+ * zamknutí sa rozvinie na formulár.
  */
 import { useState } from 'react';
 
@@ -52,7 +59,6 @@ export function UnlockWritesForm({
       return;
     }
     if (res.error.code === SUDO_REQUIRED_CODE) {
-      // Sudo okno vypršalo — to NIE je odhlásenie; pýtame heslo, nie login.
       setPending(value);
       setNeedSudo(true);
       return;
@@ -62,55 +68,48 @@ export function UnlockWritesForm({
     fail(res.error);
   }
 
+  if (!writesLocked) {
+    return (
+      <div className="lvl-3" data-testid="unlock-writes-form">
+        Zápisy nie sú zastavené. Keby appka začala zapisovať rýchlejšie, než je
+        bezpečné, zastaví sa sama a otvoriť to pôjde len tu, heslom.
+      </div>
+    );
+  }
+
   return (
-    <section
-      className={`ovl-card${writesLocked ? ' ovl-card--danger' : ''}`}
-      data-testid="unlock-writes-form"
-    >
-      <h2>Zámok zápisov</h2>
-      {!writesLocked ? (
-        <p className="ovl-small">
-          <span className="ovl-badge ovl-badge--ok">zápisy nie sú zamknuté</span>{' '}
-          <span className="ovl-muted">
-            Strop je 60 zápisov za hodinu. Pri prekročení sa zápisy zamknú a
-            odomknúť ich pôjde len tu, heslom.
-          </span>
-        </p>
-      ) : (
-        <div className="ovl-stack">
-          <p>
-            <span className="ovl-badge ovl-badge--danger">ZÁPISY ZAMKNUTÉ</span>
-          </p>
-          <p className="ovl-small">
-            Dôvod: {writesLockedReason ?? 'prekročený strop 60 zápisov za hodinu (D79).'} Kým je
-            zámok aktívny, appka nezapíše do shopu nič — ani scheduler. Predtým, než odomkneš,
-            over v audite, čo zápisy spôsobilo.
-          </p>
-          <label>
-            <span className="ovl-small">Heslo</span>
-            <br />
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={busy}
-              data-testid="unlock-writes-password"
-            />
-          </label>
-          <div className="ovl-row">
-            <Button
-              variant="danger"
-              onClick={() => void submit(password)}
-              disabled={busy}
-              data-testid="unlock-writes-submit"
-            >
-              {busy ? 'Odomykám…' : 'Odomknúť zápisy'}
-            </Button>
-          </div>
-          <ActionFailurePanel failure={failure} testId="unlock-writes-failure" />
-        </div>
-      )}
+    <div className="stack" data-testid="unlock-writes-form">
+      <div className="row">
+        <span className="sig bad">Zápisy sú zastavené</span>
+      </div>
+      <p className="set-note">
+        Dôvod: {writesLockedReason ?? 'appka zapisovala rýchlejšie, než je bezpečné'}. Kým
+        zámok trvá, do eshopu sa nezapíše nič — ani z fronty. Skôr než odomkneš,
+        pozri sa do histórie, čo zápisy spôsobilo.
+      </p>
+      <label className="field set-w">
+        <span className="lb">Heslo</span>
+        <input
+          className="inp"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={busy}
+          data-testid="unlock-writes-password"
+        />
+      </label>
+      <div className="row">
+        <Button
+          variant="danger"
+          onClick={() => void submit(password)}
+          disabled={busy}
+          data-testid="unlock-writes-submit"
+        >
+          {busy ? 'Odomykám…' : 'Odomknúť zápisy'}
+        </Button>
+      </div>
+      <ActionFailurePanel failure={failure} testId="unlock-writes-failure" />
       {needSudo ? (
         <SudoPrompt
           actionLabel="odomknutie zápisov"
@@ -126,7 +125,7 @@ export function UnlockWritesForm({
           }}
         />
       ) : null}
-    </section>
+    </div>
   );
 }
 

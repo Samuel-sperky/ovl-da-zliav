@@ -65,37 +65,67 @@ export const EMPTY_FILTERS: AuditFilterState = {
   perPage: 25,
 };
 
-/** Skupiny typov operácií pre select (podzoznam `AUDIT_EVENT_TYPES` z §3). */
+/**
+ * Vnútorný kód udalosti → veta, ktorú používateľ prečíta bez slovníka.
+ *
+ * Toto je JEDINÉ miesto, kde sa kódy histórie prekladajú. Tabuľka aj výber
+ * v filtri z neho čerpajú, takže sa nemôžu rozísť — a keď pribudne nový kód,
+ * `auditEventLabel()` ho nikdy nevypustí na povrch surový.
+ */
+export const AUDIT_EVENT_LABELS: Readonly<Record<string, string>> = {
+  write_attempt: 'pokus o zlacnenie produktu',
+  write_ok: 'produkt zlacnený',
+  write_failed: 'produkt sa nepodarilo zlacniť',
+  write_uncertain: 'nevieme, či sa produkt zlacnil',
+  write_skipped: 'zlacnenie preskočené, už tam bolo',
+  campaign_created: 'zľava vytvorená',
+  campaign_confirmed: 'zľava potvrdená',
+  campaign_cancelled: 'zľava zrušená',
+  campaign_needs_key: 'zľava čaká na kľúč',
+  campaign_missed: 'zľava zmeškala svoj štart',
+  campaign_finished: 'zľava dopísaná',
+  allowlist_added: 'pridané medzi povolené produkty',
+  allowlist_removed: 'odobrané z povolených produktov',
+  allowlist_marked_unknown: 'stav produktu označený za neznámy',
+  scope_mode_changed: 'zmena rozsahu zliav',
+  catalog_refreshed: 'načítaný katalóg',
+  key_stored: 'vložený kľúč',
+  key_wiped: 'zmazaný kľúč',
+  key_panic_wipe: 'kľúče zmazané po úniku',
+  domain_changed: 'zmena adresy eshopu',
+  canary_ok: 'skúška spojenia prešla',
+  canary_fail: 'skúška spojenia neprešla',
+  writes_locked: 'zápisy zastavené',
+  writes_unlocked: 'zápisy odomknuté',
+  login_ok: 'prihlásenie',
+  login_fail: 'neúspešné prihlásenie',
+  lockout: 'účet dočasne uzamknutý',
+  sudo_ok: 'potvrdenie heslom',
+  sudo_fail: 'neúspešné potvrdenie heslom',
+};
+
+/** Kód udalosti → veta. Neznámy kód sa NIKDY nezobrazí surový. */
+export function auditEventLabel(eventType: string): string {
+  const known = Object.prototype.hasOwnProperty.call(AUDIT_EVENT_LABELS, eventType)
+    ? AUDIT_EVENT_LABELS[eventType]
+    : undefined;
+  return known ?? 'iná udalosť appky';
+}
+
+/** Kto to urobil — na povrchu jedno slovo, nie názov vnútornej role. */
+export const AUDIT_ACTOR_LABELS: Readonly<Record<AuditRow['actor'], string>> = {
+  user: 'človek',
+  scheduler: 'appka',
+  system: 'appka',
+};
+
+/** Možnosti výberu v filtri histórie; prázdna hodnota = bez obmedzenia. */
 export const AUDIT_EVENT_OPTIONS: readonly { value: string; label: string }[] = [
-  { value: '', label: 'všetky typy' },
-  { value: 'write_attempt', label: 'pokus o zápis' },
-  { value: 'write_ok', label: 'zápis OK' },
-  { value: 'write_failed', label: 'zápis zlyhal' },
-  { value: 'write_uncertain', label: 'zápis neistý' },
-  { value: 'write_skipped', label: 'zápis preskočený' },
-  { value: 'campaign_created', label: 'kampaň vytvorená' },
-  { value: 'campaign_confirmed', label: 'kampaň potvrdená' },
-  { value: 'campaign_cancelled', label: 'kampaň zrušená' },
-  { value: 'campaign_needs_key', label: 'kampaň čaká na kľúč' },
-  { value: 'campaign_missed', label: 'kampaň zmeškaná' },
-  { value: 'campaign_finished', label: 'kampaň dokončená' },
-  { value: 'allowlist_added', label: 'allowlist — pridanie' },
-  { value: 'allowlist_removed', label: 'allowlist — odobranie' },
-  { value: 'allowlist_marked_unknown', label: 'allowlist — stav neznámy' },
-  { value: 'catalog_refreshed', label: 'katalóg obnovený' },
-  { value: 'key_stored', label: 'kľúč uložený' },
-  { value: 'key_wiped', label: 'kľúč zmazaný' },
-  { value: 'key_panic_wipe', label: 'panic button' },
-  { value: 'domain_changed', label: 'zmena domény' },
-  { value: 'canary_ok', label: 'test spojenia OK' },
-  { value: 'canary_fail', label: 'test spojenia zlyhal' },
-  { value: 'writes_locked', label: 'zápisy zamknuté' },
-  { value: 'writes_unlocked', label: 'zápisy odomknuté' },
-  { value: 'login_ok', label: 'prihlásenie OK' },
-  { value: 'login_fail', label: 'prihlásenie zlyhalo' },
-  { value: 'lockout', label: 'uzamknutie účtu' },
-  { value: 'sudo_ok', label: 'sudo OK' },
-  { value: 'sudo_fail', label: 'sudo zlyhalo' },
+  { value: '', label: 'všetko' },
+  ...Object.keys(AUDIT_EVENT_LABELS).map((value) => ({
+    value,
+    label: auditEventLabel(value),
+  })),
 ];
 
 /** Filtre → query string (prázdne polia sa vynechávajú). */

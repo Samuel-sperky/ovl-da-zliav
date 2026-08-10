@@ -10,13 +10,15 @@
  *
  * Vlastník: A10.
  */
-import type { AuditWriter, CampaignsRepo, Logger, UtcDate } from '@/contracts';
+import type { AuditWriter, Logger, UtcDate } from '@/contracts';
+
+import type { SchedulerCampaignsRepo } from './types';
 
 /** Tolerancia od `fire_at`, po ktorej je fire zmeškaný (D33b). */
 export const MISSED_GRACE_MINUTES = 5;
 
 export interface MissedDeps {
-  campaigns: Pick<CampaignsRepo, 'findMissedCandidates' | 'setStatus'>;
+  campaigns: Pick<SchedulerCampaignsRepo, 'findMissedCandidates' | 'setStatus'>;
   audit: AuditWriter;
   log: Logger;
 }

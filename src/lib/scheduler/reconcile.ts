@@ -16,7 +16,6 @@ import type {
   AuditRepo,
   AuditWriter,
   CampaignItemsRepo,
-  CampaignsRepo,
   ItemStatus,
   Logger,
   UtcDate,
@@ -24,8 +23,10 @@ import type {
 
 import { tallyItemStatuses } from '@/lib/domain/status';
 
+import type { SchedulerCampaignsRepo } from './types';
+
 export interface ReconcileDeps {
-  campaigns: Pick<CampaignsRepo, 'findRunningUnfinished' | 'setStatus'>;
+  campaigns: Pick<SchedulerCampaignsRepo, 'findRunningUnfinished' | 'setStatus'>;
   items: Pick<CampaignItemsRepo, 'listByCampaign' | 'update'>;
   auditReader: Pick<AuditRepo, 'findConfirmedWrites'>;
   audit: AuditWriter;

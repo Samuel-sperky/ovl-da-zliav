@@ -1,5 +1,5 @@
 /**
- * Aura Zľavy — testy preview tokenu (A1, BUILD-SPEC §7, O2, I3).
+ * Aura Zľavy — testy preview tokenu (A1/V6, BUILD-SPEC §7, O2, I3, K4).
  *
  * Preview token je nosič invariantu I3: bez platného, jednorazového tokenu so
  * zhodným `payloadHash` neexistuje cesta k ostrému zápisu. Testy preto pokrývajú
@@ -9,6 +9,10 @@
  *  - podvrhnutý `payloadHash` v claimoch,
  *  - token vydaný pre inú sadu parametrov,
  *  - druhé použitie toho istého tokenu (replay).
+ *
+ * K4 pridáva druhú vrstvu: hash sa počíta STREAMOVO nad trojicami
+ * `<product_id>:<percent>:<price_at_preview>` a musí zniesť 10 000 položiek bez
+ * toho, aby sa postavil jeden obrí reťazec. Testy to nielen tvrdia — merajú to.
  */
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -25,6 +29,7 @@ import {
   computePayloadHash,
   createMemoryPreviewTokenStore,
   createPreviewTokenService,
+  streamPayloadHash,
 } from '@/lib/crypto/preview-token';
 
 const SECRET = randomBytes(32);
@@ -41,12 +46,22 @@ const BASE: IssueInput = {
   pricesAtPreview: { '7': '19.90', '15': '5.00', '42': '129.00' },
 };
 
+/**
+ * Sada tak, ako ju pozná POŽIADAVKA: bez cien a bez percent pásiem — tie
+ * prídu z tokenu (verify si ich doplní, ich pravosť dokazuje `payloadHash`).
+ */
 const expectedOf = (input: IssueInput = BASE) => ({
   kind: input.kind,
   productIds: input.productIds,
   percent: input.percent,
   from: input.from,
   to: input.to,
+});
+
+/** Sada tak, ako sa HASHUJE: aj s cenami (K4, D39c). */
+const hashedOf = (input: IssueInput = BASE) => ({
+  ...expectedOf(input),
+  pricesAtPreview: input.pricesAtPreview,
 });
 
 function makeService(nowRef?: { ms: number }) {
@@ -58,37 +73,67 @@ function makeService(nowRef?: { ms: number }) {
 
 /* ═════════════════════════════ payloadHash ════════════════════════════════ */
 
-describe('preview-token: kanonický payloadHash (§7)', () => {
+describe('preview-token: kanonický payloadHash (§7, K4)', () => {
   it('nezávisí od poradia productIds', () => {
-    const a = computePayloadHash({ ...expectedOf(), productIds: [7, 15, 42] });
-    const b = computePayloadHash({ ...expectedOf(), productIds: [42, 15, 7] });
+    const a = computePayloadHash({ ...hashedOf(), productIds: [7, 15, 42] });
+    const b = computePayloadHash({ ...hashedOf(), productIds: [42, 15, 7] });
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('je SHA-256 kanonického JSON { from, kind, percent, productIds, to }', () => {
-    const canonical = JSON.stringify({
-      from: '2026-09-01',
-      kind: 'new',
-      percent: 20,
-      productIds: [7, 15, 42],
-      to: '2026-09-30',
-    });
-    expect(computePayloadHash(expectedOf())).toBe(
+  /**
+   * KONTRAKT SA ZMENIL (K4). Do V2 sa hashoval kanonický JSON
+   * `{from, kind, percent, productIds, to}` — jedno percento na celú kampaň a
+   * jeden materializovaný reťazec. Pásma (K3) urobili z percenta vlastnosť
+   * položky a strop 10 000 (K1) zakázal materializáciu, takže tvrdenie sa
+   * prepisuje na nový kanonický tvar: hlavička + trojica na položku.
+   *
+   * Hlavička `kind/from/to/count` v texte K4 nie je, ale hashuje sa vedome —
+   * bez nej by token potvrdený na september autorizoval zápis na december a I3
+   * by prestalo platiť. Toto tvrdenie hlavičku pribíja, aby ju nikto nezahodil
+   * ako „nadbytočnú".
+   */
+  it('je SHA-256 hlavičky a trojíc <id>:<percent>:<price> vzostupne (K4)', () => {
+    const canonical =
+      'kind:new\n' +
+      'from:2026-09-01\n' +
+      'to:2026-09-30\n' +
+      'count:3\n' +
+      '7:20:19.90\n' +
+      '15:20:5.00\n' +
+      '42:20:129.00\n';
+    expect(computePayloadHash(hashedOf())).toBe(
       createHash('sha256').update(canonical, 'utf8').digest('hex'),
     );
   });
 
-  it('zmena ktoréhokoľvek parametra zmení hash', () => {
-    const base = computePayloadHash(expectedOf());
-    expect(computePayloadHash({ ...expectedOf(), percent: 21 })).not.toBe(base);
-    expect(computePayloadHash({ ...expectedOf(), from: '2026-09-02' })).not.toBe(base);
-    expect(computePayloadHash({ ...expectedOf(), to: '2026-10-01' })).not.toBe(base);
-    expect(computePayloadHash({ ...expectedOf(), kind: 'extend' })).not.toBe(base);
-    expect(computePayloadHash({ ...expectedOf(), productIds: [7, 15] })).not.toBe(base);
+  it('cena sa kanonizuje, takže 19.9 a 19.90 dajú ten istý hash', () => {
+    expect(
+      computePayloadHash({
+        ...expectedOf(),
+        pricesAtPreview: { '7': '19.9', '15': '5', '42': '129.00' },
+      }),
+    ).toBe(computePayloadHash(hashedOf()));
   });
 
-  it('fail-closed odmietne nezmyselnú sadu (I2, I9)', () => {
+  it('zmena ktoréhokoľvek parametra zmení hash', () => {
+    const base = computePayloadHash(hashedOf());
+    expect(computePayloadHash({ ...hashedOf(), percent: 21 })).not.toBe(base);
+    expect(computePayloadHash({ ...hashedOf(), from: '2026-09-02' })).not.toBe(base);
+    expect(computePayloadHash({ ...hashedOf(), to: '2026-10-01' })).not.toBe(base);
+    expect(computePayloadHash({ ...hashedOf(), kind: 'extend' })).not.toBe(base);
+    expect(computePayloadHash({ ...hashedOf(), productIds: [7, 15] })).not.toBe(base);
+    // K4 — cena aj percento sú v hashi per POLOŽKA (D39c, K3).
+    expect(
+      computePayloadHash({
+        ...hashedOf(),
+        pricesAtPreview: { ...BASE.pricesAtPreview, '15': '5.01' },
+      }),
+    ).not.toBe(base);
+    expect(computePayloadHash({ ...hashedOf(), percents: { '15': 10 } })).not.toBe(base);
+  });
+
+  it('fail-closed odmietne nezmyselnú sadu (K1, I9)', () => {
     expect(() => computePayloadHash({ ...expectedOf(), percent: 0 })).toThrow(PreviewTokenError);
     expect(() => computePayloadHash({ ...expectedOf(), percent: 31 })).toThrow(PreviewTokenError);
     expect(() => computePayloadHash({ ...expectedOf(), percent: 10.5 })).toThrow(PreviewTokenError);
@@ -111,6 +156,122 @@ describe('preview-token: kanonický payloadHash (§7)', () => {
     expect(() =>
       computePayloadHash({ ...expectedOf(), from: '2026-09-30', to: '2026-09-01' }),
     ).toThrow(PreviewTokenError);
+    // K3 — percento POLOŽKY má rovnaké hranice ako percento kampane (1–30).
+    expect(() => computePayloadHash({ ...expectedOf(), percents: { '15': 31 } })).toThrow(
+      PreviewTokenError,
+    );
+    expect(() => computePayloadHash({ ...expectedOf(), percents: { '15': 0 } })).toThrow(
+      PreviewTokenError,
+    );
+    // Cena, ktorá nie je peňažná hodnota, sa nesmie potichu zahashovať (D39c).
+    expect(() =>
+      computePayloadHash({ ...expectedOf(), pricesAtPreview: { '15': 'zadarmo' } }),
+    ).toThrow(PreviewTokenError);
+  });
+
+  it('strop je 10 000 položiek — zhodný s CHECK v DB (K1 bod 3)', () => {
+    expect(PREVIEW_MAX_PRODUCTS).toBe(10_000);
+  });
+});
+
+/* ═══════════════════ payloadHash pri 10 000 položkách (K4) ════════════════ */
+
+describe('preview-token: payloadHash pri 10 000 položkách (K4)', () => {
+  const COUNT = 10_000;
+
+  /** Deterministická sada: id, percento pásma a cena sa dajú prepočítať. */
+  const bigItems = (): Array<{ productId: number; percent: number; priceAtPreview: string }> =>
+    Array.from({ length: COUNT }, (_, i) => ({
+      productId: 1000 + i,
+      percent: (i % 30) + 1,
+      priceAtPreview: `${10 + (i % 900)}.${String(i % 100).padStart(2, '0')}`,
+    }));
+
+  const bigInput = (items = bigItems()) => ({
+    kind: 'new' as const,
+    from: '2026-09-01',
+    to: '2026-09-30',
+    items,
+  });
+
+  it('hash je stabilný a nezávisí od poradia položiek na vstupe', () => {
+    const items = bigItems();
+    const first = computePayloadHash(bigInput(items));
+    const again = computePayloadHash(bigInput(items));
+    expect(first).toBe(again);
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+
+    // Obrátené poradie, náhodne premiešané poradie — hash sa nesmie pohnúť,
+    // lebo K4 hashuje VZOSTUPNE podľa product_id.
+    expect(computePayloadHash(bigInput([...items].reverse()))).toBe(first);
+
+    const shuffled = [...items];
+    let seed = 42;
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      const j = seed % (i + 1);
+      const tmp = shuffled[i]!;
+      shuffled[i] = shuffled[j]!;
+      shuffled[j] = tmp;
+    }
+    expect(computePayloadHash(bigInput(shuffled))).toBe(first);
+  });
+
+  it('zmena jedinej ceny alebo jediného percenta hash zmení', () => {
+    const base = computePayloadHash(bigInput());
+
+    const onePriceChanged = bigItems();
+    onePriceChanged[7_777] = { ...onePriceChanged[7_777]!, priceAtPreview: '999.99' };
+    expect(computePayloadHash(bigInput(onePriceChanged))).not.toBe(base);
+
+    const onePercentChanged = bigItems();
+    const victim = onePercentChanged[4_242]!;
+    onePercentChanged[4_242] = { ...victim, percent: victim.percent === 30 ? 29 : victim.percent + 1 };
+    expect(computePayloadHash(bigInput(onePercentChanged))).not.toBe(base);
+
+    // A ubratie jedinej položky tiež — `count` v hlavičke to zachytí okamžite.
+    expect(computePayloadHash(bigInput(bigItems().slice(0, COUNT - 1)))).not.toBe(base);
+  });
+
+  /**
+   * Meranie, nie tvrdenie: `streamPayloadHash()` je JEDINÝ zdroj bajtov, ktoré
+   * `computePayloadHash()` sype do `hash.update()`. Ak by sa 10 000 položiek
+   * zlialo do jedného reťazca, tento test to uvidí — kúskov by bolo pár a boli
+   * by obrovské.
+   */
+  it('sype do hashu po položkách, nie jeden obrí reťazec', () => {
+    const chunks: string[] = [];
+    streamPayloadHash(bigInput(), (chunk) => chunks.push(chunk));
+
+    expect(chunks).toHaveLength(4 + COUNT); // kind, from, to, count + trojice
+    const longest = chunks.reduce((max, chunk) => Math.max(max, chunk.length), 0);
+    expect(longest).toBeLessThanOrEqual(64);
+
+    // Celková dĺžka je rádovo stovky kilobajtov — presne to, čo sa NESMIE
+    // objaviť ako jeden reťazec v pamäti.
+    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    expect(total).toBeGreaterThan(100_000);
+
+    // A tok je naozaj to, z čoho hash vzniká.
+    expect(createHash('sha256').update(chunks.join(''), 'utf8').digest('hex')).toBe(
+      computePayloadHash(bigInput()),
+    );
+  });
+
+  it('rovnomerný a položkový tvar vstupu dajú ten istý hash', () => {
+    const items = bigItems();
+    const uniform = {
+      kind: 'new' as const,
+      productIds: items.map((item) => item.productId),
+      percent: 30,
+      from: '2026-09-01',
+      to: '2026-09-30',
+      pricesAtPreview: Object.fromEntries(
+        items.map((item) => [String(item.productId), item.priceAtPreview]),
+      ),
+      percents: Object.fromEntries(items.map((item) => [String(item.productId), item.percent])),
+    };
+    expect(computePayloadHash(uniform)).toBe(computePayloadHash(bigInput(items)));
   });
 });
 
@@ -122,7 +283,7 @@ describe('preview-token: vydanie a overenie', () => {
     const { token, jti, payloadHash } = await service.issue(BASE);
 
     expect(token.split('.')).toHaveLength(3);
-    expect(payloadHash).toBe(computePayloadHash(expectedOf()));
+    expect(payloadHash).toBe(computePayloadHash(hashedOf()));
 
     const claims = await service.verify(token, expectedOf());
     expect(claims.jti).toBe(jti);
@@ -155,6 +316,32 @@ describe('preview-token: vydanie a overenie', () => {
   it('odmietne vydanie bez prihláseného usera', async () => {
     const service = makeService();
     await expect(service.issue({ ...BASE, sub: 0 })).rejects.toBeInstanceOf(PreviewTokenError);
+  });
+
+  it('vydá token s pásmami a percentá nesie per produkt (K3)', async () => {
+    const service = makeService();
+    const percents = { '7': 30, '15': 20, '42': 20 };
+    const { token } = await service.issue({ ...BASE, percent: 30, percents });
+
+    const claims = await service.verify(token, { ...expectedOf(), percent: 30 });
+    expect(claims.percents).toEqual(percents);
+    // Položka 7 zlacnie o 30 %, položky 15 a 42 o 20 % — a hlavička kampane je
+    // to najvyššie z toho (K3).
+    expect(claims.percent).toBe(30);
+  });
+
+  it('odmietne vydanie, keď hlavička nie je najvyššie percento pásiem (K3)', async () => {
+    const service = makeService();
+    await expect(
+      service.issue({ ...BASE, percent: 20, percents: { '7': 30, '15': 20, '42': 20 } }),
+    ).rejects.toBeInstanceOf(PreviewTokenError);
+  });
+
+  it('odmietne vydanie pre percentá mimo sady (K3)', async () => {
+    const service = makeService();
+    await expect(
+      service.issue({ ...BASE, percents: { '999': 20 } }),
+    ).rejects.toBeInstanceOf(PreviewTokenError);
   });
 });
 

@@ -38,7 +38,18 @@ const FLAGS: ExecutorFlags = {
   writesEnabled: true,
   maxProductsPerOperation: 10,
   runawayLimitPerHour: 60,
+  dailyWriteBudget: 200,
   writePauseMs: 5,
+};
+
+/** Rozpočet, ktorý sa v tomto teste nikdy neminie (K2). */
+const roomyBudget = {
+  async spentToday() {
+    return 0;
+  },
+  async remainingToday() {
+    return { day: '2026-08-10', budget: 200, spent: 0, remaining: 200, exhausted: false };
+  },
 };
 
 function client() {
@@ -61,7 +72,17 @@ function makeWorld(productIds: number[], pricesAtPreview: Record<number, string>
     dateTo: to,
     confirmedAt: new Date(),
     sudoAt: new Date(),
-    confirmPayloadHash: computePayloadHash({ kind: 'new', productIds, percent: 25, from, to }),
+    // K4 — hash nad trojicami `id:percent:price` zo skutočných položiek.
+    confirmPayloadHash: computePayloadHash({
+      kind: 'new',
+      from,
+      to,
+      items: productIds.map((productId) => ({
+        productId,
+        percent: 25,
+        priceAtPreview: pricesAtPreview[productId] ?? null,
+      })),
+    }),
   };
   world.seedCampaign(
     campaign,
@@ -70,6 +91,10 @@ function makeWorld(productIds: number[], pricesAtPreview: Record<number, string>
       priceAtPreview: pricesAtPreview[productId] ?? null,
     })),
   );
+  // K3 — percento je na položke; `createMemoryCampaignWorld()` (A9) ho neseje.
+  for (const item of world.campaignItemsRepo.items.values()) {
+    Object.assign(item, { percent: 25 });
+  }
   const executor = createExecutor({
     shopClient: client(),
     campaignsRepo: world.campaignsRepo,
@@ -80,6 +105,7 @@ function makeWorld(productIds: number[], pricesAtPreview: Record<number, string>
     apiKeyRepo: createMemoryApiKeyRepo(VALID_API_KEY),
     audit,
     mutex: createWriteMutex({ dbLock: null }),
+    budget: roomyBudget,
     flags: FLAGS,
   });
   return { executor, world, audit };

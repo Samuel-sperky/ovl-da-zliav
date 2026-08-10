@@ -1,0 +1,67 @@
+/**
+ * Aura Zľavy — geometria stránky Nastavenia (V12; predloha
+ * `design/v3/nastavenia.html`).
+ *
+ * Predloha má tieto pravidlá v lokálnom `<style>` bloku stránky, nie
+ * v spoločnom systéme — sú to rozmery jednej obrazovky, nie komponenty.
+ * Držíme sa toho aj tu, a to z jedného konkrétneho dôvodu: `globals.css`
+ * vlastní iný agent (V2) a výhradné vlastníctvo súborov je jediná vec, ktorá
+ * dovoľuje písať obrazovky paralelne. Preto sa tento blok vkladá ako `<style>`
+ * priamo do stránky.
+ *
+ * Nič tu nesmie predefinovať spoločný systém — len dopĺňa mriežky, ktoré
+ * existujú výlučne v Nastaveniach. Politika obsahu stránky inline štýly
+ * povoľuje (`style-src 'self' 'unsafe-inline'` v `Caddyfile.example`).
+ *
+ * Farby sa berú VÝHRADNE z premenných systému, takže tmavá téma funguje
+ * automaticky a nie je tu ani jedna natvrdo napísaná farba.
+ *
+ * Vlastník: V12.
+ */
+
+export const SETTINGS_CSS = `
+.set-page h1.page{font-size:15px;font-weight:640;margin-bottom:10px}
+.set-page .sec + .sec{margin-top:14px}
+.set-page .sec[id]{scroll-margin-top:72px}
+/* Hlavička sekcie sa na úzkej obrazovke zalomí a dlhý popis tlačidla s ňou —
+   inak by jediné dlhé tlačidlo vytlačilo celú stránku doboku. */
+.set-page .sec-h{flex-wrap:wrap}
+.set-page .sec-h .ovl-btn{white-space:normal;text-align:left;max-width:100%}
+.set-page .kv{display:grid;grid-template-columns:190px 1fr auto;gap:8px 14px;
+  align-items:center;font-size:13px}
+.set-page .kv .k{color:var(--dim);font-size:12px}
+.set-page .kv .v{color:var(--ink);font-weight:600;min-width:0;overflow-wrap:anywhere}
+.set-page table.tbl.plain td{white-space:normal}
+.set-page table.tbl td.act{text-align:right;white-space:nowrap}
+.set-page .split{display:grid;grid-template-columns:1fr 300px;gap:16px;
+  align-items:start}
+.set-page .stack{display:flex;flex-direction:column;gap:8px}
+.set-page .danger-zone{border-color:var(--st-critical)}
+.set-page .danger-zone .sec-h h2{color:var(--st-critical)}
+.set-page .dz-row{display:flex;align-items:center;gap:12px;padding:8px 0;
+  border-top:1px solid var(--line);font-size:13px;color:var(--ink2);
+  flex-wrap:wrap}
+.set-page .dz-row:first-of-type{border-top:0}
+.set-page .dz-row .dz-a{margin-left:auto}
+.set-page .audit-scroll{max-height:340px}
+.set-page .set-form{display:flex;flex-direction:column;gap:8px;margin-top:10px;
+  border-top:1px solid var(--line);padding-top:10px}
+.set-page .set-form .row{flex-wrap:wrap}
+.set-page .set-note{font-size:12px;color:var(--dim);line-height:1.5}
+.set-page .set-note b{color:var(--ink2);font-weight:600}
+.set-page .inp{max-width:100%}
+.set-page .set-w{max-width:320px}
+/* Bočný panel je úzky — mriežka kľúč/hodnota v ňom potrebuje menej miesta. */
+.set-page .ovl-drawer .kv{grid-template-columns:110px 1fr auto;gap:4px 10px}
+.set-page .ovl-drawer pre.mono{white-space:pre-wrap;overflow-wrap:anywhere}
+
+@media (max-width:760px){
+  .set-page .split{grid-template-columns:1fr}
+  .set-page .kv{grid-template-columns:1fr;gap:2px}
+  .set-page .kv .k{margin-top:8px}
+  .set-page .dz-row .dz-a{margin-left:0}
+  .set-page .set-w{max-width:100%}
+}
+`;
+
+export default SETTINGS_CSS;

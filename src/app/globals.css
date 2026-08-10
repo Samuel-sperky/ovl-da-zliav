@@ -1,38 +1,36 @@
 /*
- * Aura Zľavy — dizajnový systém (32-UX-UI-PLAN §3, sekcia B1).
+ * Aura Zľavy — dizajnový systém V3 (design/v3/_v3.css + design/v3/ARCHITEKTURA.md).
  *
- * Smer: priehľadné (vrstvené priesvitné plochy), minimalistické (menej rámov,
- * jedna dominanta), praktické, rodina Aura (teal/gold, Inter, koruna, dark
- * default), animácie krátke a funkčné.
+ * Súbor má DVE vrstvy a obe sú živé:
+ *   · §1–§13  historická vrstva `.ovl-*` — kreslí obrazovky, ktoré ešte neprešli
+ *             na V3 (Analytika, AI agent, Nastavenia, Kampane). Odíde, keď
+ *             V9–V12 dokreslia štyri taby a V13 upratuje.
+ *   · §14     vrstva V3 — prenos `design/v3/_v3.css`: `.hdr`, `.lvl-1/2/3`,
+ *             `.sec`, `.bar`, `.tbl`, `.selbar`, `.btn`, `.chip`, … Nové
+ *             obrazovky píšu VÝHRADNE proti nej.
+ * Obe vrstvy zdieľajú JEDEN tokenový základ (§2), takže téma sa prepína raz a
+ * platí všade. Preto tu nie sú dve palety ani dva prepínače.
  *
- * Bezpečnostné výnimky z „priehľadnosti" (§1.1) — VŽDY plné a nepriesvitné:
- *   · pruh PRODUKCIA (D6)
- *   · stavové badge (D5, D14)
- *   · chybové a stavové panely (.ovl-note*)
- * Ich čitateľnosť je bezpečnostná funkcia, nie estetika.
+ * TÉMA: SVETLÁ je predvolená a stojí na HOLOM `:root`. Tmavá je deklarovaná
+ * dvakrát — pod `@media (prefers-color-scheme: dark)` s guardom
+ * `:root:not([data-theme="light"])` (systémová voľba) a pod
+ * `:root[data-theme="dark"]` (ručný prepínač). Guard je tam preto, aby ručne
+ * zvolená svetlá téma neprehrala so systémovou tmavou. Žiadna farba nesmie mať
+ * jedinú definíciu vnútri media query — inak by v druhej téme chýbala.
  *
- * Tvrdé pravidlá farieb (§3.1):
- *   · --brand (teal) a --gold NIKDY nekódujú stav ani plochu stavového badge.
- *     Gold = koruna, hairline, eyebrow. Teal = štruktúra, akcia, výber,
- *     a sekvenčná rampa --seq-teal-* (magnitúda, nie stav).
- *   · stav nie je nikdy len farba — vždy farba + glyf + text (§3.3).
+ * Bezpečnostné výnimky z „priehľadnosti" — VŽDY plné a nepriesvitné:
+ *   · pruh PRODUKCIA (D6) · stavové badge · chybové panely (`.ovl-note*`).
+ *   Ich čitateľnosť je bezpečnostná funkcia, nie estetika.
  *
- * Téma: DARK je default. `:root` bez `data-theme` = dark; dark je deklarovaný
- * aj pod `@media (prefers-color-scheme: dark)`, aj pod `:root[data-theme="dark"]`,
- * takže prepínač („Light pill") vyhrá v oboch smeroch. Hodnotu ukladá
- * `ThemeToggle` do `localStorage` a inline skript v layout ju aplikuje pred
- * prvým paintom.
+ * Tvrdé pravidlá farieb:
+ *   · teal a gold NIKDY nekódujú stav. Výnimka je bodka stavu zľavy, ktorá
+ *     nesie aj glyf aj text — farba tam nie je jediný nosič významu.
+ *   · stav nie je nikdy len farba — vždy farba + glyf + text.
+ *   · vyčerpaný denný rozpočet je NEUTRÁLNY, nie červený (K2, odpoveď 59):
+ *     je to informácia o rýchlosti, nie chyba.
  *
- * Rozhranie pre B2/B3/B4 (plán §6) — tieto triedy a tokeny sú stabilné:
- *   .ovl-card .ovl-card--quiet .ovl-panel .ovl-note
- *   .ovl-badge .ovl-badge--{critical,attention,progress,good,idle}
- *   .ovl-num .ovl-mono .ovl-grid .ovl-w-wide .ovl-w-default .ovl-w-form
- *   .ovl-anim-in .ovl-stagger .ovl-shimmer
- *   --paper --surface --surface-solid --line --ink --dim --brand --brand-tint
- *   --gold --st-{critical,attention,progress,good,idle} --seq-teal-1…5
- * Staré názvy (`--ovl-*`, `.ovl-badge--{ok,warning,danger,neutral,outline}`,
- * `.ovl-error`, `.ovl-card--{danger,warning}`) zostávajú ako aliasy, aby sa
- * nemuselo prepisovať 40 volajúcich miest naraz.
+ * Hierarchiu veľkosti nesú `.lvl-1/.lvl-2/.lvl-3` (pravidlo P1) — na obrazovke
+ * je presne jedna `.lvl-1`. Nepridávaj vlastné veľkosti mimo týchto tried.
  */
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -98,79 +96,141 @@
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   2. Téma — DARK (default rodiny) a LIGHT (prepínač)
+   2. Téma — SVETLÁ (predvolená, holý `:root`) a TMAVÁ (atribút + systém)
+
+   Poradie a duplicita sú zámerné:
+     1. `:root`                                  … kompletná SVETLÁ paleta,
+     2. `@media (prefers-color-scheme: dark)`
+        `:root:not([data-theme="light"])`         … systémová tmavá,
+     3. `:root[data-theme="dark"]`                … ručne zvolená tmavá.
+   Bod 3 stojí za bodom 2, takže prepínač vyhráva v OBOCH smeroch. Tmavé
+   hodnoty sú napísané dvakrát — je to cena za to, že žiadna farba nemá jedinú
+   definíciu v media query. CSS nevie zoskupiť custom properties do balíka,
+   takže kopírovanie je jediná možnosť; keď meníš jednu, zmeň obe.
+
+   Názvoslovie: `--paper/--paper2/--paper3`, `--ink/--ink2/--dim`,
+   `--line/--line2`, `--track`, `--sel` sú tokeny V3. Zvyšok (`--surface*`,
+   `--brand*`, `--st-*`) je mostík pre historickú vrstvu `.ovl-*`, aby obe
+   vrstvy videli tú istú tému. `--accent` je jediné miesto, kde sa rieši
+   „v svetlej tmavý teal, v tmavej svietivý teal" — komponenty V3 preto NEMAJÚ
+   vlastné `[data-theme="dark"]` selektory.
    ══════════════════════════════════════════════════════════════════════════ */
 
-:root,
-:root[data-theme='dark'] {
-  color-scheme: dark;
+:root {
+  color-scheme: light;
 
-  --paper: #0e1413;
-  --surface: color-mix(in srgb, #16201f 62%, transparent);
-  --surface-solid: #16201f;
-  --surface-raised: #1b2624;
-  --line: #22302e;
-  --line-strong: #31423f;
-  --ink: #eef3f2;
-  --dim: #8a9895;
-  --brand: #05bcc4;
+  --teal: #05bcc4;
+  --deep: #03797e;
+  --teal3: #7fd0d4;
+  --gold2: #a8853c;
+  --accent: var(--deep);
+  --accent-on: #ffffff;
+
+  --paper: #f7f5f7;
+  --paper2: #ffffff;
+  --paper3: #f1eef2;
+  --ink: #141b1a;
+  --ink2: #3d4b49;
+  --dim: #6b7877;
+  --line: #e3dde4;
+  --line2: #cfc7d1;
+  --track: #e9e4ea;
+  --sel: #eef9f9;
+  --barfill: var(--deep);
+  --shadow: 0 1px 2px rgb(19 27 26 / 0.07);
+  /* Spodná lišta výberu je tmavá aj vo svetlej téme — je to plávajúca akcia,
+     nie plocha stránky. */
+  --selbar-bg: #141b1a;
+  --selbar-fg: #f2f7f6;
+
+  /* Geometria V3. `--r-sm` definuje KISS vrstva (§13) — jedna hodnota (8 px)
+     pre obe vrstvy je lepšia než dve skoro rovnaké. */
+  --r: 9px;
+  --r-pill: 99px;
+  --w: 1440px;
+  --hdr-h: 56px;
+
+  --surface: color-mix(in srgb, #ffffff 72%, transparent);
+  --surface-solid: var(--paper2);
+  --surface-raised: var(--paper2);
+  --line-strong: var(--line2);
+  --brand: var(--deep);
   --brand-fill: var(--aura-teal-700);
-  --brand-ink: #04211f;
-  --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
-  --gold: #d8b878;
+  --brand-ink: #ffffff;
+  --brand-tint: #e3f1f1;
+  --gold: var(--aura-gold-800);
 
-  --st-critical: #e5534b;
-  --st-attention: #b58900;
-  --st-progress: #8b80e8;
-  --st-good: #3fa045;
-  --st-idle: #8a9895;
+  --st-critical: #c62f26;
+  --st-attention: #9a6c00;
+  --st-progress: #4a3aa7;
+  --st-good: #2e7d32;
+  --st-idle: #667574;
 
-  /* Pruh PRODUKCIA (D6) — v darku vyššia luminancia + gold hairline (V8) */
   --production-bg: #c62f26;
-  --production-fg: #fff4f2;
+  --production-fg: #ffffff;
 
-  /* Sekvenčná teal rampa pre G2 (hĺbka zľavy) — monotónna vo svetlosti,
-     od takmer-pozadia k plnej teal. Nekóduje stav, len magnitúdu. */
-  --seq-teal-1: #12312f;
-  --seq-teal-2: #12504f;
-  --seq-teal-3: #0a7076;
-  --seq-teal-4: #049199;
-  --seq-teal-5: #05bcc4;
+  /* Sekvenčná teal rampa (hĺbka zľavy) — monotónna vo svetlosti. Nekóduje
+     stav, len magnitúdu. */
+  --seq-teal-1: #e3f1f1;
+  --seq-teal-2: #a8d9da;
+  --seq-teal-3: #67bcbf;
+  --seq-teal-4: #2a9aa0;
+  --seq-teal-5: #03797e;
 
   /* Text stavu na tinte: čistý stavový tón má na 14% tinte kontrast ~4,1:1,
-     čo pri 13 px bold nestačí. Text sa preto mieša smerom k --ink (dark 80 %,
-     light 70 %) a dostane ≥ 4,5:1 na tinte aj na papieri. Plný tón zostáva
+     čo pri 13 px bold nestačí. Text sa preto mieša smerom k --ink (light 70 %,
+     dark 80 %) a dostane ≥ 4,5:1 na tinte aj na papieri. Plný tón zostáva
      nedotknutý pre okraje, pruhy a marky grafov. */
-  --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
-  --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
-  --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
-  --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
-  --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 70%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 70%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 70%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 70%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 70%, var(--ink));
 
-  --ovl-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
-  --ovl-shadow-raised: 0 10px 30px -18px rgb(0 0 0 / 0.8);
+  --ovl-shadow: 0 1px 2px rgb(19 27 26 / 0.05), 0 1px 3px rgb(19 27 26 / 0.07);
+  --ovl-shadow-raised: 0 10px 30px -16px rgb(19 27 26 / 0.22);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  /* Guard `:not([data-theme="light"])`: kto si ručne vypýtal svetlú, dostane
+     svetlú aj na systémovo tmavom stroji. */
+  :root:not([data-theme='light']) {
     color-scheme: dark;
 
+    --teal: #05bcc4;
+    --deep: #03797e;
+    --teal3: #7fd0d4;
+    --gold2: #c9a869;
+    --accent: var(--teal);
+    --accent-on: #08201f;
+
     --paper: #0e1413;
-    --surface: color-mix(in srgb, #16201f 62%, transparent);
-    --surface-solid: #16201f;
-    --surface-raised: #1b2624;
+    --paper2: #131b1a;
+    --paper3: #182220;
+    --ink: #e8f0ef;
+    --ink2: #b9c9c7;
+    --dim: #849694;
     --line: #22302e;
-    --line-strong: #31423f;
-    --ink: #eef3f2;
-    --dim: #8a9895;
-    --brand: #05bcc4;
+    --line2: #31423f;
+    --track: #1b2523;
+    --sel: #152a2a;
+    --barfill: var(--teal);
+    --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+    --selbar-bg: #1d2927;
+    --selbar-fg: #f2f7f6;
+
+    --surface: color-mix(in srgb, #131b1a 62%, transparent);
+    --surface-solid: var(--paper2);
+    --surface-raised: #1b2624;
+    --line-strong: var(--line2);
+    --brand: var(--teal);
     --brand-fill: var(--aura-teal-700);
     --brand-ink: #04211f;
     --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
-    --gold: #d8b878;
+    --gold: var(--aura-gold-500);
 
     --st-critical: #e5534b;
-    --st-attention: #b58900;
+    --st-attention: #d9a441;
     --st-progress: #8b80e8;
     --st-good: #3fa045;
     --st-idle: #8a9895;
@@ -184,10 +244,6 @@
     --seq-teal-4: #049199;
     --seq-teal-5: #05bcc4;
 
-    /* Text stavu na tinte: čistý stavový tón má na 14% tinte kontrast ~4,1:1,
-       čo pri 13 px bold nestačí. Text sa preto mieša smerom k --ink (dark 80 %,
-       light 70 %) a dostane ≥ 4,5:1 na tinte aj na papieri. Plný tón zostáva
-       nedotknutý pre okraje, pruhy a marky grafov. */
     --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
     --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
     --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
@@ -199,50 +255,68 @@
   }
 }
 
-:root[data-theme='light'] {
-  color-scheme: light;
+:root[data-theme='dark'] {
+  color-scheme: dark;
 
-  --paper: #f8f4f7;
-  --surface: color-mix(in srgb, #ffffff 72%, transparent);
-  --surface-solid: #ffffff;
-  --surface-raised: #ffffff;
-  --line: #e2dae0;
-  --line-strong: #c9bdc8;
-  --ink: #131b1a;
-  --dim: #667574;
-  --brand: #03797e;
+  --teal: #05bcc4;
+  --deep: #03797e;
+  --teal3: #7fd0d4;
+  --gold2: #c9a869;
+  --accent: var(--teal);
+  --accent-on: #08201f;
+
+  --paper: #0e1413;
+  --paper2: #131b1a;
+  --paper3: #182220;
+  --ink: #e8f0ef;
+  --ink2: #b9c9c7;
+  --dim: #849694;
+  --line: #22302e;
+  --line2: #31423f;
+  --track: #1b2523;
+  --sel: #152a2a;
+  --barfill: var(--teal);
+  --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+  --selbar-bg: #1d2927;
+  --selbar-fg: #f2f7f6;
+
+  --surface: color-mix(in srgb, #131b1a 62%, transparent);
+  --surface-solid: var(--paper2);
+  --surface-raised: #1b2624;
+  --line-strong: var(--line2);
+  --brand: var(--teal);
   --brand-fill: var(--aura-teal-700);
-  --brand-ink: #ffffff;
-  --brand-tint: #e3f1f1;
-  --gold: #8a6417;
+  --brand-ink: #04211f;
+  --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
+  --gold: var(--aura-gold-500);
 
-  --st-critical: #c62f26;
-  --st-attention: #d97706;
-  --st-progress: #4a3aa7;
-  --st-good: #2e7d32;
-  --st-idle: #667574;
+  --st-critical: #e5534b;
+  --st-attention: #d9a441;
+  --st-progress: #8b80e8;
+  --st-good: #3fa045;
+  --st-idle: #8a9895;
 
   --production-bg: #c62f26;
-  --production-fg: #ffffff;
+  --production-fg: #fff4f2;
 
-  --seq-teal-1: #e3f1f1;
-  --seq-teal-2: #a8d9da;
-  --seq-teal-3: #67bcbf;
-  --seq-teal-4: #2a9aa0;
-  --seq-teal-5: #03797e;
+  --seq-teal-1: #12312f;
+  --seq-teal-2: #12504f;
+  --seq-teal-3: #0a7076;
+  --seq-teal-4: #049199;
+  --seq-teal-5: #05bcc4;
 
-  --st-critical-ink: color-mix(in oklab, var(--st-critical) 70%, var(--ink));
-  --st-attention-ink: color-mix(in oklab, var(--st-attention) 70%, var(--ink));
-  --st-progress-ink: color-mix(in oklab, var(--st-progress) 70%, var(--ink));
-  --st-good-ink: color-mix(in oklab, var(--st-good) 70%, var(--ink));
-  --st-idle-ink: color-mix(in oklab, var(--st-idle) 70%, var(--ink));
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
 
-  --ovl-shadow: 0 1px 2px rgb(19 27 26 / 0.05), 0 1px 3px rgb(19 27 26 / 0.07);
-  --ovl-shadow-raised: 0 10px 30px -16px rgb(19 27 26 / 0.22);
+  --ovl-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+  --ovl-shadow-raised: 0 10px 30px -18px rgb(0 0 0 / 0.8);
 }
 
 /* Derivované tinty a okraje — jedno pravidlo pre obe témy. Miešajú sa proti
-   NEPRIESVITNÉMU povrchu, aby badge a panely zostali plné (§1.1). */
+   NEPRIESVITNÉMU povrchu, aby badge a panely zostali plné. */
 :root {
   --st-critical-tint: color-mix(in oklab, var(--st-critical) 14%, var(--surface-solid));
   --st-critical-edge: color-mix(in oklab, var(--st-critical) 42%, var(--surface-solid));
@@ -348,14 +422,6 @@ h6 {
   font-size: var(--ovl-fs-h3);
 }
 
-.ovl-page-title {
-  font-size: var(--ovl-fs-h1);
-  margin: 0 0 var(--ovl-s5);
-}
-.ovl-section-title {
-  font-size: var(--ovl-fs-h2);
-  margin: var(--ovl-s6) 0 var(--ovl-s3);
-}
 .ovl-eyebrow {
   font-size: var(--ovl-fs-eyebrow);
   font-weight: 700;
@@ -388,42 +454,20 @@ hr {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   4. Shell — pruh PRODUKCIA, teal lišta, gold hairline (§2 body 1, 2)
+   4. Shell — pruh PRODUKCIA (D6), read-only výzva (D10), pätka.
+      Hlavičku samotnú kreslí vrstva V3 (§14, `.hdr`).
    ══════════════════════════════════════════════════════════════════════════ */
 
-.ovl-main {
-  width: 100%;
-  max-width: var(--ovl-max);
-  margin: 0 auto;
-  padding: var(--ovl-s5) 1rem 2.5rem;
-}
-/* Šírka obsahu sa riadi obsahom: stačí, aby stránka obalila svoj obsah do
-   `.ovl-w-wide` / `.ovl-w-form` a shell sa prispôsobí (§2 bod 20). */
-.ovl-main:has(> .ovl-w-wide, > * > .ovl-w-wide) {
-  max-width: var(--ovl-max-wide);
-}
-.ovl-main:has(> .ovl-w-form) {
-  max-width: var(--ovl-max-form);
-}
-
+/* Šírku obsahu drží `.wrap` z V3 vrstvy (§14). Historické obrazovky, ktoré
+   ešte majú vlastný užší rám, používajú `.ovl-w-wide`. */
 .ovl-w-wide {
   width: 100%;
   max-width: var(--ovl-max-wide);
   margin-inline: auto;
 }
-.ovl-w-default {
-  width: 100%;
-  max-width: var(--ovl-max);
-  margin-inline: auto;
-}
-.ovl-w-form {
-  width: 100%;
-  max-width: var(--ovl-max-form);
-  margin-inline: auto;
-}
 
 /* Trvalý červený pruh PRODUKCIA (D6) — plný, nepriesvitný, neanimovaný.
-   Gold hairline pod ním ho zväzuje s teal lištou do jednej hlavy. */
+   Stojí NAD hlavičkou a odscrolluje s obsahom; hlavička je sticky sama. */
 .ovl-production-bar {
   background: var(--production-bg);
   color: var(--production-fg);
@@ -443,115 +487,6 @@ hr {
   letter-spacing: 0;
 }
 
-/* Teal lišta rodiny hneď pod pruhom */
-.ovl-header {
-  background: var(--brand-fill);
-  color: #fff;
-  border-bottom: 1px solid var(--gold-hairline);
-}
-
-.ovl-header-inner {
-  width: 100%;
-  max-width: var(--ovl-max-wide);
-  margin: 0 auto;
-  min-height: var(--ovl-header-h);
-  padding: 0.35rem 1rem;
-  display: grid;
-  /* wordmark | nav (max-content) | badge slot. Badge slot sa pri nedostatku
-     miesta zlomí do druhého radu — navigácia sa NESMIE odseknúť. */
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: center;
-  column-gap: var(--ovl-s4);
-}
-
-.ovl-brand {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.35em;
-  font-weight: 700;
-  font-size: 1.0625rem;
-  letter-spacing: 0.01em;
-  color: #fff;
-  padding-right: var(--ovl-s4);
-  border-right: 1px solid var(--gold-hairline);
-}
-.ovl-crown {
-  color: var(--aura-gold-500);
-  font-size: 0.95em;
-  line-height: 1;
-}
-
-.ovl-nav {
-  display: flex;
-  gap: 0.15rem;
-  align-items: center;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  scroll-snap-type: x proximity;
-}
-.ovl-nav::-webkit-scrollbar {
-  display: none;
-}
-.ovl-nav a {
-  text-decoration: none;
-  padding: 0.3rem 0.65rem;
-  border-radius: var(--ovl-radius-pill);
-  color: rgb(255 255 255 / 0.78);
-  font-weight: 600;
-  font-size: var(--ovl-fs-small);
-  white-space: nowrap;
-  scroll-snap-align: start;
-  transition: background var(--ovl-dur-hover) ease-out, color var(--ovl-dur-hover) ease-out;
-}
-.ovl-nav a:hover {
-  background: rgb(255 255 255 / 0.12);
-  color: #fff;
-}
-.ovl-nav a[aria-current='page'] {
-  background: rgb(255 255 255 / 0.18);
-  color: #fff;
-  box-shadow: inset 0 -2px 0 0 var(--aura-gold-500);
-}
-
-.ovl-header-badges {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-/* Sekundárne stavové badge sa na mobile skladajú za prepínač; TTL badge
-   ostáva vždy viditeľný (D5 — skrývať sa NESMIE). */
-.ovl-status-secondary {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.ovl-theme-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3em;
-  font: inherit;
-  font-size: var(--ovl-fs-micro);
-  font-weight: 700;
-  padding: 0.2rem 0.6rem;
-  border-radius: var(--ovl-radius-pill);
-  border: 1px solid rgb(255 255 255 / 0.35);
-  background: rgb(255 255 255 / 0.1);
-  color: #fff;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--ovl-dur-hover) ease-out;
-}
-.ovl-theme-pill:hover {
-  background: rgb(255 255 255 / 0.2);
-}
-/* Prepínač skladania sekundárnych badge je len mobilná afordancia. */
-.ovl-header-badges .ovl-status-more {
-  display: none;
-}
 
 /* Glyfy stavov (§3.3) používajú znaky mimo základnej latinky — fallback na
    systémové symbolové fonty, aby sa nekreslil prázdny rámik. Text stavu je
@@ -572,13 +507,13 @@ hr {
 }
 .ovl-readonly-notice {
   width: 100%;
-  max-width: var(--ovl-max-wide);
+  max-width: var(--w);
   margin: 0 auto;
   min-height: 2rem;
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.3rem 1rem;
+  padding: 0.3rem 24px;
   font-size: var(--ovl-fs-small);
   color: var(--ink);
 }
@@ -589,9 +524,9 @@ hr {
 
 .ovl-footer {
   width: 100%;
-  max-width: var(--ovl-max-wide);
+  max-width: var(--w);
   margin: 0 auto;
-  padding: 0 1rem 2rem;
+  padding: 0 24px 2rem;
   color: var(--dim);
   font-size: var(--ovl-fs-micro);
   border-top: 1px solid var(--line);
@@ -618,12 +553,6 @@ hr {
   letter-spacing: 0.08em;
   color: var(--gold);
 }
-/* Tichá karta: bez tieňa, len hairline — pre zoznamy a druhoradý obsah. */
-.ovl-card--quiet {
-  background: color-mix(in oklab, var(--surface-solid) 42%, transparent);
-  box-shadow: none;
-  border-color: color-mix(in oklab, var(--line) 70%, transparent);
-}
 .ovl-card--danger {
   border-color: var(--st-critical-edge);
   border-left: 4px solid var(--st-critical);
@@ -633,14 +562,6 @@ hr {
   border-left: 4px solid var(--st-attention);
 }
 
-/* Veľká priesvitná plocha bez vlastnej „kartovosti" — obal sekcie. */
-.ovl-panel {
-  background: color-mix(in oklab, var(--surface-solid) 34%, transparent);
-  backdrop-filter: blur(6px);
-  border: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
-  border-radius: var(--ovl-radius);
-  padding: var(--ovl-s5);
-}
 
 /* Poznámkové/stavové panely. VŽDY plné (§1.1) — čitateľnosť je bezpečnostná
    funkcia. `.ovl-note` bez modifikátora je neutrálna informácia, nie chyba
@@ -717,18 +638,6 @@ hr {
   font-size: var(--ovl-fs-small);
 }
 
-/* Rozbalenie „Technický detail" — plynulá výška (§3.4) */
-.ovl-expand {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows var(--ovl-dur-card) var(--ovl-ease-out);
-}
-.ovl-expand > * {
-  overflow: hidden;
-}
-.ovl-expand[data-open='true'] {
-  grid-template-rows: 1fr;
-}
 
 /* Legenda: plné znenie povinnej vety RAZ na sekciu (D4/D7 — §2 body 7, 8) */
 .ovl-legend {
@@ -829,11 +738,6 @@ hr {
   background: var(--st-idle-tint);
   border-color: var(--st-idle-edge);
   color: var(--st-idle-ink);
-}
-.ovl-badge--outline {
-  background: transparent;
-  border-color: var(--line-strong);
-  color: var(--dim);
 }
 /* Aliasy starých tónov — volajúci ich skladajú do template stringu. */
 .ovl-badge--ok {
@@ -1063,42 +967,10 @@ input::placeholder {
   color: var(--dim);
   opacity: 1;
 }
-.ovl-input--xs {
-  width: 5rem;
-}
 .ovl-input--sm {
   width: 12rem;
 }
-.ovl-input--md {
-  width: 22rem;
-  max-width: 100%;
-}
-.ovl-input--full {
-  width: 100%;
-}
-/* SK echo dátumu vedľa natívneho pickeru (D13, §2 bod 9) */
-.ovl-date-echo {
-  font-size: var(--ovl-fs-small);
-  color: var(--ink);
-  white-space: nowrap;
-}
 
-/* Výber produktu má viditeľnú odozvu (V32) */
-.ovl-pick {
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid transparent;
-  border-radius: var(--ovl-radius-sm);
-}
-.ovl-pick:hover {
-  background: var(--surface-raised);
-}
-.ovl-pick:has(input:checked) {
-  background: var(--brand-tint);
-  border-color: color-mix(in oklab, var(--brand) 35%, transparent);
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
    8. Tabuľky (+ mobil: kartový režim a sticky prvý stĺpec — §2 bod 19)
@@ -1148,20 +1020,8 @@ input::placeholder {
 .ovl-table .ovl-num {
   text-align: right;
 }
-.ovl-table-actions {
-  width: 1%;
-  white-space: nowrap;
-}
 /* Dlhá hlavička do dvoch riadkov (V25) — `Položky` + `ok / zlyh. / spolu`.
    Šírka stĺpca potom nie je daná hlavičkou, ale dátami. */
-.ovl-th-sub {
-  display: block;
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: none;
-  color: var(--dim);
-}
 
 /* Sticky prvý stĺpec + scroll fade pre široké tabuľky (audit) */
 .ovl-table-wrap--sticky-first {
@@ -1255,8 +1115,6 @@ input::placeholder {
 }
 /* Čísla, ceny, percentá a dátumy sa NESMÚ lámať (V35) */
 .ovl-num,
-.ovl-money,
-.ovl-pct,
 .ovl-date {
   font-variant-numeric: tabular-nums lining-nums;
   white-space: nowrap;
@@ -1280,9 +1138,6 @@ input::placeholder {
 }
 .ovl-stack--fill {
   align-items: stretch;
-}
-.ovl-stack--loose {
-  gap: var(--ovl-s5);
 }
 .ovl-row {
   display: flex;
@@ -1326,28 +1181,6 @@ input::placeholder {
   margin: 0.5rem 0 0.75rem;
 }
 
-/* Toast výsledku zápisu — drží kým sa neodklikne (§3.4) */
-.ovl-toast-host {
-  position: fixed;
-  left: 50%;
-  bottom: 1.25rem;
-  transform: translateX(-50%);
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: min(36rem, calc(100vw - 2rem));
-}
-.ovl-toast {
-  background: var(--surface-solid);
-  border: 1px solid var(--line-strong);
-  border-left: 4px solid var(--brand);
-  border-radius: var(--ovl-radius);
-  box-shadow: var(--ovl-shadow-raised);
-  padding: 0.7rem 0.9rem;
-  font-size: var(--ovl-fs-small);
-  animation: ovl-toast-in var(--ovl-dur-toast) var(--ovl-ease-out) both;
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
    10. Grafy (B2 kreslí inline SVG do týchto tried, tokeny z §3.1)
@@ -1417,16 +1250,6 @@ input::placeholder {
     transform: scaleX(1);
   }
 }
-@keyframes ovl-toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 
 /* Vstup obrazovky */
 .ovl-anim-in {
@@ -1475,14 +1298,6 @@ input::placeholder {
   background-repeat: no-repeat;
   animation: ovl-shimmer 1200ms linear infinite;
 }
-.ovl-skeleton--row {
-  min-height: 1.25rem;
-  display: block;
-}
-.ovl-skeleton--card {
-  min-height: 6rem;
-  display: block;
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1498,41 +1313,12 @@ input::placeholder {
    12. Mobil (§2 bod 19) — appka je na mobile scenár „pozriem, čo beží"
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Pod 1100 px sa stavové badge presunú na vlastný riadok — inak by stlačili
-   navigáciu a tá by sa odsekla. */
-@media (max-width: 1100px) {
-  .ovl-header-inner {
-    grid-template-columns: auto minmax(0, 1fr);
-    row-gap: 0.35rem;
-  }
-  .ovl-header-badges {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-}
-
 @media (max-width: 719px) {
   .ovl-production-bar {
     font-size: var(--ovl-fs-small);
     line-height: var(--ovl-lh-tight);
     letter-spacing: 0.02em;
   }
-  .ovl-brand {
-    font-size: 1rem;
-    padding-right: var(--ovl-s3);
-  }
-  .ovl-main {
-    padding: var(--ovl-s4) 0.75rem 2rem;
-  }
-  /* Sekundárne badge sa skladajú za prepínač, TTL badge zostáva (D5) */
-  .ovl-header-badges .ovl-status-more {
-    display: inline-flex;
-  }
-  .ovl-status-secondary[data-open='false'] {
-    display: none;
-  }
-
   /* Kartový režim tabuliek: hlavička sa presúva do `data-label` buniek */
   .ovl-table--cards thead {
     display: none;
@@ -1581,14 +1367,6 @@ input::placeholder {
   }
 }
 
-@media (min-width: 720px) {
-  /* Na desktope sú sekundárne badge vždy viditeľné bez ohľadu na stav
-     mobilného prepínača. */
-  .ovl-status-secondary {
-    display: flex !important;
-  }
-}
-
 /* ══════════════════════════════════════════════════════════════════════════
    13. KISS vrstva (plán 33 §2, §3 — mäkký štýl predlohy `discountcontrolui`)
 
@@ -1615,24 +1393,25 @@ input::placeholder {
   --kiss-view-in: 220ms ease;
 }
 
-/* Dark (default): tieň predlohy → hairline + veľmi nízky ambient (§1 bod 2). */
-:root,
-:root[data-theme='dark'] {
-  --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
-  --kiss-shadow-md: 0 10px 30px rgb(0 0 0 / 0.35);
-  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
+/* Tiene sa riadia témou rovnako ako §2: SVETLÁ na holom `:root`, tmavá pod
+   systémovou voľbou (s guardom) aj pod atribútom. Predtým tu bola tmavá ako
+   default a po prechode V3 by svetlá appka dostala tmavé tiene. */
+:root {
+  --kiss-shadow-sm: 0 1px 2px rgb(19 27 26 / 0.04);
+  --kiss-shadow-md: 0 10px 30px rgb(19 27 26 / 0.07);
+  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent);
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
     --kiss-shadow-md: 0 10px 30px rgb(0 0 0 / 0.35);
     --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
   }
 }
-:root[data-theme='light'] {
-  --kiss-shadow-sm: 0 1px 2px rgb(19 27 26 / 0.04);
-  --kiss-shadow-md: 0 10px 30px rgb(19 27 26 / 0.07);
-  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent);
+:root[data-theme='dark'] {
+  --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
+  --kiss-shadow-md: 0 10px 30px rgb(0 0 0 / 0.35);
+  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
 }
 
 /* Page-head predlohy: eyebrow (gold) + titul vľavo, akcie vpravo. */
@@ -1951,3 +1730,1486 @@ input::placeholder {
   font-size: var(--ovl-fs-small);
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   14. VRSTVA V3 — prenos `design/v3/_v3.css`
+
+   Nové obrazovky (V9–V12) píšu VÝHRADNE proti tejto vrstve. Rozdiely oproti
+   mockupovému CSS sú tri a všetky sú zámerné:
+
+   1. Žiadny globálny reset `*{margin:0;padding:0}`. Zmazal by odsadenia
+      historickej vrstvy `.ovl-*`, ktorá tu ešte žije. Reset je zúžený na
+      obsah `.wrap`, kde býva len V3.
+   2. Žiadne selektory `:root[data-theme="dark"] …`. Mockup nimi prepínal teal
+      na svietivý odtieň; tu to robí jediný token `--accent` (§2), takže tmavá
+      téma funguje aj vtedy, keď ju vyberie SYSTÉM a atribút na `<html>` vôbec
+      nie je. Toto je presne tá diera, kvôli ktorej má tmavá dve deklarácie.
+   3. Blok `body.mob` z mockupov sa neprenáša — bol náhrada media query pri
+      renderovaní na ploche 1440. V appke platí `@media (max-width:760px)`.
+
+   Zvyšok (geometria, veľkosti, hustota) je 1:1 podľa `_v3.css`.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ---------- 14.1 Rám stránky ---------------------------------------------- */
+.wrap {
+  max-width: var(--w);
+  margin: 0 auto;
+  padding: 16px 24px 28px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+/* Zúžený reset — platí len na obsah V3, nie na historické obrazovky. */
+.wrap :where(h1, h2, h3, h4, h5, h6, p, dl, dd, figure, blockquote) {
+  margin: 0;
+}
+.wrap :where(ul, ol) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wrap a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-family: var(--ovl-mono);
+  font-size: 0.9em;
+}
+
+/* ---------- 14.2 Tri úrovne dôležitosti (P1) ------------------------------
+   .lvl-1  dominanta — presne raz na obrazovku (číslo 44–64 px)
+   .lvl-2  bežné     — obsah, s ktorým sa pracuje (13–15 px, plná farba)
+   .lvl-3  potlačené — kontext, popisky, hotové veci (11.5–12.5 px, --dim)
+   Váhu určuj VÝHRADNE týmito triedami. Vlastné veľkosti hierarchiu rozbíjajú
+   a P1 sa potom nedá zmerať.
+   ------------------------------------------------------------------------- */
+.lvl-1 {
+  color: var(--ink);
+  font-weight: 660;
+  letter-spacing: -0.025em;
+  line-height: 1.02;
+}
+.lvl-1 .big {
+  font-size: 64px;
+  display: block;
+}
+.lvl-1 .big.sm {
+  font-size: 44px;
+}
+.lvl-1 .sub {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink2);
+  letter-spacing: 0;
+}
+.lvl-2 {
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.lvl-2 b,
+b.lvl-2 {
+  font-weight: 640;
+}
+.lvl-3 {
+  font-size: 12px;
+  color: var(--dim);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.lvl-3 b {
+  color: var(--ink2);
+  font-weight: 600;
+}
+
+/* Sekcia: nadpis je vždy vo veľkosti lvl-3 — dominantou je ČÍSLO, nie nadpis. */
+.sec {
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+}
+.sec + .sec {
+  margin-top: 12px;
+}
+.sec-h {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.sec-h h2 {
+  font-size: 10.5px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+}
+.sec-h .act {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.row.wrapx {
+  flex-wrap: wrap;
+}
+.spread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gap-t {
+  margin-top: 12px;
+}
+/* Čerstvosť dát — jeden riadok pod skupinou čísel, NIKDY v hlavičke. */
+.fresh {
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 6px;
+}
+
+/* ---------- 14.3 Hlavička (ARCHITEKTURA §0) -------------------------------
+   Jeden riadok, 56 px, sticky. Vpravo presne tri veci: rozpočet zápisov,
+   fronta, prepínač témy. Žiadne vyhľadávanie, žiadne notifikácie, žiadne
+   stavové badge — kľúče a rozpočet majú detail v Nastaveniach.
+   ------------------------------------------------------------------------- */
+.hdr {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: var(--hdr-h);
+  background: var(--paper2);
+  border-bottom: 1px solid var(--line);
+}
+.hdr-in {
+  max-width: var(--w);
+  margin: 0 auto;
+  height: var(--hdr-h);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+.brand {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink2);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.brand b {
+  color: var(--accent);
+  font-weight: 680;
+}
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+.tabs a {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--dim);
+  padding: 7px 12px;
+  border-radius: var(--r-sm);
+  line-height: 1;
+  text-decoration: none;
+}
+.tabs a:hover {
+  color: var(--ink2);
+  background: var(--paper3);
+}
+.tabs a.on {
+  color: var(--ink);
+  background: var(--paper3);
+  font-weight: 650;
+  box-shadow: inset 0 -2px 0 var(--teal);
+}
+.hdr-r {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12.5px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.hdr-r b {
+  color: var(--ink2);
+  font-weight: 640;
+}
+.hbar {
+  display: inline-block;
+  width: 46px;
+  height: 5px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+/* Pruh rozpočtu je VŽDY neutrálny — ani pri 200/200. Vyčerpaný rozpočet je
+   plánovaná rýchlosť, nie chyba (K2, odpoveď 59). */
+.hbar i {
+  display: block;
+  height: 100%;
+  background: var(--st-idle);
+  border-radius: var(--r-pill);
+}
+.hsep {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+}
+.hqueue {
+  color: var(--dim);
+  text-decoration: none;
+}
+.hqueue b {
+  color: var(--accent);
+}
+.hqueue.off,
+.hqueue.off b {
+  color: var(--dim);
+  font-weight: 500;
+}
+.tglt {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--dim);
+  width: 28px;
+  height: 28px;
+  line-height: 1;
+  font-size: 13px;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tglt:hover {
+  color: var(--ink2);
+  background: var(--paper3);
+}
+/* Pruh pod hlavičkou. `.calm` je pre stavy, ktoré NIE SÚ chyba — vypnuté ostré
+   zápisy sú najbezpečnejší možný stav, červená by tam klamala o závažnosti. */
+.hdr-strip {
+  background: var(--st-critical);
+  color: #fff;
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 0;
+}
+.hdr-strip.calm {
+  background: var(--paper3);
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---------- 14.4 Stavy: farba + GLYF + text -------------------------------
+   Glyf je súčasť značky, nie dekorácia. Samotná farebná bodka sa nepoužíva.
+   ------------------------------------------------------------------------- */
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink2);
+  white-space: nowrap;
+}
+.state .g {
+  font-size: 11px;
+  line-height: 1;
+  width: 11px;
+  text-align: center;
+}
+.state.pripravena {
+  color: var(--st-idle);
+}
+.state.pripravena .g::before {
+  content: '○';
+}
+.state.zapisuje {
+  color: var(--accent);
+}
+.state.zapisuje .g::before {
+  content: '◆';
+}
+.state.bezi {
+  color: var(--gold2);
+}
+.state.bezi .g::before {
+  content: '●';
+}
+.state.skoncila {
+  color: var(--dim);
+  font-weight: 500;
+}
+.state.skoncila .g::before {
+  content: '·';
+}
+
+/* Príznak — vždy ZA stavom, menším písmom, jantárový. Nikdy nie stav. */
+.flag {
+  font-size: 11.5px;
+  color: var(--st-attention);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.flag::before {
+  content: '▲ ';
+  font-size: 9px;
+}
+.flag.neutral {
+  color: var(--dim);
+  font-weight: 500;
+}
+.flag.neutral::before {
+  content: '· ';
+}
+.sep-dot {
+  color: var(--line2);
+  padding: 0 2px;
+}
+
+/* Signálne značky (mimo stavov zľavy) */
+.sig {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.sig::before {
+  width: 10px;
+  text-align: center;
+}
+.sig.ok {
+  color: var(--st-good);
+}
+.sig.ok::before {
+  content: '✓';
+}
+.sig.warn {
+  color: var(--st-attention);
+}
+.sig.warn::before {
+  content: '▲';
+}
+.sig.bad {
+  color: var(--st-critical);
+}
+.sig.bad::before {
+  content: '✕';
+}
+.sig.idle {
+  color: var(--st-idle);
+}
+.sig.idle::before {
+  content: '○';
+}
+.sig.lock {
+  color: var(--dim);
+  font-weight: 500;
+}
+.sig.lock::before {
+  content: '–';
+}
+
+/* Odhad — znak ≈ + tlmenejší odtieň (P7). Meraný fakt ho NIKDY nemá. */
+.est {
+  color: var(--ink2);
+  opacity: 0.82;
+  font-weight: 550;
+}
+.est::before {
+  content: '≈ ';
+}
+
+/* ---------- 14.5 Priebeh fronty ------------------------------------------ */
+.prog-lg {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+.prog-lg .n {
+  font-size: 64px;
+  font-weight: 660;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
+  color: var(--ink);
+}
+.prog-lg .n .of {
+  color: var(--dim);
+  font-weight: 550;
+  font-size: 34px;
+}
+.prog-lg .side {
+  padding-bottom: 6px;
+}
+.bar {
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+  width: 100%;
+  margin-top: 12px;
+}
+.bar i {
+  display: block;
+  height: 100%;
+  background: var(--barfill);
+  border-radius: var(--r-pill);
+}
+.bar.done i {
+  background: var(--st-idle);
+}
+.bar.paused i {
+  background: repeating-linear-gradient(135deg, var(--st-idle) 0 6px, transparent 6px 12px);
+  background-color: var(--track);
+}
+.prog-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.prog-meta b {
+  color: var(--ink2);
+  font-weight: 620;
+}
+.prog-sm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+}
+.prog-sm .bar {
+  height: 5px;
+  margin: 0;
+  flex: 1;
+}
+.prog-sm .n {
+  font-size: 12px;
+  color: var(--ink2);
+  font-weight: 620;
+  white-space: nowrap;
+}
+
+/* ---------- 14.6 Tabuľka na tisíce riadkov ------------------------------- */
+.tbl-frame {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--paper2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.tbl-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 300px);
+}
+table.tbl {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+table.tbl thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper2);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line2);
+  white-space: nowrap;
+}
+table.tbl td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink2);
+  white-space: nowrap;
+  line-height: 1.35;
+}
+table.tbl tbody tr:hover td {
+  background: var(--paper3);
+}
+table.tbl tbody tr.on td {
+  background: var(--sel);
+}
+table.tbl td.name {
+  color: var(--ink);
+  font-weight: 550;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+table.tbl td.n,
+table.tbl th.n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+table.tbl td.n b {
+  color: var(--ink);
+  font-weight: 620;
+}
+table.tbl td.locked {
+  color: var(--dim);
+}
+table.tbl .sel,
+table.tbl th.sel {
+  width: 34px;
+  padding-right: 0;
+}
+table.tbl tr.muted td {
+  color: var(--dim);
+}
+.tbl-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.cb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--line2);
+  border-radius: 4px;
+  background: var(--paper2);
+  vertical-align: middle;
+  position: relative;
+}
+.cb:checked,
+.cb:indeterminate {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.cb:checked::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  color: var(--accent-on);
+  font-size: 10px;
+  line-height: 11px;
+  text-align: center;
+  font-weight: 700;
+}
+.cb:indeterminate::after {
+  content: '–';
+  position: absolute;
+  inset: 0;
+  color: var(--accent-on);
+  font-size: 11px;
+  line-height: 11px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.pager {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.pager a,
+.pager span {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  color: var(--dim);
+}
+.pager a:hover {
+  background: var(--paper3);
+  color: var(--ink2);
+}
+.pager .cur {
+  background: var(--paper3);
+  color: var(--ink);
+  font-weight: 640;
+}
+
+/* ---------- 14.7 Spodná lišta výberu ------------------------------------- */
+.selbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--selbar-bg);
+  color: var(--selbar-fg);
+  border-radius: var(--r);
+  padding: 10px 14px;
+  box-shadow: 0 -2px 14px rgb(0 0 0 / 0.18);
+  margin-top: 12px;
+}
+.selbar .cnt {
+  font-size: 20px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+}
+.selbar .cnt small {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.7;
+  margin-left: 6px;
+}
+.selbar .all {
+  font-size: 12.5px;
+  color: var(--teal3);
+  border-bottom: 1px dotted currentColor;
+}
+.selbar .sp {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.selbar .btn.ghost {
+  color: #dfe9e8;
+  border-color: rgb(255 255 255 / 0.22);
+}
+.selbar .btn.ghost:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+
+/* ---------- 14.8 Tlačidlá, polia, chipy ---------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line2);
+  background: var(--paper2);
+  color: var(--ink);
+  line-height: 1.2;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover {
+  background: var(--paper3);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+/* Hover mieša k --ink: vo svetlej stmavne, v tmavej zosvetlí. Jedno pravidlo
+   namiesto dvoch tém. */
+.btn.primary:hover {
+  background: color-mix(in oklab, var(--accent) 86%, var(--ink));
+}
+.btn.lg {
+  font-size: 15px;
+  padding: 11px 20px;
+}
+.btn.sm {
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.btn.ghost {
+  background: transparent;
+}
+.btn.danger {
+  color: var(--st-critical);
+  border-color: var(--st-critical);
+}
+.btn[disabled],
+.btn.off {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.field {
+  display: block;
+  margin-bottom: 10px;
+}
+.field > .lb {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+.inp {
+  width: 100%;
+  font: inherit;
+  font-size: 13.5px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line2);
+  background: var(--paper2);
+  color: var(--ink);
+}
+.inp:focus {
+  outline: 2px solid var(--teal);
+  outline-offset: -1px;
+  border-color: var(--teal);
+}
+.inp.big {
+  font-size: 20px;
+  font-weight: 640;
+  padding: 10px 12px;
+  width: 160px;
+  text-align: center;
+}
+.hint {
+  font-size: 11.5px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line2);
+  background: var(--paper2);
+  color: var(--ink2);
+  font-family: inherit;
+  cursor: pointer;
+}
+.chip:hover {
+  background: var(--paper3);
+}
+.chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+.chip .x {
+  color: var(--dim);
+  font-size: 11px;
+}
+.chip.lock {
+  color: var(--dim);
+  border-style: dashed;
+  pointer-events: none;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.seg button {
+  background: var(--paper2);
+  border: 0;
+  border-right: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dim);
+  padding: 5px 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.seg button:last-child {
+  border-right: 0;
+}
+.seg button.on {
+  background: var(--paper3);
+  color: var(--ink);
+}
+
+/* ---------- 14.9 Filtrovací panel ---------------------------------------- */
+.layout-filters {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 14px;
+  align-items: start;
+}
+.filters {
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 12px;
+}
+.fgroup {
+  border-top: 1px solid var(--line);
+  padding: 10px 0 8px;
+}
+.fgroup:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.fgroup > h3 {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  margin-bottom: 7px;
+}
+.fopt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--ink2);
+  padding: 3px 0;
+}
+.fopt .c {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+/* Zamknutý filter NEZMIZNE — používateľ má vedieť, že s ním rátame (K8). */
+.fopt.locked {
+  color: var(--dim);
+}
+.fopt.locked::after {
+  content: 'zamknuté';
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--dim);
+  font-weight: 500;
+}
+.fopt.locked .c {
+  display: none;
+}
+
+/* ---------- 14.10 Zamknuté ------------------------------------------------
+   Bunka: iba tlmená pomlčka. Žiadny glyf, žiadny odstavec, žiadny žltý pruh.
+   Zamknutý STĹPEC sa v tabuľke vôbec nekreslí — je vidieť len vo filtroch.
+   ------------------------------------------------------------------------- */
+.lockcell,
+.lockline {
+  color: var(--dim);
+}
+.lockline {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.locked-sec {
+  position: relative;
+  opacity: 0.6;
+}
+.locked-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  border: 1px dashed var(--line2);
+  border-radius: var(--r-sm);
+  padding: 4px 9px;
+}
+
+/* ---------- 14.11 Rozklik techniky (P6) ---------------------------------- */
+details.tech {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+details.tech > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+details.tech > summary::-webkit-details-marker {
+  display: none;
+}
+details.tech > summary::before {
+  content: '▸';
+  font-size: 9px;
+}
+details.tech[open] > summary::before {
+  content: '▾';
+}
+details.tech > summary:hover {
+  color: var(--ink2);
+}
+details.tech .body {
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--dim);
+  line-height: 1.5;
+  background: var(--paper3);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+details.tech .body b {
+  color: var(--ink2);
+  font-weight: 600;
+}
+details.tech .body table {
+  width: 100%;
+  font-size: 11.5px;
+  border-collapse: collapse;
+}
+details.tech .body td {
+  padding: 2px 0;
+  vertical-align: top;
+}
+details.tech .body td:first-child {
+  color: var(--dim);
+  width: 38%;
+}
+details.tech.bare {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* Poistka pri nezvratnom kroku — zastaviť frontu je zásah do produkcie. */
+.stopq > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.stopq > summary::-webkit-details-marker {
+  display: none;
+}
+.stopq-b {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--dim);
+  background: var(--paper3);
+}
+.stopq-b .btn {
+  margin-left: auto;
+}
+
+/* ---------- 14.12 Prázdne stavy ------------------------------------------ */
+.empty {
+  text-align: center;
+  padding: 34px 20px;
+  color: var(--dim);
+}
+.empty .t {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink2);
+  margin-bottom: 4px;
+}
+.empty .a {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.calm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.calm .t {
+  font-size: 32px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+}
+
+/* ---------- 14.13 Zoznam zliav a návrhy ---------------------------------- */
+.zrow {
+  display: grid;
+  grid-template-columns: 1fr 190px 110px 90px 150px 200px;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.zrow:last-child {
+  border-bottom: 0;
+}
+.zrow .nm {
+  font-weight: 620;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zrow.dim {
+  opacity: 0.62;
+}
+.zlist {
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.zlist-h {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+/* Návrh je riadok s číslom a slovesom — nie karta a nie chatbot. */
+.suggest {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+  color: var(--ink2);
+}
+.suggest:last-child {
+  border-bottom: 0;
+}
+.suggest b {
+  color: var(--ink);
+  font-weight: 640;
+}
+.suggest .btn {
+  margin-left: auto;
+}
+
+/* ---------- 14.14 Grafy (inline SVG) ------------------------------------- */
+.chart {
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 12px 14px;
+}
+.chart .ct {
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.chart svg text {
+  font-family: inherit;
+  font-size: 10px;
+  fill: var(--dim);
+}
+.ax {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.line.trend {
+  stroke: var(--gold2);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+/* Projekcia dneška — iný jazyk než trend: tenká bodkovaná, tlmená farba. */
+.line.proj {
+  stroke: var(--st-idle);
+  stroke-width: 1.4;
+  stroke-dasharray: 1 3;
+  stroke-linecap: round;
+}
+.area {
+  fill: var(--teal);
+  opacity: 0.1;
+}
+.barcol {
+  fill: var(--accent);
+  opacity: 0.75;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.kpi {
+  background: var(--paper2);
+  padding: 11px 13px;
+}
+.kpi .k {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+  margin-bottom: 5px;
+}
+.kpi .v {
+  font-size: 22px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.kpi .s {
+  font-size: 11.5px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+
+/* ---------- 14.15 Bočný panel (detail produktu) -------------------------- */
+.drawer {
+  position: fixed;
+  top: var(--hdr-h);
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  z-index: 35;
+  background: var(--paper2);
+  border-left: 1px solid var(--line);
+  box-shadow: -6px 0 20px rgb(0 0 0 / 0.1);
+  padding: 16px 18px;
+  overflow: auto;
+}
+.drawer-h {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.drawer-h .t {
+  font-size: 15px;
+  font-weight: 640;
+  color: var(--ink);
+  line-height: 1.3;
+}
+.drawer .close {
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  font-size: 16px;
+}
+.dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  font-size: 13px;
+}
+.dl dt {
+  color: var(--dim);
+}
+.dl dd {
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+}
+
+/* ---------- 14.16 Kroky sprievodcu --------------------------------------- */
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.steps .s {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.steps .s.on {
+  color: var(--ink);
+  font-weight: 640;
+}
+.steps .s .i {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--line2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+}
+.steps .s.on .i {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+.steps .s.done .i {
+  border-color: var(--st-good);
+  color: var(--st-good);
+}
+.stepbar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 10px 14px;
+  margin-top: 12px;
+  box-shadow: var(--shadow);
+}
+.stepbar .sp {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- 14.17 Nastavenia (kotvy) ------------------------------------- */
+.layout-anchors {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.anchors {
+  position: sticky;
+  top: calc(var(--hdr-h) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 6px;
+}
+.anchors a {
+  font-size: 13px;
+  color: var(--ink2);
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  text-decoration: none;
+}
+.anchors a:hover {
+  background: var(--paper3);
+}
+.anchors a.on {
+  background: var(--paper3);
+  color: var(--ink);
+  font-weight: 640;
+  box-shadow: inset 2px 0 0 var(--teal);
+}
+
+/* ---------- 14.18 Mobil -------------------------------------------------- */
+@media (max-width: 760px) {
+  .wrap {
+    padding: 12px 12px 84px;
+  }
+  .hdr-in {
+    padding: 0 12px;
+    gap: 12px;
+  }
+  /* Taby idú dole ako lišta — palec ich tam dosiahne. */
+  .tabs {
+    order: 3;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    background: var(--paper2);
+    border-top: 1px solid var(--line);
+    padding: 6px 8px;
+    justify-content: space-around;
+  }
+  .tabs a {
+    flex: 1;
+    text-align: center;
+    font-size: 12px;
+    padding: 8px 4px;
+  }
+  .hdr-r {
+    gap: 8px;
+    font-size: 11.5px;
+  }
+  .hbar,
+  .hsep {
+    display: none;
+  }
+
+  .grid2,
+  .grid3,
+  .layout-filters,
+  .layout-anchors {
+    grid-template-columns: 1fr;
+  }
+  .anchors {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  /* Tabuľky → karty */
+  .tbl-scroll {
+    max-height: none;
+  }
+  table.tbl thead {
+    display: none;
+  }
+  table.tbl,
+  table.tbl tbody,
+  table.tbl tr,
+  table.tbl td {
+    display: block;
+    width: 100%;
+  }
+  table.tbl tr {
+    border-bottom: 1px solid var(--line);
+    padding: 9px 12px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 10px;
+  }
+  table.tbl td {
+    border: 0;
+    padding: 1px 0;
+    white-space: normal;
+    grid-column: 2;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12.5px;
+  }
+  table.tbl td.sel {
+    grid-column: 1;
+    grid-row: 1 / span 6;
+    align-self: start;
+  }
+  table.tbl td.name {
+    grid-column: 2;
+    font-size: 13.5px;
+    font-weight: 600;
+    max-width: none;
+    white-space: normal;
+  }
+  table.tbl td[data-l]::before {
+    content: attr(data-l);
+    color: var(--dim);
+    font-size: 11.5px;
+  }
+  table.tbl td.name::before {
+    display: none;
+  }
+
+  .filters {
+    position: fixed;
+    inset: var(--hdr-h) 0 0 0;
+    z-index: 38;
+    border-radius: 0;
+    overflow: auto;
+    display: none;
+  }
+  .filters.open {
+    display: block;
+  }
+  .filters-toggle {
+    display: inline-flex;
+  }
+
+  .selbar,
+  .stepbar {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: 56px;
+    margin: 0;
+    z-index: 39;
+  }
+  .selbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .selbar .sp {
+    width: 100%;
+    margin-left: 0;
+  }
+  .selbar .btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .prog-lg .n,
+  .lvl-1 .big {
+    font-size: 44px;
+  }
+  .drawer {
+    width: 100%;
+    top: 0;
+  }
+  .zrow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 10px 12px;
+  }
+}
+.filters-toggle {
+  display: none;
+}
+
+@media print {
+  .hdr,
+  .selbar,
+  .stepbar {
+    position: static;
+  }
+}

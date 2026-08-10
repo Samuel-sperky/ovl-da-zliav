@@ -1,49 +1,253 @@
 /**
- * Aura Zľavy — repozitár tabuľky `catalog_cache` (BUILD-SPEC §3, D57).
+ * Aura Zľavy — repozitár tabuľky `catalog_cache` (BUILD-SPEC §3, D57;
+ * KONTRAKT V3: K7, K8, K1 bod 2).
  *
- * Cache `name`/`price`/`has_attributes` zo shopu. Obnovuje sa pri otvorení
- * zápisového formulára a manuálne — žiadny background polling (D57).
+ * `catalog_cache` prestala byť cache desiatich produktov a stala sa ZRKADLOM
+ * katalógu (40 483 riadkov, K7). Z toho plynie všetko ostatné v tomto súbore:
  *
- * POZOR (I11): v cache NIE JE stav zľavy — shop ho cez API nevracia (backlog
- * B1). `raw` MUSÍ byť už redigované volajúcim (I1, D66) — repozitár ho len
- * serializuje do JSON stĺpca, nič nemaskuje.
+ *  - **Zápis po dávkach** (`upsertMany`, ~500 riadkov na príkaz). 40 tisíc
+ *    jednotlivých `INSERT`-ov nie je synchronizácia, to je DoS na vlastnú DB.
+ *    Dávky idú SEKVENČNE — paralelné upserty do jednej tabuľky si nič
+ *    nezrýchlia a rozbijú poradie chýb.
+ *  - **Stránkované čítanie** (`search`, `LIMIT/OFFSET`) a `counts()` pre čísla
+ *    v bočnom paneli. Nikdy sa nevracia celý katalóg.
+ *  - **K1 bod 2** — v režime `plny` nahrádza allowlist podmienka „produkt je
+ *    v katalógu a nie je `not_found`". Preto je `shop_status` prvotriedny
+ *    filter a `search()` ho fail-closed nastavuje na `ok` + `unknown`, keď si
+ *    volajúci nepovie inak.
+ *  - **I11** — v katalógu NIE JE stav zľavy zo shopu (shop ho cez API nevracia,
+ *    backlog B1). „Práve v zľave" a „nikdy nezlacnené" sa počítajú výhradne
+ *    z VLASTNÝCH úspešných zápisov (`campaign_items.status = 'ok'`) a tak sa
+ *    to musí aj pomenovať na povrchu.
+ *  - **K8** — sklad, kategória, kov, typ šperku a marža v schéme NIE SÚ.
+ *    `search()` ich preto nepredstiera: vráti ich v `lockedFilters` a filter
+ *    NEAPLIKUJE. Tichá „nula" alebo ignorovanie filtra bez slova by bolo
+ *    presne to klamstvo, ktoré K8 zakazuje.
  *
- * I4: žiadny prístup k `audit_log`. Vlastník: A8.
+ * `raw` MUSÍ prísť už redigované volajúcim (I1, D66) — repozitár ho len
+ * serializuje do JSON stĺpca, nič nemaskuje. I4: žiadny prístup k `audit_log`.
+ *
+ * Raw parametrizované SQL, žiadne ORM. Do SQL sa NEINTERPOLUJE žiadna hodnota;
+ * dynamické sú výhradne počty `?` placeholderov a whitelistované názvy stĺpcov
+ * pri triedení.
+ *
+ * Vlastník: V4.
  */
 import type {
+  AllowlistShopStatus,
   CatalogCacheRecord,
   CatalogRepo,
   CatalogSource,
+  DateOnly,
   MoneyString,
+  Paged,
   Queryable,
   UtcDate,
 } from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
+import { addDays, todayInZone } from '@/lib/domain/dates';
 
-/* ─────────────────────────────────── SQL ───────────────────────────────── */
+/* ═══════════════════════════════ 1. Typy ══════════════════════════════════ */
 
-const COLUMNS = 'product_id, name, price, has_attributes, source, fetched_at, raw';
+/**
+ * Stav produktu v shope. Zámerne tie isté hodnoty ako v `products_allowlist`
+ * (D49, D38) — je to jedna vec, nie dve podobné.
+ */
+export type CatalogShopStatus = AllowlistShopStatus;
+
+/** Riadok katalógu aj so stavom v shope (K1 bod 2). */
+export interface CatalogCacheRecordV3 extends CatalogCacheRecord {
+  shopStatus: CatalogShopStatus;
+}
+
+/**
+ * Riadok výsledku vyhľadávania. `unitsSold`, `everDiscounted` a `discountedNow`
+ * sú DOPOČÍTANÉ z vlastných tabuliek, nie zo shopu (I11).
+ */
+export interface CatalogSearchRow extends CatalogCacheRecordV3 {
+  /** Predané kusy za okno `soldWindowDays` (0 = za okno sa nepredal). */
+  unitsSold: number;
+  /** `true` = appka na produkt už niekedy úspešne zapísala zľavu (I11). */
+  everDiscounted: boolean;
+  /** `true` = podľa VLASTNÉHO zápisu je dnes v okne zľavy (I11). */
+  discountedNow: boolean;
+}
+
+/** Vedrá predajnosti podľa bočného panela (`design/v3/produkty.html`). */
+export type SoldBucket = 'none' | 'low' | 'mid' | 'high';
+
+/** Podľa čoho sa dá triediť. Whitelist — do SQL sa nedostane nič iné. */
+export type CatalogSort =
+  | 'name'
+  | 'price_asc'
+  | 'price_desc'
+  | 'sold_asc'
+  | 'sold_desc'
+  | 'id';
+
+/**
+ * Filtre, ktoré appka NEVIE splniť, lebo shop API dáta nevracia (K8).
+ * Vracajú sa v odpovedi, aby ich UI ukázalo ako zamknuté — nie skryté.
+ */
+export type LockedCatalogFilter =
+  | 'stock'
+  | 'category'
+  | 'metal'
+  | 'jewelryType'
+  | 'margin'
+  | 'turnover';
+
+export interface CatalogSearchFilter {
+  /** Text: časť názvu, alebo presné ID (keď je vstup celé číslo). */
+  query?: string;
+  /** Cena v EUR ako string alebo číslo. Neplatná hodnota sa IGNORUJE. */
+  priceFrom?: MoneyString | number | null;
+  priceTo?: MoneyString | number | null;
+  /** Okno predajnosti v dňoch (30/60/90/180/360). Default 180. */
+  soldWindowDays?: number;
+  /** Vedrá predajnosti spojené cez OR. Prázdne = bez filtra. */
+  soldBuckets?: SoldBucket[];
+  /** Len produkty, na ktoré appka NIKDY úspešne nezapísala zľavu (I11). */
+  neverDiscounted?: boolean;
+  /** Len produkty, ktoré sú podľa VLASTNÉHO zápisu dnes v okne zľavy (I11). */
+  currentlyDiscounted?: boolean;
+  /** Stavy v shope. Default `['ok','unknown']` — `not_found` von (K1 bod 2). */
+  shopStatus?: CatalogShopStatus[];
+  /** Konkrétne produkty (napr. hromadný výber z UI). */
+  productIds?: number[];
+  /** Deň, voči ktorému sa počíta okno a „práve v zľave". Default: dnes (D31). */
+  today?: DateOnly;
+  sort?: CatalogSort;
+  page?: number;
+  perPage?: number;
+}
+
+export interface CatalogSearchResult extends Paged<CatalogSearchRow> {
+  /** Okno, za ktoré je `unitsSold` — bez neho je číslo nečitateľné (P7). */
+  soldWindowDays: number;
+  soldFrom: DateOnly;
+  soldTo: DateOnly;
+  /** Filtre, ktoré sa NEAPLIKOVALI, lebo na ne nie sú dáta (K8). */
+  lockedFilters: LockedCatalogFilter[];
+}
+
+/** Čísla do bočného panela (K7). Jeden dotaz, nie šesť. */
+export interface CatalogCounts {
+  total: number;
+  sold: Record<SoldBucket, number>;
+  neverDiscounted: number;
+  discountedNow: number;
+  soldWindowDays: number;
+  soldFrom: DateOnly;
+  soldTo: DateOnly;
+  lockedFilters: LockedCatalogFilter[];
+}
+
+/** Vstup upsertu — `shopStatus` je voliteľný, default `ok` (viď `upsertMany`). */
+export type CatalogUpsertInput = Omit<CatalogCacheRecord, 'fetchedAt'> & {
+  fetchedAt?: UtcDate;
+  shopStatus?: CatalogShopStatus;
+};
+
+/* ═══════════════════════════ 2. Konštanty ═════════════════════════════════ */
+
+/** Koľko riadkov ide do jedného `INSERT … ON DUPLICATE KEY UPDATE` (K7). */
+const UPSERT_CHUNK_ROWS = 500;
+
+/** Strop jednej stránky výsledkov — tabuľka v UI stránkuje po 50–100. */
+const MAX_PER_PAGE = 200;
+
+/** Default okno predajnosti (bočný panel má prednastavených 180 dní). */
+const DEFAULT_SOLD_WINDOW_DAYS = 180;
+
+/** Povolené okná predajnosti podľa prepínača v UI. */
+const ALLOWED_SOLD_WINDOWS: readonly number[] = [30, 60, 90, 180, 360];
+
+/**
+ * Filtre bez dát v schéme (K8). Zoznam je ZÁMERNE tu a nie v UI: keď dáta
+ * pribudnú, zmizne filter odtiaľto a UI ho prestane kresliť zamknutý.
+ */
+const LOCKED_FILTERS: readonly LockedCatalogFilter[] = [
+  'stock',
+  'category',
+  'metal',
+  'jewelryType',
+  'margin',
+  'turnover',
+];
+
+const KNOWN_SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'not_found', 'unknown'];
+
+/** Fail-closed default (K1 bod 2): `not_found` produkt sa neponúka na zápis. */
+const DEFAULT_SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'unknown'];
+
+/** Whitelist triedenia — jediné miesto, kde sa do SQL dostane názov stĺpca. */
+const SORT_SQL: Record<CatalogSort, string> = {
+  name: 'c.name ASC, c.product_id ASC',
+  price_asc: 'c.price ASC, c.product_id ASC',
+  price_desc: 'c.price DESC, c.product_id ASC',
+  sold_asc: 'units_sold ASC, c.product_id ASC',
+  sold_desc: 'units_sold DESC, c.product_id ASC',
+  id: 'c.product_id ASC',
+};
+
+/* ═══════════════════════════ 3. SQL fragmenty ═════════════════════════════ */
+
+const COLUMNS = 'product_id, name, price, has_attributes, shop_status, source, fetched_at, raw';
 
 const SQL_GET = `SELECT ${COLUMNS} FROM catalog_cache WHERE product_id = ? LIMIT 1`;
 const SQL_GET_MANY_PREFIX = `SELECT ${COLUMNS} FROM catalog_cache WHERE product_id IN `;
-const SQL_UPSERT =
-  'INSERT INTO catalog_cache (product_id, name, price, has_attributes, source, fetched_at, raw) ' +
-  'VALUES (?, ?, ?, ?, ?, ?, ?) ' +
-  'ON DUPLICATE KEY UPDATE name = VALUES(name), price = VALUES(price), ' +
-  'has_attributes = VALUES(has_attributes), source = VALUES(source), ' +
-  'fetched_at = VALUES(fetched_at), raw = VALUES(raw)';
 
-/* ──────────────────────────────── mapovanie ────────────────────────────── */
+const SQL_UPSERT_PREFIX =
+  'INSERT INTO catalog_cache ' +
+  '(product_id, name, price, has_attributes, shop_status, source, fetched_at, raw) VALUES ';
+const SQL_UPSERT_SUFFIX =
+  ' ON DUPLICATE KEY UPDATE name = VALUES(name), price = VALUES(price), ' +
+  'has_attributes = VALUES(has_attributes), shop_status = VALUES(shop_status), ' +
+  'source = VALUES(source), fetched_at = VALUES(fetched_at), raw = VALUES(raw)';
+
+/** D49: produkt, ktorý shop nenašiel. Ostatné stĺpce sa NEPREPISUJÚ. */
+const SQL_MARK_SHOP_STATUS = 'UPDATE catalog_cache SET shop_status = ? WHERE product_id = ?';
+
+const SQL_TOTAL_ROWS = 'SELECT COUNT(*) AS total FROM catalog_cache';
+const SQL_LAST_FETCHED = 'SELECT MAX(fetched_at) AS last_fetched FROM catalog_cache';
+
+/**
+ * Predané kusy za okno. Odvodená tabuľka (nie korelovaný poddotaz v SELECT-e):
+ * poddotaz na riadok by sa pri 40 tisícoch riadkov vyhodnocoval 40-tisíckrát.
+ */
+const JOIN_SALES =
+  'LEFT JOIN (SELECT product_id, SUM(units_sold) AS units FROM product_sales_daily ' +
+  'WHERE sale_day >= ? AND sale_day <= ? GROUP BY product_id) s ON s.product_id = c.product_id ';
+
+/**
+ * VLASTNÉ úspešné zápisy zliav (I11). `now_on` je „dnes v okne" — okno berieme
+ * z kampane, lebo shop skutočný stav zľavy nevracia (backlog B1).
+ */
+const JOIN_OWN_DISCOUNTS =
+  'LEFT JOIN (SELECT i.product_id, ' +
+  'MAX(CASE WHEN cm.date_from <= ? AND cm.date_to >= ? THEN 1 ELSE 0 END) AS now_on ' +
+  'FROM campaign_items i JOIN campaigns cm ON cm.id = i.campaign_id ' +
+  "WHERE i.status = 'ok' GROUP BY i.product_id) d ON d.product_id = c.product_id ";
+
+/* ═══════════════════════════ 4. Pomocníci ═════════════════════════════════ */
 
 interface CatalogRow {
   product_id: number;
   name: string | null;
   price: string | number | null;
   has_attributes: number | boolean;
+  shop_status: string | null;
   source: CatalogSource;
   fetched_at: Date | string;
   raw: unknown;
+}
+
+interface SearchRow extends CatalogRow {
+  units_sold: number | string | null;
+  ever_discounted: number | string | null;
+  discounted_now: number | string | null;
 }
 
 const toDate = (value: Date | string): Date => (value instanceof Date ? value : new Date(value));
@@ -62,74 +266,382 @@ function parseJsonColumn(value: unknown): unknown {
   }
 }
 
-function mapRow(row: CatalogRow): CatalogCacheRecord {
+const isShopStatus = (value: unknown): value is CatalogShopStatus =>
+  KNOWN_SHOP_STATUSES.includes(value as CatalogShopStatus);
+
+function mapRow(row: CatalogRow): CatalogCacheRecordV3 {
   return {
     productId: Number(row.product_id),
     name: row.name,
     price: toMoney(row.price),
     hasAttributes: Boolean(row.has_attributes),
+    // Neznámu hodnotu čítame ako `unknown`, nie ako `ok` — o produkte, ktorého
+    // stav nevieme prečítať, nesmieme tvrdiť, že v shope existuje (K1 bod 2).
+    shopStatus: isShopStatus(row.shop_status) ? row.shop_status : 'unknown',
     source: row.source,
     fetchedAt: toDate(row.fetched_at),
     raw: parseJsonColumn(row.raw),
   };
 }
 
+function mapSearchRow(row: SearchRow): CatalogSearchRow {
+  return {
+    ...mapRow(row),
+    unitsSold: Number(row.units_sold ?? 0),
+    everDiscounted: Number(row.ever_discounted ?? 0) === 1,
+    discountedNow: Number(row.discounted_now ?? 0) === 1,
+  };
+}
+
 const isValidProductId = (id: number): boolean => Number.isInteger(id) && id > 0;
 
-/* ──────────────────────────────── factory ──────────────────────────────── */
+const DECIMAL_RE = /^-?\d{1,8}(\.\d{1,2})?$/;
+
+/** Cena do `?` parametra ako string; nezmysel sa ticho IGNORUJE (filter odpadne). */
+function toPriceParam(value: MoneyString | number | null | undefined): string | null {
+  if (value == null) return null;
+  const text = typeof value === 'number' ? String(value) : value.trim().replace(',', '.');
+  return DECIMAL_RE.test(text) ? text : null;
+}
+
+/** Escapuje `LIKE` wildcardy, aby `%` vo vyhľadávaní neznamenal „všetko". */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+function normalizeWindowDays(value: number | undefined): number {
+  const parsed = Math.trunc(Number(value));
+  return ALLOWED_SOLD_WINDOWS.includes(parsed) ? parsed : DEFAULT_SOLD_WINDOW_DAYS;
+}
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Predikáty vedier predajnosti. Výraz `COALESCE(s.units, 0)` sa opakuje, lebo
+ * alias zo SELECT-u sa v `WHERE` použiť nedá (a `HAVING` by zabilo `LIMIT`).
+ */
+const SOLD_BUCKET_SQL: Record<SoldBucket, string> = {
+  none: 'COALESCE(s.units, 0) = 0',
+  low: 'COALESCE(s.units, 0) BETWEEN 1 AND 2',
+  mid: 'COALESCE(s.units, 0) BETWEEN 3 AND 9',
+  high: 'COALESCE(s.units, 0) >= 10',
+};
+
+const isSoldBucket = (value: unknown): value is SoldBucket =>
+  value === 'none' || value === 'low' || value === 'mid' || value === 'high';
+
+interface ResolvedWindow {
+  windowDays: number;
+  from: DateOnly;
+  to: DateOnly;
+}
+
+/**
+ * Okno predajnosti. Deň sa počíta v `Europe/Bratislava` cez `dates.ts` (D31) —
+ * nikdy v UTC, inak by sa medzi 22:00 a 24:00 UTC filtrovalo podľa zajtrajška.
+ */
+function resolveWindow(filter: CatalogSearchFilter): ResolvedWindow {
+  const windowDays = normalizeWindowDays(filter.soldWindowDays);
+  const to =
+    typeof filter.today === 'string' && DATE_ONLY_RE.test(filter.today)
+      ? filter.today
+      : todayInZone(new Date());
+  // Okno vrátane dnešného dňa: 30 dní = dnes + 29 predchádzajúcich.
+  const from = addDays(to, -(windowDays - 1));
+  return { windowDays, from, to };
+}
+
+interface WhereParts {
+  sql: string;
+  values: unknown[];
+}
+
+/**
+ * Zloží `WHERE` časť. Každá hodnota ide ako `?` — do SQL sa neinterpoluje nič
+ * okrem počtu placeholderov a konštantných fragmentov z tohto súboru.
+ */
+function buildWhere(filter: CatalogSearchFilter, includeFacets: boolean): WhereParts {
+  const where: string[] = [];
+  const values: unknown[] = [];
+
+  const statuses = (filter.shopStatus ?? []).filter(isShopStatus);
+  const effectiveStatuses = statuses.length > 0 ? statuses : [...DEFAULT_SHOP_STATUSES];
+  where.push(`c.shop_status IN (${effectiveStatuses.map(() => '?').join(', ')})`);
+  values.push(...effectiveStatuses);
+
+  if (filter.productIds !== undefined) {
+    const unique = [...new Set(filter.productIds.filter(isValidProductId))];
+    if (unique.length === 0) {
+      // Prázdny výber nie je „bez filtra" — je to prázdny výsledok (fail-closed).
+      where.push('1 = 0');
+    } else {
+      where.push(`c.product_id IN (${unique.map(() => '?').join(', ')})`);
+      values.push(...unique);
+    }
+  }
+
+  const term = (filter.query ?? '').trim();
+  if (term.length > 0) {
+    if (/^\d{1,9}$/.test(term)) {
+      // Celé číslo je buď ID, alebo časť názvu — hľadáme oboje.
+      where.push("(c.product_id = ? OR c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\')");
+      values.push(Number(term), escapeLike(term));
+    } else {
+      where.push("c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\'");
+      values.push(escapeLike(term.slice(0, 191)));
+    }
+  }
+
+  const priceFrom = toPriceParam(filter.priceFrom);
+  if (priceFrom !== null) {
+    where.push('c.price >= ?');
+    values.push(priceFrom);
+  }
+  const priceTo = toPriceParam(filter.priceTo);
+  if (priceTo !== null) {
+    where.push('c.price <= ?');
+    values.push(priceTo);
+  }
+
+  if (includeFacets) {
+    const buckets = [...new Set((filter.soldBuckets ?? []).filter(isSoldBucket))];
+    if (buckets.length > 0 && buckets.length < 4) {
+      where.push(`(${buckets.map((bucket) => SOLD_BUCKET_SQL[bucket]).join(' OR ')})`);
+    }
+    if (filter.neverDiscounted === true) {
+      where.push('d.product_id IS NULL');
+    }
+    if (filter.currentlyDiscounted === true) {
+      where.push('COALESCE(d.now_on, 0) = 1');
+    }
+  }
+
+  return { sql: where.length > 0 ? ` WHERE ${where.join(' AND ')}` : '', values };
+}
+
+/* ═══════════════════════════ 5. Factory ═══════════════════════════════════ */
 
 export interface CatalogRepoDeps {
   /** Výhradne pre testy: spojenie namiesto poolu. */
   defaultConn?: Queryable;
 }
 
-export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepo {
+/** Rozhranie po KONTRAKTE V3 — nadmnožina `CatalogRepo` z kontraktov. */
+export interface CatalogRepoExt extends CatalogRepo {
+  get(productId: number, conn?: Queryable): Promise<CatalogCacheRecordV3 | null>;
+  getMany(productIds: number[], conn?: Queryable): Promise<Map<number, CatalogCacheRecordV3>>;
+  upsert(record: CatalogUpsertInput, conn?: Queryable): Promise<void>;
+  /** K7: dávkový upsert stránky synchronizácie. Vracia počet zapísaných riadkov. */
+  upsertMany(records: CatalogUpsertInput[], conn?: Queryable): Promise<number>;
+  /** D49: produkt, ktorý shop nenašiel — ostatné stĺpce zostanú (I11). */
+  markShopStatus(
+    productId: number,
+    status: CatalogShopStatus,
+    conn?: Queryable,
+  ): Promise<void>;
+  search(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogSearchResult>;
+  counts(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogCounts>;
+  /** Koľko riadkov katalóg vôbec má (hlavička „z 40 483 produktov"). */
+  totalRows(conn?: Queryable): Promise<number>;
+  /** K7: „Dáta k …" — meraný fakt, nie odhad (P7). `null` = katalóg je prázdny. */
+  lastFetchedAt(conn?: Queryable): Promise<UtcDate | null>;
+}
+
+export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
   const run = async <T>(conn: Queryable | undefined, sql: string, values: unknown[]): Promise<T> => {
     const target = conn ?? deps.defaultConn;
     if (target) return (await target.query(sql, values)) as T;
     return poolQuery<T>(sql, values);
   };
 
-  const repo: CatalogRepo = {
-    async get(productId: number, conn?: Queryable): Promise<CatalogCacheRecord | null> {
+  const repo: CatalogRepoExt = {
+    async get(productId: number, conn?: Queryable): Promise<CatalogCacheRecordV3 | null> {
       if (!isValidProductId(productId)) return null;
       const rows = await run<CatalogRow[]>(conn, SQL_GET, [productId]);
       const row = Array.isArray(rows) ? rows[0] : undefined;
-      return row ? mapRow(row) : null;
+      // Turbopack tu už raz zahodil `if (!row)` ako compile-time falsy.
+      return row === undefined ? null : mapRow(row);
     },
 
     async getMany(
       productIds: number[],
       conn?: Queryable,
-    ): Promise<Map<number, CatalogCacheRecord>> {
-      const result = new Map<number, CatalogCacheRecord>();
+    ): Promise<Map<number, CatalogCacheRecordV3>> {
+      const result = new Map<number, CatalogCacheRecordV3>();
       const unique = [...new Set(productIds.filter(isValidProductId))];
       if (unique.length === 0) return result;
-      const placeholders = `(${unique.map(() => '?').join(', ')})`;
-      const rows = await run<CatalogRow[]>(conn, SQL_GET_MANY_PREFIX + placeholders, unique);
-      for (const row of Array.isArray(rows) ? rows : []) {
-        const record = mapRow(row);
-        result.set(record.productId, record);
+      // Aj čítanie ide po dávkach — `IN (…)` s desiatimi tisíckami `?` by
+      // narazilo na limit parametrov skôr než na limit trpezlivosti.
+      for (let start = 0; start < unique.length; start += UPSERT_CHUNK_ROWS) {
+        const chunk = unique.slice(start, start + UPSERT_CHUNK_ROWS);
+        const placeholders = `(${chunk.map(() => '?').join(', ')})`;
+        const rows = await run<CatalogRow[]>(conn, SQL_GET_MANY_PREFIX + placeholders, chunk);
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const record = mapRow(row);
+          result.set(record.productId, record);
+        }
       }
       return result;
     },
 
-    async upsert(
-      record: Omit<CatalogCacheRecord, 'fetchedAt'> & { fetchedAt?: UtcDate },
-      conn?: Queryable,
-    ): Promise<void> {
+    async upsert(record: CatalogUpsertInput, conn?: Queryable): Promise<void> {
       if (!isValidProductId(record.productId)) {
         throw new Error(`Neplatné product ID pre catalog_cache: ${String(record.productId)}.`);
       }
-      await run(conn, SQL_UPSERT, [
-        record.productId,
-        record.name == null ? null : record.name.slice(0, 255),
-        record.price,
-        record.hasAttributes ? 1 : 0,
-        record.source,
-        record.fetchedAt ?? new Date(),
-        record.raw == null ? null : JSON.stringify(record.raw),
+      await repo.upsertMany([record], conn);
+    },
+
+    /**
+     * Dávkový upsert (K7). `shopStatus` je predvolene `ok`: do katalógu sa
+     * zapisuje to, čo shop práve vrátil, takže produkt existuje. Produkt,
+     * ktorý shop nenašiel, sa označuje `markShopStatus()` (D49), nie tu.
+     */
+    async upsertMany(records: CatalogUpsertInput[], conn?: Queryable): Promise<number> {
+      const valid = records.filter((record) => isValidProductId(record.productId));
+      if (valid.length === 0) return 0;
+
+      let written = 0;
+      for (let start = 0; start < valid.length; start += UPSERT_CHUNK_ROWS) {
+        const chunk = valid.slice(start, start + UPSERT_CHUNK_ROWS);
+        const tuples = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+        const values: unknown[] = [];
+        for (const record of chunk) {
+          values.push(
+            record.productId,
+            record.name == null ? null : record.name.slice(0, 255),
+            record.price,
+            record.hasAttributes ? 1 : 0,
+            isShopStatus(record.shopStatus) ? record.shopStatus : 'ok',
+            record.source,
+            record.fetchedAt ?? new Date(),
+            record.raw == null ? null : JSON.stringify(record.raw),
+          );
+        }
+        await run(conn, SQL_UPSERT_PREFIX + tuples + SQL_UPSERT_SUFFIX, values);
+        written += chunk.length;
+      }
+      return written;
+    },
+
+    async markShopStatus(
+      productId: number,
+      status: CatalogShopStatus,
+      conn?: Queryable,
+    ): Promise<void> {
+      if (!isValidProductId(productId)) return;
+      if (!isShopStatus(status)) {
+        throw new Error(`Neznámy stav produktu v shope: ${String(status)}.`);
+      }
+      await run(conn, SQL_MARK_SHOP_STATUS, [status, productId]);
+    },
+
+    /**
+     * Stránkované vyhľadávanie s filtrami. Dva dotazy: `COUNT(*)` a stránka —
+     * `SQL_CALC_FOUND_ROWS` je v MariaDB deprecated a v tomto tvare pomalší.
+     */
+    async search(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogSearchResult> {
+      const page = Math.max(1, Math.trunc(filter.page ?? 1));
+      const perPage = Math.min(MAX_PER_PAGE, Math.max(1, Math.trunc(filter.perPage ?? 50)));
+      const window = resolveWindow(filter);
+      const sort = SORT_SQL[filter.sort ?? 'name'] ?? SORT_SQL.name;
+
+      // Poradie parametrov MUSÍ zodpovedať poradiu JOIN-ov v `FROM`.
+      const joinValues = [window.from, window.to, window.to, window.to];
+      const from = `FROM catalog_cache c ${JOIN_SALES}${JOIN_OWN_DISCOUNTS}`;
+      const where = buildWhere(filter, true);
+
+      const countRows = await run<Array<{ total: number | bigint }>>(
+        conn,
+        `SELECT COUNT(*) AS total ${from}${where.sql}`,
+        [...joinValues, ...where.values],
+      );
+      const total = Array.isArray(countRows) ? Number(countRows[0]?.total ?? 0) : 0;
+
+      const dataSql =
+        `SELECT ${COLUMNS.replace(/(^|, )/g, '$1c.')}, ` +
+        'COALESCE(s.units, 0) AS units_sold, ' +
+        'CASE WHEN d.product_id IS NULL THEN 0 ELSE 1 END AS ever_discounted, ' +
+        'COALESCE(d.now_on, 0) AS discounted_now ' +
+        `${from}${where.sql} ORDER BY ${sort} LIMIT ? OFFSET ?`;
+
+      const rows = await run<SearchRow[]>(conn, dataSql, [
+        ...joinValues,
+        ...where.values,
+        perPage,
+        (page - 1) * perPage,
       ]);
+
+      return {
+        data: (Array.isArray(rows) ? rows : []).map(mapSearchRow),
+        page,
+        perPage,
+        total,
+        soldWindowDays: window.windowDays,
+        soldFrom: window.from,
+        soldTo: window.to,
+        lockedFilters: [...LOCKED_FILTERS],
+      };
+    },
+
+    /**
+     * Čísla do bočného panela. Vedrá predajnosti a história zliav sa počítajú
+     * BEZ vlastných facetových filtrov (inak by zaškrtnuté vedro vynulovalo
+     * počty ostatných), ale S filtrami ceny, textu a stavu — presne tak, ako
+     * to bočný panel v `design/v3/produkty.html` ukazuje.
+     */
+    async counts(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogCounts> {
+      const window = resolveWindow(filter);
+      const joinValues = [window.from, window.to, window.to, window.to];
+      const from = `FROM catalog_cache c ${JOIN_SALES}${JOIN_OWN_DISCOUNTS}`;
+      const where = buildWhere(filter, false);
+
+      const sql =
+        'SELECT COUNT(*) AS total, ' +
+        'SUM(CASE WHEN COALESCE(s.units, 0) = 0 THEN 1 ELSE 0 END) AS sold_none, ' +
+        'SUM(CASE WHEN COALESCE(s.units, 0) BETWEEN 1 AND 2 THEN 1 ELSE 0 END) AS sold_low, ' +
+        'SUM(CASE WHEN COALESCE(s.units, 0) BETWEEN 3 AND 9 THEN 1 ELSE 0 END) AS sold_mid, ' +
+        'SUM(CASE WHEN COALESCE(s.units, 0) >= 10 THEN 1 ELSE 0 END) AS sold_high, ' +
+        'SUM(CASE WHEN d.product_id IS NULL THEN 1 ELSE 0 END) AS never_discounted, ' +
+        'SUM(CASE WHEN COALESCE(d.now_on, 0) = 1 THEN 1 ELSE 0 END) AS discounted_now ' +
+        `${from}${where.sql}`;
+
+      const rows = await run<Array<Record<string, number | bigint | null>>>(conn, sql, [
+        ...joinValues,
+        ...where.values,
+      ]);
+      const row = Array.isArray(rows) ? rows[0] : undefined;
+      const num = (key: string): number => Number(row?.[key] ?? 0);
+
+      return {
+        total: num('total'),
+        sold: {
+          none: num('sold_none'),
+          low: num('sold_low'),
+          mid: num('sold_mid'),
+          high: num('sold_high'),
+        },
+        neverDiscounted: num('never_discounted'),
+        discountedNow: num('discounted_now'),
+        soldWindowDays: window.windowDays,
+        soldFrom: window.from,
+        soldTo: window.to,
+        lockedFilters: [...LOCKED_FILTERS],
+      };
+    },
+
+    async totalRows(conn?: Queryable): Promise<number> {
+      const rows = await run<Array<{ total: number | bigint }>>(conn, SQL_TOTAL_ROWS, []);
+      return Array.isArray(rows) ? Number(rows[0]?.total ?? 0) : 0;
+    },
+
+    async lastFetchedAt(conn?: Queryable): Promise<UtcDate | null> {
+      const rows = await run<Array<{ last_fetched: Date | string | null }>>(
+        conn,
+        SQL_LAST_FETCHED,
+        [],
+      );
+      const value = Array.isArray(rows) ? rows[0]?.last_fetched : null;
+      return value == null ? null : toDate(value);
     },
   };
 
@@ -137,4 +649,4 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepo {
 }
 
 /** Singleton pre route-y a engine preview. */
-export const catalogRepo: CatalogRepo = createCatalogRepo();
+export const catalogRepo: CatalogRepoExt = createCatalogRepo();

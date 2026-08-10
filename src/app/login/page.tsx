@@ -1,29 +1,29 @@
 'use client';
 
 /**
- * Aura Zľavy — `/login` (A16, §8, D68–D71).
+ * Aura Zľavy — `/login` (V12; predloha `design/v3/prihlasenie.html`).
  *
- * Jediný používateľ, heslo ≥ 12 znakov. Stavy: idle / submitting / locked.
- * Pri lockoute (429) UI zobrazí, koľko času zostáva — hodnotu berie z hlavičky
- * `Retry-After` alebo z hlášky servera; nikdy nehádame, či heslo bolo správne.
- * Prihlásenie ide výhradne na `/api/auth/login` (žiadny Server Action).
+ * Meno a heslo. Nič viac — žiadne „zapamätať si ma", žiadne obnovenie hesla,
+ * žiadny druhý faktor. Appka beží v jednej domácnosti na jednom počítači.
  *
- * PRVÝ BEH APPKY: po čerstvej inštalácii je `users=0` a prihlásiť sa NEDÁ
- * žiadnym menom ani heslom. Stránka to zistí z `GET /api/auth/bootstrap`
- * (výhradne POČET účtov, nikdy ich údaje — I1) a namiesto slepého formulára
- * zobrazí presný príkaz na vytvorenie admina. Príkaz MUSÍ spustiť človek
- * v normálnom termináli: `seed-admin` si pýta heslo interaktívne a na jeho
- * maskovanie potrebuje skutočné TTY, takže appka ho nikdy nespustí sama.
+ * PRVÝ BEH APPKY: po čerstvej inštalácii nie je v appke ani jeden účet a
+ * prihlásiť sa NEDÁ žiadnym menom ani heslom. Stránka to zistí z počtu účtov
+ * (výhradne počet, nikdy ich údaje) a namiesto slepého formulára ukáže presný
+ * príkaz na vytvorenie prvého účtu. Príkaz MUSÍ spustiť človek v termináli:
+ * skript si heslo pýta interaktívne a na jeho zamaskovanie potrebuje skutočný
+ * terminál, takže appka ho nikdy nespúšťa sama.
  *
- * Fail-closed: keď bootstrap neodpovie (alebo trvá dlho), stránka sa vráti
- * k bežnému formuláru a NIKDY netvrdí, že účet neexistuje. Hlášky NEúspešného
- * prihlásenia zostávajú generické — nikdy neprezradia, či meno existuje (D68).
+ * FAIL-CLOSED: keď sa počet účtov nedá zistiť (alebo to trvá dlho), stránka sa
+ * vráti k bežnému formuláru a NIKDY netvrdí, že účet neexistuje. Hlášky
+ * neúspešného prihlásenia zostávajú všeobecné — nikdy neprezradia, či meno
+ * v appke je.
  */
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import Button from '@/components/ui/Button';
 import ErrorMessage from '@/components/ui/ErrorMessage';
+import { LOGIN_CSS } from '@/app/login/styles';
 import {
   SEED_ADMIN_COMMAND,
   firstRunStateFromCount,
@@ -31,10 +31,10 @@ import {
   type FirstRunState,
 } from '@/lib/ui/first-run';
 
-/** Minimum podľa §5 (`password: string(12..200)`). */
+/** Minimálna dĺžka hesla; server má rovnakú hranicu. */
 const PASSWORD_MIN = 12;
 
-/** Po tomto čase sa bootstrap vzdá a stránka ukáže bežný formulár. */
+/** Po tomto čase sa zisťovanie prvého behu vzdá a ukáže sa bežný formulár. */
 const BOOTSTRAP_TIMEOUT_MS = 4000;
 
 interface LoginEnvelope {
@@ -49,7 +49,7 @@ interface BootstrapEnvelope {
 
 /**
  * Zistí stav prvého behu. Vracia `'unknown'` pri akejkoľvek neistote —
- * príznak `needsAdmin` sa berie len vtedy, keď je to skutočný boolean.
+ * príznak sa berie len vtedy, keď je to skutočný boolean.
  */
 async function loadFirstRunState(signal: AbortSignal): Promise<FirstRunState> {
   try {
@@ -76,7 +76,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [rawCode, setRawCode] = useState<string | null>(null);
   const [lockSeconds, setLockSeconds] = useState<number | null>(null);
-  /** `null` = ešte nevieme; potom `needs-admin` / `ready` / `unknown`. */
+  /** `null` = ešte nevieme; potom prvý beh / pripravené / neisté. */
   const [firstRun, setFirstRun] = useState<FirstRunState | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -95,7 +95,7 @@ export default function LoginPage() {
     };
   }, []);
 
-  /* Odpočet lockoutu — po uplynutí sa formulár znova povolí. */
+  /* Odpočet uzamknutia — po uplynutí sa formulár znova povolí. */
   useEffect(() => {
     if (state !== 'locked' || lockSeconds === null) return;
     if (lockSeconds <= 0) {
@@ -111,9 +111,9 @@ export default function LoginPage() {
     e.preventDefault();
     if (state === 'submitting' || state === 'locked') return;
     setRawCode(null);
-    // Lokálna validácia pred odoslaním — server má rovnaké hranice (§5).
+    // Lokálna kontrola pred odoslaním — server má rovnaké hranice.
     if (username.trim() === '') {
-      setError('Zadaj používateľské meno.');
+      setError('Zadaj meno.');
       return;
     }
     if (password.length < PASSWORD_MIN) {
@@ -128,7 +128,7 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ username: username.trim(), password }),
       });
-      // Heslo držíme len po dobu requestu.
+      // Heslo držíme len po dobu odoslania.
       setPassword('');
       let body: LoginEnvelope | null = null;
       try {
@@ -148,18 +148,18 @@ export default function LoginPage() {
         setState('locked');
         setError(
           body?.error?.message ??
-            'Účet je dočasne uzamknutý pre priveľa neúspešných pokusov. Skús to neskôr.',
+            'Prihlásenie je dočasne uzamknuté pre priveľa neúspešných pokusov. Skús to neskôr.',
         );
         setRawCode(body?.error?.code ?? 'too_many_attempts');
         return;
       }
       setState('idle');
-      setError(body?.error?.message ?? 'Prihlásenie zlyhalo. Skontroluj meno a heslo.');
+      setError(body?.error?.message ?? 'Prihlásenie sa nepodarilo. Skontroluj meno a heslo.');
       setRawCode(body?.error?.code ?? `http_${res.status}`);
     } catch {
       setPassword('');
       setState('idle');
-      setError('Server neodpovedá. Skús znova.');
+      setError('Appka neodpovedá. Skús znova.');
     }
   }
 
@@ -169,129 +169,174 @@ export default function LoginPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      // Bez clipboard práv sa príkaz označí ručne — text je aj tak na obrazovke.
+      // Bez práv na schránku si príkaz označí človek — je aj tak na obrazovke.
       setCopied(false);
     }
   }
 
-  /* ── Kým bootstrap neodpovie, formulár nezobrazujeme (nebliká) ─────────── */
+  /* ── Kým sa prvý beh nezistí, formulár nekreslíme (nebliká) ───────────── */
   if (firstRun === null) {
     return (
-      <section
-        className="ovl-card ovl-skeleton"
-        style={{ maxWidth: '26rem', minHeight: '10rem' }}
-        aria-busy="true"
-        data-testid="login-loading"
-      />
+      <div className="login">
+        <style>{LOGIN_CSS}</style>
+        <section
+          className="sec ovl-skeleton"
+          style={{ minHeight: '10rem' }}
+          aria-busy="true"
+          data-testid="login-loading"
+        />
+      </div>
     );
   }
 
-  /* ── Prvý beh: v DB nie je ani jeden účet ─────────────────────────────── */
+  /* ── Prvý beh: v appke nie je ani jeden účet ──────────────────────────── */
   if (showsAdminSetup(firstRun)) {
     return (
-      <section className="ovl-card" style={{ maxWidth: '34rem' }} data-testid="login-needs-admin">
-        <h1 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem' }}>Appka ešte nemá účet</h1>
-        <div className="ovl-note ovl-note--attention" role="status">
-          <span className="ovl-note-glyph" aria-hidden="true">
-            ▲
-          </span>
-          <span>
-            V databáze nie je ani jeden používateľ, takže sa teraz nedá prihlásiť
-            žiadnym menom ani heslom. Nie je to porucha — appka je len čerstvo
-            nainštalovaná a chýba jej prvý účet.
-          </span>
-        </div>
-        <div className="ovl-stack" style={{ marginTop: '0.9rem' }}>
-          <p style={{ margin: 0 }}>
-            <strong>Čo urobiť:</strong> spusti tento príkaz v termináli na počítači,
-            kde beží Docker, a zadaj meno a heslo (aspoň {PASSWORD_MIN} znakov).
-          </p>
-          <pre
-            className="ovl-mono"
-            data-testid="login-seed-command"
-            style={{
-              margin: 0,
-              padding: '0.6rem 0.7rem',
-              overflowX: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-all',
-              border: '1px solid var(--line)',
-              borderRadius: '0.35rem',
-            }}
-          >
+      <div className="login">
+        <style>{LOGIN_CSS}</style>
+        <section className="sec wide" data-testid="login-needs-admin">
+          <div className="spread" style={{ marginBottom: '14px' }}>
+            <span className="mark">
+              Aura <b>Zľavy</b>
+            </span>
+            <span className="sig warn">bez účtu</span>
+          </div>
+          <div className="lvl-2">
+            Appka je čerstvo nainštalovaná a nemá ešte ani jeden účet, takže sa
+            teraz nedá prihlásiť. Nie je to porucha.
+          </div>
+          <div className="hint" style={{ marginTop: '10px' }}>
+            Spusti tento príkaz v termináli na počítači, kde appka beží, a zadaj
+            meno a heslo (aspoň {PASSWORD_MIN} znakov).
+          </div>
+          <pre className="cmd" data-testid="login-seed-command">
             {SEED_ADMIN_COMMAND}
           </pre>
-          <div className="ovl-row">
+          <div className="row-2" style={{ marginTop: '10px' }}>
             <Button onClick={() => void copyCommand()} data-testid="login-copy-command">
-              {copied ? 'Skopírované ✓' : 'Skopírovať príkaz'}
+              {copied ? 'Skopírované' : 'Skopírovať príkaz'}
             </Button>
-            <Button variant="primary" onClick={() => window.location.reload()} data-testid="login-recheck">
-              Účet som vytvoril — skús znova
+            <Button
+              variant="primary"
+              onClick={() => window.location.reload()}
+              data-testid="login-recheck"
+            >
+              Účet som vytvoril
             </Button>
           </div>
-          <p className="ovl-small ovl-muted" style={{ margin: 0 }}>
-            Príkaz musí spustiť človek v normálnom termináli: skript si heslo pýta
-            interaktívne a na jeho zamaskovanie potrebuje skutočný terminál. Appka
-            ho preto nespúšťa sama a heslo nikdy nevidí ani neukladá inak než ako
-            argon2id hash. Po vytvorení účtu sa vráť sem a prihlás sa.
-          </p>
-        </div>
-      </section>
+          <details className="tech">
+            <summary>Technický detail</summary>
+            <div className="body">
+              <table>
+                <tbody>
+                  <tr>
+                    <td>Prečo to nespustí appka</td>
+                    <td>
+                      skript pýta heslo interaktívne a na jeho zamaskovanie
+                      potrebuje skutočný terminál
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Ako je heslo uložené</td>
+                    <td className="mono">argon2id, nikdy nie v čitateľnej podobe</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </section>
+      </div>
     );
   }
 
   const locked = state === 'locked';
+  const busy = state === 'submitting';
 
   return (
-    <section className="ovl-card" style={{ maxWidth: '26rem' }} data-testid="login-page">
-      <h1 style={{ fontSize: '1.2rem', margin: '0 0 0.5rem' }}>Prihlásenie</h1>
-      <form className="ovl-stack" onSubmit={submit}>
-        <label>
-          <span className="ovl-small">Používateľské meno</span>
-          <br />
-          <input
-            autoComplete="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            disabled={locked || state === 'submitting'}
-            data-testid="login-username"
-          />
-        </label>
-        <label>
-          <span className="ovl-small">Heslo</span>
-          <br />
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={locked || state === 'submitting'}
-            data-testid="login-password"
-          />
-        </label>
-        <div className="ovl-row">
+    <div className="login">
+      <style>{LOGIN_CSS}</style>
+      <section className="sec" data-testid="login-page">
+        <div className="spread" style={{ marginBottom: '18px' }}>
+          <span className="mark">
+            Aura <b>Zľavy</b>
+          </span>
+        </div>
+
+        <form onSubmit={submit}>
+          <label className="field">
+            <span className="lb">Meno</span>
+            <input
+              className="inp"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={locked || busy}
+              data-testid="login-username"
+            />
+          </label>
+          <label className="field">
+            <span className="lb">Heslo</span>
+            <input
+              className="inp"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={locked || busy}
+              data-testid="login-password"
+            />
+          </label>
+
           <Button
             type="submit"
             variant="primary"
-            disabled={locked || state === 'submitting'}
-            disabledReason={locked ? 'Účet je dočasne uzamknutý.' : undefined}
+            className="btn lg"
+            disabled={locked || busy}
+            disabledReason={locked ? 'Prihlásenie je dočasne uzamknuté.' : undefined}
             data-testid="login-submit"
           >
-            {state === 'submitting' ? 'Prihlasujem…' : 'Prihlásiť sa'}
+            {busy ? 'Prihlasujem…' : 'Prihlásiť sa'}
           </Button>
+
+          {locked ? (
+            <p className="sig bad" style={{ marginTop: '10px' }} data-testid="login-locked">
+              Uzamknuté
+              {lockSeconds !== null ? ` — skús znova o ${lockSeconds} s` : ' — skús to neskôr'}
+            </p>
+          ) : null}
+          {error ? (
+            <div style={{ marginTop: '10px' }}>
+              <ErrorMessage message={error} rawCode={rawCode} />
+            </div>
+          ) : null}
+        </form>
+
+        <div className="foot">
+          <span className="lvl-3">Appka beží len v tejto sieti</span>
         </div>
-        {locked ? (
-          <p className="ovl-badge ovl-badge--danger" data-testid="login-locked">
-            Uzamknuté
-            {lockSeconds !== null ? ` — skús znova za ${lockSeconds} s.` : ' — skús to neskôr.'}
-          </p>
-        ) : null}
-        {error ? <ErrorMessage message={error} rawCode={rawCode} /> : null}
-      </form>
-      <p className="ovl-small ovl-muted" style={{ marginTop: '0.75rem' }}>
-        Appka beží výhradne lokálne. Po prihlásení platí 15-minútové sudo okno —
-        citlivé operácie si heslo vyžiadajú znova.
-      </p>
-    </section>
+
+        <details className="tech">
+          <summary>Technický detail</summary>
+          <div className="body">
+            <table>
+              <tbody>
+                <tr>
+                  <td>Adresa</td>
+                  <td className="mono">127.0.0.1:3070</td>
+                </tr>
+                <tr>
+                  <td>Platnosť prihlásenia</td>
+                  <td className="mono">8 h celkovo · 30 min bez činnosti</td>
+                </tr>
+                <tr>
+                  <td>Citlivé kroky</td>
+                  <td className="mono">heslo znova po 15 min</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+    </div>
   );
 }

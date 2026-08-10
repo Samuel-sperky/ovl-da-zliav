@@ -1,11 +1,19 @@
 /**
- * Aura Zľavy — `POST /api/campaigns/[id]/cancel` (BUILD-SPEC §5, §4).
+ * Aura Zľavy — `POST /api/campaigns/[id]/cancel` (BUILD-SPEC §5, §4; K2).
  *
- * Zrušenie kampane — LEN zo stavov `draft`/`scheduled`/`needs_key`/`missed`
- * (stavový stroj A7). Zrušenie NIKDY nesiaha na shop: už zapísaná zľava sa
- * zrušiť nedá (I7) a `cancel` je čisto lokálna zmena stavu + audit.
+ * Zrušenie zľavy — LEN zo stavov `draft`/`scheduled`/`needs_key`/`missed`
+ * (stavový stroj A7) a `queued` (K2). Zrušenie NIKDY nesiaha na shop: už
+ * zapísaná zľava sa zrušiť nedá (I7) a `cancel` je čisto lokálna zmena stavu
+ * + audit. Položky, ktoré fronta stihla zapísať, v shope zostávajú a dobehnú
+ * prirodzene — appka to nesmie predstierať inak (I7, D35).
  *
- * Vlastník: A12.
+ * `queued` v stavovom stroji A7 (`src/lib/domain/status.ts`) zatiaľ nie je,
+ * takže `assertTransition()` by ho odmietol ako neznámy stav. Kým sa doplní
+ * (požiadavka vo výstupe V8), rieši ho táto route sama — v tom istom smere,
+ * v akom by ho riešil stavový stroj: fronta je čakajúca kampaň, teda
+ * zrušiteľná ako `scheduled`.
+ *
+ * Vlastník: V8.
  */
 import { z } from 'zod';
 
@@ -14,6 +22,7 @@ import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/d
 
 import {
   idParamSchema,
+  isQueuedStatus,
   loadCampaignOr404,
   resolveRoutesDeps,
   withRouteErrors,
@@ -40,7 +49,11 @@ export function createCancelPost(
           const campaign = await loadCampaignOr404(d, ctx.params.id);
 
           // §4 — nepovolený prechod letí ako `invalid_transition` (409).
-          assertTransition(campaign.status, 'cancelled', { trigger: 'cancel' });
+          // `queued` (K2) je zrušiteľný rovnako ako `scheduled`; ostatné stavy
+          // rozhoduje stavový stroj, nie táto route.
+          if (!isQueuedStatus(campaign.status)) {
+            assertTransition(campaign.status, 'cancelled', { trigger: 'cancel' });
+          }
 
           const reason = ctx.body.reason ?? 'Zrušené používateľom.';
           await d.campaignsRepo.setStatus(campaign.id, 'cancelled', {
