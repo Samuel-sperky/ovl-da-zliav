@@ -45,3 +45,8 @@ npm-debug.log*
 
 # Živý lokálny override je strojovo špecifický — v repe žijú len *.example.yml (R1w).
 docker-compose.override.yml
+
+# Renderované PNG a ZIP dodávky návrhu — generované z design/mockups/,
+# do repa nepatria (binárne, znovuvytvoriteľné).
+design/png/
+*.zip
