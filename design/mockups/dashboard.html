@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria časovej osi kampaní (len rozmery, žiadne farby) */
+  .tlmap{padding:14px 16px 12px}
+  .tlmap svg{display:block;width:100%;height:auto}
+  .tlmap svg text{font-family:inherit}
+  /* kostra osi cez tokeny — drží sa v dark aj light téme */
+  .tlmap .mband{fill:var(--paper2)}
+  .tlmap .mband.alt{fill:var(--paper3,var(--paper2))}
+  .tlmap .mlab{fill:var(--dim)}
+  .tlmap .mgrid{stroke:var(--line)}
+  .tlmap .rlab{fill:var(--ink2)}
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="navbar"><div class="wrap">
+  <span class="brand"><span class="crown">♛</span>Aura Zľavy</span>
+  <nav class="navtabs">
+    <a href="dashboard.html" class="on">Dashboard</a>
+    <a href="kampane.html">Kampane<span class="n">4</span></a>
+    <a href="produkty.html">Produkty<span class="n">10</span></a>
+    <a href="analytika.html">Analytika</a>
+    <a href="nastavenia.html">Nastavenia</a>
+    <a href="ai-agent.html">AI agent<span class="n">5</span></a>
+  </nav>
+  <div class="navmeta">
+    <span class="hbadge"><span class="g">⧗</span>Kľúč <b>31 h 12 m</b></span>
+    <span class="hbadge"><span class="g">◴</span>API <b>142/200</b></span>
+  </div>
+</div></div>
+
+<div class="page"><div class="wrap">
+
+  <div class="phead">
+    <div>
+      <div class="eyebrow">Pondelok · 10.08.2026 · 14:20</div>
+      <h1>Prehľad <em>dňa</em></h1>
+      <div class="sub">40 483 produktov v katalógu, zľavy sa zapisujú len na 10 povolených ID.
+        Tržby a marža sú agregované cez <code>order:stats</code> — bez zákazníckych dát.</div>
+    </div>
+    <div class="pactions">
+      <a class="btn ghost" href="analytika.html"><span class="g">◫</span>Analytika</a>
+      <a class="btn primary" href="kampan-nova.html"><span class="g">+</span>Nová kampaň</a>
+    </div>
+  </div>
+
+  <!-- KPI STRIP — 7 kariet -->
+  <div class="kpistrip">
+    <div class="kpi">
+      <div class="k">Tržby dnes</div>
+      <div class="v">2 418,60 €</div>
+      <div class="s">34 objednávok · k 14:20</div>
+    </div>
+    <div class="kpi">
+      <div class="k">Marža dnes</div>
+      <div class="v"><span class="attn">31,4 %</span></div>
+      <div class="s">−2,7 b. b. vs 7-dňový priemer</div>
+    </div>
+    <div class="kpi">
+      <div class="k">Objednávky</div>
+      <div class="v">34</div>
+      <div class="s">+8 vs včera o tomto čase</div>
+    </div>
+    <div class="kpi">
+      <div class="k">Aktívne zľavy</div>
+      <div class="v"><span class="t">6/10</span></div>
+      <div class="s">podľa vlastného zápisu</div>
+    </div>
+    <div class="kpi">
+      <div class="k">Vyžaduje zásah</div>
+      <div class="v"><span class="crit">2</span></div>
+      <div class="s">K-126 ⧗ · K-112 ◧</div>
+    </div>
+    <div class="kpi">
+      <div class="k">Rozpočet API</div>
+      <div class="v">142<small>/200</small></div>
+      <div class="s">zostáva dnes · 20/min</div>
+    </div>
+    <div class="kpi">
+      <div class="k">TTL kľúča</div>
+      <div class="v">31 h</div>
+      <div class="s">do 11.08. 21:32</div>
+    </div>
+  </div>
+
+  <!-- ================= SEKCIA 01 ================= -->
+  <div class="sect">
+    <h2><span class="snum">01</span>Vyžaduje zásah</h2>
+    <div class="sdesc">Dve kampane čakajú na človeka. Obidve majú <b>rovnakú váhu</b> — chýbajúci kľúč
+      aj zmeškané okno znamenajú, že zľava v shope nie je taká, akú si appka myslí, že zapísala.</div>
+
+    <div class="note attention mb14">
+      <span class="g">⚠</span>
+      <span><b>2 kampane vyžadujú zásah.</b> <a href="kampan-detail.html">K-126 September — nová sezóna</a>
+        (fire 01.09. je za horizontom TTL kľúča 48 h) a
+        <a href="kampan-detail.html">K-112 Júlová dobierka</a> (1 z 2 produktov zostal nezapísaný, <code>429 rate_limited</code>).
+        Žiadna z nich sa nevyrieši sama.</span>
+    </div>
+
+    <div class="grid2">
+      <div class="fcard at">
+        <div class="wm">⧗</div>
+        <span class="badge s-needskey"><span class="g">⧗</span>vyžaduje kľúč</span>
+        <h3 class="mt8">K-126 · September — nová sezóna</h3>
+        <p>Naplánovaný zápis <b>01.09.2026 o 06:00</b>, ale zápisový kľúč <code>product:edit</code>
+          platí len do <b>11.08.2026 21:32</b> (TTL 48 h). V čase spustenia bude expirovaný —
+          appka zápis nezačne a kampaň zostane nezapísaná.</p>
+        <div class="brow wide mt8">
+          <span class="bl">TTL kľúča vs fire kampane</span>
+          <span class="tr"><span class="fl attn" style="width:4%"></span></span>
+          <span class="vl">31 h / 508 h</span>
+        </div>
+        <div class="btnrow mt8">
+          <a class="btn sm" href="nastavenia.html">Nahradiť kľúč</a>
+          <a class="btn sm ghost" href="kampan-detail.html">Presunúť fire</a>
+        </div>
+      </div>
+
+      <div class="fcard at">
+        <div class="wm">◧</div>
+        <span class="badge s-partial"><span class="g">◧</span>čiastočná</span>
+        <h3 class="mt8">K-112 · Júlová dobierka</h3>
+        <p>Zapísaný <b>1 z 2</b> produktov. Druhý (<b>10617 Prívesok Aura Aster</b>) skončil
+          06.08. o 11:42 na <code>429 rate_limited</code>. Okno <b>20.07.2026 – 27.07.2026</b>
+          medzitým uplynulo — dopísanie 25 % dnes by vytvorilo zľavu mimo pôvodného zámeru.</p>
+        <div class="brow wide mt8">
+          <span class="bl">Zapísané produkty</span>
+          <span class="tr"><span class="fl attn" style="width:50%"></span></span>
+          <span class="vl">1 / 2</span>
+        </div>
+        <div class="btnrow mt8">
+          <a class="btn sm" href="kampan-detail.html">Otvoriť audit</a>
+          <a class="btn sm ghost" href="kampane.html">Uzavrieť bez dopísania</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="note idle mt14">
+      <span class="g">⊘</span>
+      <span>Zľava, ktorá už v shope je, sa <b>nedá zrušiť</b> — len nechať expirovať. Zrušiť sa dá kampaň,
+        teda budúce zápisy. <span class="claim">podľa vlastného zápisu z 05.08.</span></span>
+    </div>
+  </div>
+
+  <!-- ================= SEKCIA 02 ================= -->
+  <div class="sect">
+    <h2><span class="snum">02</span>Okná kampaní</h2>
+    <div class="sdesc">Júl – september 2026. Zvislá čiara je dnešok (10.08.2026).
+      Farba aj glyf nesú stav — nikdy len farba.</div>
+
+    <div class="card pad0">
+      <div class="chead">
+        <h3>Časová os · 6 kampaní</h3>
+        <span class="tiny muted">01.07.2026 – 30.09.2026 · 92 dní</span>
+      </div>
+      <div class="tlmap">
+<svg viewBox="0 0 1136 232" role="img" aria-label="Časová os okien kampaní od júla do septembra 2026">
+  <!-- mesiace -->
+  <rect x="126" y="14" width="333.6" height="18" class="mband"/>
+  <rect x="459.6" y="14" width="333.5" height="18" class="mband alt"/>
+  <rect x="793.1" y="14" width="312.1" height="18" class="mband"/>
+  <text x="292" y="27" class="mlab" font-size="10" letter-spacing="1.6" text-anchor="middle">JÚL 2026</text>
+  <text x="626" y="27" class="mlab" font-size="10" letter-spacing="1.6" text-anchor="middle">AUGUST 2026</text>
+  <text x="949" y="27" class="mlab" font-size="10" letter-spacing="1.6" text-anchor="middle">SEPTEMBER 2026</text>
+
+  <!-- mriežka mesiacov -->
+  <line x1="126" y1="36" x2="126" y2="196" class="mgrid" stroke-width="1"/>
+  <line x1="459.6" y1="36" x2="459.6" y2="196" class="mgrid" stroke-width="1"/>
+  <line x1="793.1" y1="36" x2="793.1" y2="196" class="mgrid" stroke-width="1"/>
+  <line x1="1105.2" y1="36" x2="1105.2" y2="196" class="mgrid" stroke-width="1"/>
+
+  <!-- dnešná čiara -->
+  <line x1="556.4" y1="36" x2="556.4" y2="204" stroke="#05bcc4" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <rect x="516" y="200" width="81" height="17" rx="8.5" fill="#03797e"/>
+  <text x="556.4" y="212" fill="#ffffff" font-size="10" font-weight="700" letter-spacing="0.8" text-anchor="middle">DNES 10.08.</text>
+
+  <!-- K-112 · čiastočná (attention) -->
+  <text x="118" y="55" class="rlab" font-size="10.8" text-anchor="end">K-112 Júlová dobierka</text>
+  <rect x="330.4" y="44" width="75.4" height="14" rx="4" fill="#D97706" fill-opacity="0.22" stroke="#D97706"/>
+  <text x="368" y="55" fill="#D97706" font-size="10.5" font-weight="700" text-anchor="middle">◧ 25 %</text>
+
+  <!-- K-115 · prepadnutá (idle) -->
+  <text x="118" y="81" class="rlab" font-size="10.8" text-anchor="end">K-115 Prsteňový týždeň</text>
+  <rect x="405.8" y="70" width="64.5" height="14" rx="4" fill="#8A9895" fill-opacity="0.2" stroke="#8A9895"/>
+  <text x="438" y="81" fill="#8A9895" font-size="10.5" font-weight="700" text-anchor="middle">⊘ 20 %</text>
+
+  <!-- K-118 · zapísaná (good) -->
+  <text x="118" y="107" class="rlab" font-size="10.8" text-anchor="end">K-118 Letný výpredaj</text>
+  <rect x="502.6" y="96" width="150.6" height="14" rx="4" fill="#3FA045" fill-opacity="0.24" stroke="#3FA045"/>
+  <text x="577.9" y="107" fill="#3FA045" font-size="10.5" font-weight="700" text-anchor="middle">✓ 15 % · 4 produkty</text>
+
+  <!-- K-121 · beží zápis (progress) -->
+  <text x="118" y="133" class="rlab" font-size="10.8" text-anchor="end">K-121 Perlová kolekcia</text>
+  <rect x="556.4" y="122" width="150.6" height="14" rx="4" fill="#8B80E8" fill-opacity="0.24" stroke="#8B80E8"/>
+  <text x="631.7" y="133" fill="#8B80E8" font-size="10.5" font-weight="700" text-anchor="middle">◐ 10 % · zapisuje sa</text>
+
+  <!-- K-124 · naplánovaná (idle) -->
+  <text x="118" y="159" class="rlab" font-size="10.8" text-anchor="end">K-124 Zlato víkend</text>
+  <rect x="610.2" y="148" width="21.5" height="14" rx="4" fill="#8A9895" fill-opacity="0.2" stroke="#8A9895"/>
+  <text x="640" y="159" fill="#8A9895" font-size="10.5" font-weight="700">○ 20 % · fire 15.08. 06:00</text>
+
+  <!-- K-126 · vyžaduje kľúč (attention) -->
+  <text x="118" y="185" class="rlab" font-size="10.8" text-anchor="end">K-126 September</text>
+  <rect x="793.1" y="174" width="140" height="14" rx="4" fill="#D97706" fill-opacity="0.2" stroke="#D97706" stroke-dasharray="4 3"/>
+  <text x="863.1" y="185" fill="#D97706" font-size="10.5" font-weight="700" text-anchor="middle">⧗ 12 % · kľúč expiruje</text>
+
+  <!-- horizont TTL kľúča -->
+  <line x1="567.2" y1="36" x2="567.2" y2="196" stroke="#D97706" stroke-width="1" stroke-dasharray="2 4"/>
+  <text x="573" y="46" fill="#D97706" font-size="9.5" font-weight="650">TTL kľúča do 11.08. 21:32</text>
+</svg>
+      </div>
+      <div class="cfoot">
+        <div class="legend mt0">
+          <span><i style="background:#3FA045"></i>✓ zapísaná</span>
+          <span><i style="background:#8B80E8"></i>◐ beží zápis</span>
+          <span><i style="background:#8A9895"></i>○ naplánovaná / ⊘ prepadnutá</span>
+          <span><i style="background:#D97706"></i>◧ čiastočná / ⧗ vyžaduje kľúč</span>
+        </div>
+        <span class="tiny muted">Prerušovaný obrys = okno, ktoré appka zatiaľ nezapísala.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= SEKCIA 03 ================= -->
+  <div class="sect">
+    <h2><span class="snum">03</span>Posledné kampane</h2>
+    <div class="sdesc">Šesť najnovších záznamov. Stĺpec „Posledný zápis“ je vždy vlastný audit appky,
+      nie stav prečítaný zo shopu.</div>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Kód</th><th>Názov</th><th>Sada</th><th class="n">%</th>
+            <th>Okno</th><th>Stav</th><th>Posledný zápis</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>K-121</b></td>
+            <td><b>Perlová kolekcia</b><span class="sec">10744, 10923</span></td>
+            <td>Perly a perleť · 2</td>
+            <td class="n">10 %</td>
+            <td>10.08.2026 – 24.08.2026</td>
+            <td><span class="badge s-running"><span class="g">◐</span>beží zápis</span></td>
+            <td>10.08. 14:18 · 1 z 2<span class="sec">pauza 3 s medzi zápismi</span></td>
+            <td><a href="kampan-detail.html">Detail</a></td>
+          </tr>
+          <tr>
+            <td><b>K-118</b></td>
+            <td><b>Letný výpredaj — striebro</b><span class="sec">10241, 10388, 10455, 10502</span></td>
+            <td>Striebro 925 · 4</td>
+            <td class="n">15 %</td>
+            <td>05.08.2026 – 19.08.2026</td>
+            <td><span class="badge s-done"><span class="g">✓</span>zapísaná</span></td>
+            <td>05.08. 09:12 · 4/4 ok<span class="sec">aktívna, expiruje 19.08.</span></td>
+            <td><a href="kampan-detail.html">Detail</a></td>
+          </tr>
+          <tr>
+            <td><b>K-124</b></td>
+            <td><b>Zlato — víkendová akcia</b><span class="sec">10809, 10388</span></td>
+            <td>Zlato 585 · 2</td>
+            <td class="n">20 %</td>
+            <td>15.08.2026 – 17.08.2026</td>
+            <td><span class="badge s-scheduled"><span class="g">○</span>naplánovaná</span></td>
+            <td>—<span class="sec">fire 15.08. o 06:00</span></td>
+            <td><a href="kampan-detail.html">Detail</a></td>
+          </tr>
+          <tr>
+            <td><b>K-126</b></td>
+            <td><b>September — nová sezóna</b><span class="sec">5 produktov</span></td>
+            <td>Vlastný výber · 5</td>
+            <td class="n">12 %</td>
+            <td>01.09.2026 – 14.09.2026</td>
+            <td><span class="badge s-needskey"><span class="g">⧗</span>vyžaduje kľúč</span></td>
+            <td>—<span class="sec">fire za horizontom TTL (48 h)</span></td>
+            <td><a href="kampan-detail.html">Detail</a></td>
+          </tr>
+          <tr>
+            <td><b>K-115</b></td>
+            <td><b>Prsteňový týždeň</b><span class="sec">3 produkty</span></td>
+            <td>Vlastný výber · 3</td>
+            <td class="n">20 %</td>
+            <td>27.07.2026 – 02.08.2026</td>
+            <td><span class="badge s-lapsed"><span class="g">⊘</span>prepadnutá</span></td>
+            <td>27.07. 07:05 · 3/3 ok<span class="sec">okno uplynulo 02.08.</span></td>
+            <td><a href="kampan-detail.html">Detail</a></td>
+          </tr>
+          <tr>
+            <td><b>K-112</b></td>
+            <td><b>Júlová dobierka</b><span class="sec">10617 + 1</span></td>
+            <td>Vlastný výber · 2</td>
+            <td class="n">25 %</td>
+            <td>20.07.2026 – 27.07.2026</td>
+            <td><span class="badge s-partial"><span class="g">◧</span>čiastočná</span></td>
+            <td>06.08. 11:42 · 1 z 2<span class="sec">✕ 429 rate_limited</span></td>
+            <td><a href="kampan-detail.html">Detail</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- riadok najbližšieho spustenia -->
+    <div class="card mt14">
+      <div class="row between">
+        <div class="row" style="gap:14px">
+          <span class="tag tt">najbližšie spustenie</span>
+          <div>
+            <div style="font-size:13.5px;font-weight:650">K-124 · Zlato — víkendová akcia
+              <span class="muted" style="font-weight:500">— 15.08.2026 o 06:00</span></div>
+            <div class="tiny muted">o 4 dni 15 h 40 m · 2 zápisy · 2 z 142 zostávajúcich requestov ·
+              odhad 6 s pri pauze 3 s · canary request tesne pred zápisom</div>
+          </div>
+        </div>
+        <div class="btnrow">
+          <span class="badge s-scheduled"><span class="g">○</span>naplánovaná</span>
+          <a class="btn sm ghost" href="kampan-detail.html">Upraviť okno</a>
+        </div>
+      </div>
+      <div class="brow wide mt8">
+        <span class="bl">Denný rozpočet zápisového kľúča</span>
+        <span class="tr"><span class="fl" style="width:71%"></span></span>
+        <span class="vl">142/200</span>
+      </div>
+      <div class="hint">Limit je 20 requestov za minútu a 200 za UTC deň na kľúč. Batch rozpočet nešetrí —
+        25 položiek znamená 25 hitov. Platnosť kľúča sa sonduje len na vyžiadanie tlačidlom v Nastaveniach.</div>
+    </div>
+  </div>
+
+</div></div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>

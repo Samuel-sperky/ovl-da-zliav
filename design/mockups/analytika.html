@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analytika · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria tejto stránky — žiadne farby, len rozmery a odhalenie tabuliek */
+  details.tbl{margin-top:12px;border-top:1px solid var(--line);padding-top:9px}
+  details.tbl>summary{font-size:11.5px;font-weight:650;letter-spacing:.06em;
+    color:var(--dim);cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px}
+  details.tbl>summary::-webkit-details-marker{display:none}
+  details.tbl>summary::before{content:"▸";font-size:10px;color:var(--teal)}
+  details.tbl[open]>summary::before{content:"▾"}
+  details.tbl>summary:hover{color:var(--ink2)}
+  details.tbl .tw{margin-top:10px}
+  .browgrp{padding:2px 0 10px}
+  .browgrp .cap{font-size:11px;color:var(--dim);margin-bottom:2px}
+  .brow.cmp{grid-template-columns:118px 1fr 96px}
+  .filtbar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;
+    border:1px solid var(--line);border-radius:var(--r);background:var(--paper2);padding:10px 14px;margin-bottom:20px}
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="navbar"><div class="wrap">
+  <span class="brand"><span class="crown">♛</span>Aura Zľavy</span>
+  <nav class="navtabs">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="kampane.html">Kampane<span class="n">4</span></a>
+    <a href="produkty.html">Produkty<span class="n">10</span></a>
+    <a href="analytika.html" class="on">Analytika</a>
+    <a href="nastavenia.html">Nastavenia</a>
+    <a href="ai-agent.html">AI agent<span class="n">5</span></a>
+  </nav>
+  <div class="navmeta">
+    <span class="hbadge"><span class="g">⧗</span>Kľúč <b>31 h 12 m</b></span>
+    <span class="hbadge"><span class="g">◴</span>API <b>142/200</b></span>
+  </div>
+</div></div>
+
+<div class="page"><div class="wrap">
+
+  <div class="phead">
+    <div>
+      <div class="eyebrow">Pondelok · 10.08.2026 · 14:20</div>
+      <h1>Analytika <em>zliav</em></h1>
+      <div class="sub">Tržby, marža a dobierky sú agregované cez scope <code>order:stats</code>
+        — appka nedostáva a nezobrazuje žiadne zákaznícke dáta. Stav zliav je vždy
+        podľa vlastného zápisu, nie podľa dotazu na shop.</div>
+    </div>
+    <div class="pactions">
+      <a class="btn ghost" href="ai-agent.html"><span class="g">❖</span>Zistenia agenta</a>
+      <a class="btn primary" href="kampan-nova.html"><span class="g">+</span>Nová kampaň</a>
+    </div>
+  </div>
+
+  <!-- FILTER OBDOBIA -->
+  <div class="filtbar">
+    <div class="row">
+      <span class="lbl" style="margin:0">Obdobie</span>
+      <div class="seg">
+        <span>7 dní</span>
+        <span class="on">14 dní</span>
+        <span>30 dní</span>
+        <span>90 dní</span>
+      </div>
+      <span class="small muted">28.07.2026 – 10.08.2026 · dnešok neúplný (k 14:20)</span>
+    </div>
+    <div class="row">
+      <span class="tag tt">order:stats · 186/200 zostáva</span>
+      <span class="claim">agregované, bez zákazníckych dát</span>
+    </div>
+  </div>
+
+  <!-- ============ SEKCIA 01 ============ -->
+  <div class="sect">
+    <h2><span class="snum">01</span>Výkon zliav</h2>
+    <div class="sdesc">Zdroj: <code>order-stats/sales</code> a <code>order-stats/summary</code>.
+      Marža = <code>order_income − expenses</code>; príjem bez DPH. Posledný odber 10.08. o 09:00,
+      jeden request denne — rozpočet kľúča to nezaťažuje.</div>
+
+    <div class="kpistrip six">
+      <div class="kpi">
+        <div class="k">Tržby dnes</div>
+        <div class="v">2 418,60 €</div>
+        <div class="s">s DPH · bez DPH 2 015,50 €</div>
+      </div>
+      <div class="kpi">
+        <div class="k">Tržby 14 dní</div>
+        <div class="v">32 152 €</div>
+        <div class="s">28.07. – 10.08. · s DPH</div>
+      </div>
+      <div class="kpi">
+        <div class="k">Marža dnes</div>
+        <div class="v"><span class="attn">31,4 %</span></div>
+        <div class="s">−2,7 b. b. vs 7-dňový priemer</div>
+      </div>
+      <div class="kpi">
+        <div class="k">Objednávky</div>
+        <div class="v">34</div>
+        <div class="s">storno 1 · neprevzaté 0</div>
+      </div>
+      <div class="kpi">
+        <div class="k">Dobierka</div>
+        <div class="v">612,40 €</div>
+        <div class="s">9 ks · 25,3 % tržieb dňa</div>
+      </div>
+      <div class="kpi">
+        <div class="k">Nízka marža</div>
+        <div class="v"><span class="crit">7</span></div>
+        <div class="s">objednávok ≤ 30 % dnes</div>
+      </div>
+    </div>
+
+    <div class="sub-h">Denné tržby s DPH · vyznačené okno kampane</div>
+
+    <div class="chart">
+      <div class="ct">Tržby po dňoch — 28.07.2026 až 10.08.2026</div>
+      <div class="cs">Jedna os (€ s DPH). Marža nie je v tomto grafe — je v porovnaní nižšie, aby sa nemiešali dve mierky.</div>
+
+      <svg viewBox="0 0 1000 268" role="img" aria-label="Stĺpcový graf denných tržieb od 28.07.2026 do 10.08.2026">
+        <!-- okno kampane K-118 -->
+        <rect x="518" y="8" width="472" height="202" fill="var(--teal)" opacity="0.07"/>
+        <line x1="518" y1="8" x2="518" y2="210" stroke="var(--teal)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+        <text x="526" y="20" font-size="10" fill="var(--teal)" letter-spacing="0.08em">K-118 · LETNÝ VÝPREDAJ — STRIEBRO</text>
+
+        <!-- mriežka + os Y -->
+        <g stroke="var(--line)" stroke-width="1">
+          <line x1="46" y1="210" x2="990" y2="210"/>
+          <line x1="46" y1="154.3" x2="990" y2="154.3"/>
+          <line x1="46" y1="98.6" x2="990" y2="98.6"/>
+          <line x1="46" y1="42.9" x2="990" y2="42.9"/>
+        </g>
+        <g font-size="10" fill="var(--dim)" text-anchor="end">
+          <text x="38" y="213">0</text>
+          <text x="38" y="157.5">1 000</text>
+          <text x="38" y="101.8">2 000</text>
+          <text x="38" y="46.1">3 000</text>
+        </g>
+
+        <!-- stĺpce: prvých 7 mimo kampane (idle), posledných 7 počas kampane (teal) -->
+        <g fill="var(--st-idle)">
+          <rect x="60"  y="107.4" width="41" height="102.6" rx="2"/>
+          <rect x="127" y="92.7"  width="41" height="117.3" rx="2"/>
+          <rect x="195" y="116.7" width="41" height="93.3"  rx="2"/>
+          <rect x="262" y="100.9" width="41" height="109.1" rx="2"/>
+          <rect x="330" y="85.2"  width="41" height="124.8" rx="2"/>
+          <rect x="397" y="125.8" width="41" height="84.2"  rx="2"/>
+          <rect x="464" y="132.7" width="41" height="77.3"  rx="2"/>
+        </g>
+        <g fill="var(--teal)">
+          <rect x="532" y="64.6"  width="41" height="145.4" rx="2"/>
+          <rect x="599" y="49.3"  width="41" height="160.7" rx="2"/>
+          <rect x="667" y="45.6"  width="41" height="164.4" rx="2"/>
+          <rect x="734" y="37.2"  width="41" height="172.8" rx="2"/>
+          <rect x="801" y="55.3"  width="41" height="154.7" rx="2"/>
+          <rect x="869" y="60.1"  width="41" height="149.9" rx="2"/>
+          <rect x="936" y="75.2"  width="41" height="134.8" rx="2" opacity="0.55"/>
+        </g>
+
+        <!-- hodnoty nad stĺpcami -->
+        <g font-size="9.5" fill="var(--ink2)" text-anchor="middle">
+          <text x="80.5"  y="101">1 842</text>
+          <text x="147.5" y="86">2 106</text>
+          <text x="215.5" y="110">1 674</text>
+          <text x="282.5" y="94">1 958</text>
+          <text x="350.5" y="79">2 240</text>
+          <text x="417.5" y="119">1 512</text>
+          <text x="484.5" y="126">1 388</text>
+          <text x="552.5" y="58">2 610</text>
+          <text x="619.5" y="43">2 884</text>
+          <text x="687.5" y="39">2 951</text>
+          <text x="754.5" y="31">3 102</text>
+          <text x="821.5" y="49">2 776</text>
+          <text x="889.5" y="54">2 690</text>
+          <text x="956.5" y="69">2 419</text>
+        </g>
+
+        <!-- os X -->
+        <g font-size="9.5" fill="var(--dim)" text-anchor="middle">
+          <text x="80.5"  y="226">28.07.</text>
+          <text x="147.5" y="226">29.07.</text>
+          <text x="215.5" y="226">30.07.</text>
+          <text x="282.5" y="226">31.07.</text>
+          <text x="350.5" y="226">01.08.</text>
+          <text x="417.5" y="226">02.08.</text>
+          <text x="484.5" y="226">03.08.</text>
+          <text x="552.5" y="226">04.08.</text>
+          <text x="619.5" y="226">05.08.</text>
+          <text x="687.5" y="226">06.08.</text>
+          <text x="754.5" y="226">07.08.</text>
+          <text x="821.5" y="226">08.08.</text>
+          <text x="889.5" y="226">09.08.</text>
+          <text x="956.5" y="226">10.08.</text>
+        </g>
+        <g font-size="9.5" fill="var(--dim)" text-anchor="middle">
+          <text x="272" y="248">mimo kampane · 7 dní</text>
+          <text x="754" y="248">počas kampane · 7 dní</text>
+        </g>
+      </svg>
+
+      <div class="legend">
+        <span><i style="background:var(--st-idle)"></i>mimo kampane (28.07. – 03.08.)</span>
+        <span><i style="background:var(--teal)"></i>počas kampane K-118 (04.08. – 10.08.)</span>
+        <span><i style="background:var(--teal);opacity:.55"></i>dnešok — neúplný deň (k 14:20)</span>
+      </div>
+
+      <details class="tbl">
+        <summary>Zobraziť ako tabuľku</summary>
+        <div class="tw">
+          <table>
+            <thead><tr>
+              <th>Deň</th><th class="n">Tržby s DPH</th><th class="n">Objednávky</th>
+              <th class="n">Marža</th><th>Okno</th>
+            </tr></thead>
+            <tbody>
+              <tr><td>28.07.2026</td><td class="n">1 842,00 €</td><td class="n">25</td><td class="n">34,6 %</td><td class="small muted">mimo kampane</td></tr>
+              <tr><td>29.07.2026</td><td class="n">2 106,00 €</td><td class="n">29</td><td class="n">33,8 %</td><td class="small muted">mimo kampane</td></tr>
+              <tr><td>30.07.2026</td><td class="n">1 674,00 €</td><td class="n">24</td><td class="n">34,9 %</td><td class="small muted">mimo kampane</td></tr>
+              <tr><td>31.07.2026</td><td class="n">1 958,00 €</td><td class="n">28</td><td class="n">33,5 %</td><td class="small muted">mimo kampane</td></tr>
+              <tr><td>01.08.2026</td><td class="n">2 240,00 €</td><td class="n">31</td><td class="n">34,0 %</td><td class="small muted">mimo kampane</td></tr>
+              <tr><td>02.08.2026</td><td class="n">1 512,00 €</td><td class="n">21</td><td class="n">34,4 %</td><td class="small muted">mimo kampane</td></tr>
+              <tr><td>03.08.2026</td><td class="n">1 388,00 €</td><td class="n">20</td><td class="n">33,9 %</td><td class="small muted">mimo kampane</td></tr>
+              <tr><td>04.08.2026</td><td class="n">2 610,00 €</td><td class="n">36</td><td class="n">31,2 %</td><td class="small muted">nábeh kampane</td></tr>
+              <tr><td><b>05.08.2026</b></td><td class="n">2 884,00 €</td><td class="n">39</td><td class="n">30,1 %</td><td><span class="badge s-done"><span class="g">✓</span>K-118 zapísaná 09:12</span></td></tr>
+              <tr><td>06.08.2026</td><td class="n">2 951,00 €</td><td class="n">40</td><td class="n">29,7 %</td><td class="small muted">K-118 beží</td></tr>
+              <tr><td>07.08.2026</td><td class="n">3 102,00 €</td><td class="n">42</td><td class="n">29,3 %</td><td class="small muted">K-118 beží</td></tr>
+              <tr><td>08.08.2026</td><td class="n">2 776,00 €</td><td class="n">38</td><td class="n">29,6 %</td><td class="small muted">K-118 beží</td></tr>
+              <tr><td>09.08.2026</td><td class="n">2 690,00 €</td><td class="n">40</td><td class="n">30,2 %</td><td class="small muted">K-118 beží</td></tr>
+              <tr><td>10.08.2026</td><td class="n">2 419,00 €</td><td class="n">34</td><td class="n">31,4 %</td><td class="small muted">neúplný deň · k 14:20</td></tr>
+            </tbody>
+            <tfoot><tr><td>Spolu 14 dní</td><td class="n">32 152,00 €</td><td class="n">447</td><td class="n">31,8 % ⌀</td><td></td></tr></tfoot>
+          </table>
+        </div>
+      </details>
+    </div>
+
+    <div class="sub-h">Počas kampane vs mimo kampane</div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="ct">Porovnanie období</div>
+        <div class="cs">Počas kampaní 03.08. – 10.08. · mimo kampaní 27.07. – 02.08. Lišta je pomer v rámci dvojice, nie absolútna škála.</div>
+
+        <div class="browgrp">
+          <div class="cap">Priemerné denné tržby</div>
+          <div class="brow cmp"><span class="bl">Počas kampane</span><span class="tr"><span class="fl" style="width:100%"></span></span><span class="vl">2 776,00 €</span></div>
+          <div class="brow cmp"><span class="bl">Mimo kampane</span><span class="tr"><span class="fl idle" style="width:65.5%"></span></span><span class="vl">1 817,14 €</span></div>
+        </div>
+
+        <div class="browgrp">
+          <div class="cap">Priemerná marža</div>
+          <div class="brow cmp"><span class="bl">Počas kampane</span><span class="tr"><span class="fl attn" style="width:87.4%"></span></span><span class="vl">29,8 %</span></div>
+          <div class="brow cmp"><span class="bl">Mimo kampane</span><span class="tr"><span class="fl idle" style="width:100%"></span></span><span class="vl">34,1 %</span></div>
+        </div>
+
+        <div class="browgrp">
+          <div class="cap">Objednávky / deň</div>
+          <div class="brow cmp"><span class="bl">Počas kampane</span><span class="tr"><span class="fl" style="width:100%"></span></span><span class="vl">38,4</span></div>
+          <div class="brow cmp"><span class="bl">Mimo kampane</span><span class="tr"><span class="fl idle" style="width:68.0%"></span></span><span class="vl">26,1</span></div>
+        </div>
+
+        <div class="browgrp">
+          <div class="cap">Podiel dobierok</div>
+          <div class="brow cmp"><span class="bl">Počas kampane</span><span class="tr"><span class="fl" style="width:100%"></span></span><span class="vl">26,4 %</span></div>
+          <div class="brow cmp"><span class="bl">Mimo kampane</span><span class="tr"><span class="fl idle" style="width:82.6%"></span></span><span class="vl">21,8 %</span></div>
+        </div>
+
+        <div class="browgrp" style="padding-bottom:0">
+          <div class="cap">Nízkomaržové objednávky / deň</div>
+          <div class="brow cmp"><span class="bl">Počas kampane</span><span class="tr"><span class="fl crit" style="width:100%"></span></span><span class="vl">6,3</span></div>
+          <div class="brow cmp"><span class="bl">Mimo kampane</span><span class="tr"><span class="fl idle" style="width:46.0%"></span></span><span class="vl">2,9</span></div>
+        </div>
+
+        <details class="tbl">
+          <summary>Zobraziť ako tabuľku</summary>
+          <div class="tw">
+            <table>
+              <thead><tr>
+                <th>Metrika</th><th class="n">Počas kampaní<br>03.08. – 10.08.</th>
+                <th class="n">Mimo kampaní<br>27.07. – 02.08.</th><th class="n">Rozdiel</th>
+              </tr></thead>
+              <tbody>
+                <tr><td>Priemerné denné tržby</td><td class="n">2 776,00 €</td><td class="n">1 817,14 €</td><td class="n" style="color:var(--st-good)">+52,8 %</td></tr>
+                <tr><td>Priemerná marža</td><td class="n">29,8 %</td><td class="n">34,1 %</td><td class="n" style="color:var(--st-critical)">−4,3 b. b.</td></tr>
+                <tr><td>Objednávky / deň</td><td class="n">38,4</td><td class="n">26,1</td><td class="n" style="color:var(--st-good)">+47,1 %</td></tr>
+                <tr><td>Podiel dobierok</td><td class="n">26,4 %</td><td class="n">21,8 %</td><td class="n" style="color:var(--st-attention)">+4,6 b. b.</td></tr>
+                <tr><td>Nízkomaržové obj. / deň</td><td class="n">6,3</td><td class="n">2,9</td><td class="n" style="color:var(--st-attention)">+3,4</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+
+      <div class="stack">
+        <div class="note attention">
+          <span class="g">◧</span>
+          <span><b>Kampane zdvihli tržby o polovicu, ale marža klesla o 4,3 b. b. — 20 % zľava na
+            zlate (K-124) by maržu stlačila pod 25 %.</b><br>
+            K-124 je zatiaľ len naplánovaná (fire 15.08. o 06:00), percento sa dá prepísať bez zápisu.
+            Rovnaké zistenie má aj AI agent.</span>
+        </div>
+
+        <div class="card">
+          <div class="ct">Ako sa toto počíta</div>
+          <div class="cs">Aby čísla nikto nečítal ako viac, než sú.</div>
+          <dl class="defs">
+            <div>
+              <dt>Zdroj dát</dt>
+              <dd>Agregáty zo scope <code>order:stats</code> — súčty za deň. Endpoint nevracia
+                mená, adresy, e-maily ani položky košíka; appka ich teda nemá kde stratiť.</dd>
+            </div>
+            <div>
+              <dt>Priradenie k oknu kampane</dt>
+              <dd>Deň je „počas kampane“, ak sa prekrýva s oknom aspoň jednej kampane
+                v stave ✓ zapísaná. K-118 bola zapísaná 05.08. o 09:12; graf farbí posledných
+                7 dní radu, tabuľka porovnania berie 03.08. – 10.08.</dd>
+            </div>
+            <div>
+              <dt>Čo to nie je</dt>
+              <dd>Nie je to atribúcia. Appka netvrdí, že zľava spôsobila rast tržieb —
+                ukazuje len dve obdobia vedľa seba. Sezónnosť ani reklamu nemeria.</dd>
+            </div>
+            <div>
+              <dt>Dnešný deň</dt>
+              <dd>Neúplný (k 14:20). V priemeroch je započítaný celý, takže priemer za obdobie
+                s kampaňou je mierne podhodnotený.</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SEKCIA 02 ============ -->
+  <div class="sect">
+    <h2><span class="snum">02</span>Nízka marža</h2>
+    <div class="sdesc">Zdroj: <code>order-stats/lowProfit</code> — objednávky s maržou ≤ 30 %
+      v období kampane. Endpoint vracia <b>len ID objednávky a sumy</b>; žiadne meno,
+      adresu ani položky.</div>
+
+    <div class="grid2" style="grid-template-columns:1.35fr 1fr">
+      <div class="tw">
+        <table>
+          <thead><tr>
+            <th>Objednávka</th><th class="n">Bez DPH</th><th class="n">S DPH</th>
+            <th class="n">Marža</th><th>Pásmo</th>
+          </tr></thead>
+          <tbody>
+            <tr><td><b>#48219</b></td><td class="n">40,10 €</td><td class="n">48,50 €</td><td class="n">22,4 %</td><td><span class="tag rs">pod 25 %</span></td></tr>
+            <tr><td><b>#48227</b></td><td class="n">61,20 €</td><td class="n">74,05 €</td><td class="n">25,1 %</td><td><span class="tag wr">25 – 30 %</span></td></tr>
+            <tr><td><b>#48231</b></td><td class="n">33,90 €</td><td class="n">41,00 €</td><td class="n">18,7 %</td><td><span class="tag rs">pod 25 %</span></td></tr>
+            <tr><td><b>#48240</b></td><td class="n">89,40 €</td><td class="n">108,17 €</td><td class="n">28,9 %</td><td><span class="tag wr">25 – 30 %</span></td></tr>
+            <tr><td><b>#48246</b></td><td class="n">27,50 €</td><td class="n">33,28 €</td><td class="n">15,2 %</td><td><span class="tag rs">pod 25 %</span></td></tr>
+            <tr><td><b>#48251</b></td><td class="n">54,80 €</td><td class="n">66,31 €</td><td class="n">29,6 %</td><td><span class="tag wr">25 – 30 %</span></td></tr>
+            <tr><td><b>#48258</b></td><td class="n">72,10 €</td><td class="n">87,24 €</td><td class="n">26,8 %</td><td><span class="tag wr">25 – 30 %</span></td></tr>
+          </tbody>
+          <tfoot><tr><td>7 objednávok · 10.08.</td><td class="n">379,00 €</td><td class="n">458,55 €</td><td class="n">23,8 % ⌀</td><td></td></tr></tfoot>
+        </table>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="ct">Rozloženie marže dnes</div>
+          <div class="cs">34 objednávok · 7 z nich pod prahom 30 %.</div>
+          <div class="brow"><span class="bl">pod 15 %</span><span class="tr"><span class="fl crit" style="width:8%"></span></span><span class="vl">0</span></div>
+          <div class="brow"><span class="bl">15 – 25 %</span><span class="tr"><span class="fl crit" style="width:43%"></span></span><span class="vl">3</span></div>
+          <div class="brow"><span class="bl">25 – 30 %</span><span class="tr"><span class="fl attn" style="width:57%"></span></span><span class="vl">4</span></div>
+          <div class="brow"><span class="bl">30 – 35 %</span><span class="tr"><span class="fl good" style="width:100%"></span></span><span class="vl">18</span></div>
+          <div class="brow"><span class="bl">nad 35 %</span><span class="tr"><span class="fl good" style="width:50%"></span></span><span class="vl">9</span></div>
+          <details class="tbl">
+            <summary>Zobraziť ako tabuľku</summary>
+            <div class="tw">
+              <table>
+                <thead><tr><th>Pásmo marže</th><th class="n">Objednávok</th><th class="n">Podiel</th></tr></thead>
+                <tbody>
+                  <tr><td>pod 15 %</td><td class="n">0</td><td class="n">0,0 %</td></tr>
+                  <tr><td>15 – 25 %</td><td class="n">3</td><td class="n">8,8 %</td></tr>
+                  <tr><td>25 – 30 %</td><td class="n">4</td><td class="n">11,8 %</td></tr>
+                  <tr><td>30 – 35 %</td><td class="n">18</td><td class="n">52,9 %</td></tr>
+                  <tr><td>nad 35 %</td><td class="n">9</td><td class="n">26,5 %</td></tr>
+                </tbody>
+                <tfoot><tr><td>Spolu</td><td class="n">34</td><td class="n">100,0 %</td></tr></tfoot>
+              </table>
+            </div>
+          </details>
+        </div>
+
+        <div class="note info">
+          <span class="g">ⓘ</span>
+          <span>Agregované a per-objednávkové sumy <b>bez zákazníckych dát</b> — scope
+            <code>order:stats</code> ich nevracia. ID objednávky je tu identifikátor dokladu,
+            nie osoby; appka ho nevie spárovať so zákazníkom a ani sa o to nepokúša.</span>
+        </div>
+
+        <div class="note idle">
+          <span class="g">◴</span>
+          <span>Odber <code>lowProfit</code> je 1 request denne o 09:00 spolu so <code>sales</code>.
+            Priebežné obnovenie je na tlačidlo — každé stojí 1 z 200 denných requestov kľúča
+            <code>order:stats</code>.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SEKCIA 03 ============ -->
+  <div class="sect">
+    <h2><span class="snum">03</span>Hĺbka zľavy a aktivita zápisov</h2>
+    <div class="sdesc">Vľavo: aké hlboké zľavy má appka <b>podľa vlastného zápisu</b> na 10 povolených ID.
+      Vpravo: koľko zápisov denne prešlo a koľko zlyhalo — z audit logu, nie zo shopu.</div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="ct">Hĺbka zľavy na produktoch</div>
+        <div class="cs">Lišta = percento voči stropu shopu 30 %. <span class="claim">podľa vlastného zápisu</span></div>
+
+        <div class="brow wide"><span class="bl">10241 Náhrdelník Aura Luna</span><span class="tr"><span class="fl" style="width:50%"></span></span><span class="vl">15 %</span></div>
+        <div class="brow wide"><span class="bl">10388 Náušnice Aura Solis</span><span class="tr"><span class="fl" style="width:50%"></span></span><span class="vl">15 %</span></div>
+        <div class="brow wide"><span class="bl">10455 Prsteň Aura Nova</span><span class="tr"><span class="fl" style="width:50%"></span></span><span class="vl">15 %</span></div>
+        <div class="brow wide"><span class="bl">10502 Náramok Aura Tide</span><span class="tr"><span class="fl" style="width:50%"></span></span><span class="vl">15 %</span></div>
+        <div class="brow wide"><span class="bl">10744 Set Aura Vesper</span><span class="tr"><span class="fl" style="width:33.3%"></span></span><span class="vl">10 %</span></div>
+        <div class="brow wide"><span class="bl">10923 Náušnice Aura Petra</span><span class="tr"><span class="fl" style="width:33.3%"></span></span><span class="vl">10 %</span></div>
+        <div class="brow wide"><span class="bl muted">10617 Prívesok Aura Aster</span><span class="tr"></span><span class="vl muted">bez zľavy</span></div>
+        <div class="brow wide"><span class="bl muted">10809 Náhrdelník Aura Mira</span><span class="tr"></span><span class="vl muted">bez zľavy</span></div>
+        <div class="brow wide"><span class="bl muted">11056 Prsteň Aura Cielo</span><span class="tr"></span><span class="vl muted">bez zľavy</span></div>
+        <div class="brow wide"><span class="bl muted">11134 Náramok Aura Rosa</span><span class="tr"></span><span class="vl muted">⊘ prepadla</span></div>
+
+        <details class="tbl">
+          <summary>Zobraziť ako tabuľku</summary>
+          <div class="tw">
+            <table>
+              <thead><tr>
+                <th>ID</th><th>Produkt</th><th class="n">Cena</th><th class="n">Zľava</th>
+                <th class="n">Nová cena</th><th>Okno</th><th>Dní bez zľavy</th>
+              </tr></thead>
+              <tbody>
+                <tr><td>10241</td><td>Náhrdelník Aura Luna, striebro 925</td><td class="n">89,00 €</td><td class="n">15 %</td><td class="n">75,65 €</td><td>do 19.08.2026</td><td class="muted">—</td></tr>
+                <tr><td>10388</td><td>Náušnice Aura Solis, zlato 585</td><td class="n">214,00 €</td><td class="n">15 %</td><td class="n">181,90 €</td><td>do 19.08.2026</td><td class="muted">—</td></tr>
+                <tr><td>10455</td><td>Prsteň Aura Nova, zirkón</td><td class="n">129,00 €</td><td class="n">15 %</td><td class="n">109,65 €</td><td>do 19.08.2026</td><td class="muted">—</td></tr>
+                <tr><td>10502</td><td>Náramok Aura Tide, chirurgická oceľ</td><td class="n">46,50 €</td><td class="n">15 %</td><td class="n">39,53 €</td><td>do 19.08.2026</td><td class="muted">—</td></tr>
+                <tr><td>10744</td><td>Set Aura Vesper, striebro 925</td><td class="n">168,00 €</td><td class="n">10 %</td><td class="n">151,20 €</td><td>do 24.08.2026</td><td class="muted">—</td></tr>
+                <tr><td>10923</td><td>Náušnice Aura Petra, riečna perla</td><td class="n">74,50 €</td><td class="n">10 %</td><td class="n">67,05 €</td><td>do 24.08.2026</td><td class="muted">—</td></tr>
+                <tr><td>10617</td><td>Prívesok Aura Aster, perleť</td><td class="n">62,00 €</td><td class="n muted">—</td><td class="n muted">—</td><td class="muted">—</td><td>41 dní</td></tr>
+                <tr><td>10809</td><td>Náhrdelník Aura Mira, zlato 585</td><td class="n">349,00 €</td><td class="n muted">—</td><td class="n muted">—</td><td class="muted">—</td><td>12 dní</td></tr>
+                <tr><td>11056</td><td>Prsteň Aura Cielo, topás</td><td class="n">156,00 €</td><td class="n muted">—</td><td class="n muted">—</td><td class="muted">—</td><td>63 dní</td></tr>
+                <tr><td>11134</td><td>Náramok Aura Rosa, ružové zlato</td><td class="n">98,00 €</td><td class="n muted">—</td><td class="n muted">—</td><td>prepadla 02.08.2026</td><td>8 dní</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <div class="hint">Nová cena je orientačný výpočet appky; zaokrúhlenie shopu sa môže líšiť.</div>
+      </div>
+
+      <div class="stack">
+        <div class="chart">
+          <div class="ct">Zápisy po dňoch — OK vs zlyhané</div>
+          <div class="cs">Z audit logu appky. Zápis = jeden <code>setReduction</code> na jeden produkt. Strop runaway je 60 zápisov / h.</div>
+
+          <svg viewBox="0 0 640 190" role="img" aria-label="Stĺpcový graf počtu zápisov denne, úspešné a zlyhané">
+            <g stroke="var(--line)" stroke-width="1">
+              <line x1="30" y1="140" x2="628" y2="140"/>
+              <line x1="30" y1="96.7" x2="628" y2="96.7"/>
+              <line x1="30" y1="53.3" x2="628" y2="53.3"/>
+              <line x1="30" y1="10" x2="628" y2="10"/>
+            </g>
+            <g font-size="9" fill="var(--dim)" text-anchor="end">
+              <text x="24" y="143">0</text>
+              <text x="24" y="100">2</text>
+              <text x="24" y="56.5">4</text>
+              <text x="24" y="13">6</text>
+            </g>
+
+            <!-- 14 dní, žiadny zápis = len tenká značka na osi -->
+            <g fill="var(--st-idle)" opacity="0.5">
+              <rect x="40"  y="138" width="26" height="2"/>
+              <rect x="82"  y="138" width="26" height="2"/>
+              <rect x="125" y="138" width="26" height="2"/>
+              <rect x="167" y="138" width="26" height="2"/>
+              <rect x="210" y="138" width="26" height="2"/>
+              <rect x="252" y="138" width="26" height="2"/>
+              <rect x="295" y="138" width="26" height="2"/>
+              <rect x="337" y="138" width="26" height="2"/>
+              <rect x="465" y="138" width="26" height="2"/>
+              <rect x="508" y="138" width="26" height="2"/>
+              <rect x="550" y="138" width="26" height="2"/>
+            </g>
+            <!-- 05.08: 4 OK -->
+            <rect x="380" y="53.3" width="26" height="86.7" rx="2" fill="var(--st-good)"/>
+            <text x="393" y="47" font-size="9.5" fill="var(--st-good)" text-anchor="middle">4 ✓</text>
+            <!-- 06.08: 1 zlyhaný -->
+            <rect x="422" y="118.3" width="26" height="21.7" rx="2" fill="var(--st-critical)"/>
+            <text x="435" y="112" font-size="9.5" fill="var(--st-critical)" text-anchor="middle">1 ✕</text>
+            <!-- 10.08: 6 OK -->
+            <rect x="592" y="10" width="26" height="130" rx="2" fill="var(--st-good)"/>
+            <text x="605" y="7" font-size="9.5" fill="var(--st-good)" text-anchor="middle">6 ✓</text>
+
+            <g font-size="8.5" fill="var(--dim)" text-anchor="middle">
+              <text x="53"  y="154">28.07.</text>
+              <text x="95"  y="154">29.07.</text>
+              <text x="138" y="154">30.07.</text>
+              <text x="180" y="154">31.07.</text>
+              <text x="223" y="154">01.08.</text>
+              <text x="265" y="154">02.08.</text>
+              <text x="308" y="154">03.08.</text>
+              <text x="350" y="154">04.08.</text>
+              <text x="393" y="154">05.08.</text>
+              <text x="435" y="154">06.08.</text>
+              <text x="478" y="154">07.08.</text>
+              <text x="520" y="154">08.08.</text>
+              <text x="563" y="154">09.08.</text>
+              <text x="605" y="154">10.08.</text>
+            </g>
+            <text x="30" y="176" font-size="9.5" fill="var(--dim)">Dni bez zápisu majú len značku na osi — nula je nula, nie chýbajúce dáta.</text>
+          </svg>
+
+          <div class="legend">
+            <span><i style="background:var(--st-good)"></i>✓ zapísané</span>
+            <span><i style="background:var(--st-critical)"></i>✕ zlyhané</span>
+            <span><i style="background:var(--st-idle);opacity:.5"></i>bez zápisu</span>
+          </div>
+
+          <details class="tbl">
+            <summary>Zobraziť ako tabuľku</summary>
+            <div class="tw">
+              <table>
+                <thead><tr><th>Deň</th><th class="n">✓ OK</th><th class="n">✕ zlyhané</th><th>Kampaň</th><th>Dôvod zlyhania</th></tr></thead>
+                <tbody>
+                  <tr><td>28.07. – 04.08.</td><td class="n">0</td><td class="n">0</td><td class="muted">—</td><td class="muted">—</td></tr>
+                  <tr><td>05.08.2026</td><td class="n">4</td><td class="n">0</td><td>K-118</td><td class="muted">—</td></tr>
+                  <tr><td>06.08.2026</td><td class="n">0</td><td class="n">1</td><td>K-112</td><td><span class="badge critical"><span class="g">✕</span>429 rate_limited</span></td></tr>
+                  <tr><td>07.08. – 09.08.</td><td class="n">0</td><td class="n">0</td><td class="muted">—</td><td class="muted">—</td></tr>
+                  <tr><td>10.08.2026</td><td class="n">6</td><td class="n">0</td><td>K-121</td><td class="muted">— · 1 z 2 produktov hotový, pauza 3 s</td></tr>
+                </tbody>
+                <tfoot><tr><td>Spolu 14 dní</td><td class="n">10</td><td class="n">1</td><td></td><td>úspešnosť 90,9 %</td></tr></tfoot>
+              </table>
+            </div>
+          </details>
+        </div>
+
+        <div class="note info">
+          <span class="g">ⓘ</span>
+          <span>Graf ukazuje <b>pokusy appky</b>, nie stav shopu. Appka sa shopu nepýta,
+            či zľava stále platí — tvrdí len to, čo sama zapísala.
+            <span class="claim">podľa vlastného zápisu z 05.08.</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SEKCIA 04 ============ -->
+  <div class="sect">
+    <h2><span class="snum">04</span>Audit</h2>
+    <div class="sdesc">Každý odchádzajúci request appky — zápis, dry-run aj odber štatistík.
+      Audit log je zároveň zdrojom rozpočtu API: appka počíta hity z neho, nie z hlavičiek shopu.</div>
+
+    <div class="row between mb14">
+      <div class="chips">
+        <span class="chip on">Všetko<span class="x">12</span></span>
+        <span class="chip">setReduction<span class="x">6</span></span>
+        <span class="chip">dry-run<span class="x">3</span></span>
+        <span class="chip">order-stats<span class="x">2</span></span>
+        <span class="chip">sonda kľúča<span class="x">1</span></span>
+        <span class="chip">✕ len zlyhané<span class="x">1</span></span>
+      </div>
+      <div class="row">
+        <span class="seg">
+          <span class="on">14 dní</span><span>30 dní</span><span>všetko</span>
+        </span>
+        <button class="btn sm ghost"><span class="g">↓</span>Export CSV</button>
+      </div>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th>Čas</th><th>Operácia</th><th>Kľúč / scope</th><th>Produkt · kampaň</th>
+          <th>Výsledok</th><th class="n">Trvanie</th><th class="n">Hit</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td>10.08. 14:18</td>
+            <td><b>setReduction 10 %</b></td>
+            <td><code>product:edit</code></td>
+            <td>10744 Set Aura Vesper <span class="sec">K-121 Perlová kolekcia</span></td>
+            <td><span class="badge good"><span class="g">✓</span>ok</span></td>
+            <td class="n">312 ms</td>
+            <td class="n">58/200</td>
+          </tr>
+          <tr>
+            <td>10.08. 14:18</td>
+            <td><b>dry-run</b></td>
+            <td><code>product:edit</code></td>
+            <td>2 produkty <span class="sec">K-121 Perlová kolekcia</span></td>
+            <td><span class="badge good"><span class="g">✓</span>token vydaný</span></td>
+            <td class="n">104 ms</td>
+            <td class="n muted">0</td>
+          </tr>
+          <tr>
+            <td>10.08. 14:17</td>
+            <td>canary <span class="sec">overenie pred zápisom</span></td>
+            <td><code>product:edit</code></td>
+            <td class="muted">— <span class="sec">1 produkt, bez zmeny</span></td>
+            <td><span class="badge good"><span class="g">✓</span>ok</span></td>
+            <td class="n">128 ms</td>
+            <td class="n">57/200</td>
+          </tr>
+          <tr>
+            <td>10.08. 09:00</td>
+            <td><b>order-stats/sales</b></td>
+            <td><code>order:stats</code></td>
+            <td class="muted">— <span class="sec">agregát 14 dní</span></td>
+            <td><span class="badge good"><span class="g">✓</span>ok</span></td>
+            <td class="n">486 ms</td>
+            <td class="n">13/200</td>
+          </tr>
+          <tr>
+            <td>10.08. 09:00</td>
+            <td><b>order-stats/lowProfit</b></td>
+            <td><code>order:stats</code></td>
+            <td class="muted">— <span class="sec">7 objednávok ≤ 30 %</span></td>
+            <td><span class="badge good"><span class="g">✓</span>ok</span></td>
+            <td class="n">402 ms</td>
+            <td class="n">14/200</td>
+          </tr>
+          <tr>
+            <td>06.08. 11:42</td>
+            <td><b>setReduction 25 %</b></td>
+            <td><code>product:edit</code></td>
+            <td>10617 Prívesok Aura Aster <span class="sec">K-112 Júlová dobierka</span></td>
+            <td><span class="badge critical"><span class="g">✕</span>429 rate_limited</span>
+              <span class="sec">odomknutie o 10 min · zápis sa neopakoval automaticky</span></td>
+            <td class="n">88 ms</td>
+            <td class="n">201/200</td>
+          </tr>
+          <tr>
+            <td>05.08. 09:12</td>
+            <td><b>setReduction 15 % ×4</b></td>
+            <td><code>product:edit</code></td>
+            <td>4 produkty <span class="sec">K-118 Letný výpredaj — striebro</span></td>
+            <td><span class="badge good"><span class="g">✓</span>4/4 ok</span>
+              <span class="sec">sekvenčne, pauza 3 s, spolu 12 s</span></td>
+            <td class="n">1 284 ms</td>
+            <td class="n">4 hity</td>
+          </tr>
+          <tr>
+            <td>05.08. 09:11</td>
+            <td>potvrdenie dry-runu</td>
+            <td class="muted">—</td>
+            <td>4 produkty <span class="sec">K-118 · admin Samuel</span></td>
+            <td><span class="badge good"><span class="g">✓</span>potvrdené</span></td>
+            <td class="n muted">—</td>
+            <td class="n muted">0</td>
+          </tr>
+          <tr>
+            <td>05.08. 09:10</td>
+            <td><b>dry-run</b></td>
+            <td><code>product:edit</code></td>
+            <td>4 produkty <span class="sec">K-118 Letný výpredaj — striebro</span></td>
+            <td><span class="badge good"><span class="g">✓</span>token vydaný</span></td>
+            <td class="n">96 ms</td>
+            <td class="n muted">0</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="hint">Audit sa needituje ani nemaže — je to jediný zdroj pravdy o tom, čo appka poslala.
+      Kľúč sa v ňom nikdy nevyskytuje, ani skrátený; loguje sa len jeho názov a scope.</div>
+  </div>
+
+  <!-- ============ SEKCIA 05 ============ -->
+  <div class="sect">
+    <h2><span class="snum">05</span>Rozpočet API</h2>
+    <div class="sdesc">Limit shopu je <b>20 requestov / minútu a 200 / UTC deň na kľúč</b>.
+      Appka si rozpočet vedie sama nad audit logom — nespolieha sa na hlavičky shopu.</div>
+
+    <div class="grid2" style="grid-template-columns:1fr 1.2fr">
+      <div class="card">
+        <div class="ct">Zostatok na dnes · 3 kľúče</div>
+        <div class="cs">Reset o 00:00 UTC. Kľúč sa nikde nezobrazuje — len názov, scope, TTL a rozpočet.</div>
+
+        <div class="mb14">
+          <div class="row between"><span class="small ink2">Zápisový · <code>product:edit</code></span><span class="small"><b>142</b> / 200 zostáva</span></div>
+          <div class="meter mt8"><span style="width:71%"></span></div>
+          <div class="tiny muted mt8">58 hitov dnes · TTL 31 h 12 m · špička 9 req/min</div>
+        </div>
+        <div class="mb14">
+          <div class="row between"><span class="small ink2">Predajnosť · <code>orders:read</code></span><span class="small"><b>168</b> / 200 zostáva</span></div>
+          <div class="meter mt8"><span style="width:84%"></span></div>
+          <div class="tiny muted mt8">32 hitov dnes · TTL 19 h 04 m · sync 10.08. 06:00, ďalší 11.08. 02:00</div>
+        </div>
+        <div>
+          <div class="row between"><span class="small ink2">Štatistiky · <code>order:stats</code></span><span class="small"><b>186</b> / 200 zostáva</span></div>
+          <div class="meter mt8"><span style="width:93%"></span></div>
+          <div class="tiny muted mt8">14 hitov dnes · TTL 43 h 51 m · <span class="tag tt">vypnuteľné nezávisle</span></div>
+        </div>
+      </div>
+
+      <div class="chart">
+        <div class="ct">Spotreba zápisového kľúča po hodinách — 10.08.2026</div>
+        <div class="cs">58 z 200 hitov. Minútový strop 20 req/min nebol dnes dosiahnutý (max 9).</div>
+        <div class="brow"><span class="bl">00:00 – 06:00</span><span class="tr"><span class="fl idle" style="width:0%"></span></span><span class="vl">0</span></div>
+        <div class="brow"><span class="bl">06:00 – 09:00</span><span class="tr"><span class="fl" style="width:14%"></span></span><span class="vl">4</span></div>
+        <div class="brow"><span class="bl">09:00 – 12:00</span><span class="tr"><span class="fl" style="width:66%"></span></span><span class="vl">19</span></div>
+        <div class="brow"><span class="bl">12:00 – 14:00</span><span class="tr"><span class="fl" style="width:100%"></span></span><span class="vl">29</span></div>
+        <div class="brow"><span class="bl">14:00 – 14:20</span><span class="tr"><span class="fl" style="width:21%"></span></span><span class="vl">6</span></div>
+        <div class="brow"><span class="bl muted">14:20 – 24:00 (odhad)</span><span class="tr"><span class="fl gold" style="width:31%"></span></span><span class="vl muted">~9</span></div>
+
+        <details class="tbl">
+          <summary>Zobraziť ako tabuľku</summary>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Okno</th><th class="n">Hity</th><th class="n">Kumulatívne</th><th>Z čoho</th></tr></thead>
+              <tbody>
+                <tr><td>00:00 – 06:00</td><td class="n">0</td><td class="n">0</td><td class="muted">—</td></tr>
+                <tr><td>06:00 – 09:00</td><td class="n">4</td><td class="n">4</td><td>sonda kľúča 1 · canary 3</td></tr>
+                <tr><td>09:00 – 12:00</td><td class="n">19</td><td class="n">23</td><td>zápisy K-121 · dry-run 0 hitov</td></tr>
+                <tr><td>12:00 – 14:00</td><td class="n">29</td><td class="n">52</td><td>zápisy K-121 · opakovanie K-112</td></tr>
+                <tr><td>14:00 – 14:20</td><td class="n">6</td><td class="n">58</td><td>canary 1 · setReduction 5</td></tr>
+              </tbody>
+              <tfoot><tr><td>Zostáva dnes</td><td class="n">142</td><td class="n">58 / 200</td><td>reset 00:00 UTC</td></tr></tfoot>
+            </table>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="note attention mt14">
+      <span class="g">◴</span>
+      <span><b>Batch nešetrí rozpočet.</b> 25 položiek v jednej dávke = 25 hitov, nie jeden.
+        Preto je medzi zápismi pauza 3 s, canary ide len tesne pred zápisom a sonda platnosti
+        kľúča sa spúšťa výhradne tlačidlom v Nastaveniach — nie na pozadí.</span>
+    </div>
+  </div>
+
+</div></div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>

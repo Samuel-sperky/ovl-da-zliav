@@ -1,0 +1,463 @@
+/* ==========================================================================
+   Aura Zľavy — REDIZAJN V2 · dizajnový systém mockupov
+   Zdroj štýlu: design/vzor-report.html (KPI strip, číslované sekcie, .tag,
+   .brow, .tw, .fcard) + appka-špecifické komponenty (navigácia, formuláre,
+   stavy, drawer).
+   Používa sa výhradne v design/mockups/*.html. Neduplikuj tento CSS do stránok.
+   ========================================================================== */
+
+/* ---------- 1. TOKENY ---------------------------------------------------- */
+:root{
+  /* Brandová paleta — NIKDY nie je stavová */
+  --teal:#05bcc4; --deep:#03797e; --teal3:#7fd0d4;
+  --gold:#d8b878; --gold2:#c9a869; --gold3:#8a6417;
+  --slate:#98a2b3;
+
+  /* STAVOVÁ PALETA — light hodnoty (default), dark prepisuje nižšie.
+     Pravidlo: teal ani gold sa NIKDY nepoužijú ako stavová farba.
+     Každý stav = farba + GLYF + text. */
+  --st-critical:#C62F26;
+  --st-attention:#B58900;
+  --st-progress:#4A3AA7;
+  --st-good:#2E7D32;
+  --st-idle:#667574;
+
+  /* Spätná kompatibilita s predlohou reportu (tag ok/wr/rs) */
+  --good:var(--st-good); --warn:var(--st-attention); --risk:var(--st-critical);
+
+  /* Geometria */
+  --w:1180px;
+  --r:10px;      /* karty */
+  --r-sm:8px;    /* inputy, tlačidlá */
+  --r-pill:99px;
+}
+
+/* Dark je DEFAULT (html data-theme="dark") */
+:root[data-theme="dark"]{
+  --paper:#0e1413; --paper2:#131b1a; --paper3:#182220;
+  --ink:#e8f0ef; --ink2:#b9c9c7; --dim:#829896;
+  --line:#22302e; --line2:#2e3f3c; --track:#1b2523;
+  --shadow:0 1px 0 rgba(0,0,0,.35);
+
+  --st-critical:#E5534B;
+  --st-attention:#D97706;
+  --st-progress:#8B80E8;
+  --st-good:#3FA045;
+  --st-idle:#8A9895;
+}
+:root[data-theme="light"]{
+  --paper:#f8f4f7; --paper2:#ffffff; --paper3:#f2edf2;
+  --ink:#131b1a; --ink2:#3b4a48; --dim:#667574;
+  --line:#e2dae0; --line2:#d2c8d1; --track:#ece6ea;
+  --shadow:0 1px 2px rgba(19,27,26,.06);
+
+  --st-critical:#C62F26;
+  --st-attention:#B58900;
+  --st-progress:#4A3AA7;
+  --st-good:#2E7D32;
+  --st-idle:#667574;
+}
+
+/* ---------- 2. ZÁKLAD ---------------------------------------------------- */
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  font-size:14px;line-height:1.5;
+  background:var(--paper);color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--w);margin:0 auto;padding:0 22px}
+a{color:var(--teal);text-decoration:none}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;
+  background:var(--track);padding:1px 6px;border-radius:5px;color:var(--teal3)}
+:root[data-theme="light"] code,:root[data-theme="light"] .mono{color:var(--deep)}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--dim)}
+.ink2{color:var(--ink2)}
+.small{font-size:12px}
+.tiny{font-size:11px}
+hr.rule{border:0;border-top:1px solid var(--line);margin:20px 0}
+
+/* ---------- 3. CHROME APPKY ---------------------------------------------- */
+/* 3.1 Červený pruh PRODUKCIA — POVINNÝ na každej stránke appky */
+.topbar-production{
+  background:var(--st-critical);color:#fff;
+  font-size:11.5px;font-weight:650;letter-spacing:.13em;text-transform:uppercase;
+  padding:6px 0;
+}
+:root[data-theme="light"] .topbar-production{background:#C62F26}
+.topbar-production .wrap{display:flex;gap:14px;align-items:center;justify-content:space-between}
+.topbar-production .dot{
+  display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:#fff;margin-right:8px;vertical-align:middle}
+.topbar-production .note{font-weight:500;letter-spacing:.04em;text-transform:none;font-size:11.5px;opacity:.92}
+
+/* 3.2 Teal lišta s korunou + 6 tabov — POVINNÁ */
+.navbar{background:var(--deep);color:#eaffff;border-bottom:1px solid rgba(0,0,0,.25)}
+.navbar .wrap{display:flex;align-items:center;gap:22px;height:52px}
+.navbar .brand{display:flex;align-items:center;gap:9px;font-weight:660;font-size:15px;
+  letter-spacing:-.01em;white-space:nowrap;color:#fff}
+.navbar .brand .crown{color:var(--gold);font-size:17px;line-height:1}
+.navtabs{display:flex;gap:2px;flex:1;min-width:0}
+.navtabs a{
+  color:rgba(255,255,255,.74);font-size:13px;font-weight:550;
+  padding:7px 12px;border-radius:var(--r-sm);white-space:nowrap;
+  border:1px solid transparent}
+.navtabs a:hover{color:#fff;background:rgba(255,255,255,.08)}
+.navtabs a.on{color:#fff;background:rgba(255,255,255,.14);
+  border-color:rgba(255,255,255,.22);font-weight:650}
+.navtabs a .n{font-size:11px;opacity:.8;margin-left:5px}
+.navmeta{display:flex;align-items:center;gap:8px;white-space:nowrap}
+
+/* 3.3 Badge TTL kľúča + rozpočet API v hlavičke — POVINNÉ */
+.hbadge{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;font-weight:600;letter-spacing:.03em;
+  padding:4px 10px;border-radius:var(--r-pill);
+  border:1px solid rgba(255,255,255,.26);color:#eaffff;background:rgba(0,0,0,.16)}
+.hbadge .g{font-size:12px;line-height:1}
+.hbadge b{font-weight:700}
+.hbadge.warn{border-color:var(--st-attention);color:#fff;background:color-mix(in srgb,var(--st-attention) 55%,transparent)}
+.hbadge.crit{border-color:var(--st-critical);color:#fff;background:color-mix(in srgb,var(--st-critical) 60%,transparent)}
+
+/* 3.4 Hlavička stránky */
+.page{padding:26px 0 60px}
+.phead{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:20px;flex-wrap:wrap}
+.eyebrow{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold2);font-weight:650;margin-bottom:7px}
+.phead h1{font-size:26px;font-weight:660;letter-spacing:-.02em;line-height:1.12}
+.phead h1 em{font-style:normal;color:var(--teal)}
+.phead .sub{font-size:13px;color:var(--ink2);margin-top:5px;max-width:720px}
+.pactions{display:flex;gap:8px;align-items:center}
+
+/* ---------- 4. SEKCIE (číslo + eyebrow) ---------------------------------- */
+.sect{border-top:1px solid var(--line);padding:26px 0 6px;margin-top:6px}
+.sect:first-of-type{border-top:0;padding-top:4px}
+.sect>h2{font-size:18px;font-weight:640;letter-spacing:-.015em;margin-bottom:5px;display:flex;align-items:baseline}
+.snum{color:var(--teal);font-weight:660;font-size:12px;letter-spacing:.08em;margin-right:10px}
+.sdesc{color:var(--ink2);font-size:13px;max-width:800px;margin-bottom:16px}
+.sub-h{font-size:9.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--dim);
+  font-weight:650;border-top:1px solid var(--line);padding-top:11px;margin:22px 0 12px}
+.sub-h.plain{border-top:0;padding-top:0}
+
+/* ---------- 5. KPI STRIP ------------------------------------------------- */
+.kpistrip{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.kpistrip.six{grid-template-columns:repeat(6,1fr)}
+.kpistrip.five{grid-template-columns:repeat(5,1fr)}
+.kpistrip.four{grid-template-columns:repeat(4,1fr)}
+.kpi{background:var(--paper2);padding:13px 14px 12px;position:relative}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:transparent;transition:background .18s}
+.kpi:hover::before{background:var(--teal)}
+.kpi .k{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:650;margin-bottom:6px}
+.kpi .v{font-size:21px;font-weight:660;letter-spacing:-.02em;line-height:1.05}
+.kpi .v small{font-size:12px;color:var(--dim);font-weight:500}
+.kpi .s{font-size:11px;color:var(--dim);margin-top:4px;line-height:1.35}
+/* farebné akcenty hodnoty — stavové, nie brandové (okrem .t = neutrálny dôraz) */
+.kpi .v .t{color:var(--teal)}
+.kpi .v .good{color:var(--st-good)}
+.kpi .v .attn{color:var(--st-attention)}
+.kpi .v .crit{color:var(--st-critical)}
+.kpi .v .prog{color:var(--st-progress)}
+.kpi .v .idle{color:var(--st-idle)}
+
+/* ---------- 6. KARTY ----------------------------------------------------- */
+.card{background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:16px 16px 14px;box-shadow:var(--shadow)}
+.card>.ct{font-size:12px;font-weight:650;color:var(--ink2);margin-bottom:3px}
+.card>.cs{font-size:11px;color:var(--dim);margin-bottom:12px}
+.card.pad0{padding:0}
+.card .chead{display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:12px 16px;border-bottom:1px solid var(--line)}
+.card .chead h3{font-size:13.5px;font-weight:650}
+.card .cbody{padding:14px 16px}
+.card .cfoot{padding:12px 16px;border-top:1px solid var(--line);display:flex;
+  justify-content:space-between;align-items:center;gap:12px}
+
+/* .fcard — karta s watermark číslom (z predlohy) */
+.fcard{background:var(--paper2);border:1px solid var(--line);border-left-width:2px;
+  border-radius:var(--r);padding:15px 16px 14px;position:relative;overflow:hidden}
+.fcard.tl{border-left-color:var(--teal)}
+.fcard.gd{border-left-color:var(--gold)}
+.fcard.rk{border-left-color:var(--st-critical)}
+.fcard.at{border-left-color:var(--st-attention)}
+.fcard.gk{border-left-color:var(--st-good)}
+.fcard .wm{position:absolute;top:-8px;right:8px;font-size:48px;font-weight:700;
+  color:var(--ink);opacity:.05;letter-spacing:-.04em;pointer-events:none}
+.fcard h3{font-size:14px;font-weight:650;margin-bottom:6px;padding-right:44px}
+.fcard p{font-size:12.5px;color:var(--ink2)}
+.fcard .tag{margin-bottom:8px}
+
+/* mriežky */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:18px}          /* kampan-nova: výber | dry-run */
+.split-58{display:grid;grid-template-columns:1.15fr 1fr;gap:18px}
+.grid2>*,.grid3>*,.grid4>*,.split>*,.split-58>*{min-width:0}
+
+/* ---------- 7. TABUĽKY .tw ---------------------------------------------- */
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--paper2)}
+.tw table{width:100%;border-collapse:collapse;background:var(--paper2);font-size:13px}
+.tw th{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);
+  font-weight:650;text-align:left;padding:10px 13px;border-bottom:1px solid var(--line);
+  /* hlavička sa smie zalomiť — inak dlhý popisok rozťahuje úzku tabuľku a obsah sa oreže */
+  white-space:normal;text-wrap:balance}
+.tw td{padding:9px 13px;border-bottom:1px solid var(--line);color:var(--ink2);vertical-align:middle}
+.tw tr:last-child td{border-bottom:0}
+.tw td b{color:var(--ink);font-weight:600}
+.tw td.n,.tw th.n{text-align:right;font-variant-numeric:tabular-nums}
+.tw td.n{font-weight:600;color:var(--ink)}
+.tw tbody tr:hover td{background:var(--paper3)}
+.tw tr.sel td{background:color-mix(in srgb,var(--teal) 9%,transparent)}
+.tw td .sec{display:block;font-size:11px;color:var(--dim);margin-top:2px}
+.tw .strike{text-decoration:line-through;color:var(--dim);font-weight:500}
+.tw tfoot td{border-top:1px solid var(--line2);font-weight:650;color:var(--ink);background:var(--paper3)}
+
+/* ---------- 8. TAGY / BADGE (farba + GLYF + text) ----------------------- */
+.tag{display:inline-block;font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  font-weight:650;padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--line);color:var(--dim)}
+.tag.ok{color:var(--st-good);border-color:color-mix(in srgb,var(--st-good) 45%,transparent)}
+.tag.wr{color:var(--st-attention);border-color:color-mix(in srgb,var(--st-attention) 48%,transparent)}
+.tag.rs{color:var(--st-critical);border-color:color-mix(in srgb,var(--st-critical) 48%,transparent)}
+.tag.tt{color:var(--teal);border-color:color-mix(in srgb,var(--teal) 45%,transparent)}  /* neutrálny/info, NIE stav */
+.tag.gd{color:var(--gold2);border-color:color-mix(in srgb,var(--gold) 45%,transparent)} /* dekoratívny */
+
+/* .badge — STAVOVÝ prvok. VŽDY farba + glyf + text. Nikdy len farba. */
+.badge{display:inline-flex;align-items:center;gap:5px;
+  font-size:11px;font-weight:650;letter-spacing:.02em;
+  padding:2px 9px 2px 7px;border-radius:var(--r-pill);
+  border:1px solid var(--line);color:var(--dim);white-space:nowrap;background:transparent}
+.badge .g{font-size:11px;line-height:1;font-weight:700}
+.badge.good{color:var(--st-good);border-color:color-mix(in srgb,var(--st-good) 45%,transparent);
+  background:color-mix(in srgb,var(--st-good) 10%,transparent)}
+.badge.progress{color:var(--st-progress);border-color:color-mix(in srgb,var(--st-progress) 50%,transparent);
+  background:color-mix(in srgb,var(--st-progress) 12%,transparent)}
+.badge.attention{color:var(--st-attention);border-color:color-mix(in srgb,var(--st-attention) 50%,transparent);
+  background:color-mix(in srgb,var(--st-attention) 11%,transparent)}
+.badge.critical{color:var(--st-critical);border-color:color-mix(in srgb,var(--st-critical) 50%,transparent);
+  background:color-mix(in srgb,var(--st-critical) 11%,transparent)}
+.badge.idle{color:var(--st-idle);border-color:color-mix(in srgb,var(--st-idle) 45%,transparent);
+  background:color-mix(in srgb,var(--st-idle) 10%,transparent)}
+.badge.lg{font-size:12px;padding:3px 11px 3px 9px}
+
+/* Doslovné triedy stavov kampane — použi ich, nemyšli si vlastné.
+   glyf sa vkladá do <span class="g"> ručne, aby zostal v HTML čitateľný. */
+.badge.s-done      {color:var(--st-good);border-color:color-mix(in srgb,var(--st-good) 45%,transparent);background:color-mix(in srgb,var(--st-good) 10%,transparent)}
+.badge.s-running   {color:var(--st-progress);border-color:color-mix(in srgb,var(--st-progress) 50%,transparent);background:color-mix(in srgb,var(--st-progress) 12%,transparent)}
+.badge.s-scheduled {color:var(--st-idle);border-color:color-mix(in srgb,var(--st-idle) 45%,transparent);background:color-mix(in srgb,var(--st-idle) 10%,transparent)}
+.badge.s-needskey  {color:var(--st-attention);border-color:color-mix(in srgb,var(--st-attention) 50%,transparent);background:color-mix(in srgb,var(--st-attention) 11%,transparent)}
+.badge.s-missed    {color:var(--st-attention);border-color:color-mix(in srgb,var(--st-attention) 50%,transparent);background:color-mix(in srgb,var(--st-attention) 11%,transparent)}
+.badge.s-partial   {color:var(--st-attention);border-color:color-mix(in srgb,var(--st-attention) 50%,transparent);background:color-mix(in srgb,var(--st-attention) 11%,transparent)}
+.badge.s-failed    {color:var(--st-critical);border-color:color-mix(in srgb,var(--st-critical) 50%,transparent);background:color-mix(in srgb,var(--st-critical) 11%,transparent)}
+.badge.s-lapsed    {color:var(--st-idle);border-color:color-mix(in srgb,var(--st-idle) 45%,transparent);background:color-mix(in srgb,var(--st-idle) 10%,transparent)}
+.badge.s-cancelled {color:var(--st-idle);border-color:color-mix(in srgb,var(--st-idle) 45%,transparent);background:color-mix(in srgb,var(--st-idle) 10%,transparent);text-decoration:line-through}
+
+/* Poznámka „podľa vlastného zápisu" (I11) */
+.claim{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:var(--dim);
+  border:1px dashed var(--line2);border-radius:var(--r-pill);padding:1px 8px}
+
+/* ---------- 9. BAR ROWS .brow ------------------------------------------- */
+.brow{display:grid;grid-template-columns:190px 1fr 84px;gap:12px;align-items:center;padding:6px 0;font-size:12.5px}
+.brow.wide{grid-template-columns:250px 1fr 96px}
+.brow .bl{color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brow .tr{height:8px;background:var(--track);border-radius:var(--r-pill);overflow:hidden}
+.brow .fl{height:100%;border-radius:var(--r-pill);background:var(--teal)}
+.brow .fl.good{background:var(--st-good)} .brow .fl.attn{background:var(--st-attention)}
+.brow .fl.crit{background:var(--st-critical)} .brow .fl.prog{background:var(--st-progress)}
+.brow .fl.idle{background:var(--st-idle)} .brow .fl.gold{background:var(--gold)}
+.brow .vl{text-align:right;font-weight:600;font-size:12px;color:var(--ink)}
+
+/* Meter — rozpočet API / TTL (obojsmerná lišta so značkou) */
+.meter{height:6px;background:var(--track);border-radius:var(--r-pill);overflow:hidden}
+.meter>span{display:block;height:100%;background:var(--teal);border-radius:var(--r-pill)}
+.meter.attn>span{background:var(--st-attention)}
+.meter.crit>span{background:var(--st-critical)}
+
+/* ---------- 10. TLAČIDLÁ ------------------------------------------------- */
+.btn{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:13px;font-weight:600;
+  padding:7px 14px;border-radius:var(--r-sm);border:1px solid var(--line2);
+  background:var(--paper2);color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--teal)}
+.btn .g{font-size:12px;line-height:1}
+.btn.primary{background:var(--deep);border-color:var(--deep);color:#fff}
+.btn.primary:hover{background:var(--teal);border-color:var(--teal);color:#04211f}
+.btn.ghost{background:transparent;color:var(--ink2)}
+.btn.danger{background:var(--st-critical);border-color:var(--st-critical);color:#fff}
+.btn.danger:hover{filter:brightness(1.08)}
+.btn.lg{font-size:14px;padding:10px 20px}
+.btn.block{width:100%;justify-content:center}
+.btn.sm{font-size:12px;padding:4px 10px}
+.btn[disabled],.btn.off{opacity:.45;cursor:not-allowed;border-color:var(--line)}
+.btn.off:hover{border-color:var(--line)}
+.btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* ---------- 11. FORMULÁRE ----------------------------------------------- */
+.field{margin-bottom:14px}
+.field>label,.lbl{display:block;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);font-weight:650;margin-bottom:6px}
+.hint{font-size:11.5px;color:var(--dim);margin-top:5px;line-height:1.4}
+.input,.select,textarea.input{
+  width:100%;font:inherit;font-size:13.5px;color:var(--ink);
+  background:var(--paper);border:1px solid var(--line2);border-radius:var(--r-sm);
+  padding:8px 11px;font-variant-numeric:tabular-nums}
+.input:focus,.select:focus{outline:2px solid color-mix(in srgb,var(--teal) 55%,transparent);outline-offset:1px}
+.input::placeholder{color:var(--dim)}
+.select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:32px}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.inline .input{width:auto;min-width:0}
+.input.w-pct{width:88px;text-align:right;font-size:16px;font-weight:660}
+.input.w-date{width:150px}
+
+/* checkbox / radio riadok */
+.chk{display:flex;align-items:flex-start;gap:9px;font-size:13px;color:var(--ink2);cursor:pointer;padding:6px 0}
+.chk .box{flex:0 0 auto;width:16px;height:16px;border:1px solid var(--line2);border-radius:4px;
+  background:var(--paper);display:inline-flex;align-items:center;justify-content:center;
+  font-size:11px;color:transparent;margin-top:1px}
+.chk.on .box{background:var(--deep);border-color:var(--deep);color:#fff}
+.chk.on{color:var(--ink)}
+.chk .box.radio{border-radius:50%}
+.chk b{color:var(--ink);font-weight:600}
+
+/* chip — presety percent, dátumov, filtre */
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:12px;font-weight:600;padding:4px 11px;border-radius:var(--r-pill);
+  border:1px solid var(--line2);background:var(--paper2);color:var(--ink2);cursor:pointer;white-space:nowrap}
+.chip:hover{border-color:var(--teal);color:var(--ink)}
+.chip.on{background:color-mix(in srgb,var(--teal) 16%,transparent);border-color:var(--teal);color:var(--teal)}
+.chip .x{margin-left:6px;opacity:.7}
+
+/* prepínač (toggle) — zapnuté/vypnuté funkcie v nastaveniach */
+.sw{display:inline-flex;align-items:center;gap:9px;font-size:13px;color:var(--ink2);cursor:pointer}
+.sw .tr{width:34px;height:19px;border-radius:var(--r-pill);background:var(--track);
+  border:1px solid var(--line2);position:relative;flex:0 0 auto}
+.sw .tr::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--dim)}
+.sw.on .tr{background:color-mix(in srgb,var(--st-good) 32%,transparent);border-color:var(--st-good)}
+.sw.on .tr::after{left:auto;right:2px;background:var(--st-good)}
+
+/* segmentovaný prepínač (napr. Dark/Light, obdobie) */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-pill);overflow:hidden}
+.seg button,.seg span{background:transparent;border:0;color:var(--dim);font:inherit;font-size:11.5px;
+  padding:5px 13px;cursor:pointer;letter-spacing:.04em}
+.seg .on{background:color-mix(in srgb,var(--teal) 16%,transparent);color:var(--teal);font-weight:650}
+
+/* ---------- 12. UPOZORNENIA / BANNERY ------------------------------------ */
+.note{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.45;
+  border:1px solid var(--line);border-left-width:3px;border-radius:var(--r-sm);
+  padding:10px 13px;background:var(--paper2);color:var(--ink2)}
+.note .g{flex:0 0 auto;font-size:13px;line-height:1.3;font-weight:700}
+.note b{color:var(--ink)}
+.note.critical{border-left-color:var(--st-critical);background:color-mix(in srgb,var(--st-critical) 8%,var(--paper2))}
+.note.critical .g{color:var(--st-critical)}
+.note.attention{border-left-color:var(--st-attention);background:color-mix(in srgb,var(--st-attention) 8%,var(--paper2))}
+.note.attention .g{color:var(--st-attention)}
+.note.good{border-left-color:var(--st-good);background:color-mix(in srgb,var(--st-good) 8%,var(--paper2))}
+.note.good .g{color:var(--st-good)}
+.note.info{border-left-color:var(--teal)}
+.note.info .g{color:var(--teal)}
+.note.idle{border-left-color:var(--st-idle)}
+.note.idle .g{color:var(--st-idle)}
+
+/* ---------- 13. DRAWER / MODAL ------------------------------------------ */
+.drawer{background:var(--paper2);border:1px solid var(--line2);border-radius:var(--r);
+  box-shadow:0 18px 48px rgba(0,0,0,.42);overflow:hidden;max-width:560px}
+:root[data-theme="light"] .drawer{box-shadow:0 18px 44px rgba(19,27,26,.16)}
+.drawer .dhead{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;
+  justify-content:space-between;align-items:center;gap:14px}
+.drawer .dhead h3{font-size:15px;font-weight:660}
+.drawer .dbody{padding:16px 18px}
+.drawer .dfoot{padding:13px 18px;border-top:1px solid var(--line);background:var(--paper3);
+  display:flex;justify-content:flex-end;gap:8px;align-items:center}
+.scrim{background:rgba(0,0,0,.5);padding:26px;border-radius:var(--r)}
+
+/* ---------- 14. PRÁZDNE STAVY ------------------------------------------- */
+.empty{border:1px dashed var(--line2);border-radius:var(--r);padding:30px 22px;text-align:center;color:var(--dim)}
+.empty .g{font-size:22px;display:block;margin-bottom:8px;color:var(--st-idle)}
+.empty h4{font-size:14px;font-weight:650;color:var(--ink2);margin-bottom:5px}
+.empty p{font-size:12.5px;max-width:420px;margin:0 auto 12px}
+
+/* ---------- 15. ČASOVÁ OS / ZOZNAMY ------------------------------------- */
+.tline{position:relative;padding-left:24px}
+.tline::before{content:"";position:absolute;left:6px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.tev{position:relative;padding:0 0 16px}
+.tev::before{content:"";position:absolute;left:-22px;top:5px;width:9px;height:9px;border-radius:50%;
+  background:var(--paper);border:2px solid var(--st-idle)}
+.tev.good::before{border-color:var(--st-good)}
+.tev.progress::before{border-color:var(--st-progress)}
+.tev.attention::before{border-color:var(--st-attention)}
+.tev.critical::before{border-color:var(--st-critical)}
+.tev .td{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);font-weight:650;margin-bottom:2px}
+.tev .tt2{font-size:13.5px;font-weight:650;margin-bottom:2px}
+.tev p{font-size:12.5px;color:var(--ink2);max-width:660px}
+
+.clist{list-style:none}
+.clist li{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);
+  font-size:13px;color:var(--ink2);align-items:baseline}
+.clist li:last-child{border-bottom:0}
+.clist .m{flex:0 0 auto;font-weight:700;font-size:12px;width:16px;text-align:center}
+.clist .m.done{color:var(--st-good)} .clist .m.todo{color:var(--st-attention)} .clist .m.open{color:var(--st-critical)}
+.clist b{color:var(--ink);font-weight:600}
+
+/* definičný zoznam */
+dl.defs div{padding:10px 0;border-bottom:1px solid var(--line)}
+dl.defs div:last-child{border-bottom:0}
+dl.defs dt{font-weight:650;font-size:13px;margin-bottom:2px}
+dl.defs dd{font-size:12.5px;color:var(--ink2)}
+
+/* stavový tok */
+.flow{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.st{font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:var(--r-sm);
+  border:1px solid var(--line);background:var(--paper2);color:var(--ink2)}
+.st.hot{border-color:color-mix(in srgb,var(--teal) 50%,transparent);color:var(--teal)}
+.st.end{border-style:dashed}
+.arr{color:var(--dim);font-size:12px}
+
+/* ---------- 16. GRAFY (inline SVG shell) -------------------------------- */
+.chart{background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px}
+.chart .ct{font-size:12px;font-weight:650;color:var(--ink2);margin-bottom:3px}
+.chart .cs{font-size:11px;color:var(--dim);margin-bottom:11px}
+.chart svg{display:block;width:100%;height:auto}
+.chart svg text{font-family:inherit}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--dim);margin-top:10px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+
+/* ---------- 17. RÔZNE --------------------------------------------------- */
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;font-size:12.5px}
+.kv dt{color:var(--dim)} .kv dd{color:var(--ink);font-weight:600;text-align:right}
+.stack{display:flex;flex-direction:column;gap:14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row.between{justify-content:space-between}
+.spacer{flex:1}
+.mt0{margin-top:0}.mt8{margin-top:8px}.mt14{margin-top:14px}.mt22{margin-top:22px}
+.mb0{margin-bottom:0}.mb8{margin-bottom:8px}.mb14{margin-bottom:14px}
+
+/* pätička mockupu */
+.mockfoot{border-top:1px solid var(--line);margin-top:32px;padding:16px 0 30px;
+  color:var(--dim);font-size:11.5px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+/* ---------- 18. LIGHT DOLADENIE ----------------------------------------- */
+:root[data-theme="light"] .navbar{background:var(--deep)}
+:root[data-theme="light"] .fcard .wm{opacity:.06}
+:root[data-theme="light"] .btn.primary:hover{color:#062421}
+
+/* ---------- 19. RESPONZÍVA (mockupy sa renderujú na 1180px) ------------- */
+@media (max-width:1120px){
+  .kpistrip,.kpistrip.six{grid-template-columns:repeat(4,1fr)}
+  .split,.split-58,.grid3,.grid4{grid-template-columns:1fr}
+}
+/* Úzke displeje (mobil): chrome appky sa zalomí, nič nepretečie vodorovne. */
+@media (max-width:720px){
+  .wrap{padding:0 14px}
+  .topbar-production .wrap{flex-wrap:wrap;gap:4px}
+  .topbar-production .note{flex-basis:100%}
+  .navbar .wrap{height:auto;flex-wrap:wrap;gap:8px;padding-top:9px;padding-bottom:9px}
+  /* tab bar sa posúva vodorovne vo vlastnom kontajneri, nie celá stránka */
+  .navtabs{flex:1 0 100%;order:3;overflow-x:auto;gap:2px;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .navtabs::-webkit-scrollbar{display:none}
+  .navmeta{flex-wrap:wrap;white-space:normal;gap:6px}
+  .kpistrip,.kpistrip.six{grid-template-columns:repeat(2,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

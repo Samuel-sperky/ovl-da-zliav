@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prvé spustenie · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria tejto stránky */
+  .obwrap{max-width:820px;margin:0 auto;padding:34px 22px 60px}
+  .obmark{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px}
+  .obmark .crown{font-size:22px;color:var(--gold);line-height:1}
+  .obmark h1{font-size:22px;font-weight:660;letter-spacing:-.015em}
+  .obsub{text-align:center;font-size:13px;color:var(--ink2);max-width:600px;margin:0 auto 22px}
+  /* progres */
+  .prog{margin-bottom:24px}
+  .prog .plbl{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:7px}
+  .prog .plbl b{color:var(--ink);font-weight:650}
+  .steps{display:flex;gap:8px;margin-top:11px}
+  .steps .s{flex:1;text-align:center;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+    font-weight:650;color:var(--dim);border-top:2px solid var(--line);padding-top:7px}
+  .steps .s.done{color:var(--st-good);border-top-color:var(--st-good)}
+  .steps .s.now{color:var(--teal);border-top-color:var(--teal)}
+  /* krok ako karta */
+  .step{position:relative;margin-bottom:14px}
+  .step .shead{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
+  .step .snumb{flex:0 0 auto;width:26px;height:26px;border-radius:50%;display:flex;
+    align-items:center;justify-content:center;font-size:12px;font-weight:700;
+    border:1px solid var(--line2);background:var(--track);color:var(--ink2)}
+  .step.done .snumb{background:color-mix(in srgb,var(--st-good) 16%,transparent);
+    border-color:var(--st-good);color:var(--st-good)}
+  .step.now .snumb{background:color-mix(in srgb,var(--teal) 16%,transparent);
+    border-color:var(--teal);color:var(--teal)}
+  .step h3{font-size:14.5px;font-weight:650}
+  .step .sd{font-size:12.5px;color:var(--ink2);margin-top:3px;max-width:640px}
+  .step .sbody{padding-left:38px}
+  .idgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .idgrid .input{text-align:center;font-size:13px}
+  .idgrid .cap{grid-column:1 / -1}
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="obwrap">
+
+  <div class="obmark"><span class="crown">♛</span><h1>Prvé spustenie</h1></div>
+  <div class="obsub">Štyri kroky, kým appka smie čokoľvek zapísať. Do dokončenia posledného kroku
+    beží v režime <b>vynúteného dry-runu</b> — nič sa do shopu nedostane.</div>
+
+  <div class="prog">
+    <div class="plbl"><span>Postup nastavenia</span><b>3 zo 4 hotové · 75 %</b></div>
+    <div class="meter"><span style="width:75%"></span></div>
+    <div class="steps">
+      <div class="s done">✓ Doména</div>
+      <div class="s done">✓ Kľúče</div>
+      <div class="s done">✓ Allowlist</div>
+      <div class="s now">◐ Dry-run test</div>
+    </div>
+  </div>
+
+  <!-- KROK 1 -->
+  <div class="card step done">
+    <div class="shead">
+      <div class="snumb">✓</div>
+      <div style="flex:1">
+        <div class="row between">
+          <h3>Doména shopu</h3>
+          <span class="badge good"><span class="g">✓</span>overená 14:02</span>
+        </div>
+        <div class="sd">Adresa, proti ktorej sa volá API. Overuje sa jedným čítacím requestom.</div>
+      </div>
+    </div>
+    <div class="sbody">
+      <div class="inline">
+        <input class="input" style="max-width:280px" value="sperky-eshop.sk">
+        <button class="btn sm ghost">Overiť znova</button>
+      </div>
+      <div class="hint">Katalóg 40 483 produktov · API kontrakt v4 · časové pásmo Europe/Bratislava.</div>
+    </div>
+  </div>
+
+  <!-- KROK 2 -->
+  <div class="card step done">
+    <div class="shead">
+      <div class="snumb">✓</div>
+      <div style="flex:1">
+        <div class="row between">
+          <h3>API kľúče (tri, oddelené)</h3>
+          <span class="badge good"><span class="g">✓</span>3 z 3 uložené</span>
+        </div>
+        <div class="sd">Každý scope má vlastný kľúč. Kľúče sa ukladajú <b>šifrovane</b>, platia
+          <b>48 h</b> a v appke sa už nikdy nezobrazia — ani skrátene (I1).</div>
+      </div>
+    </div>
+    <div class="sbody">
+      <div class="field">
+        <label>Zápisový kľúč — <code>product:edit</code> <span class="tag rs" style="margin-left:6px">povinný</span></label>
+        <div class="inline">
+          <input class="input" type="password" style="max-width:280px" value="••••••••••••••••••••">
+          <span class="badge good"><span class="g">✓</span>uložený · TTL 31 h 12 m</span>
+        </div>
+        <div class="hint">Bez neho sa zápisy nezapnú. Zapisuje výhradne na produkty z allowlistu.</div>
+      </div>
+      <div class="field">
+        <label>Kľúč predajnosti — <code>orders:read</code> <span class="tag" style="margin-left:6px">voliteľný</span></label>
+        <div class="inline">
+          <input class="input" type="password" style="max-width:280px" value="••••••••••••••••••••">
+          <span class="badge good"><span class="g">✓</span>uložený · TTL 19 h 04 m</span>
+        </div>
+        <div class="hint">Nočný sync predaných kusov. Bez neho appka funguje, len nevie, čo sa predáva.</div>
+      </div>
+      <div class="field">
+        <label>Kľúč štatistík — <code>order:stats</code> <span class="tag tt" style="margin-left:6px">voliteľný · vypnuteľný nezávisle</span></label>
+        <div class="inline">
+          <input class="input" type="password" style="max-width:280px" value="••••••••••••••••••••">
+          <span class="badge good"><span class="g">✓</span>uložený · TTL 43 h 51 m</span>
+        </div>
+        <div class="hint">Agregované tržby, marža a nízkomaržové objednávky — <b>bez zákazníckych dát</b>.
+          Dá sa kedykoľvek vypnúť v Nastaveniach bez vplyvu na zápis zliav.</div>
+      </div>
+      <div class="note info"><span class="g">ⓘ</span><div>
+        Limit je <b>20 requestov za minútu a 200 za UTC deň na každý kľúč</b>. Appka si vedie
+        vlastný rozpočet a zastaví sa skôr, než ho vyčerpá.
+      </div></div>
+    </div>
+  </div>
+
+  <!-- KROK 3 -->
+  <div class="card step done">
+    <div class="shead">
+      <div class="snumb">✓</div>
+      <div style="flex:1">
+        <div class="row between">
+          <h3>Allowlist — 10 product ID</h3>
+          <span class="badge good"><span class="g">✓</span>10 / 10 vyplnené</span>
+        </div>
+        <div class="sd">Zoznam produktov, na ktoré appka vôbec smie zapísať zľavu. Strop 10 je
+          vynútený schémou databázy (I2) — nedá sa zdvihnúť z rozhrania.</div>
+      </div>
+    </div>
+    <div class="sbody">
+      <div class="idgrid">
+        <input class="input" value="10241"><input class="input" value="10388">
+        <input class="input" value="10455"><input class="input" value="10502">
+        <input class="input" value="10617"><input class="input" value="10744">
+        <input class="input" value="10809"><input class="input" value="10923">
+        <input class="input" value="11056"><input class="input" value="11134">
+        <div class="cap hint">Overené proti katalógu 14:08 — všetkých 10 ID existuje.
+          Napr. 10241 = Náhrdelník Aura Luna, striebro 925 · 89,00 €.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KROK 4 -->
+  <div class="card step now">
+    <div class="shead">
+      <div class="snumb">4</div>
+      <div style="flex:1">
+        <div class="row between">
+          <h3>Dry-run test</h3>
+          <span class="badge progress"><span class="g">◐</span>prebieha krok</span>
+        </div>
+        <div class="sd">Nanečisto prejde celú cestu zápisu — canary, prepočet ceny, kontrola okna —
+          ale <b>neodošle žiadnu zmenu</b>. Kým tento krok neprejde, zápisy zostávajú vypnuté.</div>
+      </div>
+    </div>
+    <div class="sbody">
+      <div class="btnrow mb14">
+        <button class="btn"><span class="g">▸</span>Spustiť dry-run bez zápisu</button>
+        <span class="tiny muted">Testovacia sada: 4 produkty (10241, 10388, 10455, 10502) · 15 %</span>
+      </div>
+      <div class="note good"><span class="g">✓</span><div>
+        <b>4 / 4 produkty overené, žiadny zápis.</b> Kľúč platný, allowlist sedí, prepočet cien
+        prešiel (89,00 € → 75,65 €; 214,00 € → 181,90 €; 129,00 € → 109,65 €; 46,50 € → 39,53 €).
+        Spotrebované 4 requesty z denného rozpočtu.
+      </div></div>
+      <div class="note info mt14"><span class="g">ⓘ</span><div>
+        Orientačný výpočet appky; zaokrúhlenie shopu sa môže líšiť. Appka zľavy zo shopu
+        nečíta späť — stavy, ktoré uvidíš, sú stavy <b>vlastného zápisu</b> (I11).
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ZÁVER -->
+  <div class="card mt22">
+    <div class="chk on" style="padding-bottom:10px">
+      <span class="box">✓</span>
+      <span><b>Rozumiem, že zápis do produkcie je nevratný</b> a že zľavu nie je možné zrušiť,
+        len nechať expirovať. Každý ostrý zápis potvrdím dry-runom (I3).</span>
+    </div>
+    <div class="row between" style="border-top:1px solid var(--line);padding-top:13px">
+      <span class="tiny muted">Dokončením sa nastaví <code>WRITES_ENABLED=true</code>.
+        Vypnúť sa dá kedykoľvek v Nastaveniach → Zápisy a limity.</span>
+      <button class="btn primary lg">Dokončiť a zapnúť zápisy</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>

@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nová kampaň · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria tejto stránky */
+  .stickyfoot{margin-top:18px;border-color:var(--line2)}
+  .stickyfoot .cfoot{align-items:flex-start}
+  .picktable td:first-child,.picktable th:first-child{width:26px;padding-right:0}
+  .picktable .chk{padding:0}
+  .drylive{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:650;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--teal)}
+  .drylive .pulse{width:7px;height:7px;border-radius:50%;background:var(--teal)}
+  .costrow{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;margin-top:12px}
+  .costrow>div{background:var(--paper);padding:9px 11px}
+  .costrow .k{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:650}
+  .costrow .v{font-size:14px;font-weight:650;margin-top:3px}
+  @media (max-width:720px){ .costrow{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="navbar"><div class="wrap">
+  <span class="brand"><span class="crown">♛</span>Aura Zľavy</span>
+  <nav class="navtabs">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="kampane.html" class="on">Kampane<span class="n">4</span></a>
+    <a href="produkty.html">Produkty<span class="n">10</span></a>
+    <a href="analytika.html">Analytika</a>
+    <a href="nastavenia.html">Nastavenia</a>
+    <a href="ai-agent.html">AI agent<span class="n">5</span></a>
+  </nav>
+  <div class="navmeta">
+    <span class="hbadge"><span class="g">⧗</span>Kľúč <b>31 h 12 m</b></span>
+    <span class="hbadge"><span class="g">◴</span>API <b>142/200</b></span>
+  </div>
+</div></div>
+
+<div class="page"><div class="wrap">
+
+  <div class="phead">
+    <div>
+      <div class="eyebrow">Kampane · nová</div>
+      <h1>Nová kampaň <em>—</em> jedna obrazovka</h1>
+      <div class="sub">Výber vľavo, <b>živý dry-run náhľad</b> vpravo. Náhľad sa prepočítava
+        pri každej zmene a <b>nikdy nezmizne</b> — je to tá istá plocha, nie samostatný krok (I3).</div>
+    </div>
+    <div class="pactions">
+      <a class="btn ghost" href="kampane.html">Späť na kampane</a>
+    </div>
+  </div>
+
+  <div class="split-58">
+
+    <!-- ============================= ĽAVÝ STĹPEC — VÝBER ============================= -->
+    <div class="stack">
+
+      <div class="card pad0">
+        <div class="chead">
+          <h3><span class="snum">01</span>Sada produktov</h3>
+          <span class="tag tt">vybraných 4 / max 10</span>
+        </div>
+        <div class="cbody">
+          <div class="lbl">Uložené sady</div>
+          <div class="chips mb8">
+            <span class="chip on">Striebro 925 <b>4</b></span>
+            <span class="chip">Zlato 585 <b>2</b></span>
+            <span class="chip">Perly a perleť <b>3</b></span>
+            <span class="chip">Celý allowlist <b>10</b></span>
+            <span class="chip">Vlastný výber</span>
+          </div>
+          <div class="tiny muted mb14">Posledná použitá sada: <b>Striebro 925</b> — kampaň K-118, 05.08.2026 o 09:12.</div>
+
+          <div class="tw picktable">
+            <table>
+              <thead>
+                <tr>
+                  <th><span class="chk on"><span class="box">✓</span></span></th>
+                  <th>Slot / ID</th>
+                  <th>Produkt</th>
+                  <th class="n">Cena</th>
+                  <th>Aktuálna zľava</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="sel">
+                  <td><span class="chk on"><span class="box">✓</span></span></td>
+                  <td>1 · <b>10241</b></td>
+                  <td>Náhrdelník Aura Luna, striebro 925</td>
+                  <td class="n">89,00 €</td>
+                  <td><span class="badge good"><span class="g">✓</span>15 % do 19.08.</span></td>
+                </tr>
+                <tr class="sel">
+                  <td><span class="chk on"><span class="box">✓</span></span></td>
+                  <td>2 · <b>10388</b></td>
+                  <td>Náušnice Aura Solis, zlato 585</td>
+                  <td class="n">214,00 €</td>
+                  <td><span class="badge good"><span class="g">✓</span>15 % do 19.08.</span></td>
+                </tr>
+                <tr class="sel">
+                  <td><span class="chk on"><span class="box">✓</span></span></td>
+                  <td>3 · <b>10455</b></td>
+                  <td>Prsteň Aura Nova, zirkón</td>
+                  <td class="n">129,00 €</td>
+                  <td><span class="badge good"><span class="g">✓</span>15 % do 19.08.</span></td>
+                </tr>
+                <tr class="sel">
+                  <td><span class="chk on"><span class="box">✓</span></span></td>
+                  <td>4 · <b>10502</b></td>
+                  <td>Náramok Aura Tide, chirurgická oceľ</td>
+                  <td class="n">46,50 €</td>
+                  <td><span class="badge good"><span class="g">✓</span>15 % do 19.08.</span></td>
+                </tr>
+                <tr>
+                  <td><span class="chk"><span class="box"></span></span></td>
+                  <td>5 · <b>10617</b></td>
+                  <td>Prívesok Aura Aster, perleť</td>
+                  <td class="n">62,00 €</td>
+                  <td><span class="badge idle"><span class="g">○</span>bez zľavy 41 dní</span></td>
+                </tr>
+                <tr>
+                  <td><span class="chk"><span class="box"></span></span></td>
+                  <td>6 · <b>10744</b></td>
+                  <td>Set Aura Vesper, striebro 925</td>
+                  <td class="n">168,00 €</td>
+                  <td><span class="badge good"><span class="g">✓</span>10 % do 24.08.</span></td>
+                </tr>
+                <tr>
+                  <td><span class="chk"><span class="box"></span></span></td>
+                  <td>7 · <b>10809</b></td>
+                  <td>Náhrdelník Aura Mira, zlato 585</td>
+                  <td class="n">349,00 €</td>
+                  <td><span class="badge idle"><span class="g">○</span>bez zľavy 12 dní</span></td>
+                </tr>
+                <tr>
+                  <td><span class="chk"><span class="box"></span></span></td>
+                  <td>8 · <b>10923</b></td>
+                  <td>Náušnice Aura Petra, riečna perla</td>
+                  <td class="n">74,50 €</td>
+                  <td><span class="badge good"><span class="g">✓</span>10 % do 24.08.</span></td>
+                </tr>
+                <tr>
+                  <td><span class="chk"><span class="box"></span></span></td>
+                  <td>9 · <b>11056</b></td>
+                  <td>Prsteň Aura Cielo, topás</td>
+                  <td class="n">156,00 €</td>
+                  <td><span class="badge idle"><span class="g">○</span>bez zľavy 63 dní</span></td>
+                </tr>
+                <tr>
+                  <td><span class="chk"><span class="box"></span></span></td>
+                  <td>10 · <b>11134</b></td>
+                  <td>Náramok Aura Rosa, ružové zlato</td>
+                  <td class="n">98,00 €</td>
+                  <td><span class="badge idle"><span class="g">⊘</span>prepadla 02.08.</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="hint">Vyberať sa dá len z allowlistu — strop <b>10 produktov</b> je vynútený
+            schémou DB, nie iba formulárom (I2). Zmena allowlistu je v Nastaveniach.</div>
+          <div class="tiny muted mt8"><span class="claim">stav zľavy podľa vlastného zápisu z 05.08.</span></div>
+        </div>
+      </div>
+
+      <div class="card pad0">
+        <div class="chead"><h3><span class="snum">02</span>Zľava a okno platnosti</h3></div>
+        <div class="cbody">
+
+          <div class="field">
+            <label>Percento zľavy</label>
+            <div class="inline mb8">
+              <input class="input w-pct" type="text" value="15">
+              <span class="muted small">%</span>
+              <div class="chips">
+                <span class="chip">5</span>
+                <span class="chip">10</span>
+                <span class="chip on">15</span>
+                <span class="chip">20</span>
+                <span class="chip">25</span>
+                <span class="chip">30</span>
+              </div>
+            </div>
+            <div class="hint">Celé číslo <b>1–30</b>, strop shopu je 30 %. Validuje sa lokálne
+              ešte pred volaním API (I9).</div>
+          </div>
+
+          <div class="field">
+            <label>Okno platnosti</label>
+            <div class="inline mb8">
+              <input class="input w-date" type="text" value="05.08.2026">
+              <span class="muted">–</span>
+              <input class="input w-date" type="text" value="19.08.2026">
+              <span class="tag tt">14 dní</span>
+            </div>
+            <div class="chips mb8">
+              <span class="chip">od zajtra</span>
+              <span class="chip">7 dní</span>
+              <span class="chip on">14 dní</span>
+              <span class="chip">30 dní</span>
+              <span class="chip">do konca mesiaca</span>
+            </div>
+            <div class="hint">Platí od <b>00:00</b> dňa OD do <b>23:59</b> dňa DO, v čase shopu.
+              Okno musí byť ≤ 3 mesiace a deň OD nesmie byť v minulosti.</div>
+          </div>
+
+          <div class="field mb0">
+            <label>Názov kampane</label>
+            <input class="input" type="text" value="Letný výpredaj — striebro">
+            <div class="hint">Slúži len nám — do shopu sa neposiela. Kód sa pridelí pri uložení.</div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============================= PRAVÝ STĹPEC — ŽIVÝ DRY-RUN ============================= -->
+    <div class="stack">
+
+      <div class="card pad0">
+        <div class="chead">
+          <h3><span class="snum">03</span>Dry-run náhľad</h3>
+          <span class="drylive"><span class="pulse"></span>živý · prepočítaný 14:20</span>
+        </div>
+        <div class="cbody">
+
+          <div class="tw">
+            <table>
+              <thead>
+                <tr>
+                  <th>Produkt</th>
+                  <th class="n">Cena teraz</th>
+                  <th class="n">Zľava</th>
+                  <th class="n">Nová cena</th>
+                  <th>Posledný vlastný zápis</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>10241</b><span class="sec">Náhrdelník Aura Luna</span></td>
+                  <td class="n"><span class="strike">89,00 €</span></td>
+                  <td class="n">−15 %</td>
+                  <td class="n">≈ 75,65 €</td>
+                  <td class="small">05.08. 09:12 · 15 %</td>
+                </tr>
+                <tr>
+                  <td><b>10388</b><span class="sec">Náušnice Aura Solis</span></td>
+                  <td class="n"><span class="strike">214,00 €</span></td>
+                  <td class="n">−15 %</td>
+                  <td class="n">≈ 181,90 €</td>
+                  <td class="small">05.08. 09:12 · 15 %</td>
+                </tr>
+                <tr>
+                  <td><b>10455</b><span class="sec">Prsteň Aura Nova</span></td>
+                  <td class="n"><span class="strike">129,00 €</span></td>
+                  <td class="n">−15 %</td>
+                  <td class="n">≈ 109,65 €</td>
+                  <td class="small">05.08. 09:12 · 15 %</td>
+                </tr>
+                <tr>
+                  <td><b>10502</b><span class="sec">Náramok Aura Tide</span></td>
+                  <td class="n"><span class="strike">46,50 €</span></td>
+                  <td class="n">−15 %</td>
+                  <td class="n">≈ 39,53 €</td>
+                  <td class="small">05.08. 09:12 · 15 %</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>4 produkty · okno 05.08.2026 – 19.08.2026</td>
+                  <td class="n">478,50 €</td>
+                  <td class="n">−15 %</td>
+                  <td class="n">≈ 406,73 €</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div class="note info mt14">
+            <span class="g">≈</span>
+            <div>Nová cena je <b>orientačný výpočet appky</b>; zaokrúhlenie shopu sa môže líšiť.
+              Do shopu posielame <b>percento</b>, nie cenu — preto appka nikdy netvrdí, že novú
+              cenu pozná presne.</div>
+          </div>
+
+          <div class="costrow">
+            <div><div class="k">Zápisy</div><div class="v">4</div></div>
+            <div><div class="k">Rozpočet API</div><div class="v">4 z 142 <small class="muted">zostávajúcich</small></div></div>
+            <div><div class="k">Odhad trvania</div><div class="v">≈ 12 s</div></div>
+          </div>
+          <div class="tiny muted mt8">Zápisy idú sekvenčne s pauzou <b>3 s</b> (limit 20 req/min).
+            Batch rozpočet <b>nešetrí</b> — 4 položky = 4 hity. Canary request sa pošle až tesne
+            pred prvým zápisom.</div>
+
+          <div class="note good mt14">
+            <span class="g">✓</span>
+            <div><b>Okno sa zmestí do platnosti kľúča.</b> Zápis prebehne teraz (14:20),
+              zápisový kľúč platí ešte <b>31 h 12 m</b> — do 11.08.2026 21:32.</div>
+          </div>
+
+          <div class="note attention mt14">
+            <span class="g">⚠</span>
+            <div><b>3 zo 4 produktov už majú náš zápis 15 % do 19.08.</b>
+              Nový zápis ho prepíše rovnakou hodnotou — zľava sa nezvýši, ale
+              <b>rozpočet sa minie</b>. Zváž, či ich nechať mimo sady.</div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ct">Čo sa presne odošle</div>
+        <div class="cs">4 volania <code>setReduction</code>, sekvenčne, v tomto poradí</div>
+        <dl class="kv">
+          <dt>Scope kľúča</dt><dd><code>product:edit</code></dd>
+          <dt>Percento</dt><dd>15</dd>
+          <dt>from</dt><dd>05.08.2026 00:00</dd>
+          <dt>to</dt><dd>19.08.2026 23:59</dd>
+          <dt>Poradie ID</dt><dd>10241 → 10388 → 10455 → 10502</dd>
+          <dt>Pri prvej chybe</dt><dd>zastaviť (fail-closed)</dd>
+        </dl>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================= DOLNÁ LIŠTA ============================= -->
+  <div class="card pad0 stickyfoot">
+    <div class="cbody">
+      <div class="row between">
+        <div>
+          <div class="eyebrow">Rekapitulácia</div>
+          <div style="font-size:15px;font-weight:650">
+            <b>Letný výpredaj — striebro</b> · 4 produkty · <b>15 %</b> · 05.08.2026 – 19.08.2026
+          </div>
+          <div class="small muted mt8">
+            478,50 € → ≈ 406,73 € · 4 zápisy · 4 z 142 zostávajúcich requestov · odhad ≈ 12 s
+          </div>
+        </div>
+        <div class="row">
+          <span class="badge good lg"><span class="g">✓</span>dry-run prešiel 4/4</span>
+          <span class="badge good lg"><span class="g">✓</span>kľúč platný</span>
+        </div>
+      </div>
+    </div>
+    <div class="cfoot">
+      <div>
+        <label class="chk on">
+          <span class="box">✓</span>
+          <span>Rozumiem, že zápis je <b>nevratný</b> a zľavu nie je možné zrušiť,
+            len nechať expirovať.</span>
+        </label>
+        <div class="tiny muted" style="padding-left:25px">
+          Dry-run token platný 15 min · vydaný 14:20 · sada 4 produkty ·
+          potvrdenie sa uloží do auditu spolu s tokenom (I3).
+        </div>
+      </div>
+      <div class="btnrow">
+        <button class="btn ghost">Uložiť ako naplánovanú</button>
+        <button class="btn lg danger"><span class="g">▲</span>Zapísať do PRODUKCIE</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="note critical mt14">
+    <span class="g">!</span>
+    <div><b>Zápis do produkcie je konečný.</b> Po odoslaní zostane zľava v shope až do
+      23:59 dňa 19.08.2026. Kampaň v našej DB sa dá zrušiť, zľava v shope nie —
+      tá len expiruje uplynutím okna.</div>
+  </div>
+
+</div></div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kampane · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria tejto stránky */
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .toolbar .search{position:relative;flex:0 0 300px}
+  .toolbar .search .input{padding-left:30px}
+  .toolbar .search .g{position:absolute;left:10px;top:50%;transform:translateY(-50%);
+    font-size:12px;color:var(--dim);pointer-events:none}
+  .brow.mini{grid-template-columns:230px 1fr 130px;padding:4px 0;font-size:12px}
+  .subrow td{background:var(--paper3)}
+  .subrow .inner{padding:4px 0 2px 8px;border-left:2px solid var(--st-attention);padding-left:12px}
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="navbar"><div class="wrap">
+  <span class="brand"><span class="crown">♛</span>Aura Zľavy</span>
+  <nav class="navtabs">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="kampane.html" class="on">Kampane<span class="n">4</span></a>
+    <a href="produkty.html">Produkty<span class="n">10</span></a>
+    <a href="analytika.html">Analytika</a>
+    <a href="nastavenia.html">Nastavenia</a>
+    <a href="ai-agent.html">AI agent<span class="n">5</span></a>
+  </nav>
+  <div class="navmeta">
+    <span class="hbadge"><span class="g">⧗</span>Kľúč <b>31 h 12 m</b></span>
+    <span class="hbadge"><span class="g">◴</span>API <b>142/200</b></span>
+  </div>
+</div></div>
+
+<div class="page"><div class="wrap">
+
+  <div class="phead">
+    <div>
+      <div class="eyebrow">Zľavové kampane</div>
+      <h1>Kampane <em>6</em></h1>
+      <div class="sub">Zoznam všetkých kampaní vrátane prepadnutých. Stav je vždy stav
+        <b>nášho zápisu</b>, nie stav shopu — appka nečíta zľavy späť.</div>
+    </div>
+    <div class="pactions">
+      <a class="btn ghost" href="analytika.html"><span class="g">◴</span>Audit zápisov</a>
+      <a class="btn primary" href="kampan-nova.html"><span class="g">+</span>Nová kampaň</a>
+    </div>
+  </div>
+
+  <div class="note attention mb14">
+    <span class="g">⚠</span>
+    <div><b>2 kampane vyžadujú zásah.</b>
+      K-126 (⧗ vyžaduje kľúč — fire 01.09.2026 je za horizontom platnosti kľúča 48 h) ·
+      K-112 (◧ čiastočná — 1 z 2 produktov zapísaný, druhý skončil na <code>429 rate_limited</code>).</div>
+  </div>
+
+  <!-- ============ TOOLBAR ============ -->
+  <div class="toolbar">
+    <div class="search">
+      <span class="g">⌕</span>
+      <input class="input" type="text" value="" placeholder="Hľadať názov, kód kampane alebo product ID…">
+    </div>
+    <div class="chips">
+      <span class="chip on">Všetky <b>6</b></span>
+      <span class="chip">✓ zapísané <b>1</b></span>
+      <span class="chip">◐ beží <b>1</b></span>
+      <span class="chip">○ naplánované <b>1</b></span>
+      <span class="chip">⧗ vyžaduje kľúč <b>1</b></span>
+      <span class="chip">◧ čiastočné <b>1</b></span>
+      <span class="chip">✕ zlyhalo <b>0</b></span>
+      <span class="chip">⊘ prepadnuté <b>1</b></span>
+    </div>
+    <span class="spacer"></span>
+    <div class="seg">
+      <span class="on">Najnovšie</span><span>Podľa okna</span><span>Podľa stavu</span>
+    </div>
+  </div>
+
+  <!-- ============ TABUĽKA KAMPANÍ ============ -->
+  <div class="tw">
+    <table>
+      <thead>
+        <tr>
+          <th>Kód</th>
+          <th>Názov kampane</th>
+          <th>Sada</th>
+          <th class="n">Zľava</th>
+          <th>Okno platnosti</th>
+          <th>Stav</th>
+          <th>Posledný vlastný zápis</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <!-- K-121 beží -->
+        <tr>
+          <td><b>K-121</b></td>
+          <td><b>Perlová kolekcia</b><span class="sec">vytvoril Samuel · 10.08.2026 14:12</span></td>
+          <td>2 produkty<span class="sec">10744 · 10923</span></td>
+          <td class="n">10 %</td>
+          <td>10.08.2026 – 24.08.2026</td>
+          <td><span class="badge s-running"><span class="g">◐</span>beží zápis</span></td>
+          <td>10.08. 14:18<span class="sec">1 z 2 hotových · pauza 3 s</span></td>
+          <td><a class="btn sm" href="kampan-detail.html">Detail</a></td>
+        </tr>
+        <tr class="subrow">
+          <td colspan="8">
+            <div class="inner">
+              <div class="brow mini">
+                <span class="bl">10744 Set Aura Vesper</span>
+                <span class="tr"><span class="fl good" style="width:100%"></span></span>
+                <span class="vl"><span class="badge good"><span class="g">✓</span>ok 312 ms</span></span>
+              </div>
+              <div class="brow mini">
+                <span class="bl">10923 Náušnice Aura Petra</span>
+                <span class="tr"><span class="fl prog" style="width:35%"></span></span>
+                <span class="vl"><span class="badge progress"><span class="g">◐</span>čaká 3 s</span></span>
+              </div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- K-118 zapísaná -->
+        <tr>
+          <td><b>K-118</b></td>
+          <td><b>Letný výpredaj — striebro</b><span class="sec">sada „Striebro 925"</span></td>
+          <td>4 produkty<span class="sec">10241 · 10388 · 10455 · 10502</span></td>
+          <td class="n">15 %</td>
+          <td>05.08.2026 – 19.08.2026</td>
+          <td><span class="badge s-done"><span class="g">✓</span>zapísaná</span></td>
+          <td>05.08. 09:12 · 4/4 ok<span class="sec"><span class="claim">podľa vlastného zápisu z 05.08.</span></span></td>
+          <td><a class="btn sm" href="kampan-detail.html">Detail</a></td>
+        </tr>
+
+        <!-- K-124 naplánovaná -->
+        <tr>
+          <td><b>K-124</b></td>
+          <td><b>Zlato — víkendová akcia</b><span class="sec">sada „Zlato 585"</span></td>
+          <td>2 produkty<span class="sec">10809 · 10388</span></td>
+          <td class="n">20 %</td>
+          <td>15.08.2026 – 17.08.2026</td>
+          <td><span class="badge s-scheduled"><span class="g">○</span>naplánovaná</span></td>
+          <td>— zatiaľ nezapísaná<span class="sec">fire 15.08.2026 o 06:00</span></td>
+          <td><a class="btn sm" href="kampan-detail.html">Detail</a></td>
+        </tr>
+
+        <!-- K-126 vyžaduje kľúč -->
+        <tr>
+          <td><b>K-126</b></td>
+          <td><b>September — nová sezóna</b><span class="sec">vlastný výber</span></td>
+          <td>5 produktov<span class="sec">10241 · 10455 · 10617 · 11056 · 11134</span></td>
+          <td class="n">12 %</td>
+          <td>01.09.2026 – 14.09.2026</td>
+          <td><span class="badge s-needskey"><span class="g">⧗</span>vyžaduje kľúč</span></td>
+          <td>— zatiaľ nezapísaná<span class="sec">fire 01.09. je za horizontom TTL 48 h</span></td>
+          <td><a class="btn sm" href="kampan-detail.html">Detail</a></td>
+        </tr>
+
+        <!-- K-112 čiastočná -->
+        <tr>
+          <td><b>K-112</b></td>
+          <td><b>Júlová dobierka</b><span class="sec">vlastný výber</span></td>
+          <td>2 produkty<span class="sec">10617 · 11134</span></td>
+          <td class="n">25 %</td>
+          <td>20.07.2026 – 27.07.2026</td>
+          <td><span class="badge s-partial"><span class="g">◧</span>čiastočná</span></td>
+          <td>06.08. 11:42 · 1/2 ok<span class="sec"><span class="claim">podľa vlastného zápisu z 06.08.</span></span></td>
+          <td><a class="btn sm" href="kampan-detail.html">Detail</a></td>
+        </tr>
+        <tr class="subrow">
+          <td colspan="8">
+            <div class="inner">
+              <div class="brow mini">
+                <span class="bl">11134 Náramok Aura Rosa</span>
+                <span class="tr"><span class="fl good" style="width:100%"></span></span>
+                <span class="vl"><span class="badge good"><span class="g">✓</span>ok 288 ms</span></span>
+              </div>
+              <div class="brow mini">
+                <span class="bl">10617 Prívesok Aura Aster</span>
+                <span class="tr"><span class="fl crit" style="width:100%"></span></span>
+                <span class="vl"><span class="badge critical"><span class="g">✕</span>429 rate&nbsp;limited</span></span>
+              </div>
+              <div class="tiny muted mt8">Zápis sa zastavil fail-closed po prvej chybe (I10 — sekvenčné poradie).
+                Zopakovať zlyhané je v detaile kampane; stojí <b>1 request</b> z denného rozpočtu.</div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- K-115 prepadnutá -->
+        <tr>
+          <td><b>K-115</b></td>
+          <td><b>Prsteňový týždeň</b><span class="sec">vlastný výber</span></td>
+          <td>3 produkty<span class="sec">10455 · 11056 · 10241</span></td>
+          <td class="n">20 %</td>
+          <td>27.07.2026 – 02.08.2026</td>
+          <td><span class="badge s-lapsed"><span class="g">⊘</span>prepadnutá</span></td>
+          <td>27.07. 08:04 · 3/3 ok<span class="sec">okno uplynulo 02.08.</span></td>
+          <td><a class="btn sm" href="kampan-detail.html">Detail</a></td>
+        </tr>
+
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3">6 kampaní · 4 aktívne alebo pripravované</td>
+          <td class="n">—</td>
+          <td>aktívne zľavy dnes <b>6 / 10</b></td>
+          <td colspan="3">vyžaduje zásah <b>2</b></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="note info mt14">
+    <span class="g">❖</span>
+    <div><b>Stav = stav nášho zápisu.</b> Appka nikdy nečíta zľavy zo shopu späť a netvrdí,
+      že pozná ich skutočný stav (I11). Prepadnutú kampaň nemožno „zrušiť" — zľava v shope
+      len expiruje uplynutím okna; rušiť sa dá výhradne <b>kampaň v našej DB</b>, a to
+      pred zápisom.</div>
+  </div>
+
+</div></div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>
