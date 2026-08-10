@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ležiaky striebro — jeseň · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  /* iba drobná geometria stránky, nie nové komponenty */
+  .d-top{display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start}
+  .d-top .side{display:flex;flex-direction:column;gap:8px}
+  .d-top .side .btn{justify-content:center}
+  .dhead{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
+  .dhead h1{font-size:16px;font-weight:660;letter-spacing:-.01em}
+  .dhead .sp{margin-left:auto;display:flex;gap:8px}
+  .cmp{display:grid;grid-template-columns:auto 1fr auto;gap:4px 10px;
+    align-items:center;font-size:12.5px;color:var(--ink2)}
+  .cmp .v{font-weight:640;color:var(--ink);text-align:right;white-space:nowrap}
+  .cmp .t{background:var(--track);height:8px;border-radius:99px;overflow:hidden}
+  .cmp .t i{display:block;height:100%;border-radius:99px;background:var(--deep)}
+  .cmp .t.b i{background:var(--gold2)}
+  .pas{width:100%;border-collapse:collapse;font-size:13px}
+  .pas th{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+    font-weight:650;text-align:left;padding:0 10px 6px 0}
+  .pas td{padding:5px 10px 5px 0;border-top:1px solid var(--line);color:var(--ink2)}
+  .pas td.n,.pas th.n{text-align:right;padding-right:0}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a href="prehlad.html">Prehľad</a>
+      <a href="produkty.html">Produkty</a>
+      <a class="on" href="zlavy.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <span class="hmeter">Zápisy <b>200/200</b> · pokračujem o 02:00
+        <span class="hbar"><i style="width:100%"></i></span></span>
+      <span class="hsep"></span>
+      <a class="hqueue" href="zlavy.html">Fronta <b>3 420/8 000</b></a>
+      <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="dhead">
+    <a class="lvl-3" href="zlavy.html">&#8592; Zľavy</a>
+    <h1>Ležiaky striebro — jeseň</h1>
+    <span class="state zapisuje"><i class="g"></i>zapisuje sa</span>
+    <span class="sep-dot">·</span>
+    <span class="flag">12 sa nepodarilo</span>
+    <span class="sp">
+      <button class="btn sm">Opakovať</button>
+      <button class="btn sm">Kopírovať s novými dátumami</button>
+    </span>
+  </div>
+
+  <!-- 1 · DOMINANTA: priebeh + čo sa nepodarilo -->
+  <section class="sec">
+    <div class="d-top">
+      <div>
+        <div class="prog-lg">
+          <div>
+            <span class="n num">3 420 <span class="of">/ 8 000</span></span>
+            <div class="lvl-3" style="margin-top:6px">zapísaných 3 408 · 12 sa nepodarilo</div>
+          </div>
+        </div>
+        <div class="bar"><i style="width:42.75%"></i></div>
+        <div class="prog-meta">
+          <span>Hotové <b class="est">2. 9.</b></span>
+          <span class="sep-dot">·</span>
+          <span>zľava svieti <b>4. 9. – 18. 9.</b></span>
+          <span class="sep-dot">·</span>
+          <span>dnes <b>200</b> z 200 · pokračujem o 02:00</span>
+        </div>
+        <div class="fresh">Dáta k 10. 8. 03:00</div>
+
+        <details class="tech">
+          <summary>12 sa nepodarilo — pozrieť</summary>
+          <div class="body">
+            <table>
+              <tr><td>Strieborný prsteň Aurora, biely opál</td><td><b>Shop produkt nenašiel — možno bol medzitým zmazaný</b></td></tr>
+              <tr><td>Zlaté náušnice Perla 585, sladkovodná perla</td><td><b>Shop produkt nenašiel — možno bol medzitým zmazaný</b></td></tr>
+              <tr><td>Zlatá retiazka Filo 585, 50 cm</td><td><b>Shop produkt nenašiel — možno bol medzitým zmazaný</b></td></tr>
+              <tr><td>Zlatý prsteň Verona 750, smaragd</td><td><b>Shop neodpovedal ani po treťom pokuse</b></td></tr>
+              <tr><td>Strieborná súprava Elyra, náušnice + prívesok</td><td><b>Shop neodpovedal ani po treťom pokuse</b></td></tr>
+              <tr><td>a ďalších 7</td><td></td></tr>
+            </table>
+            <details class="tech bare" style="margin-top:8px">
+              <summary>Technický detail</summary>
+              <div class="body mono">
+                21170 → 404 not_found · 10. 8. 08:14, 08:16, 08:20<br>
+                33028 → 404 not_found · 9. 8. 18:02, 18:06, 18:12<br>
+                35619 → 504 timeout · 8. 8. 14:03, 14:07, 14:13
+              </div>
+            </details>
+          </div>
+        </details>
+      </div>
+
+      <div class="side">
+        <details class="stopq">
+          <summary class="btn lg" style="justify-content:center">Zastaviť frontu</summary>
+          <div class="stopq-b">
+            <span>Zapísané nabehnú 4. 9. Zrušiť sa nedajú.</span>
+            <button class="btn sm danger">Áno, zastaviť</button>
+          </div>
+        </details>
+        <button class="btn">Skúsiť 12 znova</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · Parametre: pásma -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Pásma</h2>
+      <div class="act lvl-3">Priemerná cena vo výbere 46,20 € · dopad na maržu
+        <span class="lockline">odomkne sa po doplnení nákupných cien</span></div>
+    </div>
+    <table class="pas">
+      <thead><tr><th>Pásmo</th><th>Pravidlo</th><th class="n">Produktov</th><th class="n">Zľava</th></tr></thead>
+      <tbody>
+        <tr><td><b class="lvl-2">A</b></td><td>0 predaných za 360 dní</td><td class="n num">3 180</td><td class="n num"><b class="lvl-2">30 %</b></td></tr>
+        <tr><td><b class="lvl-2">B</b></td><td>0 predaných za 180 dní</td><td class="n num">3 420</td><td class="n num"><b class="lvl-2">20 %</b></td></tr>
+        <tr><td><b class="lvl-2">C</b></td><td>1–2 predané za 180 dní</td><td class="n num">1 400</td><td class="n num"><b class="lvl-2">15 %</b></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 3 · Výkon — tri uhly vedľa seba, len čísla -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Výkon výberu</h2>
+      <div class="act lvl-3">tržby za 30 dní</div>
+    </div>
+    <div class="grid3">
+
+      <div class="chart">
+        <div class="ct">Pred zľavou</div>
+        <div class="cmp">
+          <span>11. 7. – 10. 8. 2026</span>
+          <span class="t"><i style="width:63%"></i></span>
+          <span class="v">1 240 €</span>
+          <span>11. 6. – 10. 7. 2026</span>
+          <span class="t b"><i style="width:100%"></i></span>
+          <span class="v">1 970 €</span>
+        </div>
+        <div class="lvl-3" style="margin-top:8px">42 ks · 71 ks</div>
+      </div>
+
+      <div class="chart">
+        <div class="ct">Vlani rovnaké obdobie</div>
+        <div class="cmp">
+          <span>11. 7. – 10. 8. 2026</span>
+          <span class="t"><i style="width:63%"></i></span>
+          <span class="v">1 240 €</span>
+          <span>11. 7. – 10. 8. 2025</span>
+          <span class="t b"><i style="width:100%"></i></span>
+          <span class="v">1 980 €</span>
+        </div>
+        <div class="lvl-3" style="margin-top:8px">42 ks · 68 ks</div>
+      </div>
+
+      <div class="chart">
+        <div class="ct">Zlacnené vs nezlacnené</div>
+        <div class="cmp">
+          <span>zlacnené 2 380</span>
+          <span class="t"><i style="width:12%"></i></span>
+          <span class="v">9 460 €</span>
+          <span>nezlacnené 38 103</span>
+          <span class="t b"><i style="width:100%"></i></span>
+          <span class="v">80 600 €</span>
+        </div>
+        <div class="lvl-3" style="margin-top:8px">3,97 € / produkt · 2,12 € / produkt</div>
+      </div>
+
+    </div>
+    <div class="lvl-3" style="margin-top:6px">Zľava svieti až od 4. 9.</div>
+  </section>
+
+  <!-- 4 · Položky: súhrn + zlyhané a podozrivé -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Položky</h2>
+      <div class="act lvl-3">8 000 celkom · 3 408 zapísaných · 4 580 čaká · 12 sa nepodarilo</div>
+    </div>
+
+    <div class="tbl-frame">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Názov</th><th class="n">Cena</th><th class="n">Predané 180 d</th>
+            <th class="n">Sklad</th><th>Pásmo</th><th>Zapísané</th><th>Poznámka</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="name">Strieborný prsteň Aurora, biely opál</td><td class="n">49,00 €</td><td class="n">0</td><td class="n">7</td><td>A · 30 %</td><td><span class="sig warn">nie</span></td><td>Shop produkt nenašiel</td></tr>
+          <tr><td class="name">Zlaté náušnice Perla 585, sladkovodná perla</td><td class="n">214,00 €</td><td class="n">0</td><td class="n">3</td><td>B · 20 %</td><td><span class="sig warn">nie</span></td><td>Shop produkt nenašiel</td></tr>
+          <tr><td class="name">Zlatá retiazka Filo 585, 50 cm</td><td class="n">268,00 €</td><td class="n">0</td><td class="n">1</td><td>B · 20 %</td><td><span class="sig warn">nie</span></td><td>Shop produkt nenašiel</td></tr>
+          <tr><td class="name">Zlatý prsteň Verona 750, smaragd</td><td class="n">742,00 €</td><td class="n">0</td><td class="n">1</td><td>A · 30 %</td><td><span class="sig warn">nie</span></td><td>Shop neodpovedal</td></tr>
+          <tr><td class="name">Strieborná súprava Elyra, náušnice + prívesok</td><td class="n">62,00 €</td><td class="n">0</td><td class="n">6</td><td>A · 30 %</td><td><span class="sig warn">nie</span></td><td>Shop neodpovedal</td></tr>
+          <tr class="muted"><td class="name">a ďalších 7, ktoré sa nepodarilo</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td>—</td><td></td><td></td></tr>
+        </tbody>
+      </table>
+      <div class="tbl-foot">
+        <span>Zobrazujem len 12, ktoré sa nepodarilo. Ak niekto zmení percentá
+          v administrácii shopu, nevieme o tom.</span>
+        <a href="#">Stiahnuť celý zoznam</a>
+      </div>
+    </div>
+
+    <details class="tech">
+      <summary>Audit — posledných 6 záznamov</summary>
+      <div class="body">
+        <table>
+          <tr><td>10. 8. 10:04</td><td><b>Zapísaných 20</b> · pásmo B · 20 %</td></tr>
+          <tr><td>10. 8. 08:20</td><td><b>3 pokusy neúspešné</b> · 21170, 33028, 38104</td></tr>
+          <tr><td>9. 8. 02:00</td><td><b>Denný rozpočet obnovený</b> · 0/200</td></tr>
+          <tr><td>7. 8. 16:12</td><td><b>Štart posunutý</b> 3. 9. → 4. 9. · sklz 1 deň</td></tr>
+          <tr><td>24. 7. 09:47</td><td><b>Fronta spustená</b> · 8 000 položiek, 3 pásma</td></tr>
+          <tr><td>24. 7. 09:41</td><td><b>Zľava zostavená</b> · potvrdené ručne (8000)</td></tr>
+        </table>
+        <div style="margin-top:6px"><a href="nastavenia.html#audit">Celý audit v Nastaveniach</a></div>
+      </div>
+    </details>
+  </section>
+
+</main>
+</body>
+</html>

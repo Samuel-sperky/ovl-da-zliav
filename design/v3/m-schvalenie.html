@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Schválenie zľavy (mobil) · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  .m-row{display:flex;align-items:baseline;gap:10px;padding:7px 0;
+    border-bottom:1px solid var(--line);font-size:13px}
+  .m-row:last-child{border-bottom:0}
+  .m-row .k{color:var(--dim);font-size:12px}
+  .m-row .v{margin-left:auto;font-weight:620;color:var(--ink)}
+  .m-band{display:grid;grid-template-columns:auto 1fr auto;gap:3px 10px;
+    padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .m-band:last-child{border-bottom:0}
+  .m-band .p{font-weight:640;color:var(--ink)}
+  .m-band .r{color:var(--dim);font-size:12px;grid-column:2}
+  .m-band .q{text-align:right;font-weight:640;color:var(--ink)}
+  .stepbar .btn{flex:1;justify-content:center}
+</style>
+</head>
+<body class="mob">
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a href="m-prehlad.html">Prehľad</a>
+      <a href="m-produkty.html">Produkty</a>
+      <a class="on" href="m-schvalenie.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <a class="hqueue" href="m-schvalenie.html">Fronta <b>3 420/8 000</b></a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="mbudget">Zápisy <b>100/200</b> dnes · ďalšia dávka <b>12:00</b>
+    <span class="hbar"><i style="width:50%"></i></span></div>
+
+  <!-- 1 · DOMINANTA: počet produktov -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Na schválenie</h2>
+      <div class="act"><span class="state pripravena"><span class="g"></span>pripravená</span></div>
+    </div>
+    <div class="lvl-2" style="margin-bottom:6px"><b>Náušnice bez pohybu</b></div>
+    <div class="lvl-1"><span class="big">1 240</span>
+      <span class="sub">produktov · 25 %</span></div>
+    <div class="prog-meta">
+      <span>Zľava <b>1. 10. – 15. 10. 2026</b></span>
+    </div>
+    <div class="fresh">Dáta k 10. 8. 03:00</div>
+  </section>
+
+  <!-- 2 · Súhrn -->
+  <section class="sec">
+    <div class="sec-h"><h2>Súhrn</h2></div>
+    <div class="m-band">
+      <span class="p">Jedno pásmo</span><span class="q">25 %</span>
+      <span class="r">0 predaných za 180 dní · náušnice</span>
+    </div>
+    <div class="m-row"><span class="k">Priemerná cena</span><span class="v">31,40 €</span></div>
+    <div class="m-row"><span class="k">Dopad na maržu</span>
+      <span class="v lockline">odomkne sa po doplnení nákupných cien</span></div>
+    <div class="m-row"><span class="k">Zapisovanie</span>
+      <span class="v est">3. 9. – 9. 9.</span></div>
+    <div class="m-row"><span class="k">Rozpočet</span>
+      <span class="v">delí sa s Ležiakmi · dnes 0 zo 200</span></div>
+    <details class="tech">
+      <summary>Technický detail</summary>
+      <div class="body">
+        <table>
+          <tr><td>Filter</td><td>kategória náušnice · predané 180 d = 0 · sklad &gt; 0</td></tr>
+          <tr><td>Zostavené</td><td>9. 8. 2026 18:12</td></tr>
+          <tr><td>Odhad marže</td><td>nepočítame — chýbajú nákupné ceny</td></tr>
+          <tr><td>Dávky</td><td>20 zápisov / 2 h · 200 za deň</td></tr>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <!-- 3 · Vzorka -->
+  <section class="sec">
+    <div class="sec-h"><h2>Vzorka</h2>
+      <div class="act lvl-3">3 z 1 240</div></div>
+    <div class="m-row"><span class="k">Strieborné náušnice Lumen, kubický zirkón</span>
+      <span class="v">34,90 → 26,20 €</span></div>
+    <div class="m-row"><span class="k">Zlaté náušnice Perla 585, sladkovodná perla</span>
+      <span class="v">214,00 → 160,50 €</span></div>
+    <div class="m-row"><span class="k">Strieborné náušnice Tara, visiace kvapky</span>
+      <span class="v">29,90 → 22,40 €</span></div>
+  </section>
+
+  <!-- 4 · Potvrdenie ručne vpísaným počtom -->
+  <section class="sec">
+    <div class="sec-h"><h2>Potvrdenie</h2></div>
+    <label class="field">
+      <span class="lb">Napíšte počet produktov</span>
+      <input class="inp big" value="" placeholder="1240" inputmode="numeric">
+    </label>
+    <div class="hint">Zapíše sa 1 240 produktov so zľavou 25 %.
+      Skúška zapíše vzorku 10 · minie 10 z dnešných 200 zápisov.</div>
+  </section>
+
+</main>
+
+<div class="stepbar">
+  <div class="sp" style="width:100%;margin-left:0">
+    <button class="btn">Skúška naprázdno</button>
+    <button class="btn primary off">Zaradiť do fronty</button>
+  </div>
+</div>
+
+</body>
+</html>

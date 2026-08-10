@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prehľad (tmavá téma) · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  /* iba drobná geometria stránky, nie nové komponenty */
+  .ov-top{display:grid;grid-template-columns:1fr 300px;gap:20px;align-items:end}
+  .ov-mid{display:grid;grid-template-columns:1fr 500px;gap:12px;align-items:start}
+  .ov-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+  .ov-actions .btn{justify-content:center}
+  .sparkwrap{margin-top:2px}
+  .colh{text-transform:uppercase;letter-spacing:.13em;font-size:10px;font-weight:650;
+    padding-bottom:4px;border-bottom:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a class="on" href="prehlad.html">Prehľad</a>
+      <a href="produkty.html">Produkty</a>
+      <a href="zlavy.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <span class="hmeter">Zápisy <b>100/200</b> dnes
+        <span class="hbar"><i style="width:50%"></i></span></span>
+      <span class="hsep"></span>
+      <a class="hqueue" href="zlavy.html">Fronta <b>3 420/8 000</b></a>
+      <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- 1 · DOMINANTA: priebeh bežiacej fronty -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Zapisuje sa</h2>
+      <div class="act">
+        <span class="state zapisuje"><span class="g"></span>zapisuje sa</span>
+        <span class="sep-dot">·</span>
+        <span class="flag">12 sa nepodarilo</span>
+      </div>
+    </div>
+
+    <div class="ov-top">
+      <div>
+        <div class="prog-lg">
+          <div class="n">3 420 <span class="of">/ 8 000</span></div>
+          <div class="side lvl-2"><b>Ležiaky striebro — jeseň</b><br>
+            <span class="lvl-3">8 000 produktov · 3 pásma · 30 / 20 / 15 %</span></div>
+        </div>
+        <div class="bar"><i style="width:42.75%"></i></div>
+        <div class="prog-meta">
+          <span>Hotové <b class="est">2. 9.</b></span>
+          <span class="sep-dot">·</span>
+          <span>Štart zľavy <b>4. 9.</b></span>
+          <span class="sep-dot">·</span>
+          <span>Okno <b>4. 9. – 18. 9.</b></span>
+          <span class="sep-dot">·</span>
+          <span>Dnes zapísaných <b>100</b> z 200</span>
+        </div>
+      </div>
+      <div class="ov-actions">
+        <a class="btn primary" href="zlava-detail.html">Detail zľavy</a>
+        <details class="stopq">
+          <summary class="btn ghost" style="justify-content:center">Zastaviť frontu</summary>
+          <div class="stopq-b">
+            <span>Zapísané zostanú. Zrušiť sa nedajú.</span>
+            <button class="btn sm danger">Áno, zastaviť</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · Čo čaká na zásah + Nová zľava a návrhy -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Čaká na vás</h2>
+      <div class="act"><a class="btn primary" href="nova-zlava.html">Nová zľava</a></div>
+    </div>
+
+    <div class="ov-mid">
+      <div>
+        <div class="colh lvl-3">Návrhy</div>
+        <div class="suggest">
+          <b>11 640</b> produktov sa 180 dní nepredalo
+          <span class="lvl-3">návrh 30 / 20 %</span>
+          <a class="btn sm" href="nova-zlava.html">Použiť</a>
+        </div>
+        <div class="suggest">
+          <b>1 240</b> náušníc čaká pripravených na zaradenie
+          <span class="lvl-3">okno 1. 10. – 15. 10.</span>
+          <a class="btn sm" href="zlava-detail.html">Otvoriť</a>
+        </div>
+      </div>
+
+      <div>
+        <div class="colh lvl-3">Vyžaduje pozornosť</div>
+        <div class="suggest">
+          <span class="flag">12 sa nepodarilo</span>
+          <span class="lvl-3">Ležiaky striebro — jeseň</span>
+          <a class="btn sm" href="zlava-detail.html">Pozrieť</a>
+        </div>
+        <div class="suggest">
+          <span class="flag">3 sa nepodarilo</span>
+          <span class="lvl-3">Prstene 2024 — dopredaj</span>
+          <a class="btn sm" href="zlava-detail.html">Pozrieť</a>
+        </div>
+        <div class="suggest">
+          <span class="sig lock">Marža a obrátkovosť zamknuté</span>
+          <span class="lvl-3">chýbajú nákupné ceny</span>
+          <a class="btn sm" href="nastavenia.html">Nastavenia</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Tržby -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Tržby</h2>
+      <div class="act"><span class="lvl-3">14 dní · 40 205 €</span></div>
+    </div>
+
+    <div class="grid2" style="grid-template-columns:300px 1fr;align-items:start">
+      <div class="kpis" style="grid-template-columns:1fr">
+        <div class="kpi">
+          <div class="k">Dnes do 11:40</div>
+          <div class="v">1 180 €</div>
+          <div class="s">Včera v tomto čase <span class="est">1 040 €</span> · +13 %</div>
+        </div>
+        <div class="kpi">
+          <div class="k">Priemer za deň</div>
+          <div class="v">3 002 €</div>
+          <div class="s">13 uzavretých dní · 412 objednávok</div>
+        </div>
+        <div class="kpi">
+          <div class="k">Trend 14 dní</div>
+          <div class="v">+4 %</div>
+          <div class="s">28. 7. – 10. 8. 2026</div>
+        </div>
+      </div>
+
+      <div class="chart" style="border:0;box-shadow:none;padding:0 0 0 8px">
+        <div class="ct">28. 7. – 10. 8. · denné tržby</div>
+        <svg viewBox="0 0 880 150" preserveAspectRatio="none" role="img" aria-label="Denné tržby za 14 dní">
+          <line class="ax" x1="30" y1="130" x2="870" y2="130"/>
+          <line class="ax" x1="30" y1="70"  x2="870" y2="70"  stroke-dasharray="2 4"/>
+          <line class="ax" x1="30" y1="10"  x2="870" y2="10"  stroke-dasharray="2 4"/>
+          <text x="0" y="133">0</text>
+          <text x="0" y="73">2 000</text>
+          <text x="0" y="13">4 000</text>
+
+          <path class="area" d="M30,41.8 93.8,36.6 157.7,46.6 221.5,20.8 285.4,56.2 349.2,64.6 413.1,30.4 476.9,25.6 540.8,33.7 604.6,38.2 668.5,13.3 732.3,50.8 796.2,60.7 796.2,130 30,130 Z"/>
+          <polyline class="line" points="30,41.8 93.8,36.6 157.7,46.6 221.5,20.8 285.4,56.2 349.2,64.6 413.1,30.4 476.9,25.6 540.8,33.7 604.6,38.2 668.5,13.3 732.3,50.8 796.2,60.7"/>
+          <polyline class="line proj" points="796.2,60.7 860,94.6"/>
+          <line class="line trend" x1="30" y1="48" x2="796.2" y2="41"/>
+          <circle cx="860" cy="94.6" r="3.4" fill="var(--gold2)"/>
+          <text x="836" y="112">dnes</text>
+
+          <text x="18"  y="146">28.7.</text>
+          <text x="209" y="146">31.7.</text>
+          <text x="401" y="146">3.8.</text>
+          <text x="593" y="146">6.8.</text>
+          <text x="784" y="146">9.8.</text>
+        </svg>
+      </div>
+    </div>
+    <div class="fresh">Dáta k 10. 8. 03:00 · dnešné tržby priebežne</div>
+  </section>
+
+  <!-- 4 · Zľavy naživo -->
+  <section class="sec" style="padding:0">
+    <div class="zlist" style="border:0;border-radius:0">
+      <div class="zlist-h">Zľavy naživo</div>
+      <div class="zrow">
+        <span class="nm">Prstene 2024 — dopredaj</span>
+        <span><span class="state bezi"><span class="g"></span>beží</span>
+          <span class="sep-dot">·</span><span class="flag">3 sa nepodarilo</span></span>
+        <span class="lvl-3">640 produktov</span>
+        <span class="lvl-2">35 %</span>
+        <span class="lvl-3">1. 8. – 31. 8.</span>
+        <span class="lvl-3">tržby zlacnených <b>4 180 €</b></span>
+      </div>
+      <div class="zrow">
+        <span class="nm">Ležiaky striebro — jeseň</span>
+        <span><span class="state zapisuje"><span class="g"></span>zapisuje sa</span>
+          <span class="sep-dot">·</span><span class="flag">12 sa nepodarilo</span></span>
+        <span class="lvl-3">8 000 produktov</span>
+        <span class="lvl-2">3 pásma</span>
+        <span class="lvl-3">4. 9. – 18. 9.</span>
+        <span class="prog-sm"><span class="bar"><i style="width:42.75%"></i></span>
+          <span class="n">3 420/8 000</span></span>
+      </div>
+      <div class="zrow">
+        <span class="nm">Náušnice bez pohybu</span>
+        <span><span class="state pripravena"><span class="g"></span>pripravená</span></span>
+        <span class="lvl-3">1 240 produktov</span>
+        <span class="lvl-2">25 %</span>
+        <span class="lvl-3">1. 10. – 15. 10.</span>
+        <span class="lvl-3">dnes <b>0</b> zo 200 zápisov</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

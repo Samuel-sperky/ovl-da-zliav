@@ -1,0 +1,564 @@
+/* ==========================================================================
+   Aura Zľavy V3 — dizajnový systém mockupov (E1)
+   Zdroj pravdy: docs/40-ODPOVEDE-V3.md · design/v3/ARCHITEKTURA.md
+   Používa sa výhradne v design/v3/*.html. Neduplikuj tento CSS do stránok.
+
+   PRAVIDLÁ, KTORÉ TENTO SÚBOR VYNUCUJE
+   - Svetlá téma je PREDVOLENÁ (bare :root). Tmavá cez <html data-theme="dark">.
+   - Hustá typografia 13–15 px, tabulárne číslice všade.
+   - Tri úrovne dôležitosti: .lvl-1 (dominanta) · .lvl-2 (bežné) · .lvl-3 (potlačené).
+     Na obrazovke je presne JEDNA .lvl-1.
+   - Stav = farba + glyf + text. Teal a zlatá NIKDY ako stavová farba
+     (výnimka: bodka stavu zľavy „zapisuje sa"/„beží" — brandový stav appky,
+     nie signál dobrý/zlý; nesie glyf aj text, takže pravidlo platí).
+   - Technika ide do <details class="tech">. Nenápadné.
+
+   ========== HOTOVÁ HLAVIČKA — SKOPÍRUJ, NEKRESLI ZNOVU =====================
+   Vlož ako prvý prvok <body>. Meň len: aktívny tab (.on), čísla, stav fronty.
+
+   <header class="hdr">
+     <div class="hdr-in">
+       <span class="brand">Aura <b>Zľavy</b></span>
+       <nav class="tabs">
+         <a class="on" href="prehlad.html">Prehľad</a>
+         <a href="produkty.html">Produkty</a>
+         <a href="zlavy.html">Zľavy</a>
+         <a href="nastavenia.html">Nastavenia</a>
+       </nav>
+       <div class="hdr-r">
+         <span class="hmeter">Zápisy <b>100/200</b> dnes
+           <span class="hbar"><i style="width:50%"></i></span></span>
+         <span class="hsep"></span>
+         <a class="hqueue" href="zlavy.html">Fronta <b>3 420/8 000</b></a>
+         <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+       </div>
+     </div>
+   </header>
+
+   Varianty pravej strany:
+     vyčerpaný rozpočet → Zápisy <b>200/200</b> · pokračujem o 02:00   (neutrálne!)
+     prázdna fronta     → <a class="hqueue off" ...>Fronta prázdna</a>
+     ostrý zápis vypnutý→ pod .hdr vlož <div class="hdr-strip">Ostrý zápis vypnutý</div>
+   ========================================================================== */
+
+/* ---------- 1. TOKENY ---------------------------------------------------- */
+:root{
+  /* Brand — rodina Aura. NIKDY nie stavová farba. */
+  --teal:#05bcc4; --deep:#03797e; --teal3:#7fd0d4;
+  --gold:#d8b878; --gold2:#a8853c; --gold3:#8a6417;
+
+  /* Stavová paleta (svetlá = predvolená) */
+  --st-critical:#C62F26;   /* strata dát, zastavený zápis */
+  --st-attention:#9A6C00;  /* príznak „nepodarilo sa" */
+  --st-good:#2E7D32;
+  --st-idle:#667574;
+
+  /* Povrchy a text — svetlá téma */
+  --paper:#f7f5f7; --paper2:#ffffff; --paper3:#f1eef2;
+  --ink:#141b1a; --ink2:#3d4b49; --dim:#6b7877;
+  --line:#e3dde4; --line2:#cfc7d1; --track:#e9e4ea;
+  --shadow:0 1px 2px rgba(19,27,26,.07);
+  --sel:#eef9f9;           /* označený riadok */
+  --barfill:var(--deep);
+
+  --r:9px; --r-sm:6px; --r-pill:99px;
+  --w:1440px;
+  --hdr-h:56px;
+}
+
+:root[data-theme="dark"]{
+  --gold2:#c9a869;
+  --st-critical:#E5534B;
+  --st-attention:#D9A441;
+  --st-good:#3FA045;
+  --st-idle:#8A9895;
+
+  --paper:#0e1413; --paper2:#131b1a; --paper3:#182220;
+  --ink:#e8f0ef; --ink2:#b9c9c7; --dim:#849694;
+  --line:#22302e; --line2:#31423f; --track:#1b2523;
+  --shadow:0 1px 0 rgba(0,0,0,.35);
+  --sel:#152a2a;
+  --barfill:var(--teal);
+}
+
+/* ---------- 2. ZÁKLAD ---------------------------------------------------- */
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  font-size:14px;line-height:1.45;
+  background:var(--paper);color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--deep);text-decoration:none}
+:root[data-theme="dark"] a{color:var(--teal)}
+button{font:inherit;cursor:pointer}
+.wrap{max-width:var(--w);margin:0 auto;padding:16px 24px 28px}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}
+
+/* ---------- 3. TRI ÚROVNE DÔLEŽITOSTI ------------------------------------
+   Používaj VÝHRADNE tieto triedy na určenie váhy. Nepridávaj vlastné veľkosti.
+   .lvl-1  dominanta — presne raz na obrazovku (číslo 44–64 px)
+   .lvl-2  bežné     — obsah, s ktorým sa pracuje (13–15 px, plná farba)
+   .lvl-3  potlačené — kontext, popisky, hotové veci (11.5–12.5 px, --dim)
+   -------------------------------------------------------------------------- */
+.lvl-1{color:var(--ink);font-weight:660;letter-spacing:-.025em;line-height:1.02}
+.lvl-1 .big{font-size:64px;display:block}
+.lvl-1 .big.sm{font-size:44px}
+.lvl-1 .sub{font-size:13px;font-weight:500;color:var(--ink2);letter-spacing:0}
+
+.lvl-2{font-size:14px;color:var(--ink);font-weight:500}
+.lvl-2 b,b.lvl-2{font-weight:640}
+
+.lvl-3{font-size:12px;color:var(--dim);font-weight:500;letter-spacing:0}
+.lvl-3 b{color:var(--ink2);font-weight:600}
+
+/* Sekcia: nadpis je vždy lvl-3-veľkosti — dominantou je ČÍSLO, nie nadpis. */
+.sec{background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px;box-shadow:var(--shadow)}
+.sec + .sec{margin-top:12px}
+.sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  margin-bottom:10px}
+.sec-h h2{font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--dim);font-weight:650}
+.sec-h .act{display:flex;gap:8px;align-items:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.row{display:flex;align-items:center;gap:10px}
+.row.wrapx{flex-wrap:wrap}
+.spread{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.gap-t{margin-top:12px}
+
+/* Čerstvosť dát — jeden riadok pod skupinou čísel, nikdy v hlavičke */
+.fresh{font-size:12px;color:var(--dim);margin-top:6px}
+
+/* ---------- 4. HLAVIČKA -------------------------------------------------- */
+.hdr{position:sticky;top:0;z-index:40;height:var(--hdr-h);
+  background:var(--paper2);border-bottom:1px solid var(--line)}
+.hdr-in{max-width:var(--w);margin:0 auto;height:var(--hdr-h);padding:0 24px;
+  display:flex;align-items:center;gap:26px}
+.brand{font-size:14px;font-weight:600;color:var(--ink2);letter-spacing:-.01em;
+  white-space:nowrap}
+.brand b{color:var(--deep);font-weight:680}
+:root[data-theme="dark"] .brand b{color:var(--teal)}
+.tabs{display:flex;gap:2px}
+.tabs a{font-size:13.5px;font-weight:550;color:var(--dim);padding:7px 12px;
+  border-radius:var(--r-sm);line-height:1}
+.tabs a:hover{color:var(--ink2);background:var(--paper3)}
+.tabs a.on{color:var(--ink);background:var(--paper3);font-weight:650;
+  box-shadow:inset 0 -2px 0 var(--teal)}
+.hdr-r{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:12.5px;
+  color:var(--dim);white-space:nowrap}
+.hdr-r b{color:var(--ink2);font-weight:640}
+.hbar{display:inline-block;width:46px;height:5px;border-radius:var(--r-pill);
+  background:var(--track);overflow:hidden;vertical-align:middle;margin-left:6px}
+.hbar i{display:block;height:100%;background:var(--st-idle);border-radius:var(--r-pill)}
+.hsep{width:1px;height:16px;background:var(--line)}
+.hqueue{color:var(--dim)}
+.hqueue b{color:var(--deep)}
+:root[data-theme="dark"] .hqueue b{color:var(--teal)}
+.hqueue.off b,.hqueue.off{color:var(--dim);font-weight:500}
+.tglt{background:transparent;border:1px solid var(--line);border-radius:var(--r-pill);
+  color:var(--dim);width:28px;height:28px;line-height:1;font-size:13px}
+.hdr-strip{background:var(--st-critical);color:#fff;text-align:center;
+  font-size:11.5px;font-weight:650;letter-spacing:.12em;text-transform:uppercase;
+  padding:5px 0}
+
+/* ---------- 5. STAVY: farba + GLYF + text -------------------------------- */
+/* Glyf je súčasť značky, nie dekorácia. Nikdy nepoužívaj samotnú .dot. */
+.state{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;
+  font-weight:600;color:var(--ink2);white-space:nowrap}
+.state .g{font-size:11px;line-height:1;width:11px;text-align:center}
+
+.state.pripravena{color:var(--st-idle)}
+.state.pripravena .g::before{content:"○"}
+.state.zapisuje{color:var(--deep)}
+.state.zapisuje .g::before{content:"◆"}   /* ◐ väčšina fontov nemá → rámček */
+.state.bezi{color:var(--gold2)}
+.state.bezi .g::before{content:"●"}
+.state.skoncila{color:var(--dim);font-weight:500}
+.state.skoncila .g::before{content:"·"}
+:root[data-theme="dark"] .state.zapisuje{color:var(--teal)}
+
+/* Príznak — vždy ZA stavom, menším písmom, jantárový. Nikdy nie stav. */
+.flag{font-size:11.5px;color:var(--st-attention);font-weight:600;white-space:nowrap}
+.flag::before{content:"▲ ";font-size:9px}
+.flag.neutral{color:var(--dim);font-weight:500}
+.flag.neutral::before{content:"· "}
+.sep-dot{color:var(--line2);padding:0 2px}
+
+/* Signálne značky (mimo stavov zľavy) */
+.sig{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600}
+.sig::before{width:10px;text-align:center}
+.sig.ok{color:var(--st-good)} .sig.ok::before{content:"✓"}
+.sig.warn{color:var(--st-attention)} .sig.warn::before{content:"▲"}
+.sig.bad{color:var(--st-critical)} .sig.bad::before{content:"✕"}
+.sig.idle{color:var(--st-idle)} .sig.idle::before{content:"○"}
+.sig.lock{color:var(--dim);font-weight:500} .sig.lock::before{content:"–"}
+
+/* Odhad — znak ≈ + tlmenejší odtieň (P7) */
+.est{color:var(--ink2);opacity:.82;font-weight:550}
+.est::before{content:"≈ "}
+
+/* ---------- 6. PRIEBEH FRONTY ------------------------------------------- */
+/* Veľká varianta: dominanta obrazovky. Malá: v riadku zoznamu. */
+.prog-lg{display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap}
+.prog-lg .n{font-size:64px;font-weight:660;letter-spacing:-.03em;line-height:.95;
+  color:var(--ink)}
+.prog-lg .n .of{color:var(--dim);font-weight:550;font-size:34px}
+.prog-lg .side{padding-bottom:6px}
+.bar{height:10px;border-radius:var(--r-pill);background:var(--track);overflow:hidden;
+  width:100%;margin-top:12px}
+.bar i{display:block;height:100%;background:var(--barfill);border-radius:var(--r-pill)}
+.bar.done i{background:var(--st-idle)}
+.bar.paused i{background:repeating-linear-gradient(135deg,var(--st-idle) 0 6px,transparent 6px 12px);
+  background-color:var(--track)}
+.prog-meta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px;
+  font-size:12.5px;color:var(--dim)}
+.prog-meta b{color:var(--ink2);font-weight:620}
+
+.prog-sm{display:flex;align-items:center;gap:8px;min-width:180px}
+.prog-sm .bar{height:5px;margin:0;flex:1}
+.prog-sm .n{font-size:12px;color:var(--ink2);font-weight:620;white-space:nowrap}
+
+/* ---------- 7. TABUĽKA NA TISÍCE RIADKOV --------------------------------- */
+.tbl-frame{border:1px solid var(--line);border-radius:var(--r);background:var(--paper2);
+  overflow:hidden;display:flex;flex-direction:column}
+.tbl-scroll{overflow:auto;max-height:calc(100vh - 300px)}
+table.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+table.tbl thead th{position:sticky;top:0;z-index:2;background:var(--paper2);
+  font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+  font-weight:650;text-align:left;padding:8px 12px;
+  border-bottom:1px solid var(--line2);white-space:nowrap}
+table.tbl td{padding:6px 12px;border-bottom:1px solid var(--line);color:var(--ink2);
+  white-space:nowrap;line-height:1.35}
+table.tbl tbody tr:hover td{background:var(--paper3)}
+table.tbl tbody tr.on td{background:var(--sel)}
+table.tbl td.name{color:var(--ink);font-weight:550;max-width:340px;overflow:hidden;
+  text-overflow:ellipsis}
+table.tbl td.n,table.tbl th.n{text-align:right;font-variant-numeric:tabular-nums}
+table.tbl td.n b{color:var(--ink);font-weight:620}
+table.tbl td.locked{color:var(--dim)}
+table.tbl .sel,table.tbl th.sel{width:34px;padding-right:0}
+table.tbl tr.muted td{color:var(--dim)}
+.tbl-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:8px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+
+/* Checkbox */
+.cb{appearance:none;width:14px;height:14px;border:1.5px solid var(--line2);
+  border-radius:4px;background:var(--paper2);vertical-align:middle;position:relative}
+.cb:checked{background:var(--deep);border-color:var(--deep)}
+.cb:checked::after{content:"✓";position:absolute;inset:0;color:#fff;font-size:10px;
+  line-height:11px;text-align:center;font-weight:700}
+.cb:indeterminate{background:var(--deep);border-color:var(--deep)}
+.cb:indeterminate::after{content:"–";position:absolute;inset:0;color:#fff;font-size:11px;
+  line-height:11px;text-align:center;font-weight:700}
+:root[data-theme="dark"] .cb:checked,:root[data-theme="dark"] .cb:indeterminate{
+  background:var(--teal);border-color:var(--teal)}
+:root[data-theme="dark"] .cb:checked::after,
+:root[data-theme="dark"] .cb:indeterminate::after{color:#08201f}
+
+/* Stránkovanie */
+.pager{display:flex;gap:4px;align-items:center}
+.pager a,.pager span{font-size:12px;padding:3px 8px;border-radius:var(--r-sm);
+  color:var(--dim)}
+.pager a:hover{background:var(--paper3);color:var(--ink2)}
+.pager .cur{background:var(--paper3);color:var(--ink);font-weight:640}
+
+/* ---------- 8. SPODNÁ LIŠTA VÝBERU --------------------------------------- */
+.selbar{position:sticky;bottom:0;z-index:30;display:flex;align-items:center;gap:14px;
+  background:#141b1a;color:#f2f7f6;border-radius:var(--r);padding:10px 14px;
+  box-shadow:0 -2px 14px rgba(0,0,0,.18);margin-top:12px}
+:root[data-theme="dark"] .selbar{background:#1d2927;border:1px solid var(--line2)}
+.selbar .cnt{font-size:20px;font-weight:660;letter-spacing:-.02em}
+.selbar .cnt small{font-size:12px;font-weight:500;opacity:.7;margin-left:6px}
+.selbar .all{font-size:12.5px;color:var(--teal3);border-bottom:1px dotted currentColor}
+.selbar .sp{margin-left:auto;display:flex;gap:8px;align-items:center}
+.selbar .btn.ghost{color:#dfe9e8;border-color:rgba(255,255,255,.22)}
+.selbar .btn.ghost:hover{background:rgba(255,255,255,.08)}
+
+/* ---------- 9. TLAČIDLÁ, POLIA, CHIPY ------------------------------------ */
+.btn{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;
+  padding:7px 14px;border-radius:var(--r-sm);border:1px solid var(--line2);
+  background:var(--paper2);color:var(--ink);line-height:1.2}
+.btn:hover{background:var(--paper3)}
+.btn.primary{background:var(--deep);border-color:var(--deep);color:#fff}
+.btn.primary:hover{background:#046b70}
+.btn.lg{font-size:15px;padding:11px 20px}
+.btn.sm{font-size:12px;padding:5px 10px}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--st-critical);border-color:var(--st-critical)}
+.btn[disabled],.btn.off{opacity:.45;pointer-events:none}
+:root[data-theme="dark"] .btn.primary{background:var(--teal);border-color:var(--teal);
+  color:#08201f}
+
+.field{display:block;margin-bottom:10px}
+.field > .lb{display:block;font-size:11.5px;font-weight:600;color:var(--dim);
+  margin-bottom:4px}
+.inp{width:100%;font:inherit;font-size:13.5px;padding:7px 10px;border-radius:var(--r-sm);
+  border:1px solid var(--line2);background:var(--paper2);color:var(--ink)}
+.inp:focus{outline:2px solid var(--teal);outline-offset:-1px;border-color:var(--teal)}
+.inp.big{font-size:20px;font-weight:640;padding:10px 12px;width:160px;text-align:center}
+.inp.search{padding-left:28px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236b7877' stroke-width='1.6'><circle cx='7' cy='7' r='4.2'/><path d='M10.2 10.2 14 14'/></svg>");
+  background-repeat:no-repeat;background-position:8px 50%;background-size:14px}
+.hint{font-size:11.5px;color:var(--dim);margin-top:3px}
+
+/* Chipy — uložené filtre, prepínače období */
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  padding:4px 10px;border-radius:var(--r-pill);border:1px solid var(--line2);
+  background:var(--paper2);color:var(--ink2)}
+.chip:hover{border-color:var(--line2);background:var(--paper3)}
+.chip.on{background:var(--deep);border-color:var(--deep);color:#fff}
+:root[data-theme="dark"] .chip.on{background:var(--teal);border-color:var(--teal);color:#08201f}
+.chip .x{color:var(--dim);font-size:11px}
+.chip.lock{color:var(--dim);border-style:dashed;pointer-events:none}
+
+/* Segment (30/60/90/180/360) */
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:var(--r-sm);
+  overflow:hidden}
+.seg button{background:var(--paper2);border:0;border-right:1px solid var(--line);
+  font-size:12px;font-weight:600;color:var(--dim);padding:5px 10px}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--paper3);color:var(--ink)}
+
+/* ---------- 10. FILTROVACÍ PANEL ---------------------------------------- */
+.layout-filters{display:grid;grid-template-columns:260px 1fr;gap:14px;align-items:start}
+.filters{background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px}
+.fgroup{border-top:1px solid var(--line);padding:10px 0 8px}
+.fgroup:first-of-type{border-top:0;padding-top:0}
+.fgroup > h3{font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--dim);font-weight:650;margin-bottom:7px}
+.fopt{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--ink2);
+  padding:3px 0}
+.fopt .c{margin-left:auto;font-size:11.5px;color:var(--dim)}
+.fopt.locked{color:var(--dim)}
+.fopt.locked::after{content:"zamknuté";margin-left:auto;font-size:10.5px;color:var(--dim);
+  font-weight:500}
+.fopt.locked .c{display:none}
+
+/* ---------- 11. ZAMKNUTÉ ------------------------------------------------- */
+/* Bunka: iba tlmená pomlčka. Žiadny glyf, žiadny odstavec, žiadny žltý pruh.
+   Zamknutý STĹPEC sa v tabuľke vôbec nekreslí — je vidieť len vo filtroch. */
+.lockcell{color:var(--dim)}
+.locked-sec{position:relative;opacity:.6}
+.locked-note{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+  color:var(--dim);border:1px dashed var(--line2);border-radius:var(--r-sm);
+  padding:4px 9px}
+
+/* Zamknutý údaj v riadku kľúč–hodnota */
+.lockline{font-size:12.5px;color:var(--dim);font-weight:500}
+
+/* ---------- 12. ROZKLIK TECHNIKY ---------------------------------------- */
+details.tech{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}
+details.tech > summary{list-style:none;cursor:pointer;font-size:11.5px;color:var(--dim);
+  display:inline-flex;align-items:center;gap:5px}
+details.tech > summary::-webkit-details-marker{display:none}
+details.tech > summary::before{content:"▸";font-size:9px;transition:transform .15s}
+details.tech[open] > summary::before{content:"▾"}
+details.tech > summary:hover{color:var(--ink2)}
+details.tech .body{margin-top:7px;font-size:12px;color:var(--dim);line-height:1.5;
+  background:var(--paper3);border-radius:var(--r-sm);padding:8px 10px}
+details.tech .body b{color:var(--ink2);font-weight:600}
+details.tech .body table{width:100%;font-size:11.5px;border-collapse:collapse}
+details.tech .body td{padding:2px 0;vertical-align:top}
+details.tech .body td:first-child{color:var(--dim);width:38%}
+
+/* Rozklik bez rámu (napr. pri príznaku v riadku) */
+details.tech.bare{border-top:0;padding-top:0;margin-top:0}
+
+/* ---------- 12b. POISTKA PRI NEZVRATNOM KROKU ---------------------------
+   Zastaviť frontu je zásah do produkcie. Klik otvorí krátke potvrdenie. */
+.stopq > summary{list-style:none;cursor:pointer}
+.stopq > summary::-webkit-details-marker{display:none}
+.stopq-b{margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  border:1px solid var(--line2);border-radius:var(--r-sm);padding:8px 10px;
+  font-size:12px;color:var(--dim);background:var(--paper3)}
+.stopq-b .btn{margin-left:auto}
+
+/* ---------- 13. PRÁZDNE STAVY ------------------------------------------- */
+.empty{text-align:center;padding:34px 20px;color:var(--dim)}
+.empty .t{font-size:15px;font-weight:600;color:var(--ink2);margin-bottom:4px}
+.empty .a{margin-top:12px;display:flex;gap:8px;justify-content:center}
+
+/* Pokojný stav („Všetko beží") */
+.calm{display:flex;align-items:center;gap:12px}
+.calm .t{font-size:32px;font-weight:660;letter-spacing:-.02em}
+
+/* ---------- 14. ZOZNAM ZLIAV / KARTY ------------------------------------ */
+.zrow{display:grid;grid-template-columns:1fr 190px 110px 90px 150px 200px;gap:14px;
+  align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);
+  font-size:13.5px}
+.zrow:last-child{border-bottom:0}
+.zrow .nm{font-weight:620;color:var(--ink);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.zrow.dim{opacity:.62}
+.zlist{background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden}
+.zlist-h{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);
+  font-weight:650;padding:8px 14px;border-bottom:1px solid var(--line)}
+
+/* Návrh (rozpustený agent) — riadok s číslom a slovesom, nie karta */
+.suggest{display:flex;align-items:center;gap:12px;padding:9px 0;
+  border-bottom:1px solid var(--line);font-size:13.5px;color:var(--ink2)}
+.suggest:last-child{border-bottom:0}
+.suggest b{color:var(--ink);font-weight:640}
+.suggest .btn{margin-left:auto}
+
+/* ---------- 15. GRAFY (inline SVG) -------------------------------------- */
+.chart{background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px 14px}
+.chart .ct{font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--dim);font-weight:650;margin-bottom:8px}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart svg text{font-family:inherit;font-size:10px;fill:var(--dim)}
+.ax{stroke:var(--line);stroke-width:1}
+.line{fill:none;stroke:var(--deep);stroke-width:2;stroke-linejoin:round}
+:root[data-theme="dark"] .line{stroke:var(--teal)}
+.line.trend{stroke:var(--gold2);stroke-width:1.5;stroke-dasharray:4 3}
+/* Projekcia dneška — iný jazyk než trend: tenká bodkovaná, tlmená farba */
+.line.proj{stroke:var(--st-idle);stroke-width:1.4;stroke-dasharray:1 3;
+  stroke-linecap:round}
+.area{fill:var(--teal);opacity:.10}
+.barcol{fill:var(--deep);opacity:.75}
+:root[data-theme="dark"] .barcol{fill:var(--teal)}
+
+/* KPI trojica */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden}
+.kpi{background:var(--paper2);padding:11px 13px}
+.kpi .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+  font-weight:650;margin-bottom:5px}
+.kpi .v{font-size:22px;font-weight:660;letter-spacing:-.02em;line-height:1.05}
+.kpi .s{font-size:11.5px;color:var(--dim);margin-top:3px}
+
+/* ---------- 16. BOČNÝ PANEL (detail produktu) --------------------------- */
+.drawer{position:fixed;top:var(--hdr-h);right:0;bottom:0;width:400px;z-index:35;
+  background:var(--paper2);border-left:1px solid var(--line);
+  box-shadow:-6px 0 20px rgba(0,0,0,.10);padding:16px 18px;overflow:auto}
+.drawer-h{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+  margin-bottom:12px}
+.drawer-h .t{font-size:15px;font-weight:640;color:var(--ink);line-height:1.3}
+.drawer .close{background:transparent;border:0;color:var(--dim);font-size:16px}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+.dl dt{color:var(--dim)}
+.dl dd{color:var(--ink);font-weight:600;text-align:right}
+
+/* ---------- 17. KROKY SPRIEVODCU ---------------------------------------- */
+.steps{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
+.steps .s{display:inline-flex;align-items:center;gap:6px}
+.steps .s.on{color:var(--ink);font-weight:640}
+.steps .s .i{width:18px;height:18px;border-radius:50%;border:1px solid var(--line2);
+  display:inline-flex;align-items:center;justify-content:center;font-size:10.5px}
+.steps .s.on .i{background:var(--deep);border-color:var(--deep);color:#fff}
+.steps .s.done .i{border-color:var(--st-good);color:var(--st-good)}
+:root[data-theme="dark"] .steps .s.on .i{background:var(--teal);border-color:var(--teal);
+  color:#08201f}
+.stepbar{position:sticky;bottom:0;display:flex;align-items:center;gap:10px;
+  background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:10px 14px;margin-top:12px;box-shadow:var(--shadow)}
+.stepbar .sp{margin-left:auto;display:flex;gap:8px}
+
+/* ---------- 18. NASTAVENIA (kotvy) -------------------------------------- */
+.layout-anchors{display:grid;grid-template-columns:230px 1fr;gap:16px;align-items:start}
+.anchors{position:sticky;top:calc(var(--hdr-h) + 16px);display:flex;flex-direction:column;
+  gap:1px;background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:6px}
+.anchors a{font-size:13px;color:var(--ink2);padding:6px 10px;border-radius:var(--r-sm)}
+.anchors a:hover{background:var(--paper3)}
+.anchors a.on{background:var(--paper3);color:var(--ink);font-weight:640;
+  box-shadow:inset 2px 0 0 var(--teal)}
+
+/* ---------- 19. MOBIL ---------------------------------------------------- */
+@media (max-width:760px){
+  .wrap{padding:12px 12px 84px}
+  .hdr-in{padding:0 12px;gap:12px}
+  .tabs{order:3;position:fixed;bottom:0;left:0;right:0;z-index:40;
+    background:var(--paper2);border-top:1px solid var(--line);padding:6px 8px;
+    justify-content:space-around}
+  .tabs a{flex:1;text-align:center;font-size:12px;padding:8px 4px}
+  .hdr-r{gap:8px;font-size:11.5px}
+  .hbar,.hsep{display:none}
+
+  .grid2,.grid3,.layout-filters,.layout-anchors{grid-template-columns:1fr}
+  .anchors{position:static;flex-direction:row;overflow-x:auto}
+
+  /* Tabuľky → karty */
+  .tbl-scroll{max-height:none}
+  table.tbl thead{display:none}
+  table.tbl,table.tbl tbody,table.tbl tr,table.tbl td{display:block;width:100%}
+  table.tbl tr{border-bottom:1px solid var(--line);padding:9px 12px;
+    display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+  table.tbl td{border:0;padding:1px 0;white-space:normal;grid-column:2;
+    display:flex;justify-content:space-between;gap:10px;font-size:12.5px}
+  table.tbl td.sel{grid-column:1;grid-row:1 / span 6;align-self:start}
+  table.tbl td.name{grid-column:2;font-size:13.5px;font-weight:600;max-width:none;
+    white-space:normal}
+  table.tbl td[data-l]::before{content:attr(data-l);color:var(--dim);font-size:11.5px}
+  table.tbl td.name::before{display:none}
+
+  /* Filtre do vysúvacieho panelu */
+  .filters{position:fixed;inset:var(--hdr-h) 0 0 0;z-index:38;border-radius:0;
+    overflow:auto;display:none}
+  .filters.open{display:block}
+  .filters-toggle{display:inline-flex}
+
+  /* Akcie do spodnej lišty */
+  .selbar,.stepbar{position:fixed;left:8px;right:8px;bottom:56px;margin:0;z-index:39}
+  .selbar{flex-wrap:wrap;gap:8px}
+  .selbar .sp{width:100%;margin-left:0}
+  .selbar .btn{flex:1;justify-content:center}
+
+  .prog-lg .n{font-size:44px}
+  .lvl-1 .big{font-size:44px}
+  .drawer{width:100%;top:0}
+  .zrow{grid-template-columns:1fr;gap:4px;padding:10px 12px}
+}
+.filters-toggle{display:none}
+
+/* ---------- 19b. MOBILNÉ MOCKUPY (<body class="mob">) --------------------
+   Mockup sa renderuje na ploche 1440, preto sa media query nespustí. Táto
+   trieda vynúti MOBILNÉ ROZLOŽENIE, nie zúžený desktop:
+   hlavička = značka + jedno číslo fronty · taby dole ako lišta ·
+   rozpočet patrí do obsahu (.mbudget), nie do hlavičky.
+   ------------------------------------------------------------------------ */
+body.mob{max-width:420px;margin:0 auto;background:var(--paper);
+  min-height:100vh;overflow-x:hidden}
+body.mob .hdr-in{max-width:100%;padding:0 12px;gap:10px}
+body.mob .hmeter,body.mob .hbar,body.mob .hsep,body.mob .tglt{display:none}
+body.mob .mbudget .hbar{display:inline-block}
+body.mob .hdr-r{gap:10px;font-size:12px}
+body.mob .wrap{max-width:100%;padding:12px 12px 118px}
+
+body.mob .tabs{position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:min(420px,100%);z-index:40;background:var(--paper2);
+  border-top:1px solid var(--line);padding:6px;justify-content:space-around;gap:0}
+body.mob .tabs a{flex:1;text-align:center;font-size:11.5px;padding:8px 2px}
+
+body.mob .stepbar,body.mob .selbar{position:fixed;left:50%;
+  transform:translateX(-50%);width:min(404px,calc(100% - 16px));bottom:58px;
+  margin:0;z-index:39}
+body.mob .stepbar .btn,body.mob .selbar .btn{flex:1;justify-content:center}
+
+body.mob .grid2,body.mob .grid3,body.mob .layout-filters,
+body.mob .layout-anchors{grid-template-columns:1fr}
+body.mob .prog-lg .n{font-size:44px}
+body.mob .lvl-1 .big{font-size:44px}
+body.mob .lvl-1 .big.sm{font-size:32px}
+body.mob .drawer{width:420px;top:0}
+body.mob .zrow{grid-template-columns:1fr;gap:4px;padding:10px 12px}
+
+/* Rozpočet v obsahu — mobilná náhrada meradla z hlavičky */
+.mbudget{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--dim);
+  background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:8px 12px;margin-bottom:12px}
+.mbudget b{color:var(--ink2);font-weight:640}
+.mbudget .hbar{display:inline-block;margin-left:auto;width:70px}
+
+/* ---------- 20. TLAČ / RENDER ------------------------------------------- */
+@media print{ .hdr{position:static} .selbar,.stepbar{position:static} }

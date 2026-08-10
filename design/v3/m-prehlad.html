@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prehľad (mobil) · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  .m-card{display:flex;align-items:center;gap:10px;padding:10px 0;
+    border-bottom:1px solid var(--line)}
+  .m-card:last-child{border-bottom:0}
+  .m-card .mc-r{margin-left:auto;text-align:right}
+  .m-num{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body class="mob">
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a class="on" href="m-prehlad.html">Prehľad</a>
+      <a href="m-produkty.html">Produkty</a>
+      <a href="m-schvalenie.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <a class="hqueue" href="m-schvalenie.html">Fronta <b>3 420/8 000</b></a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="mbudget">Zápisy <b>100/200</b> dnes · ďalšia dávka <b>12:00</b>
+    <span class="hbar"><i style="width:50%"></i></span></div>
+
+  <!-- 1 · DOMINANTA: priebeh fronty -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Zapisuje sa</h2>
+      <div class="act"><span class="flag">12 sa nepodarilo</span></div>
+    </div>
+    <div class="lvl-2"><b>Ležiaky striebro — jeseň</b></div>
+    <div class="prog-lg" style="margin-top:6px">
+      <div class="n">3 420 <span class="of">/ 8 000</span></div>
+    </div>
+    <div class="bar"><i style="width:42.75%"></i></div>
+    <div class="prog-meta">
+      <span>Hotové <b class="est">2. 9.</b></span>
+      <span class="sep-dot">·</span>
+      <span>štart zľavy <b>4. 9.</b></span>
+    </div>
+    <div class="fresh">Dáta k 10. 8. 03:00</div>
+  </section>
+
+  <!-- 2 · Zľavy -->
+  <section class="sec">
+    <div class="sec-h"><h2>Zľavy</h2></div>
+
+    <div class="m-card">
+      <div>
+        <div class="lvl-2"><b>Prstene 2024 — dopredaj</b></div>
+        <div class="lvl-3">640 produktov · 35 % · do 31. 8.</div>
+      </div>
+      <div class="mc-r">
+        <span class="state bezi"><span class="g"></span>beží</span>
+        <div class="flag">3 sa nepodarilo</div>
+      </div>
+    </div>
+
+    <div class="m-card">
+      <div>
+        <div class="lvl-2"><b>Náušnice bez pohybu</b></div>
+        <div class="lvl-3">1 240 produktov · 25 % · 1. 10. – 15. 10.</div>
+      </div>
+      <div class="mc-r">
+        <span class="state pripravena"><span class="g"></span>pripravená</span>
+        <div class="lvl-3"><a href="m-schvalenie.html">Schváliť</a></div>
+      </div>
+    </div>
+
+    <div class="m-card">
+      <div>
+        <div class="lvl-2"><b>Jarná obnova skladu</b></div>
+        <div class="lvl-3">2 100 produktov · 20 / 10 % · 15. 6. – 15. 7.</div>
+      </div>
+      <div class="mc-r">
+        <span class="state skoncila"><span class="g"></span>skončila</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Tržby -->
+  <section class="sec">
+    <div class="sec-h"><h2>Tržby</h2></div>
+    <div class="m-num">
+      <span class="lvl-1"><span class="big sm">1 180 €</span></span>
+      <span class="lvl-3">dnes do 11:40</span>
+    </div>
+    <div class="lvl-3" style="margin-top:4px">Včera do 11:40 <b class="est">1 040 €</b> · +13 %</div>
+    <div class="chart" style="border:0;padding:10px 0 0">
+      <svg viewBox="0 0 380 84" preserveAspectRatio="none" aria-label="Tržby 14 dní">
+        <path class="area" d="M6,44 L34,38 L62,50 L90,26 L118,58 L146,66 L174,34 L202,30 L230,42 L258,46 L286,20 L314,56 L342,62 L370,74 L370,84 L6,84 Z"/>
+        <path class="line" d="M6,44 L34,38 L62,50 L90,26 L118,58 L146,66 L174,34 L202,30 L230,42 L258,46 L286,20 L314,56 L342,62"/>
+        <path class="line proj" d="M342,62 L370,74"/>
+        <path class="line trend" d="M6,50 L370,42"/>
+      </svg>
+    </div>
+    <div class="lvl-3" style="margin-top:4px">14 dní · 40 205 € · 412 objednávok</div>
+  </section>
+
+</main>
+
+<!-- akcie v spodnej lište, nad tabmi -->
+<div class="stepbar">
+  <details class="stopq" style="flex:1">
+    <summary class="btn" style="justify-content:center">Zastaviť frontu</summary>
+    <div class="stopq-b">
+      <span>Zapísané nabehnú 4. 9. Zrušiť sa nedajú.</span>
+      <button class="btn sm danger">Áno, zastaviť</button>
+    </div>
+  </details>
+  <a class="btn primary" href="m-nova-zlava.html" style="flex:1;justify-content:center">Nová zľava</a>
+</div>
+
+</body>
+</html>

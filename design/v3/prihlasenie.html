@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prihlásenie · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  .login{min-height:100vh;display:flex;align-items:center;justify-content:center;
+    padding:24px 16px}
+  .login .sec{width:100%;max-width:360px;padding:22px 22px 20px}
+  .login .mark{font-size:20px;font-weight:660;letter-spacing:-.02em;color:var(--ink)}
+  .login .mark b{color:var(--deep)}
+  :root[data-theme="dark"] .login .mark b{color:var(--teal)}
+  .login .btn{width:100%;justify-content:center;margin-top:6px}
+  .login .foot{display:flex;align-items:center;justify-content:space-between;
+    gap:10px;margin-top:14px}
+</style>
+</head>
+<body>
+
+<div class="login">
+  <section class="sec">
+    <div class="spread" style="margin-bottom:18px">
+      <span class="mark">Aura <b>Zľavy</b></span>
+      <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+    </div>
+
+    <label class="field">
+      <span class="lb">Meno</span>
+      <input class="inp" value="" autocomplete="username">
+    </label>
+    <label class="field">
+      <span class="lb">Heslo</span>
+      <input class="inp" type="password" value="" autocomplete="current-password">
+    </label>
+
+    <button class="btn primary lg">Prihlásiť sa</button>
+
+    <div class="foot">
+      <span class="lvl-3">Toto zariadenie je povolené</span>
+      <span class="sig ok">Pripojené</span>
+    </div>
+
+    <details class="tech">
+      <summary>Technický detail</summary>
+      <div class="body">
+        <table>
+          <tr><td>Adresa</td><td>192.168.1.14:3070 · lokálne aj 127.0.0.1:3070</td></tr>
+          <tr><td>Zariadenie</td><td>Mobil — Zuzana · 192.168.1.51</td></tr>
+          <tr><td>Posledné prihlásenie</td><td>10. 8. 2026 08:14</td></tr>
+        </table>
+      </div>
+    </details>
+  </section>
+</div>
+
+</body>
+</html>
