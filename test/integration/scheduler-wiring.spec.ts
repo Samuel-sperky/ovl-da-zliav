@@ -146,6 +146,15 @@ describe('E1 — createSchedulerExecutor: produkčný wiring due → engine → 
       allowlistRepo: createMemoryAllowlistRepo(productIds),
       settingsRepo,
       auditRepo: audit,
+      // K2 — bez in-memory počítadla by rozpočet siahol na produkčný audit
+      // v DB, ktorá v teste neexistuje. Executor by potom (správne, fail-closed)
+      // vrátil kampaň do fronty a tento test by nikdy nedokázal to, načo je:
+      // že produkčný wiring naozaj DOJDE k zápisu.
+      writeAttemptCounter: {
+        async countWriteAttemptsOn() {
+          return audit.byEvent('write_attempt').length;
+        },
+      },
       apiKeyRepo: createMemoryApiKeyRepo(VALID_API_KEY),
       audit,
       mutex: createWriteMutex({ dbLock: null }),

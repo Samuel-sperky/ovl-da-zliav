@@ -33,12 +33,14 @@ import {
   type MemoryApiKeyRepo,
   type MemoryAudit,
 } from '@/lib/engine/testing';
+import { createBudget } from '@/lib/engine/budget';
 import { createWriteMutex } from '@/lib/engine/mutex';
 import type { ExecutorFlags } from '@/lib/engine/executor';
 import type { RouteDeps } from '@/lib/http/define-route';
 import { createShopClient } from '@/lib/shop/client';
 
 import type { RoutesDeps } from '@/app/api/campaigns/_shared';
+import type { CampaignTierRecord } from '@/lib/repo/tiers.repo';
 
 import { fakeApiKey } from '../helpers/factories';
 
@@ -168,6 +170,8 @@ export interface RoutesWorldOptions {
   allowlistIds?: number[];
   apiKey?: string | null;
   flags?: Partial<ExecutorFlags>;
+  /** K2 — denný strop zápisov pre testy fronty. Default 200 ako v produkcii. */
+  dailyBudget?: number;
 }
 
 export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
@@ -176,6 +180,8 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
   const allowlist = new Map<number, AllowlistRecord>();
   const catalog = new Map<number, CatalogCacheRecord>();
   const audit = createMemoryAudit();
+  /** K3 — pásma zľavy per kampaň. */
+  const tiers = new Map<number, CampaignTierRecord[]>();
   const settingsRepo = createMemorySettingsRepo({ shopDomain: 'https://mock.local' });
   let nextCampaignId = 1;
   let nextItemId = 1;
@@ -548,6 +554,39 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     settingsRepo,
     apiKeyRepo,
     audit,
+    // K3 — pásma nad in-memory mapou. Bez toho by `GET /api/campaigns` aj
+    // detail siahli na produkčný `tiersRepo` v DB, ktorá v teste neexistuje,
+    // a čítanie by viselo až do timeoutu testu.
+    tiersRepo: {
+      async createMany(campaignId, rows) {
+        tiers.set(campaignId, [
+          ...(tiers.get(campaignId) ?? []),
+          ...rows.map((row, index) => ({
+            id: (tiers.get(campaignId)?.length ?? 0) + index + 1,
+            campaignId,
+            createdAt: new Date(),
+            rule: null,
+            itemsCount: 0,
+            ...row,
+          })),
+        ]);
+      },
+      async listByCampaign(campaignId) {
+        return [...(tiers.get(campaignId) ?? [])];
+      },
+    },
+    // K2 — rozpočet zápisov nad IN-MEMORY auditom. Bez neho by `createBudget()`
+    // spadol na produkčné počítadlo nad `audit_log` v DB, ktorá v teste
+    // neexistuje: čítanie by viselo až do stropu a route by (správne,
+    // fail-closed) vrátila kampaň do fronty namiesto zápisu.
+    budget: createBudget({
+      counter: {
+        async countWriteAttemptsOn() {
+          return audit.byEvent('write_attempt').length;
+        },
+      },
+      dailyBudget: opts.dailyBudget ?? 200,
+    }),
     previewTokens,
     shopClient,
     mutex: createWriteMutex({ dbLock: null }),

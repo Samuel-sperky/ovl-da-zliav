@@ -338,7 +338,10 @@ describe('audit (I4) — append-only', () => {
   });
 
   it('zoznam `event_type` je kompletný a v limite VARCHAR(48)', () => {
-    expect(AUDIT_EVENT_TYPES.length).toBe(38);
+    // Počet je natvrdo naschvál — nová audit udalosť má byť vedomé
+    // rozhodnutie, nie vedľajší efekt. 39. je `queue_resumed` (K2): návrat
+    // prepadnutej fronty po odstávke počítača.
+    expect(AUDIT_EVENT_TYPES.length).toBe(39);
     for (const event of AUDIT_EVENT_TYPES) {
       expect(event.length, event).toBeLessThanOrEqual(48);
       expect(isAuditEventType(event)).toBe(true);

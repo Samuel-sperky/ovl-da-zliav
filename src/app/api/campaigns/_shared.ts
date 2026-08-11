@@ -261,6 +261,10 @@ export function makeExecutor(d: ResolvedRoutesDeps): ReturnType<typeof createExe
     apiKeyRepo: d.apiKeyRepo,
     audit: d.audit,
     mutex: d.mutex,
+    // K2 — rozpočet MUSÍ ísť ďalej. Bez neho si executor vyrobil vlastný nad
+    // produkčným auditom a ten, ktorý mu route podala, ticho ignoroval: route
+    // a executor by potom počítali spotrebu z dvoch rôznych zdrojov.
+    budget: d.budget,
     flags: d.executorFlags,
     now: d.now,
     timeZone: d.timeZone,

@@ -228,6 +228,38 @@ export interface BudgetSource {
   remainingToday(): Promise<BudgetStatus>;
 }
 
+/**
+ * Strop na čítanie rozpočtu. Zaseknutá DB nevyhodí výnimku, len nikdy
+ * neodpovie — a `await` bez stropu by držal executor (aj zápisový mutex)
+ * donekonečna. Zaseknutie preto prekladáme na CHYBU, ktorú volajúci už vie
+ * spracovať fail-closed: kampaň ide do fronty, nie do zápisu.
+ */
+const BUDGET_READ_TIMEOUT_MS = 5_000;
+
+/** Zaseknuté alebo nedostupné čítanie rozpočtu. Nikdy neznamená „zapisuj". */
+export class BudgetUnavailableError extends Error {
+  constructor(message = 'Rozpočet zápisov sa nepodarilo prečítať v limite.') {
+    super(message);
+    this.name = 'BudgetUnavailableError';
+  }
+}
+
+/** `promise` s tvrdým stropom — po `ms` odmietne, nech vnútro robí čokoľvek. */
+async function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new BudgetUnavailableError()), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export function createBudget(deps: BudgetDeps = {}): BudgetSource {
   const counter = deps.counter ?? auditWriteAttemptCounter;
   const now = deps.now ?? ((): Date => new Date());
@@ -242,8 +274,12 @@ export function createBudget(deps: BudgetDeps = {}): BudgetSource {
 
     async remainingToday(): Promise<BudgetStatus> {
       const day = budgetDay(now());
-      const budget = await resolveDailyBudget(deps.settingsRepo, deps.dailyBudget);
-      const used = await spent();
+      // Obe čítania pod jedným stropom — visieť môže ktorékoľvek z nich.
+      const budget = await withDeadline(
+        resolveDailyBudget(deps.settingsRepo, deps.dailyBudget),
+        BUDGET_READ_TIMEOUT_MS,
+      );
+      const used = await withDeadline(spent(), BUDGET_READ_TIMEOUT_MS);
       const remaining = Math.max(0, budget - used);
       return { day, budget, spent: used, remaining, exhausted: remaining === 0 };
     },
