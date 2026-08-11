@@ -424,15 +424,22 @@ export async function buildPreview(
   const blockers: PreviewBlocker[] = [];
   const sortedIds = [...input.productIds].sort((a, b) => a - b);
 
-  /* 1. Lokálna validácia parametrov (I9, D29, D30). */
+  /* 1. Lokálna validácia parametrov (I9, D29, D30).
+   *
+   * „Naozaj 1 deň?" (D30) sa TU zámerne NEPOČÍTA medzi blokátory. Je to
+   * potvrdenie človeka, nie technická prekážka — a blokátor bráni vydaniu
+   * tokenu, takže by sa jednodňová zľava nedala vytvoriť vôbec: používateľ by
+   * ju musel potvrdiť skôr, než by ju vôbec uvidel. Náhľad ju hlási ako
+   * upozornenie (`warnings.oneDayWindow`) a tvrdou podmienkou zostáva až
+   * `POST /api/campaigns`, kde bez `acknowledgements.oneDay` letí 400 a token
+   * sa NESPÁLI (to je celé D30). */
   for (const issueItem of validateCampaignWindow({
     from: input.from,
     to: input.to,
     percent: input.percent,
     today,
-    ...(input.oneDayAcknowledged !== undefined
-      ? { oneDayAcknowledged: input.oneDayAcknowledged }
-      : {}),
+    // Náhľad sa na jednodňové okno nepýta — preto vždy „potvrdené".
+    oneDayAcknowledged: true,
   })) {
     blockers.push({ code: issueItem.code, message: issueItem.message });
   }
