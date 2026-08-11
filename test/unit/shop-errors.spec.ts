@@ -620,8 +620,17 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
   const ORDERS_CLIENT_FILE = 'orders-client.ts';
   const withoutOrdersClient = sources.filter((s) => s.file !== ORDERS_CLIENT_FILE);
 
-  it('má všetkých 7 súborov modulu', () => {
+  /**
+   * Zoznam je ÚMYSELNE vymenovaný: nový súbor v `src/lib/shop` musí zhodiť
+   * tento test, aby sa naň pozrel človek. Skeny nižšie (I7, I8') bežia nad
+   * `sources`, takže každý pribudnutý súbor im automaticky podlieha.
+   *
+   * V3 pridala `catalog-sync.ts` (K7 — stránkované zrkadlenie katalógu, číta,
+   * nezapisuje). Prijatá vedome; I7 aj I8' nad ňou platia.
+   */
+  it('má všetkých 8 súborov modulu', () => {
     expect(sources.map((s) => s.file).sort()).toEqual([
+      'catalog-sync.ts',
       'client.ts',
       'correlation.ts',
       'errors.ts',

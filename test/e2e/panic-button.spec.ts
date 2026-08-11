@@ -55,9 +55,15 @@ test.describe('panic button', () => {
 
     const result = page.getByTestId('panic-result');
     await expect(result).toBeVisible();
-    await expect(result).toContainText('Kľúč bol wipnutý');
-    // R5 — appka NESMIE tvrdiť, že kľúč revokovala.
-    await expect(result).toContainText(/revok/i);
+    // V3 (K10): panic maže OBA kľúče a hovorí to po slovensky — „wipe" je
+    // vnútorné slovo a na povrchu nemá čo robiť.
+    await expect(result).toContainText('Kľúče sú zmazané');
+    // R5 — appka NESMIE tvrdiť, že kľúč revokovala; vie ho len zabudnúť a musí
+    // poslať používateľa za správcom eshopu. (Pôvodné tvrdenie hľadalo slovo
+    // „revok" BEZ negácie, takže presne tú vetu, ktorú R5 zakazuje, vyžadovalo.)
+    await expect(result).not.toContainText(/revokoval/i);
+    await expect(result).toContainText('appka kľúč zneplatniť nevie');
+    await expect(result).toContainText('Kontaktuj správcu eshopu');
 
     /* D63/I1 — po kľúči nezostane v DB riadok. */
     expect(await db.keyRowCount()).toBe(0);
@@ -82,7 +88,9 @@ test.describe('panic button', () => {
   test('panic je použiteľný aj bez uloženého kľúča', async ({ page, db }) => {
     await login(page);
     await page.goto('/nastavenia');
-    await expect(page.getByTestId('panic-button')).toContainText('Kľúč momentálne nie je uložený');
+    await expect(page.getByTestId('panic-button')).toContainText(
+      'Teraz nie je uložený ani jeden kľúč',
+    );
 
     await page.getByTestId('panic-open').click();
     await page.getByTestId('panic-password').fill(E2E_CONFIG.adminPassword);

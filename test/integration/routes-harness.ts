@@ -6,8 +6,8 @@
  * `Request`-ov so správnym Origin (D72). Shop je VŽDY reálny mock (I6) —
  * testy si ho prinesú cez `useMockShop()` a harness dostane jeho URL.
  *
- * Vlastník: A12 (zdieľané výhradne medzi
- * `routes-campaigns.spec.ts` a `no-write-without-confirm.spec.ts`).
+ * Vlastník: A12. Zdieľajú ho `routes-campaigns.spec.ts`,
+ * `no-write-without-confirm.spec.ts` a `kontrakt-v3-kluc.spec.ts` (K6).
  */
 import type {
   AllowlistRecord,
@@ -124,6 +124,14 @@ class CodedError extends Error {
   }
 }
 
+/**
+ * Položka fronty tak, ako ju vidí PRODUKČNÝ repozitár po V3: `CampaignItemRecord`
+ * + `percent` pásma (K3). Fake bez `percent` by bol pasca — executor by v
+ * `assertConfirmed()` nedopočítal hash (K4) a testy by dokazovali niečo iné,
+ * než čo robí produkčná cesta.
+ */
+export type HarnessItem = CampaignItemRecord & { percent: number };
+
 function paginate<T>(rows: T[], page: number, perPage: number): Paged<T> {
   return {
     data: rows.slice((page - 1) * perPage, page * perPage),
@@ -136,7 +144,7 @@ function paginate<T>(rows: T[], page: number, perPage: number): Paged<T> {
 export interface RoutesWorld {
   deps: RoutesDeps;
   campaigns: Map<number, CampaignRecord>;
-  items: Map<number, CampaignItemRecord>;
+  items: Map<number, HarnessItem>;
   allowlist: Map<number, AllowlistRecord>;
   catalog: Map<number, CatalogCacheRecord>;
   audit: MemoryAudit;
@@ -144,7 +152,13 @@ export interface RoutesWorld {
   previewTokens: PreviewTokenServiceInstance;
   seedCampaign(
     campaign: CampaignRecord,
-    items: Array<{ productId: number; priceAtPreview: MoneyString | null; status?: CampaignItemRecord['status'] }>,
+    items: Array<{
+      productId: number;
+      priceAtPreview: MoneyString | null;
+      status?: CampaignItemRecord['status'];
+      /** K3 — keď chýba, použije sa hlavičkové percento kampane. */
+      percent?: number;
+    }>,
   ): CampaignRecord;
   seedAllowlist(productIds: number[]): void;
 }
@@ -158,7 +172,7 @@ export interface RoutesWorldOptions {
 
 export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
   const campaigns = new Map<number, CampaignRecord>();
-  const items = new Map<number, CampaignItemRecord>();
+  const items = new Map<number, HarnessItem>();
   const allowlist = new Map<number, AllowlistRecord>();
   const catalog = new Map<number, CatalogCacheRecord>();
   const audit = createMemoryAudit();
@@ -268,7 +282,7 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     },
   };
 
-  const listItems = (campaignId: number): CampaignItemRecord[] =>
+  const listItems = (campaignId: number): HarnessItem[] =>
     [...items.values()]
       .filter((i) => i.campaignId === campaignId)
       .sort((a, b) => a.position - b.position)
@@ -397,6 +411,13 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
       newItems: Array<{
         productId: number;
         position: number;
+        /**
+         * K3 — percento je vlastnosť POLOŽKY a rozhoduje sa pri potvrdení.
+         * Fake ho MUSÍ prenášať: bez neho executor v `assertConfirmed()`
+         * nedopočíta hash (K4) a každý zápis by skončil na
+         * `confirmation_required`. Presne to sa stalo, kým tu chýbalo.
+         */
+        percent: number;
         priceAtPreview: MoneyString | null;
         hasAttributes: boolean;
       }>,
@@ -408,6 +429,7 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
           id,
           campaignId,
           productId: seed.productId,
+          percent: seed.percent,
           position: seed.position,
           status: 'pending',
           attemptCount: 0,
@@ -556,6 +578,8 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
             id,
             campaignId: record.id,
             productId: seed.productId,
+            // K3 — bez percenta na položke sa hash potvrdenia nedá prepočítať.
+            percent: seed.percent ?? record.percent,
             position: index + 1,
             status: seed.status ?? 'pending',
             attemptCount: 0,

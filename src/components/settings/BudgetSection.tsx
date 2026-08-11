@@ -23,8 +23,7 @@
  *
  * Vlastník: V12.
  */
-import { formatDateSk } from '@/lib/ui/format';
-import { formatCountSk, writeBudgetSentence } from '@/lib/ui/vocabulary';
+import { dayMonthSk, formatCountSk, writeBudgetSentence } from '@/lib/ui/vocabulary';
 import type { QueueView, SettingsView } from '@/components/settings/api';
 
 export interface BudgetSectionProps {
@@ -82,8 +81,10 @@ export function BudgetSection({ settings, queue }: BudgetSectionProps) {
               <div className="k">Hotové</div>
               <div className="v">
                 {queue?.estimate != null ? (
+                  // Krátky tvar `2. 9.` — dlhý dátum sa v úzkej dlaždici zlomí
+                  // a znak odhadu by zostal visieť na samostatnom riadku.
                   <span className="est" data-testid="budget-estimate">
-                    {formatDateSk(queue.estimate.date)}
+                    {dayMonthSk(queue.estimate.date)}
                   </span>
                 ) : (
                   '—'

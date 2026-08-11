@@ -57,10 +57,16 @@
   justify-content: center;
 }
 
-/* Riadok zoznamu: názov · stav · produktov · zľava · okno · zapísané. */
+/*
+ * Hlavička zoznamu. Stĺpce sú ZÁMERNE totožné s `.zrow` v `globals.css`
+ * (1fr 190px 110px 90px 150px 200px, medzera 14px) — popisky musia sedieť nad
+ * svojimi číslami. Keď sa `.zrow` zmení tam, zmení sa aj tu, inak sa hlavička
+ * rozíde s riadkami.
+ */
 .cols {
-  grid-template-columns: 1fr 190px 96px 84px 132px 150px;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr 190px 110px 90px 150px 200px;
+  gap: 14px;
 }
 
 .rowName a {
@@ -137,12 +143,13 @@
   padding-left: 0;
 }
 
-.tiers .n {
+/* `n` a `sum` sú globálne triedy z JSX — v module ich treba prehlásiť. */
+.tiers :global(.n) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.tiers tr.sum td {
+.tiers :global(tr.sum) td {
   border-bottom: 0;
   color: var(--ink);
   font-weight: 640;
@@ -243,22 +250,17 @@
   padding-top: 10px;
 }
 
-/* Potvrdenie: dominanta pravého stĺpca (P1). */
+/*
+ * Potvrdenie: dominanta pravého stĺpca (P1). Veľkosť čísla drží `.lvl-1 .big`
+ * v `globals.css` (64 px, na mobile 44 px) — tu sa nepredefinuje, aby dominanta
+ * mala na všetkých štyroch taboch tú istú mieru.
+ */
 .confirm {
   text-align: center;
   padding: 4px 0 2px;
 }
 
-.confirm .big {
-  font-size: 64px;
-  font-weight: 660;
-  letter-spacing: -0.035em;
-  line-height: 1;
-  display: block;
-  color: var(--ink);
-}
-
-.confirm .cap {
+.cap {
   font-size: 13px;
   color: var(--dim);
   font-weight: 600;
@@ -349,8 +351,8 @@
   color: var(--ink2);
 }
 
-.tiersRead td.n,
-.tiersRead th.n {
+.tiersRead :global(td.n),
+.tiersRead :global(th.n) {
   text-align: right;
   padding-right: 0;
 }
@@ -403,9 +405,12 @@
   .top {
     grid-template-columns: 1fr;
   }
+}
 
+/* `.zrow` sa v `globals.css` skladá pod seba pri 760 px — hlavička s ním. */
+@media (max-width: 760px) {
   .cols {
-    grid-template-columns: 1fr;
+    display: none;
   }
 }
 
@@ -415,10 +420,6 @@
  * `.stepbar` v `globals.css` — tokeny, nie nové farby.
  */
 @media (max-width: 760px) {
-  .confirm .big {
-    font-size: 44px;
-  }
-
   .acts {
     position: sticky;
     bottom: 56px;

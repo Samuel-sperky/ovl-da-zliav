@@ -104,6 +104,41 @@ function ensureTlsCert(): { keyPath: string; certPath: string } {
   return { keyPath, certPath };
 }
 
+/**
+ * Heslá do DB majú DVE cesty: `*_PASSWORD_FILE` (produkcia, D89) a
+ * `*_PASSWORD` (dev/CI). SÚBOR VŽDY VYHRÁVA (`src/db/pool.ts`,
+ * `scripts/migrate.ts`) — a `next dev` si navyše dotiahne `.env` vývojára,
+ * takže `DB_PASSWORD_FILE` z neho ticho prebije heslo, ktoré harness práve
+ * podstrčil cez `DB_PASSWORD`. Appka potom nabehne s cudzími prihlasovacími
+ * údajmi a fail-fast zahlási „DB nie je dosiahnuteľná" (§11.6), hoci DB beží
+ * a e2e schéma je zmigrovaná — hodinu sa hľadá chyba, ktorá je v konfigurácii.
+ *
+ * Odstrániť premennú z prostredia dieťaťa nestačí: `.env` ju vráti späť.
+ * Harness si preto zapíše VLASTNÉ súbory s heslami do gitignorovaného
+ * `secrets/` a ukáže na ne — súborová cesta tak vedie tam, kam má, a pravidlo
+ * „súbor vyhráva" zostáva nedotknuté (D89 sa neoslabuje).
+ *
+ * Heslá sú syntetické (`test_app_password`, I1) a `secrets/` je v `.gitignore`.
+ */
+function ensurePasswordFile(relativePath: string, password: string): string {
+  const target = resolvePath(REPO_ROOT, relativePath);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, `${password}\n`, { mode: 0o600, flag: 'w' });
+  return target;
+}
+
+function dbPasswordEnv(): Record<string, string> {
+  return {
+    DB_PASSWORD: E2E_CONFIG.dbPassword,
+    DB_PASSWORD_FILE: ensurePasswordFile('secrets/e2e-db-app.password', E2E_CONFIG.dbPassword),
+    DB_MIGRATION_PASSWORD: E2E_CONFIG.migPassword,
+    DB_MIGRATION_PASSWORD_FILE: ensurePasswordFile(
+      'secrets/e2e-db-mig.password',
+      E2E_CONFIG.migPassword,
+    ),
+  };
+}
+
 function migrationEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -112,7 +147,7 @@ function migrationEnv(): NodeJS.ProcessEnv {
     DB_NAME: E2E_CONFIG.dbName,
     DB_USER: E2E_CONFIG.dbUser,
     DB_MIGRATION_USER: E2E_CONFIG.migUser,
-    DB_MIGRATION_PASSWORD: E2E_CONFIG.migPassword,
+    ...dbPasswordEnv(),
   };
 }
 
@@ -233,6 +268,33 @@ function startControlServer(mock: MockShopServer): Promise<{ close(): Promise<vo
         json(res, 200, { ok: true, previous });
         return;
       }
+      /**
+       * Katalóg mocku na mieru scenára (K7). Bez neho by sa dal do
+       * `catalog_cache` dostať produkt, ktorý shop nepozná — a skúška naprázdno
+       * by ho správne odmietla ako `product_not_found`. Scenáre, ktoré chcú
+       * väčší katalóg než 12 kusov, si ho tu nastavia a appka si ho zosynchronizuje
+       * VLASTNOU cestou (`POST /api/catalog/sync`), nie zápisom do DB.
+       */
+      if (method === 'POST' && path === '/products') {
+        const body = await readJson(req);
+        const raw = Array.isArray(body.products) ? body.products : [];
+        const products = raw.map((item) => {
+          const entry = item as { id: unknown; name?: unknown; price: unknown };
+          return {
+            id: Number(entry.id),
+            name: typeof entry.name === 'string' ? entry.name : `Šperk ${String(entry.id)}`,
+            price: Number(entry.price),
+            has_attributes: false,
+          };
+        });
+        // NAHRADIŤ, nie primiešať: `setProducts()` v mocku merguje, takže bez
+        // vyprázdnenia by v katalógu ostalo aj 12 default produktov z `/reset`
+        // a scenár by počítal cudzie riadky.
+        for (const id of [...mock.state.products.keys()]) mock.state.removeProduct(id);
+        mock.state.setProducts(products);
+        json(res, 200, { ok: true, count: products.length });
+        return;
+      }
       if (method === 'POST' && path === '/rate-limit') {
         const body = await readJson(req);
         mock.state.rateLimit(Number(body.retryAfterSeconds ?? 30));
@@ -273,9 +335,9 @@ function appEnv(mockBaseUrl: string): NodeJS.ProcessEnv {
     DB_PORT: String(E2E_CONFIG.dbPort),
     DB_NAME: E2E_CONFIG.dbName,
     DB_USER: E2E_CONFIG.dbUser,
-    DB_PASSWORD: E2E_CONFIG.dbPassword,
     DB_MIGRATION_USER: E2E_CONFIG.migUser,
-    DB_MIGRATION_PASSWORD: E2E_CONFIG.migPassword,
+    // Heslá zo súborov harnessu — `.env` vývojára ich nesmie prebiť (viď hore).
+    ...dbPasswordEnv(),
     MASTER_KEY_FILE: E2E_CONFIG.masterKeyFile,
     SESSION_SECRET_FILE: E2E_CONFIG.sessionSecretFile,
     // Scheduler v e2e nebeží sám — inak by nedeterministicky pálil kampane.

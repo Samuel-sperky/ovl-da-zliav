@@ -129,7 +129,7 @@ export function NewDiscountConfirm({
         <span className="big" data-testid="confirm-count">
           {formatCountSk(itemsCount)}
         </span>
-        <span className="cap">produktov dostane zľavu</span>
+        <span className={styles.cap}>produktov dostane zľavu</span>
       </div>
 
       <div className={`prog-meta ${styles.center}`}>

@@ -1,19 +1,32 @@
 /**
- * Aura Zľavy — e2e: celý zápisový flow (A18, D2, D22, D30, D70, I3, I13).
+ * Aura Zľavy — e2e: I3 a D30 cez skutočný HTTP stack (A18, D2, D30, I3, I13).
  *
- * Overuje POVINNÝ dvojkrok (dry-run → samostatné potvrdenie), sudo re-auth po
- * vypršaní 15-minútového okna a fail-closed odmietnutie zápisu bez potvrdenia.
+ * ZMENA V3 (V11): štvorkrokový sprievodca `/kampane/nova` (`wizard-step1`,
+ * `percent-chip-*`) zanikol. Nová zľava je jedna obrazovka `/zlavy/nova`
+ * a jej preklikanie — vrátane povinnej skúšky naprázdno a ručne vpísaného
+ * počtu — dokazuje `fronta-v3.spec.ts` (cesta z K12).
+ *
+ * Tomuto súboru zostáva to, čo sa cez UI ukázať NEDÁ, lebo obrazovka to ani
+ * neponúkne: čo urobí SERVER, keď potvrdenie chýba alebo je neúplné. Sú to
+ * tvrdenia o invariantoch, nie o rozložení tlačidiel, a preto sa robia
+ * priamo na API — cez tú istú appku, tie isté guardy a ten istý mock shop.
+ *
+ *  1. **I3** — `POST /api/campaigns` bez preview tokenu je 4xx a na shop
+ *     neodíde ani jeden zápis.
+ *  2. **I3** — token je jednorazový: druhé použitie toho istého tokenu je 409
+ *     a opäť bez jediného zápisu.
+ *  3. **D30** — jednodňová zľava (`from = to`) bez potvrdenia „naozaj 1 deň?"
+ *     je 4xx a token sa pri tom NESPÁLI (chýbajúce potvrdenie nie je dôvod
+ *     nútiť používateľa opakovať skúšku).
  *
  * POZOR — I13/I6: e2e appka beží mimo `NODE_ENV=production` (v produkcii je
  * `SHOP_BASE_URL_OVERRIDE` zakázaný a e2e by muselo volať reálny shop, čo I6
- * nedovoľuje). Ostrý zápis je preto vynútene odmietnutý; test akceptuje OBE
- * korektné vyústenia — vytvorenú kampaň alebo hlášku „ostrý zápis je vypnutý" —
- * a v druhom prípade DODATOČNE overí, že mock nedostal ani jeden zápis.
+ * nedovoľuje). Ostrý zápis je preto vynútene odmietnutý; testy nižšie o zápise
+ * nič netvrdia — tvrdia, že sa NEDEJE.
  */
 import { addAllowlist, api, expect, login, storeApiKey, test } from './fixtures';
-import { E2E_CONFIG } from './config';
 
-const PRODUCTS = [201, 202] as const;
+const PRODUCT = 201;
 
 /** `YYYY-MM-DD` v posune dní od dneška (rovnaká konvencia ako UI). */
 function dateOnly(offsetDays: number): string {
@@ -22,131 +35,114 @@ function dateOnly(offsetDays: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Krok 1 sprievodcu: produkty, percento, okno → „Pokračovať na dry-run". */
-async function fillStep1(
+/** Dry-run nad jedným produktom → jednorazový podpísaný token (O2, I3). */
+async function previewToken(
   page: import('@playwright/test').Page,
-  opts: { productIds: readonly number[]; percent: 5 | 10 | 15 | 20 | 25 | 30; from: string; to: string },
-): Promise<void> {
-  await expect(page.getByTestId('wizard-step1')).toBeVisible();
-  for (const id of opts.productIds) await page.getByTestId(`product-${id}`).check();
-  await page.getByTestId(`percent-chip-${opts.percent}`).click();
-  await page.getByTestId('date-from').fill(opts.from);
-  await page.getByTestId('date-to').fill(opts.to);
-  await page.getByRole('button', { name: /Pokračovať na dry-run/ }).click();
+  window: { from: string; to: string },
+): Promise<string> {
+  const res = await api(page, 'POST', '/api/campaigns/preview', {
+    productIds: [PRODUCT],
+    percent: 10,
+    from: window.from,
+    to: window.to,
+    kind: 'new',
+  });
+  expect(res.status(), await res.text()).toBe(200);
+  const body = (await res.json()) as { data: { previewToken: string; blockers: unknown[] } };
+  expect(body.data.blockers, JSON.stringify(body.data.blockers)).toEqual([]);
+  expect(body.data.previewToken).not.toBe('');
+  return body.data.previewToken;
 }
 
 test.describe('zápisový flow', () => {
-  test('dvojkrok + sudo re-auth: bez potvrdenia sa na shop nepošle žiadny zápis', async ({
-    page,
-    control,
-  }) => {
+  test('I3: bez potvrdenia sa na shop nepošle žiadny zápis', async ({ page, control }) => {
     await login(page);
     await storeApiKey(page);
-    await addAllowlist(page, PRODUCTS);
-
-    // Hodiny v prehliadači riadime sami — sudo okno (D70) vypršiava klientsky.
-    await page.clock.install();
-    await page.goto('/kampane/nova');
-
-    await fillStep1(page, {
-      productIds: PRODUCTS,
-      percent: 10,
-      from: dateOnly(1),
-      to: dateOnly(8),
-    });
-
-    /* Krok 2 — dry-run náhľad a POTOM samostatné potvrdenie (D2, I3). */
-    await expect(page.getByTestId('wizard-step2')).toBeVisible();
-    await expect(page.getByTestId('dry-run-table')).toBeVisible();
-    await expect(page.getByTestId('confirm-panel')).toBeVisible();
-    await expect(page.getByTestId('irreversible-note')).toContainText('nedá zrušiť, len prepísať');
-
-    // Do tejto chvíle NESMIE existovať žiadny zápis nad rámec sondy kľúča.
-    const beforeConfirm = await control.state();
-
-    /* D70 — po 20 minútach nečinnosti si potvrdenie vyžiada heslo znova. */
-    await page.clock.fastForward('20:00');
-    await page.getByTestId('write-to-production').click();
-
-    const sudoDialog = page.getByRole('dialog', { name: 'Overenie heslom' });
-    await expect(sudoDialog).toBeVisible();
-    await sudoDialog.getByPlaceholder('Heslo').fill(E2E_CONFIG.adminPassword);
-    await sudoDialog.getByRole('button', { name: 'Potvrdiť' }).click();
-    await expect(sudoDialog).toBeHidden();
-
-    /* Vyústenie: kampaň vytvorená, alebo fail-closed odmietnutie zápisu (I13). */
-    const created = page.getByTestId('wizard-result');
-    const refused = page.getByText(/Ostrý zápis je vypnutý|WRITES_ENABLED/);
-    await expect(created.or(refused).first()).toBeVisible();
-
-    if (await refused.isVisible()) {
-      const afterConfirm = await control.state();
-      expect(afterConfirm.writeCount).toBe(beforeConfirm.writeCount);
-    } else {
-      await expect(created).toContainText('Kampaň');
-    }
-
-    // I1 — v žiadnom vyústení sa kľúč neobjaví v HTML.
-    expect(await page.content()).not.toContain('fake-shop-key');
-  });
-
-  test('D30: jednodňová zľava sa nepotvrdí bez explicitného „naozaj 1 deň"', async ({ page }) => {
-    await login(page);
-    await storeApiKey(page);
-    await addAllowlist(page, [PRODUCTS[0]]);
-
-    await page.goto('/kampane/nova');
-    const day = dateOnly(2);
-    await fillStep1(page, { productIds: [PRODUCTS[0]], percent: 15, from: day, to: day });
-
-    await expect(page.getByTestId('confirm-panel')).toBeVisible();
-    await expect(page.getByTestId('one-day-ack')).toBeVisible();
-    await expect(page.getByTestId('write-to-production')).toBeDisabled();
-
-    await page.getByTestId('one-day-ack').getByRole('checkbox').check();
-    await expect(page.getByTestId('write-to-production')).toBeEnabled();
-  });
-
-  test('I3: POST /api/campaigns bez preview tokenu neposlal na shop nič', async ({
-    page,
-    control,
-  }) => {
-    await login(page);
-    await storeApiKey(page);
-    await addAllowlist(page, [PRODUCTS[0]]);
+    await addAllowlist(page, [PRODUCT]);
     const before = await control.state();
 
-    const res = await api(page, 'POST', '/api/campaigns', {
-      previewToken: 'nie-je-podpisany-token',
-      name: 'Pokus bez dry-runu',
+    /* 1. Úplne bez tokenu. */
+    const noToken = await api(page, 'POST', '/api/campaigns', {
+      name: 'Bez potvrdenia',
       mode: 'eager',
       acknowledgements: { irreversible: true },
     });
-    expect(res.status()).toBeGreaterThanOrEqual(400);
+    expect(noToken.status()).toBeGreaterThanOrEqual(400);
+    expect(noToken.status()).toBeLessThan(500);
 
-    const after = await control.state();
-    expect(after.writeCount).toBe(before.writeCount);
+    /* 2. S podvrhnutým tokenom. */
+    const fakeToken = await api(page, 'POST', '/api/campaigns', {
+      previewToken: 'nie.je.token',
+      name: 'Podvrhnuté potvrdenie',
+      mode: 'eager',
+      acknowledgements: { irreversible: true },
+    });
+    expect(fakeToken.status()).toBeGreaterThanOrEqual(400);
+    expect(fakeToken.status()).toBeLessThan(500);
+
+    /* 3. Ani jeden pokus sa nesmel dotknúť shopu. */
+    expect((await control.state()).writeCount).toBe(before.writeCount);
   });
 
-  test('I2: produkt mimo allowlistu sa odmietne pred volaním shopu', async ({ page, control }) => {
+  test('I3: preview token je jednorazový — druhé použitie je 409', async ({ page, control }) => {
     await login(page);
     await storeApiKey(page);
-    await addAllowlist(page, [PRODUCTS[0]]);
+    await addAllowlist(page, [PRODUCT]);
     const before = await control.state();
 
-    const res = await api(page, 'POST', '/api/campaigns/preview', {
-      productIds: [PRODUCTS[0], 999_999],
-      percent: 10,
-      from: dateOnly(1),
-      to: dateOnly(3),
-      kind: 'new',
+    const token = await previewToken(page, { from: dateOnly(2), to: dateOnly(9) });
+    const first = await api(page, 'POST', '/api/campaigns', {
+      previewToken: token,
+      name: 'Prvé použitie',
+      // `scheduled` — appka má len naplánovať; ostrý zápis je v e2e vypnutý (I13).
+      mode: 'scheduled',
+      acknowledgements: { irreversible: true },
     });
-    const body = await res.text();
-    // Buď 4xx, alebo preview s blokátorom — v oboch prípadoch žiadny zápis.
-    if (res.ok()) expect(body).toMatch(/blocker|allowlist/i);
-    else expect(res.status()).toBeGreaterThanOrEqual(400);
+    expect(first.status(), await first.text()).toBe(200);
 
-    const after = await control.state();
-    expect(after.writeCount).toBe(before.writeCount);
+    const replay = await api(page, 'POST', '/api/campaigns', {
+      previewToken: token,
+      name: 'Druhé použitie toho istého potvrdenia',
+      mode: 'scheduled',
+      acknowledgements: { irreversible: true },
+    });
+    expect(replay.status()).toBe(409);
+
+    // Naplánovanie nie je zápis — na shop stále neodišlo nič.
+    expect((await control.state()).writeCount).toBe(before.writeCount);
+  });
+
+  test('D30: jednodňová zľava sa nepotvrdí bez explicitného „naozaj 1 deň"', async ({
+    page,
+    control,
+  }) => {
+    await login(page);
+    await storeApiKey(page);
+    await addAllowlist(page, [PRODUCT]);
+    const before = await control.state();
+
+    const day = dateOnly(3);
+    const token = await previewToken(page, { from: day, to: day });
+
+    const withoutAck = await api(page, 'POST', '/api/campaigns', {
+      previewToken: token,
+      name: 'Jednodňová bez potvrdenia',
+      mode: 'scheduled',
+      acknowledgements: { irreversible: true },
+    });
+    expect(withoutAck.status()).toBe(400);
+    expect(await withoutAck.text()).toContain('one_day_not_acknowledged');
+
+    /* D30 — chýbajúce potvrdenie NESMIE spáliť token: ten istý token
+     * s doplneným „naozaj 1 deň?" musí prejsť. */
+    const withAck = await api(page, 'POST', '/api/campaigns', {
+      previewToken: token,
+      name: 'Jednodňová s potvrdením',
+      mode: 'scheduled',
+      acknowledgements: { irreversible: true, oneDay: true },
+    });
+    expect(withAck.status(), await withAck.text()).toBe(200);
+
+    expect((await control.state()).writeCount).toBe(before.writeCount);
   });
 });

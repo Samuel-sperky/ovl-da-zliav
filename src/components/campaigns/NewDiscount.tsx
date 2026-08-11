@@ -122,6 +122,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [scope, setScope] = useState<ScopeView | null>(null);
+  /** `true` = na otázku o strope už prišla odpoveď (aj záporná). */
+  const [scopeReady, setScopeReady] = useState(false);
   const [budget, setBudget] = useState<BudgetView | null>(null);
   const [ahead, setAhead] = useState<{
     pending: number;
@@ -141,7 +143,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [previewSig, setPreviewSig] = useState<string | null>(null);
   const [previewAt, setPreviewAt] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
-  const [busy, setBusy] = useState<Busy>('idle');
+  // Obrazovka sa otvára do načítania — nie do prázdneho výberu.
+  const [busy, setBusy] = useState<Busy>('loading');
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateResult | null>(null);
 
@@ -158,7 +161,11 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   useEffect(() => {
     let alive = true;
     void scopeLimits().then((res) => {
-      if (alive && res.ok) setScope(res.data);
+      if (!alive) return;
+      if (res.ok) setScope(res.data);
+      // Výber sa načítava až po tejto odpovedi: v režime `pilot` je strop 10
+      // a bez neho by prvé načítanie zbytočne prelistovalo celý katalóg (K1).
+      setScopeReady(true);
     });
     void keyMeta().then((res) => {
       if (alive && res.ok) setKey(res.data);
@@ -291,13 +298,14 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   }, [cap, filter, initial.productIds, source]);
 
   useEffect(() => {
+    if (!scopeReady) return;
     const timer = setTimeout(() => {
       void loadSelection();
     }, 300);
     return () => clearTimeout(timer);
     // Závislosťami sú TEXTOVÉ ODTLAČKY vstupov (`filterKey`, `pickedKey`), nie
     // objekty — inak by sa výber načítaval znova pri každom prekreslení.
-  }, [filterKey, pickedKey, source, cap, loadSelection]);
+  }, [filterKey, pickedKey, source, cap, scopeReady, loadSelection]);
 
   /* ── 3. Pásma, vzorka, priemerná cena ────────────────────────────────── */
 

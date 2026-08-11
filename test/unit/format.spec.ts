@@ -2,13 +2,20 @@
  * Aura Zľavy — testy formátovacích utilít (U11).
  *
  * Neplatný `expiresAt` (rozbitý string zo servera) nesmie nikdy vyústiť do
- * „kľúč: NaN h NaN min“: `formatCountdownSk` musí na nekonečno/NaN vrátiť
- * `—` a `secondsLeftFrom` (KeyTtlBadge) musí na neplatný ISO string vrátiť
- * `null`, čo badge zobrazí ako „kľúč chýba“.
+ * „kľúč: NaN h NaN min“.
+ *
+ * ZMENA V3: nositeľom tejto poistky bol `secondsLeftFrom()` z
+ * `components/layout/KeyTtlBadge.tsx`. V3 badge z hlavičky odstránil
+ * (ARCHITEKTURA §0 — v hlavičke je len rozpočet, fronta a téma) a jediným
+ * miestom, kde sa dnes odpočítava k `expiresAt`, je `components/ui/Countdown`.
+ * Tvrdenie sa preto NEZOSLABUJE, len sa presúva na aktuálneho nositeľa:
+ * `Countdown` s rozbitým dátumom musí vykresliť „—“, nie „NaN h NaN min“.
  */
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { secondsLeftFrom } from '@/components/layout/KeyTtlBadge';
+import Countdown from '@/components/ui/Countdown';
 import { formatCountdownSk } from '@/lib/ui/format';
 
 describe('formatCountdownSk (U11 — NaN guard)', () => {
@@ -34,19 +41,31 @@ describe('formatCountdownSk (U11 — NaN guard)', () => {
   });
 });
 
-describe('secondsLeftFrom (U11 — neplatný expiresAt v KeyTtlBadge)', () => {
-  const NOW = Date.parse('2026-08-06T10:00:00.000Z');
+describe('Countdown (U11 — neplatný expiresAt sa nesmie stať „NaN h NaN min“)', () => {
+  const html = (expiresAt: string | number | Date | null): string =>
+    renderToStaticMarkup(createElement(Countdown, { expiresAt }));
 
-  it('neplatný ISO string → null (badge zobrazí „kľúč chýba“)', () => {
-    expect(secondsLeftFrom('nie-je-datum', NOW)).toBeNull();
-    expect(secondsLeftFrom('', NOW)).toBeNull();
+  it('neplatný ISO string → „—“, nikdy NaN', () => {
+    for (const broken of ['nie-je-datum', '', 'undefined']) {
+      const out = html(broken);
+      expect(out).not.toContain('NaN');
+      expect(out).toContain('—');
+    }
   });
 
-  it('platný ISO string → zvyšné sekundy', () => {
-    expect(secondsLeftFrom('2026-08-06T11:00:00.000Z', NOW)).toBe(3600);
+  it('chýbajúca hodnota → „—“', () => {
+    expect(html(null)).toContain('—');
   });
 
-  it('expirovaný kľúč → záporné/nulové sekundy, nie null', () => {
-    expect(secondsLeftFrom('2026-08-06T09:00:00.000Z', NOW)).toBe(-3600);
+  it('platný budúci čas → zvyšný čas, žiadne NaN', () => {
+    const out = html(new Date(Date.now() + 3_600_000 + 5_000));
+    expect(out).not.toContain('NaN');
+    expect(out).toMatch(/\d+\s*(h|min|s)/);
+  });
+
+  it('expirovaný čas → „expirovaný“, nie záporné číslo', () => {
+    const out = html(new Date(Date.now() - 3_600_000));
+    expect(out).toContain('expirovaný');
+    expect(out).not.toContain('-');
   });
 });

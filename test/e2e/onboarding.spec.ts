@@ -1,39 +1,62 @@
 /**
- * Aura Zľavy — e2e: onboarding od nuly po testovací dry-run (A18, D20, D55).
+ * Aura Zľavy — e2e: prvé spustenie a fail-closed doména (A18, D20, D55, D80).
  *
- * Onboarding sa NIKDY nekončí ostrým zápisom (D20, I3): posledný krok je
- * dry-run a tento test to overuje aj na strane mocku — počet zápisových
- * požiadaviek sa počas 4. kroku NESMIE zmeniť.
+ * ZMENA V3 (V12, architektúra §3): onboarding prestal byť štvorkrokový
+ * sprievodca so zámkami. Je to jedna obrazovka s tromi kartami — adresa
+ * eshopu, kľúč na zápis, prvá zľava — a každá karta len POVIE, ako na tom
+ * appka je, a pošle človeka tam, kde sa to nastavuje. Kroky sa preto už
+ * nezamykajú (`step-N-state` v UI neexistuje) a allowlist zanikol úplne
+ * (K1: strop rozsahu nahradil `scope_mode`).
+ *
+ * Čo z pôvodných tvrdení PLATÍ ĎALEJ a testuje sa tu:
+ *
+ *  1. **Onboarding nikdy nič nezapíše do eshopu** (D20, I3). Je to
+ *     rozcestník, nie akcia — počet zápisov na mocku sa počas neho nesmie
+ *     pohnúť ani o jeden.
+ *  2. **Doména sa bez úspešného canary čítania NEULOŽÍ** (D55). Formulár sa
+ *     presťahoval do Nastavení (`#pripojenie`), invariant je nedotknutý.
+ *  3. Stavy kariet sú MERANÉ, nie predvolené: kým sa nevie, či kľúč je,
+ *     appka nepíše „chýba" (P7).
  */
-import { addAllowlist, api, expect, login, test, VALID_API_KEY } from './fixtures';
+import { expect, login, storeApiKey, test } from './fixtures';
 import { E2E_CONFIG } from './config';
 
-const FIRST_PRODUCT = 201;
-
-test.describe('onboarding', () => {
+test.describe('prvé spustenie', () => {
   test.beforeEach(async ({ db }) => {
-    // Onboarding začína od nuly — doména ešte nie je potvrdená.
+    // Začína sa od nuly — doména ešte nie je potvrdená.
     await db.query(
       'UPDATE settings SET shop_domain = NULL, shop_domain_confirmed_at = NULL WHERE id = 1',
     );
   });
 
-  test('4 kroky v pevnom poradí: kroky sa odomykajú postupne', async ({ page }) => {
+  test('tri karty povedia, čo chýba — a nič pri tom nezapíšu', async ({ page, control }) => {
+    const before = await control.state();
+
     await login(page);
     await page.goto('/onboarding');
-    await expect(page.getByTestId('onboarding')).toBeVisible();
+    const onboarding = page.getByTestId('onboarding');
+    await expect(onboarding).toBeVisible();
 
-    // Krok 1 čaká, kroky 2–4 sú zamknuté, kým doména nie je potvrdená.
-    await expect(page.getByTestId('step-1-state')).toHaveText('čaká');
-    await expect(page.getByTestId('step-2-state')).toHaveText('zamknuté');
-    await expect(page.getByTestId('step-3-state')).toHaveText('zamknuté');
-    await expect(page.getByTestId('step-4-state')).toHaveText('zamknuté');
-    await expect(page.getByTestId('onboarding-step-2')).toContainText('Najprv potvrď doménu');
+    // Bez domény aj bez kľúča: obe karty priznajú, že chýbajú.
+    await expect(onboarding).toContainText('Adresa eshopu');
+    await expect(onboarding).toContainText('Kľúč na zápis zliav');
+    await expect(onboarding).toContainText('Prvá zľava');
+    await expect(onboarding.locator('.sig.warn').first()).toBeVisible();
+
+    // D20 — rozcestník, nie akcia. Nikam sa nezapisuje a hovorí to nahlas.
+    await expect(onboarding).toContainText('Táto stránka nič nezapisuje');
+    expect((await control.state()).writeCount).toBe(before.writeCount);
+
+    // Po vložení kľúča karta zmení stav na „vložený" — je to meraný fakt.
+    await storeApiKey(page);
+    await page.goto('/onboarding');
+    await expect(onboarding).toContainText('vložený');
   });
 
   test('D55: doména sa bez úspešného canary čítania NEULOŽÍ', async ({ page, db }) => {
     await login(page);
-    await page.goto('/onboarding');
+    // Formulár domény býval v onboardingu; od V3 má jediné miesto — Nastavenia.
+    await page.goto('/nastavenia#pripojenie');
 
     // Doména musí byť https (D80) a canary GET ide proti KANDIDÁTSKEJ doméne,
     // nie cez mock override — na `.invalid` host sa spojenie nedá vytvoriť (I6),
@@ -45,73 +68,9 @@ test.describe('onboarding', () => {
     // Chybová hláška patrí formuláru domény. `getByRole('alert')` globálne by
     // trafilo aj `ProductionBar` (tiež `role="alert"`) → strict mode violation.
     await expect(page.getByTestId('domain-form').getByRole('alert')).toBeVisible();
-    await expect(page.getByTestId('domain-canary')).toBeHidden();
     const rows = await db.query<{ shop_domain: string | null }>(
       'SELECT shop_domain FROM settings WHERE id = 1',
     );
     expect(rows[0].shop_domain).toBeNull();
-  });
-
-  test('kľúč → allowlist → testovací dry-run bez jediného ostrého zápisu', async ({
-    page,
-    db,
-    control,
-  }) => {
-    // Doména je potvrdená (jej vlastný canary má vlastný test vyššie).
-    await db.query(
-      'UPDATE settings SET shop_domain = ?, shop_domain_confirmed_at = UTC_TIMESTAMP(3) WHERE id = 1',
-      [E2E_CONFIG.shopDomain],
-    );
-
-    await login(page);
-    await page.goto('/onboarding');
-    await expect(page.getByTestId('step-1-state')).toHaveText('hotové');
-
-    /* Krok 2 — kľúč (syntetický `fake-shop-key-…`, I1). Appka ho overí sondou
-     * proti mocku; do UI sa vracia výhradne `last4` (D65, I1). */
-    await page.getByTestId('api-key-input').fill(VALID_API_KEY);
-    await page.getByTestId('api-key-save').click();
-    await expect(page.getByTestId('api-key-stored')).toBeVisible();
-    await expect(page.getByTestId('api-key-stored')).not.toContainText(VALID_API_KEY);
-    await expect(page.getByTestId('step-2-state')).toHaveText('hotové');
-
-    /* Krok 3 — allowlist (max 10, I2). */
-    await page.getByTestId('add-product-id').fill(String(FIRST_PRODUCT));
-    await page.getByTestId('add-product-submit').click();
-    await expect(page.getByTestId('allowlist-table')).toContainText(String(FIRST_PRODUCT));
-    await expect(page.getByTestId('step-3-state')).toHaveText('hotové');
-
-    /* Krok 4 — testovací dry-run. Do shopu sa NESMIE zapísať nič (D20, I3). */
-    const before = await control.state();
-    await page.getByTestId(`onboarding-product-${FIRST_PRODUCT}`).check();
-    await page.getByTestId('percent-chip-10').click();
-    await page.getByTestId('onboarding-dry-run').click();
-
-    await expect(page.getByTestId('onboarding-dry-run-result')).toBeVisible();
-    await expect(page.getByTestId('onboarding-done')).toBeVisible();
-    await expect(page.getByTestId('dry-run-table')).toBeVisible();
-    await expect(page.getByTestId('step-4-state')).toHaveText('hotové');
-
-    const after = await control.state();
-    expect(after.writeCount).toBe(before.writeCount);
-
-    // I1 — kľúč sa nikde v UI nezobrazí, ani v celom HTML stránky.
-    expect(await page.content()).not.toContain(VALID_API_KEY);
-  });
-
-  test('I2: 11. produkt sa do allowlistu nedostane', async ({ page }) => {
-    await login(page);
-    // 10 produktov cez API (mock katalóg má 201–210).
-    await addAllowlist(page, [201, 202, 203, 204, 205, 206, 207, 208, 209, 210]);
-
-    await page.goto('/produkty');
-    await expect(page.getByTestId('allowlist-table')).toBeVisible();
-    // KISS redizajn: pridanie produktu žije v draweri; pri plnom allowliste je
-    // tlačidlo „+ Pridať produkt" vypnuté a dôvod je viditeľný text (I2).
-    await expect(page.getByTestId('open-add-product')).toBeDisabled();
-    await expect(page.getByText('Allowlist je plný')).toBeVisible();
-
-    const res = await api(page, 'POST', '/api/allowlist', { productId: 123 });
-    expect(res.status()).toBeGreaterThanOrEqual(400);
   });
 });

@@ -45,6 +45,10 @@ export const E2E_PRODUCTS = [201, 202, 203] as const;
 const DATA_TABLES = [
   'audit_log',
   'campaign_items',
+  // KONTRAKT V3: pásma (K3) a predané kusy (K7/P4). Bez nich by riadky prežili
+  // `reset()` a ďalší scenár by staval pásma na cudzích dátach.
+  'campaign_tiers',
+  'product_sales_daily',
   'campaigns',
   'catalog_cache',
   'products_allowlist',
@@ -78,11 +82,21 @@ function fakeUlid(): string {
 export interface SeededItem {
   productId: number;
   status: 'ok' | 'failed' | 'uncertain' | 'pending' | 'skipped' | 'not_found';
+  /** K3 — percento pásma. Keď chýba, platí hlavičkové percento zľavy. */
+  percent?: number;
   priceAtPreview?: number;
   priceAtWrite?: number;
   priceMismatch?: boolean;
   errorCode?: string;
   errorMessage?: string;
+}
+
+/** Predaj za jeden deň — vstup pásiem (K3). */
+export interface SeedSalesRow {
+  productId: number;
+  /** `YYYY-MM-DD`. */
+  day: string;
+  unitsSold: number;
 }
 
 export interface SeedCampaignInput {
@@ -105,6 +119,8 @@ export interface DbHelper {
   adminUserId(): Promise<number>;
   /** Priamy seed allowlistu (keď scenár nemá dôvod prechádzať UI). */
   seedAllowlist(productIds: readonly number[]): Promise<void>;
+  /** Predané kusy per produkt — z nich vznikajú pásma zľavy (K3, P4). */
+  seedSales(rows: readonly SeedSalesRow[]): Promise<void>;
   seedCampaign(input: SeedCampaignInput): Promise<number>;
   /** D39c — audit záznam s príznakom nezhody cien v `after_snapshot`. */
   seedAuditRow(input: {
@@ -168,9 +184,25 @@ function makeDb(): DbHelper {
       await query(
         'UPDATE settings SET shop_domain = ?, shop_domain_confirmed_at = UTC_TIMESTAMP(3), ' +
           'eager_write_default = 1, writes_locked = 0, writes_locked_reason = NULL, ' +
-          'writes_locked_at = NULL, onboarding_done_at = NULL WHERE id = 1',
+          'writes_locked_at = NULL, onboarding_done_at = NULL, ' +
+          // K1 — režim rozsahu sa MUSÍ vrátiť na `pilot`. Bez toho scenár, ktorý
+          // si rozsah uvoľnil (a je to sudo akcia, takže vzácna), nechá `plny`
+          // ležať v DB a ďalším testom sa ticho vypne allowlist. Fail-closed
+          // stav je východiskový aj medzi testami, nielen v produkcii.
+          "scope_mode = 'pilot', max_products_per_campaign = 10000, " +
+          'daily_write_budget = 200 WHERE id = 1',
         [E2E_CONFIG.shopDomain],
       );
+    },
+
+    async seedSales(rows: readonly SeedSalesRow[]): Promise<void> {
+      for (const row of rows) {
+        await query(
+          'INSERT INTO product_sales_daily (product_id, sale_day, units_sold) VALUES (?, ?, ?) ' +
+            'ON DUPLICATE KEY UPDATE units_sold = VALUES(units_sold)',
+          [row.productId, row.day, row.unitsSold],
+        );
+      }
     },
 
     async seedAllowlist(productIds: readonly number[]): Promise<void> {
@@ -220,12 +252,16 @@ function makeDb(): DbHelper {
       let position = 1;
       for (const item of input.items) {
         await query(
-          'INSERT INTO campaign_items (campaign_id, product_id, position, status, attempt_count, ' +
+          // K3 — `percent` je od migrácie 0010 na POLOŽKE a nemá default:
+          // percento sa rozhoduje pri potvrdení, nie pri zápise. Bez neho DB
+          // odmietne celý seed hláškou „Field 'percent' doesn't have a default value".
+          'INSERT INTO campaign_items (campaign_id, product_id, percent, position, status, attempt_count, ' +
             'name_at_write, price_at_preview, price_at_write, price_mismatch, error_code, error_message) ' +
-            'VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)',
+            'VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)',
           [
             campaignId,
             item.productId,
+            item.percent ?? input.percent,
             position,
             item.status,
             `Šperk ${item.productId}`,
@@ -267,7 +303,14 @@ function makeDb(): DbHelper {
     },
 
     async expireApiKey(): Promise<void> {
-      await query('UPDATE api_key SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 HOUR WHERE id = 1');
+      // `WHERE id = 1` tu bolo od začiatku krehké: `reset()` maže riadky cez
+      // DELETE, takže AUTO_INCREMENT rastie a druhý test v poradí už kľúč
+      // s id = 1 nemá — UPDATE potom neurobil NIČ a test „po expirácii" bežal
+      // nad platným kľúčom. Od V3 sú navyše v tabuľke dva kľúče rozlíšené
+      // stĺpcom `kind`; expiruje sa ten zápisový.
+      await query(
+        "UPDATE api_key SET expires_at = UTC_TIMESTAMP(3) - INTERVAL 1 HOUR WHERE kind = 'shop_write'",
+      );
     },
 
     async keyRowCount(): Promise<number> {
@@ -307,6 +350,19 @@ export interface Control {
   ): Promise<void>;
   changePrice(productId: number, price: number): Promise<void>;
   rateLimit(retryAfterSeconds?: number): Promise<void>;
+  /**
+   * K7 — katalóg mocku na mieru scenára. Appka si ho potom zosynchronizuje
+   * vlastnou cestou (`POST /api/catalog/sync`); do `catalog_cache` sa tak
+   * nedostane produkt, ktorý shop nepozná.
+   */
+  setProducts(products: readonly MockCatalogProduct[]): Promise<void>;
+}
+
+/** Produkt v katalógu mocku (podmnožina `MockProduct` — `has_attributes` je 0). */
+export interface MockCatalogProduct {
+  id: number;
+  name?: string;
+  price: number;
 }
 
 function makeControl(): Control {
@@ -331,6 +387,7 @@ function makeControl(): Control {
       call('/change-price', { id: productId, price }).then(() => undefined),
     rateLimit: (retryAfterSeconds = 30) =>
       call('/rate-limit', { retryAfterSeconds }).then(() => undefined),
+    setProducts: (products) => call('/products', { products }).then(() => undefined),
   };
 }
 

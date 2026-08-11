@@ -1,16 +1,24 @@
 /**
- * Aura Zľavy — e2e: čiastočné zlyhanie a „Zopakovať zlyhané" (A18, D15, D16, D36).
+ * Aura Zľavy — e2e: čiastočné zlyhanie a opakovanie zlyhaných (A18, D15, D16, D36).
  *
- * Kampaň v stave `partial` (2 OK, 1 zlyhaná položka) je nasedená priamo v DB —
+ * Zľava, v ktorej sa časť produktov nepodarilo zapísať, je nasedená priamo v DB —
  * ostrý zápis, ktorým by vznikla, je v e2e vynútene odmietnutý (I13/I6, viď
- * `write-flow.spec.ts`), a stav `partial` je vstup, nie predmet tohto testu.
+ * hlavičku `fronta-v3.spec.ts`), a stav `partial` je vstup, nie predmet testu.
  *
  * Predmetom je invariant I3 v jeho najzradnejšej podobe: opakovanie zlyhaných
  * položiek MUSÍ prejsť NOVÝM dry-runom a novým potvrdením, aj keď sú parametre
  * identické (D16). Skratka neexistuje.
+ *
+ * ZMENA V3 (K9, K10, V11): detail zľavy sa prekreslil — `campaign-detail` je
+ * `discount-detail`, `/kampane/[id]` je presmerovanie na `/zlavy/[id]` a na
+ * povrchu už nie sú vnútorné kódy („1 zlyhané" → „1 sa nepodarilo").
+ * Sprievodca opakovania zlyhaných položiek na obrazovke NIE JE: zoznam toho,
+ * čo sa nepodarilo, je pod rozklikom a opakovanie ide cez novú zľavu.
+ * Tvrdenie o D16 sa preto presúva na server — a je tam prísnejšie: cesta
+ * `POST /api/campaigns/[id]/retry-failed` bez čerstvého jednorazového tokenu
+ * MUSÍ skončiť 4xx a na shop nesmie odísť ani jeden zápis.
  */
-import { expect, login, storeApiKey, test } from './fixtures';
-import { E2E_CONFIG } from './config';
+import { api, expect, login, storeApiKey, test } from './fixtures';
 
 const OK_PRODUCTS = [201, 202] as const;
 const FAILED_PRODUCT = 203;
@@ -22,7 +30,7 @@ function dateOnly(offsetDays: number): string {
 }
 
 test.describe('čiastočné zlyhanie', () => {
-  test('detail kampane ukáže 2 OK a 1 zlyhanú položku', async ({ page, db }) => {
+  test('detail zľavy ukáže, koľko prešlo a koľko sa nepodarilo', async ({ page, db }) => {
     await login(page);
     await storeApiKey(page);
     await db.seedAllowlist([...OK_PRODUCTS, FAILED_PRODUCT]);
@@ -40,17 +48,22 @@ test.describe('čiastočné zlyhanie', () => {
       ],
     });
 
+    // K9 — stará cesta sa nesmie zlomiť, vedie na novú.
     await page.goto(`/kampane/${campaignId}`);
-    await expect(page.getByTestId('campaign-detail')).toBeVisible();
-    await expect(page.getByTestId('campaign-detail')).toContainText('2 ok');
-    await expect(page.getByTestId('campaign-detail')).toContainText('1 zlyhané');
-    // I11 — stav sa nikdy neprezentuje ako pravda o shope.
-    await expect(page.getByTestId('campaign-detail')).toContainText('posledného VLASTNÉHO zápisu');
-    await expect(page.getByTestId('retry-failed')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Zopakovať zlyhané \(1\)/ })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/zlavy/${campaignId}$`));
+
+    const detail = page.getByTestId('discount-detail');
+    await expect(detail).toBeVisible();
+    await expect(page.getByTestId('detail-progress')).toContainText('sa nepodarilo');
+    // K10 — na povrchu nie je ani jeden vnútorný kód stavu položky.
+    await expect(detail).not.toContainText('item failed');
+    await expect(detail).not.toContainText('needs_key');
+
+    // Zoznam toho, čo sa nepodarilo, je pod rozklikom (P6), nie na povrchu.
+    await expect(page.getByTestId('detail-items')).toBeVisible();
   });
 
-  test('D16: „Zopakovať zlyhané" ide vždy cez nový dry-run a nové potvrdenie', async ({
+  test('D16: opakovanie zlyhaných bez čerstvého potvrdenia je 4xx a NIČ nezapíše', async ({
     page,
     db,
     control,
@@ -72,48 +85,29 @@ test.describe('čiastočné zlyhanie', () => {
       ],
     });
 
-    await page.clock.install();
-    await page.goto(`/kampane/${campaignId}`);
     const before = await control.state();
 
-    await page.getByRole('button', { name: /Zopakovať zlyhané/ }).click();
+    /* 1. Bez tokenu — telo požiadavky ho nemá vôbec. */
+    const noToken = await api(page, 'POST', `/api/campaigns/${campaignId}/retry-failed`, {});
+    expect(noToken.status()).toBeGreaterThanOrEqual(400);
+    expect(noToken.status()).toBeLessThan(500);
 
-    /* Dry-run opakovania — obsahuje VÝHRADNE zlyhaný produkt. */
-    const retry = page.getByTestId('retry-failed');
-    await expect(retry.getByTestId('dry-run-table')).toBeVisible();
-    await expect(retry.getByTestId('dry-run-table')).toContainText(String(FAILED_PRODUCT));
-    await expect(retry.getByTestId('dry-run-table')).not.toContainText(String(OK_PRODUCTS[0]));
+    /* 2. S vymysleným tokenom — podpis nesedí. */
+    const fakeToken = await api(page, 'POST', `/api/campaigns/${campaignId}/retry-failed`, {
+      previewToken: 'nie.je.token',
+    });
+    expect(fakeToken.status()).toBeGreaterThanOrEqual(400);
+    expect(fakeToken.status()).toBeLessThan(500);
 
-    /* Nové potvrdenie je povinné — názov je zamknutý (D36). */
-    await expect(retry.getByTestId('confirm-panel')).toBeVisible();
-    await expect(retry.getByTestId('campaign-name')).toBeDisabled();
+    /* I3 — ani jeden z pokusov sa nesmel dotknúť shopu. */
+    const after = await control.state();
+    expect(after.writeCount).toBe(before.writeCount);
 
-    // Dry-run sám nezapisuje.
-    const afterPreview = await control.state();
-    expect(afterPreview.writeCount).toBe(before.writeCount);
-
-    /* Potvrdenie po vypršaní sudo okna → heslo znova (D70). */
-    await page.clock.fastForward('20:00');
-    await retry.getByTestId('write-to-production').click();
-    const sudoDialog = page.getByRole('dialog', { name: 'Overenie heslom' });
-    if (await sudoDialog.isVisible()) {
-      await sudoDialog.getByPlaceholder('Heslo').fill(E2E_CONFIG.adminPassword);
-      await sudoDialog.getByRole('button', { name: 'Potvrdiť' }).click();
-    }
-
-    /* Vyústenie: nová retry kampaň, alebo fail-closed odmietnutie zápisu (I13). */
-    const refused = page.getByText(/Ostrý zápis je vypnutý|WRITES_ENABLED/);
-    await expect(page.getByTestId('campaign-detail').or(refused).first()).toBeVisible();
-
-    if (await refused.isVisible()) {
-      const afterConfirm = await control.state();
-      expect(afterConfirm.writeCount).toBe(before.writeCount);
-      // Žiadna nová kampaň nesmie zostať „rozbehnutá" po odmietnutom zápise.
-      const running = await db.query<{ n: number }>(
-        "SELECT COUNT(*) AS n FROM campaigns WHERE status = 'running'",
-      );
-      expect(Number(running[0].n)).toBe(0);
-    }
+    /* A zľava zostala presne tam, kde bola — nič sa „nerozbehlo". */
+    const rows = await db.query<{ status: string }>('SELECT status FROM campaigns WHERE id = ?', [
+      campaignId,
+    ]);
+    expect(rows[0].status).toBe('partial');
   });
 
   test('I7: v UI neexistuje akcia, ktorá by zľavu v shope rušila', async ({ page, db }) => {
@@ -130,10 +124,13 @@ test.describe('čiastočné zlyhanie', () => {
       items: [{ productId: OK_PRODUCTS[0], status: 'ok' }],
     });
 
-    await page.goto(`/kampane/${campaignId}`);
-    await expect(page.getByTestId('campaign-detail')).toBeVisible();
-    // „Zrušiť" existuje výhradne pre PLÁN v našej DB, nikdy pre zľavu v shope.
-    await expect(page.getByRole('button', { name: /Zrušiť zľavu|Vymazať zľavu/ })).toHaveCount(0);
-    await expect(page.getByTestId('campaign-detail')).toContainText('nedá zrušiť, len prepísať');
+    await page.goto(`/zlavy/${campaignId}`);
+    await expect(page.getByTestId('discount-detail')).toBeVisible();
+    // Appka zľavu v eshope nikdy neruší ani neskracuje — také tlačidlo
+    // neexistuje. „Zastaviť" sa smie týkať výhradne FRONTY, teda toho, čo sa
+    // ešte nezapísalo.
+    await expect(
+      page.getByRole('button', { name: /Zrušiť zľavu|Vymazať zľavu|Zrušiť v eshope/ }),
+    ).toHaveCount(0);
   });
 });

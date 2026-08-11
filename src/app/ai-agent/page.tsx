@@ -1,54 +1,21 @@
 /**
- * Aura Zľavy — /ai-agent: tab AI agent (plán 33 §4, sekcia C3).
+ * Aura Zľavy — `/ai-agent` → `/` (V13; kontrakt V3 K9).
  *
- * Poctivý rozsah: V1 „Zistenia" (deterministické pravidlá nad vlastnými
- * dátami, bez LLM) + „Predajnosť" (počet predaných kusov za obdobie, ktoré je
- * v DB skutočne pokryté) + V2 zamknutá „Obrátkovosť" (presný zoznam
- * chýbajúcich dát) + V3 karta „Agent" (vyžaduje konfiguráciu).
+ * Samostatný tab AI agent zanikol. To, čo z neho reálne fungovalo — zistenia
+ * z deterministických pravidiel nad vlastnými dátami (`/api/ai/insights`) —
+ * sa rozpustilo do Prehľadu ako riadky „Návrhy": číslo, sloveso a jedno
+ * tlačidlo. Nie karta, nie chatbot, nie vlastná obrazovka.
  *
- * Nič na tejto stránke nepredstiera dáta, ktoré appka nemá (I11), a nič
- * nezapisuje (I3): predajnosť sú kusy, nie obrat, a obrátkovosť zostáva
- * zamknutá, kým shop nedá COGS a zásobu nevariantných produktov.
+ * Zamknutá obrátkovosť sa presťahovala do Nastavení → „Zamknuté funkcie",
+ * kde je JEDINÉ miesto s vysvetlením, čo appke z eshopu chýba.
+ *
+ * Cesta zostáva ako presmerovanie, aby staré odkazy a záložky neskončili
+ * na 404.
+ *
+ * Vlastník: V13.
  */
-import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 
-import AgentCard from '@/components/ai/AgentCard';
-import InsightsCard from '@/components/ai/InsightsCard';
-import SalesCard from '@/components/ai/SalesCard';
-import TurnoverCard from '@/components/ai/TurnoverCard';
-import Eyebrow from '@/components/ui/Eyebrow';
-import { APP_DISPLAY_NAME } from '@/version';
-
-export const metadata: Metadata = {
-  title: `AI agent — ${APP_DISPLAY_NAME}`,
-};
-
-export default function AiAgentPage() {
-  return (
-    <div className="ovl-w-wide">
-      <div className="ovl-page-head ovl-view-in">
-        <div>
-          <Eyebrow>Riadenie zliav</Eyebrow>
-          <h1>AI agent</h1>
-          <p className="ovl-page-desc">
-            Pravidlový analytik nad vlastnými dátami appky. Navrhuje — nikdy nezapisuje: každý
-            návrh prechádza dry-run náhľadom a potvrdením.
-          </p>
-        </div>
-      </div>
-
-      <div className="ovl-stack" style={{ gap: '1rem' }}>
-        <InsightsCard />
-        <SalesCard />
-        {/* grid-halves predlohy — `.ovl-grid--halves` v B1 nie je, preto inline */}
-        <div
-          className="ovl-grid"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))' }}
-        >
-          <TurnoverCard />
-          <AgentCard />
-        </div>
-      </div>
-    </div>
-  );
+export default function AiAgentRedirect(): never {
+  redirect('/');
 }

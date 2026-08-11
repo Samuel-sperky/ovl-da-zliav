@@ -12,14 +12,25 @@
  *     `WRITES_ENABLED=false`. Appka zapisuje do PRODUKČNÉHO shopu, takže
  *     označenie režimu zápisov nesmie tvrdiť nič o `NODE_ENV`.
  *
- * Testujú sa čisté funkcie (`classifyHealthStatus`, `headerStatusView`,
- * `writeModeView`) — rovnaký vzor ako `chart-frame.spec.ts`.
+ * ZMENA V3: bod 2 strážil čistá funkcia `writeModeView()` z
+ * `components/layout/WriteModeBadge.tsx`. V3 badge z hlavičky odstránil —
+ * podľa ARCHITEKTURA §0 je v hlavičke výhradne rozpočet, fronta a téma — a
+ * fakt o vypnutých zápisoch nesie pruh pod hlavičkou (`HeaderWritesStrip`
+ * v `HeaderStatus.tsx`). Tvrdenie sa preto nezoslabuje, len sa presúva na
+ * nového nositeľa; navyše sa sprísňuje o K10 (slovo „dry-run" je na povrchu
+ * zakázané, takže pôvodné `toContain('dry-run')` by dnes bolo v rozpore
+ * s kontraktom).
+ *
+ * Testujú sa čisté funkcie (`classifyHealthStatus`, `headerStatusView`) a
+ * zdroj pruhu o zápisoch.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { classifyHealthStatus } from '@/components/layout/health';
 import { headerStatusView } from '@/components/layout/HeaderStatus';
-import { writeModeView } from '@/components/layout/WriteModeBadge';
 
 describe('classifyHealthStatus — 401 nie je porucha appky', () => {
   it('200 = ok', () => {
@@ -135,34 +146,47 @@ describe('headerStatusView — všetky štyri kombinácie (session × beží)', 
   });
 });
 
-describe('writeModeView — režim zápisov je odlíšený od NODE_ENV', () => {
-  it('zápisy povolené = žiadny badge (absencia varovania = ostrý zápis)', () => {
-    expect(writeModeView({ writesEnabled: true, writesLocked: false })).toBeNull();
+describe('pruh o zápisoch — režim zápisov je odlíšený od NODE_ENV', () => {
+  const source = readFileSync(
+    resolve(process.cwd(), 'src/components/layout/HeaderStatus.tsx'),
+    'utf8',
+  );
+
+  /** Telo `HeaderWritesStrip` — jediné miesto, kde sa o zápisoch tvrdí stav. */
+  const strip = (() => {
+    const start = source.indexOf('export function HeaderWritesStrip');
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf('\nexport ', start + 1);
+    return source.slice(start, end === -1 ? source.length : end);
+  })();
+
+  it('zápisy povolené = žiadny pruh (absencia varovania = ostrý zápis)', () => {
+    expect(strip).toContain('return null');
   });
 
-  it('zápisy vypnuté NETVRDÍ „dev" — vypnutie je vlastnosť WRITES_ENABLED', () => {
-    const v = writeModeView({ writesEnabled: false, writesLocked: false });
-    expect(v).not.toBeNull();
-    if (v === null) throw new Error('nedosiahnuteľné');
-    expect(v.state).toBe('disabled');
-    // Jadro opravy: badge nesmie hlásiť vývojový režim ani nič o NODE_ENV.
-    expect(v.label.toLowerCase()).not.toContain('dev');
-    expect(v.title).not.toContain('NODE_ENV');
+  it('vypnuté zápisy NETVRDIA „dev" ani nič o NODE_ENV', () => {
+    // Jadro pôvodnej opravy: vypnutie je vlastnosť WRITES_ENABLED, nie prostredia.
+    expect(strip).not.toMatch(/NODE_ENV/);
+    expect(strip.toLowerCase()).not.toMatch(/\bdev\b/);
     // Musí ostať jasné, že sa nezapisuje ostro.
-    expect(v.label.toLowerCase()).toContain('zápisy vypnuté');
-    expect(v.label.toLowerCase()).toContain('dry-run');
+    expect(strip).toContain('Ostrý zápis vypnutý');
+    expect(strip).toContain('data-state="disabled"');
   });
 
-  it('runaway zámok zostáva critical a má prednosť', () => {
-    const v = writeModeView({ writesEnabled: false, writesLocked: true });
-    expect(v).not.toBeNull();
-    if (v === null) throw new Error('nedosiahnuteľné');
-    expect(v.state).toBe('locked');
-    expect(v.tone).toBe('critical');
+  it('K10 — na povrchu nepadne „dry-run" ani „WRITES_ENABLED"', () => {
+    expect(strip.toLowerCase()).not.toContain('dry-run');
+    // Premenná `writesEnabled` je v kóde v poriadku; zakázaný je len TEXT
+    // vykreslený používateľovi.
+    const rendered = strip.match(/>[^<>{}]*[A-Za-zÁ-ž][^<>{}]*</g) ?? [];
+    for (const text of rendered) {
+      expect(text.toLowerCase()).not.toContain('writes_enabled');
+      expect(text.toLowerCase()).not.toContain('dry-run');
+    }
   });
 
-  it('zámok platí aj keď sú zápisy inak povolené', () => {
-    const v = writeModeView({ writesEnabled: true, writesLocked: true });
-    expect(v?.state).toBe('locked');
+  it('runaway zámok má vlastný, prísnejší stav a prednosť pred vypnutými zápismi', () => {
+    expect(strip).toContain('data-state="locked"');
+    // Zámok sa vyhodnocuje PRED `writesEnabled` — inak by ho vypnuté zápisy prekryli.
+    expect(strip.indexOf('writesLocked')).toBeLessThan(strip.indexOf('!health.writesEnabled'));
   });
 });

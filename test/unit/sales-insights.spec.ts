@@ -251,9 +251,20 @@ describe('salesMetrics — kusy, kusy/deň, dni od posledného predaja', () => {
 
 const read = (path: string): string => readFileSync(resolve(process.cwd(), path), 'utf8');
 
+/**
+ * ZMENA V3 (K9): karty `components/ai/SalesCard.tsx` a `TurnoverCard.tsx`
+ * zanikli spolu s tabom `/ai-agent`. Predané kusy sa dnes zobrazujú
+ * v Produktoch (tabuľka + bočný panel) a zoznam toho, čo je zamknuté a prečo,
+ * má jediné miesto v Nastaveniach (`LockedFeatures`, K8). Tvrdenie I11
+ * zostáva to isté — mení sa len súbor, na ktorom sa dokazuje.
+ */
 describe('predajnosť sa nikde nevydáva za obrátkovosť', () => {
-  it('modul metrík ani karta Predajnosť nepočítajú obrátkovosť ani COGS', () => {
-    for (const path of ['src/lib/sales/insights.ts', 'src/components/ai/SalesCard.tsx']) {
+  it('modul metrík ani povrch s predanými kusmi nepočítajú obrátkovosť ani COGS', () => {
+    for (const path of [
+      'src/lib/sales/insights.ts',
+      'src/components/products/ProductDetailPanel.tsx',
+      'src/components/products/CatalogTable.tsx',
+    ]) {
       const code = read(path);
       // Slovo smie padnúť len v popise toho, čo appka NEVIE — nikdy ako
       // názov metriky, premennej či vzorca.
@@ -262,23 +273,27 @@ describe('predajnosť sa nikde nevydáva za obrátkovosť', () => {
     }
   });
 
-  it('karta Predajnosť pomenúva metriku ako kusy a odmieta obrat', () => {
-    const card = read('src/components/ai/SalesCard.tsx');
-    expect(card).toContain('kusov');
-    expect(card).toContain('Nie je');
-    expect(card).toContain('obrátkovosť');
+  it('povrch s predajnosťou pomenúva metriku ako KUSY, nikdy ako obrat', () => {
+    const panel = read('src/components/products/ProductDetailPanel.tsx');
+    expect(panel).toContain('predaných za posledných');
+    const table = read('src/components/products/CatalogTable.tsx');
+    expect(table).toContain('Predané');
+    // Obrat na produkt sa priradiť nedá (P4) — nesmie sa objaviť ani ako slovo.
+    for (const code of [panel, table]) {
+      expect(/\bobrat\b/i.test(code)).toBe(false);
+      expect(/\bobrátkovosť\b/i.test(code)).toBe(false);
+    }
   });
 
-  it('karta Obrátkovosť zostáva ZAMKNUTÁ a hovorí, čo ešte chýba', () => {
-    const card = read('src/components/ai/TurnoverCard.tsx');
-    expect(card).toContain('aria-disabled="true"');
-    expect(card).toContain('zamknuté');
-    // Chýba už len COGS a zásoba nevariantných produktov — predaje nie.
-    expect(card).toContain('turnover-missing-cogs');
-    expect(card).toContain('turnover-missing-stock');
-    expect(card).toContain('turnover-sales-ok');
-    expect(card).toContain('Predaje už nechýbajú');
-    // Vzorec zostáva citovaný ako CIEĽ, nie ako výsledok.
-    expect(card).toContain('turnover-formula');
+  it('Obrátkovosť zostáva ZAMKNUTÁ a na jedinom mieste hovorí, čo chýba', () => {
+    const locked = read('src/components/settings/LockedFeatures.tsx');
+    expect(locked).toContain('Obrátkovosť');
+    // Chýbajú nákupné ceny (COGS) — nie predaje.
+    expect(locked).toContain('nákupné ceny');
+    expect(locked).toContain('Predané kusy fungujú vždy');
+    // Vo filtroch je viditeľná, ale neklikateľná (K8) — nie skrytá.
+    const filters = read('src/components/products/CatalogFilters.tsx');
+    expect(filters).toContain("turnover: 'Obrátkovosť'");
+    expect(filters).toContain('aria-disabled="true"');
   });
 });

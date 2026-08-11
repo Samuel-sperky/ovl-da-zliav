@@ -4,6 +4,13 @@
  * Po expirácii TTL (max 48 h) sa kľúč lazy wipne, appka NEBLOKUJE čítanie,
  * ale zapisovacie akcie sú fail-closed a v hlavičke visí výzva na nový kľúč.
  * Nový kľúč režim zruší.
+ *
+ * ZMENA V3: v hlavičke už NIE JE odpočet platnosti kľúča — podľa architektúry
+ * §0 sú v nej výhradne rozpočet zápisov, stav fronty a prepínač témy (K9).
+ * Platnosť kľúča má jediné miesto: Nastavenia → „Kľúče a rozpočet". Tvrdenie sa
+ * preto presúva tam; výzva na nový kľúč (`readonly-notice`) zostáva na každej
+ * obrazovke a nemení sa. Tabuľka allowlistu zanikla — čítanie sa overuje na
+ * tabuľke katalógu (`/produkty`) a na zozname zliav (`/zlavy`).
  */
 import { addAllowlist, api, expect, login, storeApiKey, test } from './fixtures';
 
@@ -18,10 +25,12 @@ test.describe('read-only po expirácii kľúča', () => {
     await storeApiKey(page);
     await addAllowlist(page, PRODUCTS);
 
-    // Kľúč platí — výzva nie je.
+    // Kľúč platí — výzva nie je a Nastavenia hlásia uložený kľúč.
     await page.goto('/');
     await expect(page.getByTestId('readonly-notice')).toBeHidden();
-    await expect(page.getByTestId('key-ttl-badge')).toHaveAttribute('data-state', /ok|warning|critical/);
+    await page.goto('/nastavenia');
+    // Platnosť kľúča je v riadku tabuľky „Kľúče" — nie v hlavičke (K9).
+    await expect(page.getByTestId('key-row-write')).toContainText('vložený');
 
     /* Posun expirácie do minulosti = to isté, čo urobí čas (R2). */
     await db.expireApiKey();
@@ -29,18 +38,19 @@ test.describe('read-only po expirácii kľúča', () => {
     await page.goto('/');
     await expect(page.getByTestId('readonly-notice')).toBeVisible();
     await expect(page.getByTestId('readonly-notice')).toContainText('len na čítanie');
-    await expect(page.getByTestId('key-ttl-badge')).toHaveAttribute('data-state', 'missing');
+    await page.goto('/nastavenia');
+    await expect(page.getByTestId('key-row-write')).toContainText('chýba');
 
     // D63 — expirovaný kľúč sa wipne, v DB po ňom nezostane riadok.
     expect(await db.keyRowCount()).toBe(0);
 
     /* Čítanie NIE JE zablokované (D10). */
     await page.goto('/produkty');
-    await expect(page.getByTestId('allowlist-table')).toBeVisible();
+    await expect(page.getByTestId('catalog-table')).toBeVisible();
     await page.goto('/audit');
     await expect(page.getByTestId('audit-table')).toBeVisible();
-    await page.goto('/kampane');
-    await expect(page.getByTestId('campaign-list')).toBeVisible();
+    await page.goto('/zlavy');
+    await expect(page.getByTestId('discounts-list')).toBeVisible();
 
     /* Zápis je fail-closed — kampaň sa bez kľúča nezapíše. */
     const res = await api(page, 'POST', '/api/campaigns/preview', {
@@ -61,6 +71,8 @@ test.describe('read-only po expirácii kľúča', () => {
     await db.expireApiKey();
 
     await page.goto('/nastavenia');
+    // Keď kľúč na zápis chýba, formulár je otvorený hneď — je to najčastejší
+    // dôvod, prečo sem človek prišiel.
     await expect(page.getByTestId('api-key-missing')).toBeVisible();
 
     await storeApiKey(page);
@@ -84,8 +96,8 @@ test.describe('read-only po expirácii kľúča', () => {
     });
     await db.expireApiKey();
 
-    await page.goto(`/kampane/${campaignId}`);
-    await expect(page.getByTestId('campaign-detail')).toBeVisible();
-    await expect(page.getByTestId('campaign-detail')).not.toContainText('zlyhala');
+    await page.goto(`/zlavy/${campaignId}`);
+    await expect(page.getByTestId('discount-detail')).toBeVisible();
+    await expect(page.getByTestId('discount-detail')).not.toContainText('zlyhala');
   });
 });

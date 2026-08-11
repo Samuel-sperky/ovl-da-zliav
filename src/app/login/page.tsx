@@ -290,7 +290,6 @@ export default function LoginPage() {
           <Button
             type="submit"
             variant="primary"
-            className="btn lg"
             disabled={locked || busy}
             disabledReason={locked ? 'Prihlásenie je dočasne uzamknuté.' : undefined}
             data-testid="login-submit"

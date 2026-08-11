@@ -106,17 +106,35 @@ describe.skipIf(!available)('I1 — kľúč nie je v DB ani v logoch (redaction)
 
     const from = day(1);
     const to = day(7);
+    /**
+     * K3/K4 — hash potvrdenia je nad trojicami `id:percent:price_at_preview`.
+     * Executor si ho prepočíta z RIADKOV `campaign_items`, takže ceny aj
+     * percentá tu musia byť tie isté, aké sa o pár riadkov nižšie vložia.
+     * (Do V3 sa hashoval len kanonický JSON bez cien a s jedným percentom.)
+     */
+    const priceAtPreview = '15.00';
+    const percent = 10;
+    const pricesAtPreview = Object.fromEntries(
+      productIds.map((id) => [String(id), priceAtPreview]),
+    );
     const campaign = await campaignsRepo.create({
       operationId: testUlid(),
       name: 'Redakčný test',
       kind: 'new',
-      percent: 10,
+      percent,
       dateFrom: from,
       dateTo: to,
       mode: 'eager',
       status: 'scheduled',
       confirmedAt: new Date(),
-      confirmPayloadHash: computePayloadHash({ kind: 'new', productIds, percent: 10, from, to }),
+      confirmPayloadHash: computePayloadHash({
+        kind: 'new',
+        productIds,
+        percent,
+        from,
+        to,
+        pricesAtPreview,
+      }),
       sudoAt: new Date(),
       createdBy: userId,
     });
@@ -125,7 +143,8 @@ describe.skipIf(!available)('I1 — kľúč nie je v DB ani v logoch (redaction)
       productIds.map((productId, index) => ({
         productId,
         position: index + 1,
-        priceAtPreview: '15.00',
+        percent,
+        priceAtPreview,
         hasAttributes: false,
       })),
     );
