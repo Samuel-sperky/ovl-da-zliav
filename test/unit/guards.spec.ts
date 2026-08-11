@@ -264,6 +264,36 @@ describe('checkScope — režim pilot (K1, I2, fail-closed)', () => {
     expect((await checkScope([201], broken)).ok).toBe(false);
   });
 
+  it('ZASEKNUTÁ DB (nikdy neodpovie) skončí ako pilot, nie ako večné čakanie', async () => {
+    // Regresia: `resolveScope()` mal try/catch, ktorý pokrýval len ODMIETNUTIE.
+    // Keď DB neodpovedala vôbec, `await` visel donekonečna — teda nie
+    // fail-closed, ale fail-nikdy. V testoch to vyzeralo ako timeout po 20 s,
+    // v produkcii by to bol zamrznutý náhľad. Zaseknutie sa musí správať
+    // rovnako ako chyba: „neviem" → `pilot`.
+    const { deps } = world();
+    const zaseknuta: GuardsDeps = {
+      ...deps,
+      settingsRepo: {
+        // Nikdy sa nevyrieši ani neodmietne — presne to robí mŕtve spojenie.
+        readScope: () => new Promise<never>(() => {}),
+        get: () => new Promise<never>(() => {}),
+      } as unknown as GuardsDeps['settingsRepo'],
+    };
+
+    // 11 produktov: v `pilot` (strop 10) to musí PADNÚŤ na `tooManyProducts`.
+    // Keby zaseknutie skončilo v režime `plny`, prešlo by to — a to je práve
+    // ten tichý zápis, ktorému K1 bod 1 bráni.
+    const ids = Array.from({ length: 11 }, (_, i) => 401 + i);
+    const zaciatok = Date.now();
+    const result = await checkScope(ids, zaseknuta);
+    const trvanie = Date.now() - zaciatok;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe(GUARD_CODES.tooManyProducts);
+    // Musí to skončiť na strope čítania, nie až na timeoute testu.
+    expect(trvanie).toBeLessThan(10_000);
+  }, 15_000);
+
   it('strop 10 platí aj keď nastavenia hovoria o 10 000 (K1, tabuľka režimov)', async () => {
     const ids = Array.from({ length: 11 }, (_, i) => 301 + i);
     const { deps } = world({

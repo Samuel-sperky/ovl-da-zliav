@@ -179,6 +179,7 @@ export type AuditEventType =
   | 'campaign_claimed'
   | 'campaign_needs_key'
   | 'campaign_missed'
+  | 'queue_resumed'
   | 'campaign_lapsed'
   | 'campaign_from_shifted'
   | 'campaign_finished'

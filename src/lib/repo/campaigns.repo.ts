@@ -195,6 +195,15 @@ const SQL_FIND_LATE_CANDIDATES =
 const SQL_MARK_LATE = 'UPDATE campaigns SET late = 1 WHERE id = ? AND late = 0';
 
 /**
+ * K2: `missed` → `queued` po odstávke počítača. Podmienka `status = 'missed'`
+ * v tom istom `UPDATE` je celá atomicita — dva kliky ani súbeh so schedulerom
+ * nevrátia do fronty nič dvakrát.
+ */
+const SQL_REQUEUE_MISSED =
+  "UPDATE campaigns SET status = 'queued', status_reason = ?, claimed_at = NULL " +
+  "WHERE id = ? AND status = 'missed'";
+
+/**
  * K2: počítadlá sú ODVODENINA z `campaign_items`, nie druhý zdroj pravdy.
  * Pri fronte bežiacej 40 dní by inkrementovaný stĺpec nevyhnutne odišiel od
  * skutočnosti; jeden `UPDATE … SET x = (SELECT …)` odísť nevie.
@@ -435,6 +444,18 @@ export interface CampaignsRepoExt {
   markLate(id: number, conn?: Queryable): Promise<boolean>;
   /** K2: prepočíta počítadlá z `campaign_items` (jediný zdroj pravdy). */
   syncCountersFromItems(id: number, conn?: Queryable): Promise<void>;
+  /**
+   * K2 / odpoveď 43: prepadnutá kampaň späť do fronty po odstávke počítača.
+   *
+   * JEDEN atomický `UPDATE … WHERE status = 'missed'`, nie `claim()` +
+   * `setStatus()`. `claim()` totiž prepína na `running`, čo by tu klamalo —
+   * kampaň sa nezapisuje, len čaká na rad — a pád medzi tými dvoma krokmi by
+   * ju nechal visieť v `running` bez executora.
+   *
+   * `true` = práve teraz sa vrátila do fronty. `false` = medzitým ju zmenil
+   * niekto iný (druhá karta, scheduler), a to je v poriadku.
+   */
+  requeueMissed(id: number, conn?: Queryable): Promise<boolean>;
 }
 
 export interface CampaignsRepoDeps {
@@ -613,6 +634,16 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
       return typeof result.affectedRows === 'number' ? result.affectedRows === 1 : false;
     },
 
+    async requeueMissed(id: number, conn?: Queryable): Promise<boolean> {
+      if (!isValidId(id)) return false;
+      const result =
+        (await run<{ affectedRows?: number }>(conn, SQL_REQUEUE_MISSED, [
+          'Fronta znovu spustená po odstávke.',
+          id,
+        ])) ?? {};
+      return typeof result.affectedRows === 'number' ? result.affectedRows === 1 : false;
+    },
+
     async syncCountersFromItems(id: number, conn?: Queryable): Promise<void> {
       if (!isValidId(id)) return;
       await run(conn, SQL_SYNC_COUNTERS, [id]);
@@ -709,6 +740,8 @@ export const campaignsRepoV3: CampaignsRepoExt = singleton;
  */
 export type CampaignsRepoLegacy = CampaignsRepo & {
   findScheduled(conn?: Queryable): Promise<CampaignRecord[]>;
+  /** K2 — `missed` → `queued` po odstávke. Singleton ju má, typ ju len priznáva. */
+  requeueMissed(id: number, conn?: Queryable): Promise<boolean>;
 };
 
 /** Singleton pre route-y, engine a scheduler (starý tvar). */

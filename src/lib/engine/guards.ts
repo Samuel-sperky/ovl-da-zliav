@@ -225,8 +225,18 @@ const fieldOf = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
 
 /**
- * K1 bod 1 — FAIL-CLOSED čítanie režimu. Chýbajúca, nečitateľná aj neznáma
- * hodnota znamená `pilot`. Nikdy výnimka, nikdy `plny`.
+ * Strop na čítanie režimu z DB. Bez neho „neviem" nefunguje: zaseknutá DB
+ * nevyhodí výnimku, len nikdy neodpovie, a `await` by čakal donekonečna.
+ */
+const SCOPE_READ_TIMEOUT_MS = 2_000;
+
+/**
+ * K1 bod 1 — FAIL-CLOSED čítanie režimu. Chýbajúca, nečitateľná, ZASEKNUTÁ aj
+ * neznáma hodnota znamená `pilot`. Nikdy výnimka, nikdy `plny`.
+ *
+ * Časový strop tu nie je kozmetika. Bez neho stačilo, aby DB neodpovedala, a
+ * `buildPreview()` visel — teda nie fail-closed, ale fail-nikdy. Zaseknutie sa
+ * musí správať rovnako ako chyba: „neviem" → `pilot`.
  */
 async function resolveScope(d: ResolvedDeps): Promise<ResolvedScope> {
   const pilot = (): ResolvedScope => ({
@@ -238,12 +248,27 @@ async function resolveScope(d: ResolvedDeps): Promise<ResolvedScope> {
   const repo = d.settingsRepo;
   const read = typeof repo.readScope === 'function' ? repo.readScope.bind(repo) : repo.get.bind(repo);
 
+  const TIMED_OUT = Symbol('scope_read_timeout');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
   let raw: unknown;
   try {
-    raw = await read();
+    raw = await Promise.race([
+      read(),
+      new Promise<typeof TIMED_OUT>((resolveRace) => {
+        timer = setTimeout(() => resolveRace(TIMED_OUT), SCOPE_READ_TIMEOUT_MS);
+        // Časovač nesmie držať proces nažive — scheduler aj testy sa inak
+        // nedočkajú ukončenia.
+        timer.unref?.();
+      }),
+    ]);
   } catch {
     return pilot(); // nečitateľná DB je „neviem" a „neviem" je `pilot`
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
+
+  if (raw === TIMED_OUT) return pilot(); // zaseknutá DB je tiež „neviem"
 
   const mode = fieldOf(raw, 'mode') ?? fieldOf(raw, 'scopeMode');
   if (!isScopeMode(mode) || mode === 'pilot') {

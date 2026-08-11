@@ -77,7 +77,10 @@ import {
   campaignItemsRepo as defaultCampaignItemsRepo,
   type NewCampaignItem,
 } from '@/lib/repo/campaign-items.repo';
-import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
+import {
+  campaignsRepo as defaultCampaignsRepo,
+  type CampaignsRepoExt,
+} from '@/lib/repo/campaigns.repo';
 import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import {
@@ -152,7 +155,12 @@ export interface RoutesDeps {
     | 'findPlannedForProduct'
     | 'findFutureOverlaps'
     | 'lastOwnWrite'
-  >;
+  > &
+    // `requeueMissed` (K2) žije až v rozšírenom repozitári, nie v kontrakte A0.
+    // VOLITEĽNÉ zámerne: staršie fakes v testoch ho nemajú a nemá zmysel nútiť
+    // ich dopisovať metódu, ktorú netestujú. Keď chýba, `resolveRoutesDeps()`
+    // doplní fail-closed náhradu, ktorá nevráti do fronty nič.
+    Partial<Pick<CampaignsRepoExt, 'requeueMissed'>>;
   campaignItemsRepo?: RoutesItemsRepo;
   allowlistRepo?: Pick<
     AllowlistRepo,
@@ -179,17 +187,34 @@ export interface RoutesDeps {
 }
 
 export type ResolvedRoutesDeps = Required<
-  Omit<RoutesDeps, 'executorFlags' | 'fireTime' | 'timeZone'>
+  Omit<RoutesDeps, 'executorFlags' | 'fireTime' | 'timeZone' | 'campaignsRepo'>
 > & {
+  campaignsRepo: ResolvedCampaignsRepo;
   executorFlags: ExecutorFlags | (() => ExecutorFlags);
   timeZone: string;
   fireTime: string;
 };
 
+/** Repozitár kampaní, ako ho route-y prijímajú (s voliteľným `requeueMissed`). */
+type RoutesCampaignsRepo = NonNullable<RoutesDeps['campaignsRepo']>;
+
+/** Repozitár po doplnení — `requeueMissed` je tu už vždy. */
+export type ResolvedCampaignsRepo = RoutesCampaignsRepo &
+  Pick<CampaignsRepoExt, 'requeueMissed'>;
+
+/** Doplní `requeueMissed` fake repozitárom, ktoré ho nemajú (K2, fail-closed). */
+function withRequeue(repo: RoutesCampaignsRepo): ResolvedCampaignsRepo {
+  return repo.requeueMissed === undefined
+    ? { ...repo, requeueMissed: async () => false }
+    : (repo as ResolvedCampaignsRepo);
+}
+
 export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDeps {
   const settingsRepo = overrides.settingsRepo ?? defaultSettingsRepo;
   return {
-    campaignsRepo: overrides.campaignsRepo ?? defaultCampaignsRepo,
+    // K2: fake bez `requeueMissed` dostane náhradu, ktorá nevráti do fronty
+    // NIČ. Fail-closed — chýbajúca schopnosť nesmie znamenať tichý zápis.
+    campaignsRepo: withRequeue(overrides.campaignsRepo ?? defaultCampaignsRepo),
     campaignItemsRepo: overrides.campaignItemsRepo ?? defaultCampaignItemsRepo,
     allowlistRepo: overrides.allowlistRepo ?? defaultAllowlistRepo,
     catalogRepo: overrides.catalogRepo ?? defaultCatalogRepo,
