@@ -23,11 +23,14 @@ import type { DateOnly } from '@/contracts';
 import { env } from '@/env';
 import { addCalendarMonths, addDays, isDateOnly, todayInZone } from '@/lib/domain/dates';
 import { insightsRepo as defaultInsightsRepo } from '@/lib/repo/insights.repo';
+import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
 
 /* ═══════════════════════ 1. Závislosti route-ov ═══════════════════════════ */
 
 export interface InsightsDeps {
   insightsRepo?: typeof defaultInsightsRepo;
+  /** Okno platnosti zľavy pre sekciu „Výkon" — jediné, čo z nej treba. */
+  campaignsRepo?: Pick<typeof defaultCampaignsRepo, 'getById'>;
   now?: () => Date;
   timeZone?: string;
 }
@@ -39,6 +42,7 @@ export type ResolvedInsightsDeps = Required<Omit<InsightsDeps, 'timeZone'>> & {
 export function resolveInsightsDeps(overrides: InsightsDeps = {}): ResolvedInsightsDeps {
   return {
     insightsRepo: overrides.insightsRepo ?? defaultInsightsRepo,
+    campaignsRepo: overrides.campaignsRepo ?? defaultCampaignsRepo,
     now: overrides.now ?? (() => new Date()),
     // LAZY: route moduly volajú resolve na module scope, takže eager čítanie
     // `env.*` by spustilo validáciu ENV už počas `next build` (rovnaký dôvod

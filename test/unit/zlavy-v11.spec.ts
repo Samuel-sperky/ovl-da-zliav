@@ -30,6 +30,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
+import DiscountPerformance from '@/components/campaigns/DiscountPerformance';
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import NewDiscountStart from '@/components/campaigns/NewDiscountStart';
 import {
@@ -403,5 +404,39 @@ describe('H — /kampane/* vedie na /zlavy/*', () => {
     const page = (await import('@/app/kampane/[id]/page')).default;
     expect(await redirectOf(() => page({ params: Promise.resolve({ id: '42' }) }))).toBe('/zlavy/42');
     expect(await redirectOf(() => page({ params: Promise.resolve({ id: 'nieco' }) }))).toBe('/zlavy');
+  });
+});
+
+/* ═════════ Výkon výberu — appka nesmie predstierať tržby (K8, P8) ═════════ */
+
+describe('Výkon výberu v detaile zľavy', () => {
+  /*
+   * Mockup `design/v3/zlava-detail.html` v tejto sekcii ukazuje tržby v
+   * eurách a porovnanie s vlaňajškom. Appka ani jedno nemá: zo shopu chodia
+   * iba počty kusov a synchronizácia predajov rok dozadu nesiaha. Panely sú
+   * preto zamknuté a povedia prečo.
+   *
+   * Test existuje kvôli jedinej vete, ktorú by niekto raz mohol chcieť
+   * „dopočítať": kusy krát dnešná cenníková cena. To nie je tržba.
+   */
+  it('nezobrazuje eurá — v sekcii nie je znak meny ani slovo tržba ako číslo', () => {
+    const markup = renderToStaticMarkup(createElement(DiscountPerformance, { id: 7 }));
+    // Pred načítaním dát je panel v stave „Načítavam…"; znak € tam nesmie byť
+    // ani vtedy, ani v zamknutých paneloch.
+    expect(markup).not.toContain('€');
+  });
+
+  it('zamknuté panely povedia dôvod, nie sú skryté (K8)', () => {
+    const markup = renderToStaticMarkup(createElement(DiscountPerformance, { id: 7 }));
+    expect(markup).toContain('Tržby');
+    expect(markup).toContain('Vlani rovnaké obdobie');
+    expect(markup).toContain('data-testid="performance-locked"');
+  });
+
+  it('nevyslovuje záver o príčine (P8)', () => {
+    const markup = renderToStaticMarkup(createElement(DiscountPerformance, { id: 7 }));
+    for (const veta of ['priniesla', 'vďaka zľave', 'spôsobil', 'nárast o']) {
+      expect(markup).not.toContain(veta);
+    }
   });
 });

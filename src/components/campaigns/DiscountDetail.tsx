@@ -24,6 +24,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
+import DiscountPerformance from '@/components/campaigns/DiscountPerformance';
 import DiscountState from '@/components/campaigns/DiscountState';
 import styles from '@/components/campaigns/zlavy.module.css';
 import { progressPercent, sentenceOf } from '@/components/campaigns/discounts-model';
@@ -263,6 +264,10 @@ export function DiscountDetail({ id }: { id: number }) {
           </div>
         </div>
       </section>
+
+      {/* 3 · Výkon výberu — dva z troch panelov sú zamknuté, lebo appka tržby
+          ani vlaňajšie dáta nemá (K8). Vysvetlenie v DiscountPerformance. */}
+      <DiscountPerformance id={campaign.id} />
 
       {/* 2 · Pásma */}
       <section className="sec" data-testid="detail-tiers">

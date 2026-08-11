@@ -439,3 +439,71 @@
     width: 100%;
   }
 }
+
+/* ═══════════════ Výkon výberu — tri uhly vedľa seba (§1 TAB 3) ═══════════ */
+
+.perfGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.perfPanel {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 12px;
+  background: var(--paper2);
+}
+
+/* Zamknutý panel je tlmený, ale ČITATEĽNÝ — má povedať dôvod, nie zmiznúť. */
+.perfLocked {
+  background: transparent;
+  border-style: dashed;
+}
+
+.perfTitle {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 8px;
+}
+
+.perfPair {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+
+.perfTrack {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.perfTrack i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Porovnávacie (staršie) okno je tlmenejšie — dominanta je aktuálne číslo. */
+.perfStrong i {
+  background: var(--ink3);
+}
+
+.perfValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+  .perfGrid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -92,6 +92,23 @@ const SQL_SYNC_DAYS =
   'SELECT sale_day, status, finished_at, updated_at FROM sales_sync_state ' +
   'ORDER BY sale_day ASC LIMIT ?';
 
+/**
+ * Súčet PREDANÝCH KUSOV produktov jednej zľavy za obdobie.
+ *
+ * Join na `campaign_items` zámerne nahrádza zoznam ID v `IN (…)`: zľava má aj
+ * 8 000 položiek a taký dotaz by bol neúnosný a krehký.
+ *
+ * POZOR, čo to NIE JE: nie sú to tržby. `product_sales_daily` drží výhradne
+ * počty kusov — appka cenu predaja nikdy nevidela a násobiť kusy dnešnou
+ * cenníkovou cenou by vyrobilo číslo, ktoré vyzerá ako tržba, ale nie je ňou
+ * (K8: appka nesmie predstierať dáta, ktoré nemá).
+ */
+const SQL_CAMPAIGN_UNITS =
+  'SELECT COALESCE(SUM(s.units_sold), 0) AS units ' +
+  'FROM product_sales_daily s ' +
+  'JOIN campaign_items i ON i.product_id = s.product_id AND i.campaign_id = ? ' +
+  'WHERE s.sale_day BETWEEN ? AND ?';
+
 const SQL_DAILY_UNITS_PREFIX =
   'SELECT product_id, sale_day, units_sold FROM product_sales_daily ' +
   'WHERE sale_day >= ? AND sale_day <= ? AND product_id IN ';
@@ -153,6 +170,27 @@ export async function dailyUnits(
     });
   }
   return out;
+}
+
+/**
+ * Koľko kusov produktov tejto zľavy sa predalo v danom okne.
+ *
+ * Vracia `null`, keď okno nie je platné — nie 0. Nula znamená „nepredalo sa
+ * nič", `null` znamená „nevieme", a v UI sa tie dve veci NESMÚ zliať.
+ */
+export async function campaignUnits(
+  campaignId: number,
+  from: DateOnly,
+  to: DateOnly,
+  conn?: Queryable,
+): Promise<number | null> {
+  if (!isValidId(campaignId)) return null;
+  if (!isDateOnly(from) || !isDateOnly(to) || from > to) return null;
+
+  const rows = await run<DbRow[]>(conn, SQL_CAMPAIGN_UNITS, [campaignId, from, to]);
+  const first = Array.isArray(rows) ? rows[0] : undefined;
+  if (first === undefined) return null;
+  return Math.max(0, Math.trunc(num(first.units)));
 }
 
 /* ══════════════════ 5. Čisté funkcie — pokrytie a metriky ═════════════════ */

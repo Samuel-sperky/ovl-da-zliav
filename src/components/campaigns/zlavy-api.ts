@@ -361,3 +361,31 @@ export function keyMeta(): Promise<Envelope<KeyMetaView>> {
 export function scopeLimits(): Promise<Envelope<ScopeView>> {
   return getJson<ScopeView>('/api/settings');
 }
+
+/* ═══════════════════════ Výkon výberu (architektúra §1 TAB 3) ═════════════ */
+
+export interface PerformanceWindow {
+  readonly from: string;
+  readonly to: string;
+  /** `null` = za toto obdobie nemáme dáta. NIE JE to nula. */
+  readonly units: number | null;
+}
+
+export interface PerformanceView {
+  readonly available: boolean;
+  readonly unit: 'ks';
+  readonly spanDays: number;
+  readonly recent: PerformanceWindow;
+  readonly prior: PerformanceWindow;
+  readonly coverage: { from: string | null; to: string | null; syncEnabled: boolean };
+  readonly locked: { revenue: string; lastYear: string };
+}
+
+/**
+ * Predaj produktov zľavy v kusoch — dve rovnako dlhé okná vedľa seba.
+ * Tržby v eurách appka nemá (shop ich cez API nevracia), preto ich tu
+ * nehľadaj: sú medzi zamknutými panelmi.
+ */
+export function discountPerformance(id: number): Promise<Envelope<PerformanceView>> {
+  return getJson<PerformanceView>(`/api/insights/campaign/${id}/performance`);
+}
