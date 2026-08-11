@@ -85,6 +85,7 @@ import {
   setReductionSuccessSchema,
   toProductDetail,
   toProductListItem,
+  unwrapShopResult,
 } from '@/lib/shop/schemas';
 import { APP_VERSION } from '@/version';
 
@@ -577,7 +578,7 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
     });
     if (result.outcome === 'error') throw new ShopRequestError(result.error);
 
-    const parsed = parseShopPayload(productListResponseSchema, result.value.body);
+    const parsed = parseShopPayload(productListResponseSchema, unwrapShopResult(result.value.body));
     if (!parsed.ok) {
       const error = schemaDriftError({
         requestId: result.value.requestId,
@@ -610,7 +611,7 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
     });
     if (result.outcome === 'error') throw new ShopRequestError(result.error);
 
-    const parsed = parseShopPayload(productDetailSchema, result.value.body);
+    const parsed = parseShopPayload(productDetailSchema, unwrapShopResult(result.value.body));
     if (!parsed.ok) {
       const error = schemaDriftError({
         requestId: result.value.requestId,
@@ -668,7 +669,7 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
       return { via: 'fallback', reason: `batch_${result.error.kind}` };
     }
 
-    const envelope = parseShopPayload(batchResponseSchema, result.value.body);
+    const envelope = parseShopPayload(batchResponseSchema, unwrapShopResult(result.value.body));
     if (!envelope.ok) {
       const error = schemaDriftError({
         requestId: result.value.requestId,
@@ -706,7 +707,7 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
         continue;
       }
 
-      const parsed = parseShopPayload(productDetailSchema, slot);
+      const parsed = parseShopPayload(productDetailSchema, unwrapShopResult(slot));
       if (!parsed.ok) {
         const error = schemaDriftError({
           requestId: result.value.requestId,
@@ -780,7 +781,7 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
       };
     }
 
-    const parsed = parseShopPayload(productListResponseSchema, result.value.body);
+    const parsed = parseShopPayload(productListResponseSchema, unwrapShopResult(result.value.body));
     if (!parsed.ok) {
       const error = schemaDriftError({
         requestId: result.value.requestId,
@@ -878,7 +879,7 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
   }
 
   function finishWrite(value: SuccessEnvelope, attempts: number, ctx: ShopCtx): SetReductionResult {
-    const parsed = parseShopPayload(setReductionSuccessSchema, value.body);
+    const parsed = parseShopPayload(setReductionSuccessSchema, unwrapShopResult(value.body));
     if (!parsed.ok) {
       // D54 — HTTP 200 v nečakanom tvare NIE JE úspech, je to neistý stav.
       const error = schemaDriftError({

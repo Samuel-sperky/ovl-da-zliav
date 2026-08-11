@@ -6,10 +6,13 @@
  * schémy `looseObject` (zod 4 náhrada za `.passthrough()`) — shop smie pridať
  * pole, ale NESMIE odobrať alebo zmeniť typ povinného poľa.
  *
- * Modul zvláda **obe tvarové konvencie** shopu (§6):
+ * Modul zvláda **všetky tvarové konvencie** shopu (§6):
  *   1. `{ ok: true, … }` / `{ ok: false, errors: ['invalid_dates', …] }`
  *   2. bare objekt bez `ok` (list endpointy) / `{ error: '…' }` (transportné chyby)
  *   3. `{ ok: false, error: '…' }` (staršie endpointy so singulárnym `error`)
+ *   4. ktorýkoľvek z nich zabalený do `{ "result": … }` — tak odpovedá reálny
+ *      shop, kým mock a starší kontrakt vracajú payload priamo
+ *      (`unwrapShopResult()` nižšie)
  *
  * HTTP 200 s `ok:false` sa NIKDY nevyhodnocuje ako úspech — o to sa stará
  * `readErrorBody()` + `classifyFailure()` v `errors.ts`.
@@ -26,10 +29,37 @@ import type { ProductDetail, ProductListItem } from '@/contracts';
 
 /* ═════════════════════════ 1. Tolerantné primitívy ════════════════════════ */
 
+/**
+ * Číselný string zo shopu → `number`. PHP posiela `DECIMAL` v lokalizovanom
+ * tvare, takže oddeľovačom desatín býva bodka aj čiarka a tisíce môžu byť
+ * oddelené medzerou. Rozhoduje POSLEDNÝ oddeľovač: `'1 234,50'` aj `'1,234.50'`
+ * je 1234.5. `Number()` samo o sebe na oboch spadne na `NaN`.
+ *
+ * Prázdny string ani text bez číslice číslom nie sú — vracajú `NaN`, aby ich
+ * `numberLike` odmietlo ako drift (`Number('')` je 0, čo by ticho vyrobilo
+ * cenu 0 €).
+ */
+function parseNumberLike(value: string): number {
+  const compact = value.trim().replace(/\s+/g, '').replace(/[^0-9,.-]/g, '');
+  if (compact.length === 0 || !/[0-9]/.test(compact)) return Number.NaN;
+
+  const comma = compact.lastIndexOf(',');
+  const dot = compact.lastIndexOf('.');
+  const normalized =
+    comma >= 0 && dot >= 0
+      ? comma > dot
+        ? compact.replace(/\./g, '').replace(',', '.')
+        : compact.replace(/,/g, '')
+      : comma >= 0
+        ? compact.replace(',', '.')
+        : compact;
+  return Number(normalized);
+}
+
 /** Číslo alebo číselný string (PHP `DECIMAL`) → `number`. */
 const numberLike = z
   .union([z.number(), z.string()])
-  .transform((v) => (typeof v === 'number' ? v : Number(v.trim())))
+  .transform((v) => (typeof v === 'number' ? v : parseNumberLike(v)))
   .refine((n) => Number.isFinite(n), 'nie je číslo');
 
 /** Celé číslo v rovnakej tolerancii (id, stránkovanie). */
@@ -147,6 +177,21 @@ export type ParseOutcome<T> =
   | { ok: false; issues: string[] };
 
 /**
+ * Rozbalí obálku `{"result":{…}}`, do ktorej produkčný shop balí úspešné telá.
+ * Mock aj starší kontrakt vracajú payload priamo, preto MUSÍME zvládnuť oba
+ * tvary — obal nie je `schema_drift` (D54), len konvencia nasadenia. To isté
+ * rozhodnutie robí `unwrapEnvelope()` v `orders-client.ts`.
+ *
+ * Rozbaľuje sa len vtedy, keď je `result` objekt: telo, ktoré má `result` ako
+ * string alebo číslo, je vlastný payload s takým poľom, nie obálka.
+ */
+export function unwrapShopResult(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) return value;
+  const inner = (value as Record<string, unknown>).result;
+  return typeof inner === 'object' && inner !== null ? inner : value;
+}
+
+/**
  * Validácia odpovede. Zlyhanie NIE JE chyba volajúceho — je to `schema_drift`
  * (D54), teda „stav neistý". Vracia zoznam problémov pre audit; hodnoty polí sa
  * do problémov nedávajú (mohli by obsahovať čokoľvek, I1) — len cesty a dôvody.
@@ -182,20 +227,37 @@ function stringCodes(value: unknown): string[] {
   return [];
 }
 
+/** Chybové kódy a `ok` z JEDNEJ úrovne tela — bez ohľadu na obálku. */
+function readErrorLevel(value: unknown): ShopErrorBody {
+  if (typeof value !== 'object' || value === null) {
+    return { okFalse: false, okTrue: false, codes: [] };
+  }
+  const obj = value as Record<string, unknown>;
+  return {
+    okFalse: obj.ok === false,
+    okTrue: obj.ok === true,
+    codes: [...stringCodes(obj.errors), ...stringCodes(obj.error)],
+  };
+}
+
 /**
  * Prečíta chybové kódy z ĽUBOVOĽNEJ z troch konvencií shopu (§6):
  * `{ok:false,errors:[…]}`, `{ok:false,error:'…'}`, `{error:'…'}`.
  * Zvláda aj `errors` ako jediný string (obranne — dokumentácia to nesľubuje).
+ *
+ * Číta OBE úrovne obálky (`unwrapShopResult`), lebo nasadenia shopu nesú `ok`
+ * raz vonku (`{ok:false,result:{…}}`) a raz vnútri (`{result:{ok:false,…}}`).
+ * Čítať len jednu by druhý tvar prehliadlo a HTTP 200 s `ok:false` by prešlo
+ * ako úspech — presne to, čo §6 zakazuje. `okFalse` preto vyhráva z oboch
+ * úrovní; pri tele bez obálky sú obe úrovne tá istá a správanie je nezmenené.
  */
 export function readErrorBody(body: unknown): ShopErrorBody {
-  if (typeof body !== 'object' || body === null) {
-    return { okFalse: false, okTrue: false, codes: [] };
-  }
-  const obj = body as Record<string, unknown>;
-  const codes = [...stringCodes(obj.errors), ...stringCodes(obj.error)];
+  const outer = readErrorLevel(body);
+  const inner = readErrorLevel(unwrapShopResult(body));
+  const codes = [...outer.codes, ...inner.codes.filter((c) => !outer.codes.includes(c))];
   return {
-    okFalse: obj.ok === false,
-    okTrue: obj.ok === true,
+    okFalse: outer.okFalse || inner.okFalse,
+    okTrue: outer.okTrue || inner.okTrue,
     codes,
   };
 }
