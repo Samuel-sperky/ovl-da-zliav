@@ -120,7 +120,7 @@ describe('no_units_sold — za sledované obdobie ani jeden kus', () => {
 
   it('akcia otvára drawer novej kampane s predvyplneným produktom (I3)', () => {
     const action = findings.find((f) => f.kind === 'no_units_sold')?.action;
-    expect(action?.href).toBe('/kampane?nova=1&produkty=201');
+    expect(action?.href).toBe('/zlavy/nova?produkty=201');
   });
 
   it('produkt s aspoň jedným kusom sa nehlási', () => {
@@ -169,7 +169,7 @@ describe('sales_declining — novšia polovica obdobia proti staršej', () => {
     const action = declining({ recentUnits: 1, previousUnits: 8 }).find(
       (f) => f.kind === 'sales_declining',
     )?.action;
-    expect(action?.href).toBe('/kampane?nova=1&produkty=201');
+    expect(action?.href).toBe('/zlavy/nova?produkty=201');
   });
 });
 
@@ -210,7 +210,7 @@ describe('poctivosť textov o predaji', () => {
 
   it('každé zistenie o predaji má akciu do drawera, nikdy nie zápis', () => {
     for (const f of findings) {
-      expect(f.action?.href.startsWith('/kampane?nova=1')).toBe(true);
+      expect(f.action?.href.startsWith('/zlavy/nova')).toBe(true);
     }
   });
 });

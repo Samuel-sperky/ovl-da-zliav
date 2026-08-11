@@ -53,6 +53,29 @@ function parseProductIds(raw: string | undefined): number[] | null {
   return ids.length === 0 ? null : ids;
 }
 
+/**
+ * Okno platnosti z adresy (`?od=2026-09-04&do=2026-09-18`). Používajú ho návrhy
+ * z Prehľadu pri nadväzovaní na končiacu zľavu.
+ *
+ * `od` stačí samo: návrh vie, kedy predošlá zľava končí, ale nie ako dlho má
+ * trvať nová — dĺžku doplní sprievodca svojou predvolenou. Prijme sa len tvar
+ * `YYYY-MM-DD` a koniec nesmie byť pred začiatkom; čokoľvek iné je `null` a
+ * appka si okno navrhne sama. Adresa je vstup od používateľa a naslepo sa jej
+ * neverí.
+ */
+function parseWindow(
+  from: string | undefined,
+  to: string | undefined,
+): { from: string; to: string | null } | null {
+  const shape = /^\d{4}-\d{2}-\d{2}$/;
+  const valid = (value: string | undefined): value is string =>
+    value !== undefined && shape.test(value) && !Number.isNaN(Date.parse(value));
+
+  if (!valid(from)) return null;
+  if (!valid(to)) return { from, to: null };
+  return to < from ? { from, to: null } : { from, to };
+}
+
 export default async function NewDiscountPage({
   searchParams,
 }: {
@@ -72,6 +95,7 @@ export default async function NewDiscountPage({
           : DEFAULT_CATALOG_FILTER
         : parseCatalogFilterQuery(filterQuery),
     expectedTotal: Number.isInteger(expected) && expected > 0 ? expected : null,
+    window: parseWindow(first(params['od']), first(params['do'])),
   };
 
   return <NewDiscount initial={initial} />;

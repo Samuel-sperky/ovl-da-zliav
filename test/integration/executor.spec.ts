@@ -31,6 +31,7 @@ import { createShopClient } from '@/lib/shop/client';
 import { newOperationContext } from '@/lib/shop/correlation';
 
 import { ApiKeyError } from '@/lib/repo/api-key.repo';
+import { createLogger } from '@/lib/log/logger';
 
 import { useMockShop, VALID_API_KEY } from '../helpers/mock';
 import { makeCampaign } from '../helpers/factories';
@@ -369,18 +370,33 @@ describe('D85 — SIGTERM počas dávky', () => {
 });
 
 describe('reconcile po havárii (D86)', () => {
+  /*
+   * POZOR, pasca z CLAUDE.md: tento test kedysi importoval
+   * `@/lib/engine/reconcile`, ktorý v produkcii NIKDY nebežal — scheduler má
+   * vlastný `@/lib/scheduler/reconcile` a ten nemal test žiadny. Dva moduly,
+   * jeden testovaný, druhý spustený. Test preto ide na PRODUKČNÚ cestu; mŕtvy
+   * dvojník je zmazaný.
+   */
   it('write_ok z auditu potvrdí položku, ostatné sú uncertain, bez re-runu', async () => {
-    const { reconcileRunningCampaigns } = await import('@/lib/engine/reconcile');
+    const { reconcileAfterCrash } = await import('@/lib/scheduler/reconcile');
     const { executor, world, audit } = makeWorld({ productIds: [201, 202, 203] });
     void executor;
 
-    // Simulácia havárie: kampaň zostala running, položka 201 má potvrdený
-    // write_ok v audite, 202/203 zostali pending.
+    /*
+     * Simulácia havárie presne v tvare, v akom môže nastať. Executor zapisuje
+     * položku ako `ok` a AŽ POTOM audit `write_ok` — položka `pending`
+     * s auditom `ok` teda v produkcii vzniknúť nevie a testovať ju by znamenalo
+     * dokazovať niečo, čo sa nikdy nestane. Reálny stav po páde uprostred
+     * dávky: 201 je dopísaná a potvrdená auditom, 202/203 zostali `pending`.
+     */
     const campaign = world.campaignsRepo.campaigns.get(1)!;
     campaign.status = 'running';
     campaign.finishedAt = null;
     const items = await world.campaignItemsRepo.listByCampaign(1);
-    await world.campaignItemsRepo.update(items[0]!.id, { requestId: 'REQCONFIRMED0000000000000' });
+    await world.campaignItemsRepo.update(items[0]!.id, {
+      status: 'ok',
+      requestId: 'REQCONFIRMED0000000000000',
+    });
     audit.records.push({
       actor: 'user',
       eventType: 'write_ok',
@@ -390,14 +406,18 @@ describe('reconcile po havárii (D86)', () => {
       requestId: 'REQCONFIRMED0000000000000',
     });
 
-    const report = await reconcileRunningCampaigns({
-      campaignsRepo: world.campaignsRepo,
-      campaignItemsRepo: world.campaignItemsRepo,
-      auditRepo: audit,
-      audit,
-    });
+    const reconciled = await reconcileAfterCrash(
+      {
+        campaigns: world.campaignsRepo,
+        items: world.campaignItemsRepo,
+        auditReader: audit,
+        audit,
+        log: createLogger({ module: 'reconcile-test' }),
+      },
+      new Date(),
+    );
 
-    expect(report).toMatchObject({ campaigns: 1, confirmedItems: 1, uncertainItems: 2 });
+    expect(reconciled).toBe(1);
     const settled = await world.campaignItemsRepo.listByCampaign(1);
     expect(settled.map((i) => i.status)).toEqual(['ok', 'uncertain', 'uncertain']);
     expect(world.campaignsRepo.campaigns.get(1)?.status).toBe('partial');

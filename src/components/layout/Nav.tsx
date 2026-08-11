@@ -7,10 +7,11 @@
  * nepridáva — všetko ostatné sa skladá dovnútra týchto štyroch (analytika do
  * Prehľadu a Zliav, AI návrhy do Prehľadu, audit do Nastavení).
  *
- * `ALIASY` existujú len pre prechodné obdobie: staré cesty (`/kampane`,
- * `/audit`, `/analytika`, `/ai-agent`) ešte žijú, kým V13 nedodá presmerovania.
- * Bez nich by na starej ceste nesvietil žiadny tab a hlavička by tvrdila, že
- * používateľ nie je nikde. Keď presmerovania pribudnú, mapa môže zmiznúť.
+ * `ALIASY` mapujú staré cesty (`/kampane`, `/audit`, `/analytika`,
+ * `/ai-agent`) na tab, pod ktorý po K9 patria. Presmerovania na nich už
+ * existujú, ale mapa má zostať: bez nej by počas presmerovania — a pri
+ * otvorení starej záložky — nesvietil žiadny tab a hlavička by tvrdila, že
+ * používateľ nie je nikde.
  */
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';

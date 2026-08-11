@@ -80,9 +80,9 @@ describe('kampane končiace do 7 dní bez nadväznosti', () => {
     const findings = analyze(snapshot({ campaigns: [c] }));
     const f = findings.find((x) => x.kind === 'ending_soon');
     expect(f).toBeDefined();
-    expect(f!.href).toBe('/kampane/7');
+    expect(f!.href).toBe('/zlavy/7');
     // Akcia otvára drawer s predvyplnením — dvojkrok (I3) tým nie je dotknutý.
-    expect(f!.action?.href).toContain('/kampane?nova=1');
+    expect(f!.action?.href).toContain('/zlavy/nova');
     expect(f!.action?.href).toContain('produkty=11%2C12');
     expect(f!.action?.href).toContain(`od=${addDaysOnly(c.dateTo, 1)}`);
   });
@@ -148,7 +148,7 @@ describe('čiastočné kampane a zásah (needs_key / missed)', () => {
     ).find((x) => x.kind === 'partial_campaign');
     expect(f).toBeDefined();
     expect(f!.text).toContain('2 z 5');
-    expect(f!.href).toBe('/kampane/9');
+    expect(f!.href).toBe('/zlavy/9');
     expect(f!.tone).toBe('attention');
   });
 

@@ -101,6 +101,12 @@ export interface NewDiscountInitial {
   readonly filter: CatalogFilterState;
   /** Koľko produktov filtru vyhovovalo v tabe Produkty (len na porovnanie). */
   readonly expectedTotal: number | null;
+  /**
+   * Okno platnosti z adresy (`?od=&do=`). Používajú ho návrhy z Prehľadu, keď
+   * nadväzujú na končiacu zľavu — bez neho by ho používateľ prepisoval ručne.
+   * Keď je zadané, appka si okno UŽ NEPOSÚVA sama (má prednosť človek, K5).
+   */
+  readonly window: { readonly from: string; readonly to: string | null } | null;
 }
 
 type Busy = 'idle' | 'loading' | 'previewing' | 'creating';
@@ -135,9 +141,16 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [percents, setPercents] = useState<Record<SoldBucketKey, number>>({
     ...DEFAULT_TIER_PERCENT,
   });
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [windowTouched, setWindowTouched] = useState(false);
+  const [from, setFrom] = useState(initial.window?.from ?? '');
+  // Návrh nadväznosti pozná len začiatok — dĺžku doplní predvolená appky.
+  const [to, setTo] = useState(
+    initial.window === null
+      ? ''
+      : (initial.window.to ?? addDays(initial.window.from, DEFAULT_WINDOW_DAYS - 1)),
+  );
+  // Okno z adresy sa počíta ako „človek si ho už zvolil" — návrh appky ho
+  // potom neprepíše (K5).
+  const [windowTouched, setWindowTouched] = useState(initial.window !== null);
 
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewSig, setPreviewSig] = useState<string | null>(null);

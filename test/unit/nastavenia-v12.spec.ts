@@ -42,6 +42,7 @@ import LockedFeatures, {
   lockedFeaturesText,
 } from '@/components/settings/LockedFeatures';
 import SafeguardsSection from '@/components/settings/SafeguardsSection';
+import SignOut from '@/components/settings/SignOut';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
 import { SETTINGS_ANCHORS } from '@/components/settings/SettingsPanel';
 import { SETTINGS_CSS } from '@/components/settings/styles';
@@ -115,6 +116,7 @@ describe('Nastavenia — kotvy a sekcie', () => {
       'poistky',
       'zamknute',
       'historia',
+      'odhlasenie',
       'cervena',
     ]);
   });
@@ -372,6 +374,28 @@ describe('Zamknuté funkcie', () => {
       expect(text).toContain(row.feature);
       expect(text).toContain(row.missing);
     }
+  });
+});
+
+/* ═══════════════ H. Odhlásenie sa dá vôbec urobiť ═════════════════════════ */
+
+describe('Odhlásenie', () => {
+  /*
+   * Regresia: prestavba na štyri taby vzala odhlásenie so sebou. Cesta
+   * `POST /api/auth/logout` ostala, ale v UI ju už nič nevolalo — používateľ
+   * sa nemal ako odhlásiť a musel čakať, kým session vyprší. Tento test drží
+   * tlačidlo na mieste.
+   */
+  it('sekcia existuje, má tlačidlo a nesie kotvu, na ktorú navigácia ukazuje', () => {
+    const markup = renderToStaticMarkup(createElement(SignOut));
+    expect(markup).toContain('id="odhlasenie"');
+    expect(markup).toContain('data-testid="sign-out-button"');
+    expect(markup).toContain('Odhlásiť sa');
+  });
+
+  it('hovorí, čo odhlásenie NEZASTAVÍ — fronta beží na serveri, nie v prehliadači', () => {
+    const markup = renderToStaticMarkup(createElement(SignOut));
+    expect(markup).toContain('Fronta beží ďalej');
   });
 });
 

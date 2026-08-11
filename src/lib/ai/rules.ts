@@ -22,8 +22,9 @@
  *     predaje nemá (`sales == null`), žiadne takéto pravidlo sa nespustí —
  *     mlčať je poctivejšie než hlásiť nulu bez dát.
  *
- * Výstup je ČISTO ČÍTACÍ návrh: `action.href` otvára drawer s predvyplnením
- * (`/kampane?nova=1&…`), kde platí plný dvojkrok s dry-run potvrdením (I3).
+ * Výstup je ČISTO ČÍTACÍ návrh: `action.href` otvára sprievodcu novej zľavy
+ * s predvyplneným výberom (`/zlavy/nova?produkty=…`), kde platí plný dvojkrok
+ * so skúškou naprázdno a potvrdením (I3).
  * Analytik sám nikdy nič nezapisuje a ani nemá čím — nedostáva žiadny klient.
  *
  * Vlastník: C3.
@@ -191,14 +192,26 @@ const COVERING_STATUSES = new Set(['scheduled', 'running', 'done', 'partial', 'n
 
 /* ═══════════════════════════════ 5. Pravidlá ══════════════════════════════ */
 
-/** URL akcie „otvor drawer s predvyplnením" — dvojkrok v draweri platí ďalej. */
-function drawerHref(productIds: number[], percent?: number, from?: string, to?: string): string {
-  const qs = new URLSearchParams({ nova: '1' });
+/**
+ * URL akcie „otvor novú zľavu s predvyplneným výberom" — dvojkrok (skúška
+ * naprázdno + potvrdenie) platí ďalej, návrh nič nezapisuje.
+ *
+ * Mieri PRIAMO na `/zlavy/nova` (K9); cez starú `/kampane?nova=1` to fungovalo
+ * tiež, ale cez zbytočný skok presmerovaním.
+ *
+ * `od`/`do` nesie okno nadväzujúcej zľavy — bez neho by ho používateľ po
+ * kliknutí na návrh prepisoval ručne. `percent` sa NEPOSIELA: percento sa v
+ * sprievodcovi rozhoduje pásmami (K3), jedno číslo z návrhu preň nemá miesto.
+ */
+function drawerHref(productIds: number[], _percent?: number, from?: string, to?: string): string {
+  const qs = new URLSearchParams();
   if (productIds.length > 0) qs.set('produkty', productIds.join(','));
-  if (percent != null) qs.set('percent', String(percent));
-  if (from) qs.set('od', from);
-  if (to) qs.set('do', to);
-  return `/kampane?${qs.toString()}`;
+  // `od` chodí aj samo — návrh vie, kedy predošlá zľava končí, ale dĺžku novej
+  // určuje sprievodca.
+  if (from !== undefined) qs.set('od', from);
+  if (to !== undefined) qs.set('do', to);
+  const query = qs.toString();
+  return query === '' ? '/zlavy/nova' : `/zlavy/nova?${query}`;
 }
 
 /** 1 — kampane končiace do 7 dní bez nadväzujúcej kampane. */
@@ -228,7 +241,7 @@ function findEndingSoon(s: RuleSnapshot): Finding[] {
       kind: 'ending_soon',
       tone: 'info',
       text: `Kampaň „${c.name}" končí ${days === 0 ? 'dnes' : `o ${days} ${pluralSk(days, 'deň', 'dni', 'dní')}`} (${c.dateTo}) a na jej produkty nenadväzuje žiadna ďalšia kampaň.`,
-      href: `/kampane/${c.id}`,
+      href: `/zlavy/${c.id}`,
       action: {
         label: 'Pripraviť nadväzujúcu kampaň',
         href: drawerHref(c.productIds, c.percent, addDaysOnly(c.dateTo, 1)),
@@ -282,8 +295,8 @@ function findPartialCampaigns(s: RuleSnapshot): Finding[] {
         kind: 'partial_campaign' as const,
         tone: 'attention' as const,
         text: `Kampaň „${c.name}" je čiastočná — ${missing} z ${c.itemsTotal} ${pluralSk(c.itemsTotal, 'produktu', 'produktov', 'produktov')} sa nezapísalo.`,
-        href: `/kampane/${c.id}`,
-        action: { label: 'Otvoriť detail a zopakovať zlyhané', href: `/kampane/${c.id}` },
+        href: `/zlavy/${c.id}`,
+        action: { label: 'Otvoriť detail a zopakovať zlyhané', href: `/zlavy/${c.id}` },
       };
     });
 }
@@ -300,8 +313,8 @@ function findNeedsIntervention(s: RuleSnapshot): Finding[] {
         c.status === 'needs_key'
           ? `Kampaň „${c.name}" čaká na API kľúč — bez neho sa okno ${c.dateFrom} – ${c.dateTo} nezapíše.`
           : `Kampaň „${c.name}" sa zmeškala — plánovaný zápis pre okno ${c.dateFrom} – ${c.dateTo} neprebehol.`,
-      href: `/kampane/${c.id}`,
-      action: { label: 'Otvoriť detail kampane', href: `/kampane/${c.id}` },
+      href: `/zlavy/${c.id}`,
+      action: { label: 'Otvoriť detail kampane', href: `/zlavy/${c.id}` },
     }));
 }
 
@@ -328,7 +341,7 @@ function findKeyBeforeStart(s: RuleSnapshot): Finding[] {
         kind: 'key_before_start',
         tone: 'attention',
         text: `Kampaň „${c.name}" štartuje ${c.dateFrom}, ale API kľúč nie je uložený — zápis by skončil v stave „vyžaduje kľúč".`,
-        href: `/kampane/${c.id}`,
+        href: `/zlavy/${c.id}`,
         action: { label: 'Vložiť kľúč v Nastaveniach', href: '/nastavenia' },
       });
       continue;
@@ -340,7 +353,7 @@ function findKeyBeforeStart(s: RuleSnapshot): Finding[] {
         kind: 'key_before_start',
         tone: 'attention',
         text: `API kľúč expiruje ${expiresDayLocal}, teda pred štartom kampane „${c.name}" (${c.dateFrom}) — bez nového kľúča sa zápis nevykoná.`,
-        href: `/kampane/${c.id}`,
+        href: `/zlavy/${c.id}`,
         action: { label: 'Vložiť nový kľúč v Nastaveniach', href: '/nastavenia' },
       });
     }

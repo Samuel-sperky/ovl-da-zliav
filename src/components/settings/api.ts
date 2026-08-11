@@ -155,6 +155,9 @@ export const testConnection = () => postJson<CanaryView>('/api/settings/test-con
 export const putEagerWriteDefault = (enabled: boolean) =>
   sendJson<{ eagerWriteDefault: boolean }>('/api/settings/eager-write-default', 'PUT', { enabled });
 
+/** Odhlásenie — session cookie ruší server, klient sa potom prekreslí. */
+export const logout = () => postJson<Record<string, never>>('/api/auth/logout');
+
 export const unlockWrites = (password: string) =>
   postJson<{ writesLocked: false }>('/api/settings/unlock-writes', { password });
 

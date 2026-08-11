@@ -28,6 +28,7 @@ import BudgetSection from '@/components/settings/BudgetSection';
 import DomainForm from '@/components/settings/DomainForm';
 import KeysSection from '@/components/settings/KeysSection';
 import LockedFeatures from '@/components/settings/LockedFeatures';
+import SignOut from '@/components/settings/SignOut';
 import PanicButton from '@/components/settings/PanicButton';
 import SafeguardsSection from '@/components/settings/SafeguardsSection';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
@@ -54,6 +55,7 @@ export const SETTINGS_ANCHORS: readonly { id: string; label: string }[] = [
   { id: 'poistky', label: 'Poistky' },
   { id: 'zamknute', label: 'Zamknuté funkcie' },
   { id: 'historia', label: 'História' },
+  { id: 'odhlasenie', label: 'Odhlásenie' },
   { id: 'cervena', label: 'Červená zóna' },
 ];
 
@@ -161,6 +163,8 @@ export function SettingsPanel() {
           <LockedFeatures />
 
           <AuditPanel />
+
+          <SignOut />
 
           {/* Červená zóna maže OBA kľúče — stačí, že je uložený ktorýkoľvek. */}
           <PanicButton
