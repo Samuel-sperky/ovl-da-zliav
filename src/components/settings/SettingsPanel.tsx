@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import BudgetSection from '@/components/settings/BudgetSection';
+import DiagnosticsSection from '@/components/settings/DiagnosticsSection';
 import DomainForm from '@/components/settings/DomainForm';
 import KeysSection from '@/components/settings/KeysSection';
 import LockedFeatures from '@/components/settings/LockedFeatures';
@@ -53,8 +54,11 @@ export const SETTINGS_ANCHORS: readonly { id: string; label: string }[] = [
   { id: 'rozpocet', label: 'Rozpočet' },
   { id: 'rozsah', label: 'Rozsah zliav' },
   { id: 'poistky', label: 'Poistky' },
-  { id: 'zamknute', label: 'Zamknuté funkcie' },
+  // Poradie kotiev je poradie z `design/v3/nastavenia.html`: audit (u nás
+  // „História" podľa K9) → diagnostika → zamknuté funkcie → červená zóna.
   { id: 'historia', label: 'História' },
+  { id: 'diagnostika', label: 'Diagnostika' },
+  { id: 'zamknute', label: 'Zamknuté funkcie' },
   { id: 'odhlasenie', label: 'Odhlásenie' },
   { id: 'cervena', label: 'Červená zóna' },
 ];
@@ -160,9 +164,11 @@ export function SettingsPanel() {
 
           <SafeguardsSection settings={settings} onChanged={() => void load()} />
 
-          <LockedFeatures />
-
           <AuditPanel />
+
+          <DiagnosticsSection />
+
+          <LockedFeatures />
 
           <SignOut />
 

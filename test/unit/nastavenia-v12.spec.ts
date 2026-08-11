@@ -36,6 +36,7 @@ import AuditFilters from '@/components/audit/AuditFilters';
 import AuditTable, { auditRowText, showsFailureFlag } from '@/components/audit/AuditTable';
 import { EMPTY_FILTERS, auditEventLabel, type AuditRow } from '@/components/audit/api';
 import BudgetSection from '@/components/settings/BudgetSection';
+import DiagnosticsSection from '@/components/settings/DiagnosticsSection';
 import KeysSection from '@/components/settings/KeysSection';
 import LockedFeatures, {
   LOCKED_FEATURES,
@@ -114,8 +115,13 @@ describe('Nastavenia — kotvy a sekcie', () => {
       'rozpocet',
       'rozsah',
       'poistky',
-      'zamknute',
+      // Chvost je poradie z `design/v3/nastavenia.html`: audit (u nás
+      // „historia" podľa K9) → diagnostika → zamknuté → červená zóna.
+      // Pred dobehom V3 tu bolo `zamknute` pred `historia` a `diagnostika`
+      // chýbala celá (`docs/53-AUDIT-1-1-V3.md` §A.1).
       'historia',
+      'diagnostika',
+      'zamknute',
       'odhlasenie',
       'cervena',
     ]);
@@ -136,9 +142,14 @@ describe('Nastavenia — kotvy a sekcie', () => {
         createElement(SafeguardsSection, { settings: SETTINGS, onChanged: noop }),
       ),
       renderToStaticMarkup(createElement(LockedFeatures)),
+      renderToStaticMarkup(createElement(DiagnosticsSection)),
     ].join('\n');
 
-    for (const id of ['kluce', 'rozpocet', 'rozsah', 'poistky', 'zamknute']) {
+    // Podmnožina kotiev — tie ostatné (`pripojenie`, `historia`, `odhlasenie`,
+    // `cervena`) patria komponentám, ktoré si bez fetchu a props nezrenderujú,
+    // a kryje ich e2e. Kto pridá kotvu do `SETTINGS_ANCHORS`, nech ju pridá aj
+    // sem — inak kotva ukazuje na sekciu, ktorá nemusí existovať.
+    for (const id of ['kluce', 'rozpocet', 'rozsah', 'poistky', 'zamknute', 'diagnostika']) {
       expect(markup, `chýba sekcia s kotvou ${id}`).toContain(`id="${id}"`);
     }
   });
