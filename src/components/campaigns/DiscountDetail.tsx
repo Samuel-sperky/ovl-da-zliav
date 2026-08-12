@@ -4,12 +4,17 @@
  * Aura Zľavy — DETAIL ZĽAVY (V11; predloha `design/v3/zlava-detail.html`,
  * architektúra §1 TAB 3, kontrakt V3 K2, K3, K5, K10, invarianty I7, I11).
  *
- * Tri sekcie a jeden rozklik:
+ * Sekcie a jeden rozklik:
  *
  *   1. **Priebeh fronty** — dominanta (P1). Koľko z koľkých, dokedy to potrvá,
  *      kedy zľava svieti zákazníkom a čo sa nepodarilo (s ľudským dôvodom).
- *   2. **Pásma** — podľa čoho ktorý produkt zlacnel a o koľko (K3).
- *   3. **Položky** — súhrn a len problémové riadky. Osemtisíc riadkov nikto
+ *   2. **Fronta naživo** (`QueueLive`) — stav, ktorý sa mení bez zásahu
+ *      používateľa: rozpad položiek, spotreba denného rozpočtu, čo bude zajtra
+ *      a PREČO to prípadne stojí. Sem patrí všetko, kvôli čomu by inak musel
+ *      otvoriť log alebo databázu.
+ *   3. **Zopakovať to, čo sa nepodarilo** (`RetryFailed`) — len keď je čo.
+ *   4. **Pásma** — podľa čoho ktorý produkt zlacnel a o koľko (K3).
+ *   5. **Položky** — súhrn a len problémové riadky. Osemtisíc riadkov nikto
  *      neprečíta a appka ich sem ani nesťahuje (odpoveď 56).
  *
  *   + **Technický detail** (P6): kódy shopu, počty pokusov, čísla produktov
@@ -19,6 +24,14 @@
  * neponúka zrušenie už zapísanej zľavy — zastaviť sa dá len to, čo ešte
  * nebolo zapísané (I7, D35).
  *
+ * PREČO SÚ ČÍSLA NA DVOCH MIESTACH RÔZNE ČERSTVÉ
+ * ---------------------------------------------
+ * Počítadlá zľavy (`itemsOk`, `itemsFailed`, …) prichádzajú z detailu kampane
+ * a obnovujú sa až pri načítaní obrazovky. Stav CELEJ fronty a rozpočtu sa
+ * obnovuje sám každú polminútu v `QueueLive`. Je to vedomé: prekresľovať celý
+ * detail aj s položkami každých tridsať sekúnd by bolo drahé a blikalo by to.
+ * Obe miesta preto hovoria, ku ktorému okamihu platia.
+ *
  * Vlastník: V11.
  */
 import Link from 'next/link';
@@ -26,6 +39,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 import DiscountPerformance from '@/components/campaigns/DiscountPerformance';
 import DiscountState from '@/components/campaigns/DiscountState';
+import QueueLive from '@/components/campaigns/QueueLive';
+import RetryFailed from '@/components/campaigns/RetryFailed';
 import styles from '@/components/campaigns/zlavy.module.css';
 import { progressPercent, sentenceOf } from '@/components/campaigns/discounts-model';
 import {
@@ -154,6 +169,15 @@ export function DiscountDetail({ id }: { id: number }) {
   const shown = problems.slice(0, PROBLEM_ROWS);
   const scanned = data.items.length;
 
+  /*
+   * Panel opakovania sa ponúka vtedy, keď má o čom hovoriť — teda keď niečo
+   * neprešlo alebo o niečom nevieme (D45). Či sa naozaj dá zopakovať, rozhodne
+   * server; panel si to vypýta sám a prípadné „ešte nie" aj vysvetlí. Skrývať
+   * ho podľa stavu zľavy tu by znamenalo druhé, tichšie pravidlo vedľa toho
+   * serverového — a práve z takých vzniká „nič sa nestalo a neviem prečo".
+   */
+  const retryWorthShowing = campaign.itemsFailed > 0 || campaign.itemsUncertain > 0;
+
   return (
     <div className={styles.page} data-testid="discount-detail">
       <div className={styles.dhead}>
@@ -265,7 +289,24 @@ export function DiscountDetail({ id }: { id: number }) {
         </div>
       </section>
 
-      {/* 3 · Výkon výberu — dva z troch panelov sú zamknuté, lebo appka tržby
+      {/* 2 · Fronta naživo — to, čo sa mení samo: rozpad položiek, rozpočet,
+          odhad a dôvod, prečo to prípadne stojí. */}
+      <QueueLive
+        campaign={{
+          id: campaign.id,
+          itemsTotal: campaign.itemsTotal,
+          itemsOk: campaign.itemsOk,
+          itemsFailed: campaign.itemsFailed,
+          itemsUncertain: campaign.itemsUncertain,
+          itemsPending: campaign.itemsPending,
+        }}
+      />
+
+      {/* 3 · Zopakovanie — len keď je čo. Panel si sadu aj dôvody vypýta sám
+          a bez čerstvého potvrdenia nezaradí nič (I3, D16). */}
+      {retryWorthShowing ? <RetryFailed campaignId={campaign.id} onCreated={() => void load()} /> : null}
+
+      {/* 4 · Výkon výberu — dva z troch panelov sú zamknuté, lebo appka tržby
           ani vlaňajšie dáta nemá (K8). Vysvetlenie v DiscountPerformance. */}
       <DiscountPerformance id={campaign.id} />
 

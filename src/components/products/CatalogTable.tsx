@@ -17,12 +17,30 @@
  *
  * `Zľava teraz` je VŽDY podľa vlastného zápisu appky, nikdy podľa shopu (I11).
  *
+ * PREČO NEPREJDE — PRI RIADKU, NIE V PÄTKE
+ * ────────────────────────────────────────
+ * Riadok, na ktorý sa zľava nezapíše, dostane pod menom krátky príznak
+ * („shop ho nenašiel"). Zámerne to NIE JE nový stĺpec: stĺpec by musel byť
+ * vyplnený pri všetkých 40 483 riadkoch a 40 480 pomlčiek je šum, nie
+ * informácia. Príznak sa objaví len tam, kde je čo povedať, a celá veta aj
+ * s ďalším krokom čaká v bočnom paneli. Text príznaku sa TU nevyrába —
+ * prichádza z `catalog-status.ts`, aby ho tabuľka a panel nemohli povedať inak.
+ *
+ * PRÁZDNA TABUĽKA NIE JE JEDEN PRÍBEH
+ * ───────────────────────────────────
+ * „Filtru nevyhovuje ani jeden produkt" je pravda len nad ÚPLNÝM katalógom.
+ * Kým appka pozná 2 900 zo 41 082 produktov, hľadaný kus môže pokojne existovať
+ * a len ešte nebyť načítaný — a to je úplne iná rada. Tabuľka preto o prázdnom
+ * stave nerozhoduje: dostane hotový `emptyState` od obrazovky, ktorá stav
+ * katalógu pozná.
+ *
  * Vlastník: V10.
  */
 import { useEffect, useRef } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import type { CatalogRowView } from '@/components/products/catalog-api';
+import type { ProductReason } from '@/components/products/catalog-status';
 import type { PerPage } from '@/components/products/catalog-filter';
 import { PER_PAGE_CHOICES } from '@/components/products/catalog-filter';
 import { formatEur } from '@/lib/ui/format';
@@ -84,6 +102,16 @@ export interface CatalogTableProps {
   onOpenDetail: (productId: number) => void;
   onPage: (page: number) => void;
   onPerPage: (perPage: PerPage) => void;
+  /**
+   * Prečo sa na tento riadok zľava nezapíše. `null` = nič mu nevyčítame.
+   * Rozhoduje o tom volajúci, nie tabuľka — pozri hlavičku modulu.
+   */
+  rowReason?: (row: CatalogRowView) => ProductReason | null;
+  /**
+   * Čo sa ukáže namiesto prázdnej tabuľky. Bez neho zostane holá veta o filtri,
+   * ktorá je nad neúplným katalógom nepravdivá — preto ho obrazovka posiela.
+   */
+  emptyState?: ReactNode;
 }
 
 export function CatalogTable({
@@ -100,6 +128,8 @@ export function CatalogTable({
   onOpenDetail,
   onPage,
   onPerPage,
+  rowReason,
+  emptyState,
 }: CatalogTableProps) {
   const headBox = useRef<HTMLInputElement | null>(null);
 
@@ -149,12 +179,19 @@ export function CatalogTable({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="lvl-3" style={{ padding: '18px 12px' }}>
-                  {loading ? 'Načítavam…' : 'Filtru nevyhovuje ani jeden produkt.'}
+                  {loading ? (
+                    'Načítavam…'
+                  ) : emptyState !== undefined ? (
+                    emptyState
+                  ) : (
+                    <>Filtru nevyhovuje ani jeden z načítaných produktov.</>
+                  )}
                 </td>
               </tr>
             ) : (
               rows.map((row) => {
                 const checked = allMatchingSelected || selected.has(row.productId);
+                const reason = rowReason?.(row) ?? null;
                 return (
                   <tr key={row.productId} className={checked ? 'on' : undefined}>
                     <td className="sel">
@@ -176,6 +213,16 @@ export function CatalogTable({
                       >
                         {row.name ?? 'bez názvu'}
                       </button>
+                      {reason === null ? null : (
+                        // `.flag` nesie glyf aj farbu; text je tretí kanál —
+                        // stav nikdy nie je len farba.
+                        <div
+                          className={reason.tone === 'attention' ? 'flag' : 'flag neutral'}
+                          data-testid={`row-reason-${reason.id}`}
+                        >
+                          {reason.short}
+                        </div>
+                      )}
                     </td>
                     <td className="n" data-l="Predané">
                       {row.unitsSold === 0 ? <b>0</b> : formatCountSk(row.unitsSold)}

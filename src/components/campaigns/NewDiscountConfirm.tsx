@@ -25,18 +25,12 @@ import Link from 'next/link';
 
 import styles from '@/components/campaigns/zlavy.module.css';
 import type { TierPlan } from '@/components/campaigns/discounts-model';
+// Preklad blokátora zo skúšky naprázdno žije v `queue-model.ts` — používa ho aj
+// panel opakovania a dve kópie toho istého prekladu by sa časom rozišli (K10).
+import { previewBlockerText } from '@/components/campaigns/queue-model';
 import type { CreateResult, PreviewData } from '@/components/campaigns/zlavy-api';
 import { formatDateTimeSk, formatEur } from '@/lib/ui/format';
-import { formatCountSk, guardSentence, pluralSk, GUARD_CODES_KNOWN } from '@/lib/ui/vocabulary';
-
-/** Blokátor na povrchu: známy kód dostane vetu zo slovníka (K10). */
-function blockerText(code: string, message: string): string {
-  if ((GUARD_CODES_KNOWN as readonly string[]).includes(code)) {
-    const sentence = guardSentence(code);
-    return sentence.hint === null ? sentence.text : `${sentence.text} ${sentence.hint}`;
-  }
-  return message;
-}
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 export interface NewDiscountConfirmProps {
   itemsCount: number;
@@ -210,7 +204,7 @@ export function NewDiscountConfirm({
         <div className="gap-t" data-testid="preview-blockers">
           {blockers.map((blocker, index) => (
             <div key={`${blocker.code}-${index}`} className="row wrapx">
-              <span className="flag">{blockerText(blocker.code, blocker.message)}</span>
+              <span className="flag">{previewBlockerText(blocker.code, blocker.message)}</span>
             </div>
           ))}
           <details className="tech">

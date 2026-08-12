@@ -18,15 +18,34 @@
  *  · Riadok „Dáta k …" tu NIE JE: v Produktoch sa objaví práve raz, nad
  *    tabuľkou (architektúra §0).
  *
+ * PREČO TENTO KUS NEPREJDE
+ * ────────────────────────
+ * Skupina „Prekážky" je celá odpoveď na otázku, kvôli ktorej sa panel najčastejšie
+ * otvára. Skladá sa z dvoch zdrojov a tie sa NESMÚ pomiešať:
+ *
+ *  · `blockers` prichádzajú z `lib/status/blockers.ts` cez `GET /api/status` —
+ *    hovoria o OPERÁCII (vypnuté zápisy, chýbajúci kľúč, strop rozsahu, produkt
+ *    mimo katalógu) a ich vety sa tu nepíšu, len kreslia,
+ *  · `productReasons()` hovoria o KUSE (shop ho nenašiel, už je v zľave) —
+ *    o tom prekážky nevedia a `BlockerId` je uzavretý zoznam, do ktorého sa
+ *    takýto dôvod nepridáva zvonku.
+ *
+ * Informatívne prekážky sa sem NEDÁVAJÚ: veta „v pilotnom režime prejde 10
+ * produktov, vo výbere je 1 produkt" je pri jednom kuse šum a patrí nad tabuľku,
+ * k výberu.
+ *
  * Vlastník: V10.
  */
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import BlockerNotes from '@/components/products/BlockerNotes';
 import type { CatalogRowView, ProductWriteView } from '@/components/products/catalog-api';
 import { catalogRow, isAborted, productWrites } from '@/components/products/catalog-api';
 import { newDiscountHref } from '@/components/products/catalog-filter';
+import { productReasons } from '@/components/products/catalog-status';
+import type { Blocker } from '@/lib/status/blockers';
 import { formatDateSk, formatDateTimeSk, formatEur, formatPercentSk } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, SURFACE_TERMS } from '@/lib/ui/vocabulary';
 
@@ -98,6 +117,12 @@ export interface ProductDetailPanelProps {
   row: CatalogRowView;
   /** Okno, v ktorom je `row.unitsSold` — to isté, aké má tabuľka. */
   soldWindowDays: number;
+  /**
+   * Prekážky, ktoré by zápis na TENTO produkt zastavili
+   * (`collectProductBlockers`). Informatívne riadky sem neposielajte —
+   * odfiltruje ich panel sám, ale zbytočne.
+   */
+  blockers?: readonly Blocker[];
   onClose: () => void;
 }
 
@@ -112,7 +137,12 @@ const EMPTY: DetailState = { writes: null, soldLongTerm: null, failed: false };
 /** Najdlhšie okno, ktoré API pozná — druhý uhol pohľadu na tie isté predaje. */
 const LONG_WINDOW = 360;
 
-export function ProductDetailPanel({ row, soldWindowDays, onClose }: ProductDetailPanelProps) {
+export function ProductDetailPanel({
+  row,
+  soldWindowDays,
+  blockers,
+  onClose,
+}: ProductDetailPanelProps) {
   const [state, setState] = useState<DetailState>(EMPTY);
 
   useEffect(() => {
@@ -149,6 +179,10 @@ export function ProductDetailPanel({ row, soldWindowDays, onClose }: ProductDeta
 
   const writes = state.writes ?? [];
   const planned = writes.find((write) => write.status === 'pending');
+  // Informatívne prekážky sú o výbere, nie o kuse — pozri hlavičku modulu.
+  const stopping = (blockers ?? []).filter((blocker) => blocker.severity !== 'informuje');
+  const reasons = productReasons(row);
+  const nothingInTheWay = stopping.length === 0 && reasons.length === 0;
 
   return (
     <aside className="drawer" data-testid="product-detail" aria-label="Detail produktu">
@@ -178,6 +212,33 @@ export function ProductDetailPanel({ row, soldWindowDays, onClose }: ProductDeta
             : ` · za ${LONG_WINDOW} dní ${formatCountSk(state.soldLongTerm)}`}
         </span>
       </div>
+
+      <DetailGroup title="Prekážky">
+        {nothingInTheWay ? (
+          <div className="lvl-3" data-testid="product-no-blockers">
+            Appka pri tomto produkte nevidí nič, čo by zápisu zľavy bránilo.
+          </div>
+        ) : (
+          <>
+            {reasons.map((reason) => (
+              <div
+                key={reason.id}
+                style={{ padding: '4px 0' }}
+                data-testid={`product-reason-${reason.id}`}
+              >
+                <div className={reason.tone === 'attention' ? 'flag' : 'flag neutral'}>
+                  {reason.short}
+                </div>
+                <div className="lvl-2" style={{ marginTop: '3px' }}>
+                  {reason.what}
+                </div>
+                <div className="lvl-3">{reason.nextStep}</div>
+              </div>
+            ))}
+            <BlockerNotes blockers={stopping} here="/produkty" testId="product-blockers" />
+          </>
+        )}
+      </DetailGroup>
 
       <DetailGroup title="História zliav">
         {state.failed ? (

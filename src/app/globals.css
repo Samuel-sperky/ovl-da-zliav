@@ -3231,3 +3231,120 @@ details.tech.bare {
   /* Zvýraznený prúžok — v karte, kde je rozpočet hlavnou informáciou. */
   --ovl-meter-h-lg: 6px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Stály stavový pruh (L1) — `components/layout/StatusBar.tsx`
+
+   Výhradne PRÍDAVOK na konci súboru: žiadna existujúca farba, typografia ani
+   rozloženie tabov sa nemení. Nová farba sa nezavádza — pruh stojí na
+   tokenoch, ktoré tu už sú (`--paper3`, `--line`, `--dim`).
+
+   TRI VECI, KTORÉ SA TU NESMÚ POKAZIŤ
+   -----------------------------------
+
+   1. **Pevná výška.** `--ovl-statusbar-h` nie je kozmetika: `--ovl-chrome-h`
+      z nej počíta, kde začínajú lepkavé prvky obrazoviek (bočný panel,
+      kotvy v Nastaveniach). Pruh, ktorý by rástol zalomením obsahu, by ich
+      prekryl — preto sa obsah nezalamuje, ale vodorovne posúva.
+
+   2. **Lepkavý len na širokej obrazovke.** Na mobile ide navigácia dole ako
+      lišta a lepkavý pruh navrchu by z malej obrazovky ukrojil ďalší riadok.
+      Preto je `sticky` až od 761 px — a v tom istom dychu sa posúvajú aj
+      lepkavé prvky obrazoviek, ktoré by inak zmizli pod pruhom.
+
+   3. **Zámok v tabe je len glyf.** Veľkosť ani odsadenie tabov sa nemení
+      (K9, KISS redizajn) — pribúda výhradne malý znak za názvom.
+
+   Vlastník: L1.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Výška pruhu. Zmestí sa doň aj merací prúžok s riadkom o úrovni stropu. */
+  --ovl-statusbar-h: 48px;
+  /* Koľko zhora zaberá lepkavý chróm dohromady (hlavička + stavový pruh). */
+  --ovl-chrome-h: calc(var(--hdr-h) + var(--ovl-statusbar-h));
+}
+
+.ovl-statusbar {
+  position: relative;
+  z-index: 39;
+  height: var(--ovl-statusbar-h);
+  background: var(--paper3);
+  border-bottom: 1px solid var(--line);
+  /* Stlačený riadkový preklad — inak sa trojriadkový merací prúžok do pruhu
+     nezmestí a pravidlo o pevnej výške padne. */
+  line-height: 1.15;
+}
+
+.ovl-statusbar-in {
+  max-width: var(--w);
+  height: 100%;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* Nezalamovať, radšej posúvať: výška pruhu musí zostať predvídateľná. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.ovl-statusbar-in > * {
+  flex: 0 0 auto;
+}
+
+.ovl-statusbar-meter {
+  display: block;
+  min-width: 148px;
+}
+
+/* Jedna veta namiesto piatich menoviek — kým stav appky nepoznáme. */
+.ovl-statusbar-note {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* Dôvod zámku sa drží vpravo, aby menovky stavu ostali pokope. */
+.ovl-statusbar-lock {
+  margin-left: auto;
+  padding-left: 14px;
+}
+
+/* Zámok pri názve tabu (predloha `sperky-admin.html`, `.lock`). Odkaz zostáva
+   živý — zamknuté sa nekreslí ako mŕtvy text. */
+.tabs a .tab-lock {
+  margin-left: 5px;
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: 1px;
+}
+
+@media (min-width: 761px) {
+  .ovl-statusbar {
+    position: sticky;
+    top: var(--hdr-h);
+  }
+  /* Lepkavé prvky obrazoviek začínajú pod pruhom, nie pod hlavičkou. */
+  .drawer {
+    top: var(--ovl-chrome-h);
+  }
+  .anchors {
+    top: calc(var(--ovl-chrome-h) + 16px);
+  }
+}
+
+@media (max-width: 760px) {
+  .ovl-statusbar-in {
+    padding: 0 12px;
+    gap: 10px;
+  }
+}
+
+@media print {
+  .ovl-statusbar {
+    position: static;
+  }
+}

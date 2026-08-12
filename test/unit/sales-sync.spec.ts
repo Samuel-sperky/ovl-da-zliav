@@ -8,13 +8,28 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { DateOnly, LogFields, Logger } from '@/contracts';
 
-import { salesSyncFlagsFromEnv, syncSales, type SalesSyncFlags } from '@/lib/engine/sales-sync';
+import {
+  MIN_ORDERS_READ_PAUSE_MS,
+  ORDERS_RETRY_READS_CHARGE,
+  salesSyncFlagsFromEnv,
+  syncSales,
+  type SalesReadBudgetGate,
+  type SalesSyncFlags,
+} from '@/lib/engine/sales-sync';
 import type {
   DailyUnitsRow,
   SalesSyncStateRecord,
   SalesSyncStateWrite,
 } from '@/lib/repo/sales.repo';
 import { createOrdersClient, type OrdersClient } from '@/lib/shop/orders-client';
+import {
+  READ_LANE_LIMITS,
+  createMemoryReadBudgetStore,
+  createReadBudget,
+  type ReadBudgetStatus,
+  type ReadBudgetStore,
+  type ReadReservation,
+} from '@/lib/shop/read-budget';
 
 import {
   NO_SCOPE_ORDERS_KEY,
@@ -56,6 +71,69 @@ class FakeSalesRepo {
   unitsFor(day: DateOnly): Record<number, number> {
     return Object.fromEntries(this.units.get(day) ?? new Map<number, number>());
   }
+}
+
+/* ───────────────────── denný rozpočet čítaní (A4) ────────────────────────── */
+
+/** Rozpočet, ktorý si navyše počíta, čo cezeň prešlo. */
+interface TestBudget extends SalesReadBudgetGate {
+  /** Koľkokrát sa beh vôbec pýtal. */
+  calls: number;
+  /** Koľko čítaní si vypýtal (aj tie, na ktoré sa už nedostalo). */
+  requested: number;
+  /** Koľko ich naozaj dostal. */
+  granted: number;
+}
+
+function counting(reserve: (count: number) => Promise<ReadReservation>): TestBudget {
+  const budget: TestBudget = {
+    calls: 0,
+    requested: 0,
+    granted: 0,
+    async reserveShopReads(count = 1): Promise<ReadReservation> {
+      const reservation = await reserve(count);
+      budget.calls += 1;
+      budget.requested += reservation.requested;
+      budget.granted += reservation.granted;
+      return reservation;
+    },
+  };
+  return budget;
+}
+
+const OPEN_STATUS: ReadBudgetStatus = {
+  lane: 'orders',
+  day: '2026-08-06',
+  limit: READ_LANE_LIMITS.orders.perUtcDay,
+  used: 0,
+  remaining: READ_LANE_LIMITS.orders.perUtcDay,
+  exhausted: false,
+  resetAt: new Date('2026-08-07T00:00:00.000Z'),
+  minuteLimit: READ_LANE_LIMITS.orders.perMinute,
+  usedThisMinute: 0,
+  known: true,
+};
+
+/**
+ * Rozpočet, ktorý dá vždy všetko. Používajú ho testy, ktoré merajú NIEČO INÉ
+ * (paginácia, per-beh strop, idempotencia) — inak by im do výsledku zasahoval
+ * denný strop 160 čítaní a merali by dve veci naraz.
+ */
+function openBudget(): TestBudget {
+  return counting(async (count) => ({ requested: count, granted: count, status: OPEN_STATUS }));
+}
+
+/** Skutočné počítadlo dráhy `orders` nad zdieľaným úložiskom — stropy z kontraktu. */
+function ordersBudget(store: ReadBudgetStore, now: () => Date): TestBudget {
+  const budget = createReadBudget({ store, lane: 'orders', now });
+  return counting((count) => budget.reserve(count));
+}
+
+/** Koľko čítaní zostáva do denného stropu, keď ich má byť voľných `free`. */
+async function budgetStoreWith(free: number, day = '2026-08-06'): Promise<ReadBudgetStore> {
+  const store = createMemoryReadBudgetStore();
+  await store.add('orders', day, Math.max(0, READ_LANE_LIMITS.orders.perUtcDay - free));
+  return store;
 }
 
 /* ─────────────────────────────── harness ─────────────────────────────────── */
@@ -108,11 +186,17 @@ function flags(overrides: Partial<SalesSyncFlags> = {}): SalesSyncFlags {
 }
 
 function deps(
-  overrides: { key?: () => Promise<{ value: Buffer; release(): void }> } = {},
+  overrides: {
+    key?: () => Promise<{ value: Buffer; release(): void }>;
+    budget?: SalesReadBudgetGate;
+  } = {},
 ): Parameters<typeof syncSales>[0] {
   return {
     ordersClient: client,
     key: overrides.key ?? fakeSecretRef(ORDERS_API_KEY),
+    // Rozpočet je od tejto chvíle POVINNÁ súčasť produkčného zapojenia (A4),
+    // takže ho dostáva aj harness — testy rozpočtu si podsúvajú vlastný.
+    budget: overrides.budget ?? openBudget(),
     salesRepo: repo,
     logger: collectingLogger(logs),
     sleepFn: async (ms) => {
@@ -469,6 +553,194 @@ describe('sales-sync — neúplný beh nesmie zhoršiť už uložený deň', () 
     expect(second.days[0]?.status).toBe('complete');
     expect(second.days[0]?.written).toBe(true);
     expect(repo.unitsFor('2026-08-06')).toEqual({ 11: 4, 13: 3 });
+  });
+});
+
+/* ═════════ denný rozpočet čítaní zo shopu (A4, KONTRAKT-DOKONCENIE) ═══════ */
+
+describe('sales-sync — rezervácia PRED volaním shopu (A4)', () => {
+  it('každé volanie shopu má za sebou práve jednu rezerváciu', async () => {
+    const budget = openBudget();
+    const result = await syncSales(
+      { ...deps({ budget }), flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    // 1 strana zoznamu + 2 detaily.
+    expect(result.requestsUsed).toBe(3);
+    expect(mock.state.requestCount).toBe(3);
+    expect(result.readsUsed).toBe(3);
+    expect(budget.granted).toBe(3);
+    // Štvrté oslovenie rozpočtu je nahliadnutie pred dňom (`count = 0`) —
+    // pýta sa, či sa oplatí začať, a nemíňa nič.
+    expect(budget.calls).toBe(4);
+  });
+
+  it('neúspešné volanie míňa strop rovnako ako úspešné — vrátane tichých opakovaní klienta', async () => {
+    // Detail objednávky 5 padá na 500, čo klient sám opakuje (R-2). Pre shop
+    // to sú tri návštevy; rezervácia jedného čítania by strop podhodnotila
+    // práve vtedy, keď je appka najbližšie k banu.
+    mock.state.failDetailFor = 5;
+    const budget = openBudget();
+
+    const result = await syncSales(
+      { ...deps({ budget }), flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    expect(result.error).toBe('request_failed');
+    // Zoznam + detail #4 + tri pokusy o detail #5.
+    expect(mock.state.requestCount).toBe(3 + ORDERS_RETRY_READS_CHARGE);
+    expect(result.readsUsed).toBe(mock.state.requestCount);
+    // Per-beh strop meria LOGICKÉ requesty a jeho význam sa nemení (P6).
+    expect(result.requestsUsed).toBe(3);
+  });
+
+  it('rozpočet sa účtuje aj vtedy, keď sa volanie vôbec nepodarí odoslať', async () => {
+    mock.state.always('unauthorized');
+    const budget = openBudget();
+
+    const result = await syncSales(
+      { ...deps({ budget }), flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    expect(result.error).toBe('unauthorized');
+    // 401 sa neopakuje (E4), takže jedno volanie = jedno čítanie.
+    expect(mock.state.requestCount).toBe(1);
+    expect(result.readsUsed).toBe(1);
+  });
+});
+
+describe('sales-sync — minutý denný rozpočet (A4)', () => {
+  it('beh sa skončí POKOJNE: dôvod, čas pokračovania a žiadna chyba', async () => {
+    const store = await budgetStoreWith(0);
+    const budget = ordersBudget(store, () => new Date('2026-08-06T12:00:00.000Z'));
+
+    const result = await syncSales(
+      { ...deps({ budget }), flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    expect(result.outcome).toBe('paused');
+    expect(result.error).toBeNull();
+    expect(result.dailyBudgetReached).toBe(true);
+    expect(result.stoppedBy).toBe('daily_budget');
+    // Strop shopu resetuje polnoc UTC, nie polnoc v Bratislave.
+    expect(result.resumeAt?.toISOString()).toBe('2026-08-07T00:00:00.000Z');
+    // Per-beh strop s tým nemá nič spoločné a nesmie sa tváriť, že áno.
+    expect(result.capReached).toBe(false);
+
+    // Shopu sa beh vôbec nedotkol a v DB nič nezmenil.
+    expect(mock.state.requestCount).toBe(0);
+    expect(result.requestsUsed).toBe(0);
+    expect(repo.writes).toEqual([]);
+    expect(logs.some((l) => l.message === 'sales_sync_daily_budget_reached')).toBe(true);
+  });
+
+  it('rozpočet PREŽIJE beh: druhý beh nezačína počítať od nuly', async () => {
+    // Toto je jadro A4. Per-beh strop `maxRequestsPerRun` sa po skončení behu
+    // zabudne, takže dva behy za sebou vedeli minúť dvojnásobok denného stropu
+    // shopu — a shop na to odpovedal 429.
+    const store = await budgetStoreWith(2);
+    const now = (): Date => new Date('2026-08-06T12:00:00.000Z');
+
+    const first = await syncSales(
+      { ...deps({ budget: ordersBudget(store, now) }), flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    // Zmestil sa zoznam a jeden detail; druhý detail už rozpočet nepustil.
+    expect(first.requestsUsed).toBe(2);
+    expect(first.stoppedBy).toBe('daily_budget');
+    expect(first.outcome).toBe('partial');
+    expect(repo.unitsFor('2026-08-06')).toEqual({ 11: 4, 13: 1 });
+
+    const requestsAfterFirst = mock.state.requestCount;
+
+    // „Reštart appky": nový beh, nové počítadlo v pamäti, to isté úložisko.
+    const second = await syncSales(
+      { ...deps({ budget: ordersBudget(store, now) }), flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    expect(second.outcome).toBe('paused');
+    expect(second.stoppedBy).toBe('daily_budget');
+    expect(second.error).toBeNull();
+    expect(mock.state.requestCount).toBe(requestsAfterFirst);
+    // A deň, ktorý sa nedopočítal, ostal taký, aký bol — nie vynulovaný.
+    expect(repo.unitsFor('2026-08-06')).toEqual({ 11: 4, 13: 1 });
+  });
+
+  it('deň, o ktorom sa beh nič nedozvedel, sa neprepíše na nulu (I11)', async () => {
+    // Rozpočet stačí presne na stranu zoznamu. Absolútny prepis by z dňa, ktorý
+    // sa nikdy nedopočítal, spravil „0 kusov".
+    const store = await budgetStoreWith(1);
+    const result = await syncSales(
+      {
+        ...deps({ budget: ordersBudget(store, () => new Date('2026-08-06T12:00:00.000Z')) }),
+        flags: flags({ windowDays: 1 }),
+      },
+      { today: TODAY },
+    );
+
+    expect(result.days[0]?.status).toBe('partial');
+    expect(result.days[0]?.written).toBe(false);
+    expect(repo.writes).toEqual([]);
+    expect((await repo.getSyncState('2026-08-06'))?.status).toBe('partial');
+    // Stav dňa nesie „nedokončené", nie chybu — rozpočet chyba nie je.
+    expect((await repo.getSyncState('2026-08-06'))?.lastError).toBeNull();
+  });
+
+  it('rozpočet zastaví beh aj uprostred okna a zvyšné dni nechá na inokedy', async () => {
+    const store = await budgetStoreWith(3);
+    const result = await syncSales(
+      {
+        ...deps({ budget: ordersBudget(store, () => new Date('2026-08-06T12:00:00.000Z')) }),
+        flags: flags(),
+      },
+      { today: TODAY },
+    );
+
+    // Prvý deň okna (4. 8.) sa dopočíta celý, na ďalší už nezostane.
+    expect(result.days.map((d) => d.day)).toEqual(['2026-08-04']);
+    expect(repo.unitsFor('2026-08-04')).toEqual({ 11: 3, 12: 3 });
+    expect(result.stoppedBy).toBe('daily_budget');
+    expect(result.outcome).toBe('partial');
+    expect(result.error).toBeNull();
+  });
+});
+
+describe('sales-sync — appka priznáva, čo o rozpočte nevie', () => {
+  it('beh bez zdieľaného počítadla to ohlási', async () => {
+    const withoutBudget = { ...deps(), flags: flags({ windowDays: 1 }) };
+    delete (withoutBudget as { budget?: SalesReadBudgetGate }).budget;
+
+    const result = await syncSales(withoutBudget, { today: TODAY });
+
+    expect(result.outcome).toBe('complete');
+    expect(logs.some((l) => l.message === 'sales_read_budget_missing')).toBe(true);
+  });
+
+  it('pauza pod minútovým stropom dráhy `orders` sa ohlási s číslami', async () => {
+    await syncSales(
+      { ...deps(), flags: flags({ windowDays: 1, pauseMs: 250 }) },
+      { today: TODAY },
+    );
+
+    const warned = logs.find((l) => l.message === 'sales_sync_pause_below_minute_limit');
+    expect(warned?.fields.minPauseMs).toBe(MIN_ORDERS_READ_PAUSE_MS);
+    expect(warned?.fields.pauseMs).toBe(250);
+    // 20 volaní/min z kontraktu, z toho si berieme 80 % → 3 750 ms.
+    expect(MIN_ORDERS_READ_PAUSE_MS).toBe(Math.ceil(60_000 / READ_LANE_LIMITS.orders.perMinute));
+  });
+
+  it('dosť pomalá pauza sa neohlasuje', async () => {
+    await syncSales(
+      { ...deps(), flags: flags({ windowDays: 1, pauseMs: MIN_ORDERS_READ_PAUSE_MS }) },
+      { today: TODAY },
+    );
+    expect(logs.some((l) => l.message === 'sales_sync_pause_below_minute_limit')).toBe(false);
   });
 });
 

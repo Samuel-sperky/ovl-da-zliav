@@ -27,16 +27,48 @@
  *     Akákoľvek zmena výberu, pásma alebo okna skúšku zneplatní.
  *  4. **Zamknuté filtre sú vidieť** (K8) a **dopad na maržu sa nikdy neukáže
  *     ako číslo** — nákupné ceny appka nemá.
+ *  5. **Strop výber neodmietne ticho.** Keď je vo filtri viac produktov, než
+ *     pustí režim rozsahu, obrazovka to POVIE a rovno ponúkne prepnutie do
+ *     plného rozsahu aj s upozornením na heslo (`ScopeRelease`). Odmietnutie
+ *     bez ponuky je tu zakázané — presne to bol dôvod, prečo sa appka nedala
+ *     použiť na viac než desať produktov.
+ *  6. **Čas hovorí jedno číslo.** Koľko je vo fronte pred nami vie povedať
+ *     `/api/queue` (presne, z položiek) aj zoznam zliav (odhadom, z počítadiel).
+ *     Zmieruje ich `resolveAhead()` a panel štartu prizná, ktorý zdroj to bol.
+ *     Keď sa nedá prečítať ani jeden, dátum dobehnutia sa NEDOPOČÍTA (P7).
+ *
+ * PREČO SA PREKÁŽKY POČÍTAJU LOKÁLNE
+ * ----------------------------------
+ * `GET /api/status` vracia prekážky pre PRÁZDNY výber. Tu sa nad tým istým
+ * snapshotom prepočítajú znova, ale s výberom (`statusSnapshotFromPayload`) —
+ * je to jediná podporovaná cesta, ako sa dozvedieť „prejde MOJICH 150", bez
+ * druhého volania servera. `missingProductIds` sa dopĺňa ako PRÁZDNE pole
+ * vedome: každý riadok výberu prišiel z katalógu appky, takže „ktoré z vybraných
+ * v katalógu nie sú" je overene prázdna množina, nie domnienka. Označené
+ * produkty, ktoré katalóg nevrátil, sa do výberu vôbec nedostanú a hlási ich
+ * samostatný riadok v sekcii výberu.
  *
  * Vlastník: V11.
  */
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import BlockerList, { BlockerRules } from '@/components/campaigns/BlockerList';
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import NewDiscountStart from '@/components/campaigns/NewDiscountStart';
+import ScopeRelease from '@/components/campaigns/ScopeRelease';
 import styles from '@/components/campaigns/zlavy.module.css';
 import { fetchSession, sudoValid } from '@/components/campaigns/api';
+import {
+  alarmingCards,
+  cardOfBlocker,
+  findCard,
+  quietCards,
+  resetPhrase,
+  resolveAhead,
+  type BlockerCard,
+  type QueueSnapshotView,
+} from '@/components/campaigns/queue-model';
 import {
   DEFAULT_TIER_PERCENT,
   buildTiers,
@@ -56,6 +88,8 @@ import {
 } from '@/components/campaigns/discounts-model';
 import {
   createDiscount,
+  fetchQueue,
+  fetchStatus,
   keyMeta,
   listDiscounts,
   previewDiscount,
@@ -66,6 +100,7 @@ import {
   type KeyMetaView,
   type PreviewData,
   type ScopeView,
+  type StatusPayload,
 } from '@/components/campaigns/zlavy-api';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import {
@@ -75,6 +110,8 @@ import {
   type CatalogFilterState,
 } from '@/components/products/catalog-filter';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
+import { collectOperationBlockers } from '@/lib/status/blockers';
+import { statusSnapshotFromPayload } from '@/lib/status/snapshot';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, guardSentence, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -123,6 +160,12 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [rows, setRows] = useState<readonly SelectableRow[] | null>(null);
   const [matching, setMatching] = useState<number | null>(null);
   const [skipped, setSkipped] = useState(0);
+  /**
+   * Označené produkty, ktoré katalóg vôbec nevrátil. Do výberu sa nedostanú,
+   * takže prekážky o nich mlčia — ale používateľ ich označil a musí sa
+   * dozvedieť, že zľavu nedostanú (K7).
+   */
+  const [notInCatalog, setNotInCatalog] = useState(0);
   const [dataAsOf, setDataAsOf] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -136,6 +179,10 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     names: readonly { name: string; pending: number }[];
   } | null>(null);
   const [key, setKey] = useState<KeyMetaView | null>(null);
+  /** Celý obraz stavu appky — z neho sa lokálne prepočítavajú prekážky. */
+  const [status, setStatus] = useState<StatusPayload | null>(null);
+  /** Živý stav fronty: presný počet čakajúcich položiek a spotreba rozpočtu. */
+  const [queue, setQueue] = useState<QueueSnapshotView | null>(null);
 
   const [name, setName] = useState('');
   const [percents, setPercents] = useState<Record<SoldBucketKey, number>>({
@@ -188,6 +235,14 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       setBudget(res.data.budget);
       setAhead(queueAhead(res.data.data));
     });
+    // Presný stav fronty a rozpočtu. Keď sa nedá prečítať, ostáva `null` a
+    // obrazovka sa vráti k odhadu zo zoznamu zliav — nikdy k nule (P7).
+    void fetchQueue().then((res) => {
+      if (alive && res.ok) setQueue(res.data);
+    });
+    void fetchStatus().then((res) => {
+      if (alive && res.ok) setStatus(res.data);
+    });
     void fetchSession().then((session) => {
       if (alive) setSudoUntil(session?.sudoUntil ?? null);
     });
@@ -196,7 +251,17 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     };
   }, []);
 
-  const maxProducts = scope === null ? null : Math.min(scope.maxProducts, HARD_MAX_PRODUCTS);
+  /*
+   * Efektívny strop jednej zľavy. Keď sa nastavenia nedajú prečítať, siahne sa
+   * po tom istom čísle zo stavu appky — inak by obrazovka o strope MLČALA
+   * práve vtedy, keď oň používateľ zakopne, a výber by sa orezal bez slova.
+   */
+  const maxProducts =
+    scope !== null
+      ? Math.min(scope.maxProducts, HARD_MAX_PRODUCTS)
+      : status !== null && status.scope.maxProducts !== null
+        ? Math.min(status.scope.maxProducts, HARD_MAX_PRODUCTS)
+        : null;
   const capParsed = capText.trim() === '' ? null : Number(capText.replace(/\s/g, ''));
   const cap =
     capParsed !== null && Number.isInteger(capParsed) && capParsed > 0
@@ -216,6 +281,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     setLoaded(0);
 
     const collected: SelectableRow[] = [];
+    /** ID, ktoré katalóg naozaj vrátil — zvyšok označených v ňom nie je (K7). */
+    const seen = new Set<number>();
     let dropped = 0;
     let total: number | null = null;
     let asOf: string | null = null;
@@ -231,6 +298,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       }[],
     ): void => {
       for (const row of data) {
+        seen.add(row.productId);
         // I11 / D28 — na produkte podľa VLASTNÝCH zápisov beží zľava. Prepis je
         // vedomá akcia, nie vedľajší účinok hromadného výberu.
         if (row.discountedNow) {
@@ -305,6 +373,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     setRows(collected);
     setMatching(total);
     setSkipped(dropped);
+    // Chýbajúce hlásime LEN pri označených produktoch: pri výbere z filtra
+    // prišlo z katalógu všetko, čo v ňom je, takže „chýbajúce" tam neexistuje.
+    setNotInCatalog(
+      source === 'products'
+        ? (initial.productIds ?? []).filter((id) => !seen.has(id)).length
+        : 0,
+    );
     setDataAsOf(asOf);
     setLoadError(failure);
     setSelectionVersion((value) => value + 1);
@@ -337,16 +412,49 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
   /* ── 4. Odhad dobehnutia a navrhovaný štart ──────────────────────────── */
 
-  const perDay = budget !== null ? budget.budget : (scope?.dailyWriteBudget ?? null);
-  const aheadPending = ahead === null ? 0 : ahead.pending;
+  /*
+   * Rozpočet aj počet položiek pred nami majú DVA zdroje a musia dať jedno
+   * číslo. Prednosť má `/api/queue`: ten číta priamo položky fronty, kým
+   * zoznam zliav sčítava počítadlá kampaní, ktoré sa dorovnávajú až po behu.
+   */
+  const queueBudget = queue === null ? null : queue.budget;
+  const perDay =
+    queueBudget !== null
+      ? queueBudget.budget
+      : budget !== null
+        ? budget.budget
+        : (scope?.dailyWriteBudget ?? null);
+  const remainingToday =
+    queueBudget !== null ? queueBudget.remaining : budget !== null ? budget.remaining : null;
+
+  const aheadView = resolveAhead({
+    queuePending: queue === null ? null : queue.queue.pending,
+    listPending: ahead === null ? null : ahead.pending,
+  });
+  const aheadPending = aheadView.pending;
+
+  // Bez známeho rozpočtu ANI bez známej fronty pred nami sa dátum nedopočíta —
+  // vymyslený deň dobehnutia je horší než priznaná medzera (P7).
   const estimate =
-    perDay === null || itemsCount === 0
+    perDay === null || itemsCount === 0 || !aheadView.known
       ? null
       : estimateFinishDay(aheadPending + itemsCount, perDay, {
-          ...(budget !== null ? { remainingToday: budget.remaining } : {}),
+          ...(remainingToday !== null ? { remainingToday } : {}),
         });
   const finishDay = estimate === null ? null : estimate.date;
+  const queueDays = estimate === null ? null : estimate.days;
   const proposedStart = finishDay === null ? null : proposeStart(finishDay);
+
+  const startBudget =
+    queueBudget !== null
+      ? {
+          spent: queueBudget.spent,
+          limit: queueBudget.budget,
+          resetsAt: resetPhrase(queue === null ? null : queue.limits.nextResetAt),
+        }
+      : budget !== null
+        ? { spent: budget.spent, limit: budget.budget, resetsAt: null }
+        : null;
 
   // Kým sa okna nikto nedotkol, drží sa návrhu appky (K5). Po prvej ručnej
   // zmene sa už neposúva sám — používateľ má prednosť pred odhadom.
@@ -359,6 +467,45 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   }, [proposedStart, windowTouched, from]);
 
   const windowDays = safeWindowDays(from, to);
+
+  /* ── 4b. Prekážky nad VLASTNÝM výberom a strop rozsahu (K1, C2) ───────── */
+
+  /**
+   * Prekážky pre výber, ktorý sa naozaj zaradí. `missingProductIds: []` je
+   * overený fakt, nie domnienka — každý riadok výberu prišiel z katalógu appky
+   * (viď hlavička súboru).
+   */
+  const blockerCards: readonly BlockerCard[] = useMemo(() => {
+    if (status === null) return [];
+    const snapshot = statusSnapshotFromPayload(status, {
+      selection: { selectedCount: itemsCount },
+      missingProductIds: [],
+    });
+    return collectOperationBlockers(snapshot).map(cardOfBlocker);
+  }, [status, itemsCount]);
+
+  /** Koľko produktov by do zľavy išlo, keby strop rozsahu nebol. */
+  const wanted = matching ?? itemsCount;
+  /** `true` = výber orezal STROP REŽIMU, nie vlastný strop používateľa. */
+  const scopeTrims = maxProducts !== null && wanted > maxProducts;
+
+  /**
+   * Tá istá prekážka, ale spočítaná nad tým, čo používateľ CHCEL — inak by veta
+   * tvrdila „vo výbere je 10 produktov" práve vtedy, keď ich je 150 a 140 sa
+   * zahodilo.
+   */
+  const scopeBlocker: BlockerCard | null = useMemo(() => {
+    if (status === null || !scopeTrims) return null;
+    const snapshot = statusSnapshotFromPayload(status, {
+      selection: { selectedCount: wanted },
+      missingProductIds: [],
+    });
+    const cards = collectOperationBlockers(snapshot).map(cardOfBlocker);
+    return findCard(cards, 'scope_pilot_cap') ?? findCard(cards, 'scope_full_cap');
+  }, [status, scopeTrims, wanted]);
+
+  const alarming = alarmingCards(blockerCards);
+  const rules = quietCards(blockerCards);
 
   /* ── 5. Skúška naprázdno a zaradenie do fronty (I3) ──────────────────── */
 
@@ -614,7 +761,26 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                   </span>
                 </>
               )}
+              {notInCatalog === 0 ? null : (
+                <>
+                  <span className="sep-dot" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="flag" data-testid="missing-in-catalog">
+                    {formatCountSk(notInCatalog)} označených appka v katalógu nevidí — zľavu
+                    nedostanú
+                  </span>
+                </>
+              )}
             </div>
+
+            {scopeTrims ? (
+              <ScopeRelease
+                wanted={wanted}
+                allowed={maxProducts ?? itemsCount}
+                blocker={scopeBlocker}
+              />
+            ) : null}
 
             {busy === 'loading' ? (
               <div className={styles.busy} data-testid="selection-busy">
@@ -818,12 +984,24 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
         {/* ── PRAVÝ STĹPEC ────────────────────────────────────────────── */}
         <div className={styles.nzCol}>
+          {alarming.length === 0 ? null : (
+            <section className="sec" data-testid="new-discount-blockers">
+              <div className="sec-h">
+                <h2>Čo teraz stojí v ceste</h2>
+              </div>
+              <BlockerList cards={alarming} />
+            </section>
+          )}
+
           <NewDiscountStart
             itemsCount={itemsCount}
             perDay={perDay}
             aheadPending={aheadPending}
             aheadNames={ahead === null ? [] : ahead.names}
+            ahead={aheadView}
             finishDay={finishDay}
+            queueDays={queueDays}
+            budget={startBudget}
             proposedStart={proposedStart}
             from={from}
             onUseProposal={() => {
@@ -853,6 +1031,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
             onPreview={() => void runPreview()}
             onQueue={onQueue}
           />
+
+          <BlockerRules cards={rules} testId="new-discount-rules" />
         </div>
       </div>
 

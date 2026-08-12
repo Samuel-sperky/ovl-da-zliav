@@ -19,38 +19,23 @@
  *
  * Vlastník: V9.
  */
+import {
+  asRecord,
+  readCount as count,
+  readFlag as bool,
+  readNumber as num,
+  readText as str,
+} from '@/components/dashboard/json';
 import { fetchJson } from '@/components/layout/health';
 
 /* ═════════════════════════ 0. Bezpečné čítanie JSON ═══════════════════════ */
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== 'object' || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function num(source: Record<string, unknown>, key: string): number | null {
-  const value = source[key];
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  return value;
-}
-
-/** Celé nezáporné číslo, inak `null`. Záporný počet položiek je nezmysel. */
-function count(source: Record<string, unknown>, key: string): number | null {
-  const value = num(source, key);
-  if (value === null || value < 0) return null;
-  return Math.trunc(value);
-}
-
-function str(source: Record<string, unknown>, key: string): string | null {
-  const value = source[key];
-  if (typeof value !== 'string' || value === '') return null;
-  return value;
-}
-
-function bool(source: Record<string, unknown>, key: string): boolean {
-  return source[key] === true;
-}
+/*
+ * Helpery žijú v `json.ts`, lebo ich rovnako potrebuje aj `status-api.ts`
+ * (živý stav a prekážky). Krátke lokálne mená zostávajú, aby sa telá parserov
+ * nemuseli prepisovať — a s nimi ani riziko, že sa v nich pri premenovaní
+ * stratí niektoré explicitné porovnanie.
+ */
 
 /* ══════════════════════════════ 1. Fronta ═════════════════════════════════ */
 

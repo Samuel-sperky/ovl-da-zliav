@@ -1,14 +1,21 @@
 /**
  * Aura Zľavy — root layout (V3, design/v3/prehlad.html a prehlad-tmava.html).
  *
- * Shell je zámerne chudobný — jeden sticky riadok 56 px:
+ * Shell je zámerne chudobný — jeden sticky riadok 56 px a pod ním stály
+ * stavový pruh:
  *
- *   [Aura Zľavy]  Prehľad · Produkty · Zľavy · Nastavenia   Zápisy 100/200 dnes ▮▮▯  Fronta 3 420/8 000  ☾
+ *   [Aura Zľavy]  Prehľad · Produkty · Zľavy 🔒 · Nastavenia      Fronta 3 420/8 000  ☾
+ *   ✓ Shop odpovedá │ Kľúč 41 h 12 min │ Ostrý zápis zapnutý │ Zápisy dnes 12/200 ▮▯ │ Katalóg 2 900 z 41 082
  *
- * Nad ním pruh PRODUKCIA (D6), pod ním nanajvýš dva tenké pruhy faktov:
+ * Nad tým pruh PRODUKCIA (D6), pod tým nanajvýš dva tenké pruhy faktov:
  * „Ostrý zápis vypnutý" (I13) a read-only výzva pri chýbajúcom kľúči (D10).
+ * Tie dva pruhy sú HLASNÉ oznámenie na začiatku stránky a odscrollujú;
+ * stavový pruh je naopak lepkavý prístrojový panel, ktorý je vidieť stále.
  * Nič iné do hlavičky nepatrí — žiadne vyhľadávanie, žiadne notifikácie,
  * žiadne stavové badge (ARCHITEKTURA §0).
+ *
+ * Hlavičku aj stavový pruh skladá `components/layout/AppHeader.tsx`, aby stav
+ * appky ťahal jeden poller pre celý shell.
  *
  * Téma: SVETLÁ je predvolená a `<html>` sa renderuje BEZ `data-theme`, takže
  * kým si používateľ nevyberie, rozhoduje systém (`prefers-color-scheme`).
@@ -18,13 +25,9 @@
  */
 import type { Metadata } from 'next';
 
-import Nav from '@/components/layout/Nav';
+import AppHeader from '@/components/layout/AppHeader';
 import ProductionBar from '@/components/layout/ProductionBar';
-import {
-  HeaderReadOnlyNotice,
-  HeaderRight,
-  HeaderWritesStrip,
-} from '@/components/layout/HeaderStatus';
+import { HeaderReadOnlyNotice, HeaderWritesStrip } from '@/components/layout/HeaderStatus';
 import { THEME_BOOTSTRAP_SCRIPT } from '@/components/layout/theme';
 import { APP_DISPLAY_NAME, APP_VERSION } from '@/version';
 
@@ -44,15 +47,7 @@ export default function RootLayout({
       <body>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
         <ProductionBar />
-        <header className="hdr">
-          <div className="hdr-in">
-            <span className="brand">
-              Aura <b>Zľavy</b>
-            </span>
-            <Nav />
-            <HeaderRight />
-          </div>
-        </header>
+        <AppHeader />
         <HeaderWritesStrip />
         <HeaderReadOnlyNotice />
         <main className="wrap">{children}</main>

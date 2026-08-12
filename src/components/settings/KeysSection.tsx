@@ -15,19 +15,55 @@
  * Vloženie a obnova sú pod tlačidlom v riadku; formulár sa otvorí pod tabuľkou,
  * aby obrazovka nemala dva rozpísané formuláre naraz.
  *
+ * ČO SA STANE PO EXPIRÁCII — A PREČO TO TU MUSÍ BYŤ NAPÍSANÉ
+ * ---------------------------------------------------------
+ * Kľúč na zápis platí 48 hodín, ale fronta na 150 produktov beží deň a fronta
+ * na tisíce aj týždne. Expirácia uprostred behu je teda normálny stav, nie
+ * výnimka — a používateľ, ktorý nevie, čo sa vtedy stane, si domyslí to
+ * najhoršie (že o rozrobenú zľavu prišiel). Preto je pri tabuľke veta, ktorá
+ * hovorí presne tri veci: fronta počká, nič sa nestratí, zapísané zľavy
+ * v eshope zostanú. Táto veta sa odtiaľto nesmie stratiť.
+ *
  * Vlastník: V12.
  */
 import { useState } from 'react';
 
 import ApiKeyForm from '@/components/settings/ApiKeyForm';
 import OrdersKeyForm from '@/components/settings/OrdersKeyForm';
+import { TONE_SIG_CLASS } from '@/components/settings/blockers-view';
 import Button from '@/components/ui/Button';
 import Countdown from '@/components/ui/Countdown';
+import Note from '@/components/ui/Note';
+import type { StatusTone } from '@/components/ui/ToneBadge';
 import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
 import type { KeyMetaView } from '@/components/settings/api';
 
 /** Ktorý formulár je práve otvorený. `null` = žiadny. */
 type OpenForm = 'write' | 'orders' | null;
+
+/**
+ * Od koľkých zostávajúcich hodín sa o platnosti hovorí nahlas. Zhoda
+ * s `KEY_WARNING_HOURS` v `lib/status/blockers.ts` je zámerná: obrazovka
+ * a zoznam prekážok nesmú varovať v inom okamihu, inak si protirečia.
+ */
+export const KEY_WARNING_HOURS = 12;
+
+/**
+ * Stav kľúča ako SLOVO a tón. Čistá funkcia — presne tu sa dá ticho pokaziť,
+ * že obrazovka povie „vložený" o kľúči, ktorý už neplatí, a používateľ potom
+ * hodinu hľadá, prečo sa nezapisuje.
+ */
+export function keyRowState(meta: KeyMetaView | null): {
+  readonly label: string;
+  readonly tone: StatusTone;
+} {
+  if (meta?.present !== true) return { label: 'chýba', tone: 'attention' };
+  const left = meta.secondsLeft;
+  if (left === null) return { label: 'vložený', tone: 'good' };
+  if (left <= 0) return { label: 'už neplatí', tone: 'critical' };
+  if (left < KEY_WARNING_HOURS * 3600) return { label: 'vložený, čoskoro vyprší', tone: 'attention' };
+  return { label: 'vložený a platný', tone: 'good' };
+}
 
 export interface KeysSectionProps {
   writeKey: KeyMetaView | null;
@@ -46,6 +82,7 @@ interface KeyRowProps {
 
 function KeyRow({ label, purpose, meta, open, onToggle, testId }: KeyRowProps) {
   const present = meta?.present === true;
+  const state = keyRowState(meta);
   return (
     <tr data-testid={testId}>
       <td className="name">
@@ -65,11 +102,7 @@ function KeyRow({ label, purpose, meta, open, onToggle, testId }: KeyRowProps) {
         )}
       </td>
       <td data-l="Stav">
-        {present ? (
-          <span className="sig ok">vložený</span>
-        ) : (
-          <span className="sig warn">chýba</span>
-        )}
+        <span className={TONE_SIG_CLASS[state.tone]}>{state.label}</span>
         {present && meta?.last4 !== null && meta?.last4 !== undefined ? (
           <div className="lvl-3">končí na {meta.last4}</div>
         ) : null}
@@ -134,6 +167,16 @@ export function KeysSection({ writeKey, ordersKey, onStored }: KeysSectionProps)
           <span>Kľúče sú uložené zašifrované. Nikdy sa nezobrazia ani nezapíšu do histórie.</span>
         </div>
       </div>
+
+      <Note testId="keys-expiry-note">
+        <b>Keď kľúč na zápis vyprší:</b> fronta sa zastaví a počká, <b>nič sa nestratí</b>
+        {' '}a zľavy, ktoré už v eshope sú, tam zostanú a dobehnú. Appka si nový kľúč
+        nevypýta sama a nevyrobí ho — vygeneruješ ho v eshope a vložíš sem tlačidlom
+        <b> Obnoviť</b>. Fronta potom pokračuje presne tam, kde stála, a zľavy, ktoré na
+        kľúč čakali a sú ešte vo svojom okne, appka dopíše sama. Kľúč na zápis platí
+        48 hodín od vloženia, kľúč na objednávky 30 dní — dlhšiu platnosť nastaviť
+        nevieme, je to pravidlo eshopu.
+      </Note>
 
       {open === 'write' ? (
         <div className="set-form">

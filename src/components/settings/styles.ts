@@ -20,9 +20,32 @@
  */
 
 export const SETTINGS_CSS = `
-.set-page h1.page{font-size:15px;font-weight:640;margin-bottom:10px}
+.set-page h1.page{font-size:15px;font-weight:640;margin-bottom:4px}
+.set-page .set-lead{font-size:12.5px;color:var(--dim);line-height:1.55;
+  margin-bottom:12px;max-width:70ch}
 .set-page .sec + .sec{margin-top:14px}
 .set-page .sec[id]{scroll-margin-top:72px}
+/* Nadpis skupiny sekcií. Nie je to karta — je to popiska nad kartami, preto
+   nemá rám ani pozadie; jediné, čo robí, je oddelenie otázok od seba. */
+.set-page .set-grp{font-size:11px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--dim);margin:22px 0 8px}
+.set-page .set-grp:first-of-type{margin-top:14px}
+.set-page .anchor-grp{display:flex;flex-direction:column;gap:1px}
+.set-page .anchor-grp + .anchor-grp{margin-top:8px}
+.set-page .anchor-grp-t{font-size:10.5px;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--dim);padding:4px 10px 2px}
+/* Odkaz „prejsť tam" v bunke tabuľky — text, nie tlačidlo: v hustej tabuľke
+   by päť tlačidiel pod sebou prekričalo samotné vety. */
+.set-page .set-jump{font-size:12px;color:var(--teal);text-decoration:none;
+  border-bottom:1px solid transparent}
+.set-page .set-jump:hover{border-bottom-color:currentColor}
+/* Dva rozpočtové prúžky vedľa seba. Zápisy a čítania sú oddelené kvóty a
+   obrazovka to má ukázať aj rozložením, nie len textom. */
+.set-page .set-meters{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;
+  margin:10px 0 12px;align-items:start}
+.set-page .set-pill-row{display:flex;gap:14px;align-items:flex-start;
+  flex-wrap:wrap;margin-bottom:10px}
+.set-page .set-pill-row .set-note{flex:1 1 320px;margin:0}
 /* Hlavička sekcie sa na úzkej obrazovke zalomí a dlhý popis tlačidla s ňou —
    inak by jediné dlhé tlačidlo vytlačilo celú stránku doboku. */
 .set-page .sec-h{flex-wrap:wrap}
@@ -57,6 +80,7 @@ export const SETTINGS_CSS = `
 
 @media (max-width:760px){
   .set-page .split{grid-template-columns:1fr}
+  .set-page .set-meters{grid-template-columns:1fr}
   .set-page .kv{grid-template-columns:1fr;gap:2px}
   .set-page .kv .k{margin-top:8px}
   .set-page .dz-row .dz-a{margin-left:0}

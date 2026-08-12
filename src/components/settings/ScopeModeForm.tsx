@@ -19,6 +19,13 @@
  *    s neznámym následkom nad produkčným eshopom.
  * 3. **„Neviem" je pilotný rozsah.** Keď server prizná, že hodnotu nedokázal
  *    prečítať, obrazovka to povie a NEtvrdí, že rozsah je plný.
+ * 4. **Dlaždica „Po uvoľnení by prešlo" sa nesmie stratiť.** Používateľ mesiace
+ *    nevedel, že strop desiatich produktov je prepínač a že strop plného
+ *    rozsahu je už uložený na tisícoch — a nevedel to preto, že obrazovka
+ *    ukazovala výhradne to, čo platí TERAZ. Číslo, ktoré by platilo po
+ *    prepnutí, je celý dôvod, prečo sa dá poistka nájsť skôr, než sa do nej
+ *    narazí. Tabuľka oboch rozsahov vedľa seba je tá istá vec pre pomalšie
+ *    čítanie; ani jedno z toho nie je ozdoba.
  *
  * Appka režimom nič nezapisuje — mení sa len to, čo smie prejsť neskôr cez
  * bránu pred zápisom.
@@ -29,6 +36,8 @@ import { useState } from 'react';
 
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
+import Note from '@/components/ui/Note';
+import StatTile from '@/components/ui/StatTile';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import { formatCountSk } from '@/lib/ui/vocabulary';
@@ -88,18 +97,83 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
         </div>
       </div>
 
-      <div className="kv">
-        <span className="k">Teraz platí</span>
-        <span className="v">{SCOPE_MODE_LABELS[mode]} rozsah</span>
-        <span className="lvl-3">
-          {full ? 'produkt musí byť v katalógu' : 'len povolené produkty'}
-        </span>
+      <Note testId="scope-intro">
+        Toto je jediné miesto, kde sa mení, <b>koľko produktov smie mať jedna zľava</b>.
+        Strop desiatich produktov nie je hranica appky — je to prepínač, ktorý brzdil
+        pilotnú prevádzku. Strop plného rozsahu je už uložený na{' '}
+        {formatCountSk(settings.maxProductsPerCampaign)} produktoch; treba ho iba uvoľniť.
+      </Note>
 
-        <span className="k">Najviac na jednu zľavu</span>
-        <span className="v" data-testid="scope-max">
-          {formatCountSk(settings.maxProducts)} produktov
-        </span>
-        <span className="lvl-3">strop stráži aj databáza</span>
+      <div className="kpis">
+        <StatTile
+          label="Teraz platí"
+          value={`${SCOPE_MODE_LABELS[mode]} rozsah`}
+          detail={full ? 'produkt musí byť v katalógu' : 'len povolené produkty'}
+          testId="scope-mode-tile"
+        />
+        <StatTile
+          label="Najviac na jednu zľavu"
+          value={`${formatCountSk(settings.maxProducts)} produktov`}
+          detail="strop stráži aj databáza"
+          testId="scope-max"
+        />
+        <StatTile
+          label={full ? 'Po sprísnení by prešlo' : 'Po uvoľnení by prešlo'}
+          value={`${formatCountSk(full ? settings.pilotMaxProducts : settings.maxProductsPerCampaign)} produktov`}
+          detail={full ? 'návrat do pilotného rozsahu, bez hesla' : 'uložený strop plného rozsahu'}
+          testId="scope-other"
+        />
+      </div>
+
+      <div className="tbl-frame">
+        <table className="tbl plain">
+          <thead>
+            <tr>
+              <th>Rozsah</th>
+              <th>Najviac na jednu zľavu</th>
+              <th>Ktorý produkt prejde</th>
+              <th>Ako sa naň prepne</th>
+            </tr>
+          </thead>
+          <tbody data-testid="scope-modes">
+            <tr>
+              <td className="name">
+                pilotný{' '}
+                {full ? null : (
+                  <span className="sig ok" data-testid="scope-row-pilot">
+                    teraz platí
+                  </span>
+                )}
+              </td>
+              <td data-l="Najviac na jednu zľavu">
+                {formatCountSk(settings.pilotMaxProducts)} produktov
+              </td>
+              <td data-l="Ktorý produkt prejde">len ten, ktorý je v zozname povolených</td>
+              <td data-l="Ako sa naň prepne">sprísnenie je vždy voľné, heslo netreba</td>
+            </tr>
+            <tr>
+              <td className="name">
+                plný{' '}
+                {full ? (
+                  <span className="sig ok" data-testid="scope-row-full">
+                    teraz platí
+                  </span>
+                ) : null}
+              </td>
+              <td data-l="Najviac na jednu zľavu">
+                {formatCountSk(settings.maxProductsPerCampaign)} produktov
+              </td>
+              <td data-l="Ktorý produkt prejde">každý, ktorý appka vidí vo svojom katalógu</td>
+              <td data-l="Ako sa naň prepne">uvoľnenie si vypýta heslo</td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="tbl-foot">
+          <span>
+            Zmena rozsahu nezapíše ani nezruší nič. Mení len to, čo appka pustí pri
+            najbližšom potvrdení zľavy.
+          </span>
+        </div>
       </div>
 
       {settings.scopeFailClosed ? (

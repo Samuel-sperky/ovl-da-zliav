@@ -3,13 +3,21 @@
 /**
  * Aura Zľavy — ČÍTANIE A ZÁPIS TABU ZĽAVY (V11; kontrakt V3 K2–K8, I3, I11).
  *
- * Tenká vrstva nad piatimi endpointmi, ktoré tab Zľavy potrebuje:
+ * Tenká vrstva nad endpointmi, ktoré tab Zľavy potrebuje:
  *
  *   `GET  /api/campaigns`            — zoznam zliav, pásma, odhad, rozpočet,
  *   `GET  /api/campaigns/[id]`       — detail: pásma, položky, audit stopa,
  *   `GET  /api/catalog/search`       — z čoho sa výber skladá (K7, K8),
  *   `POST /api/campaigns/preview`    — skúška naprázdno; jediný zdroj tokenu (I3),
- *   `POST /api/campaigns`            — zaradenie do fronty (sudo, D70).
+ *   `POST /api/campaigns`            — zaradenie do fronty (sudo, D70),
+ *   `GET  /api/queue`                — ŽIVÝ stav fronty, rozpočtu a prekážok,
+ *   `GET  /api/status`               — celý obraz stavu appky + prekážky,
+ *   `GET  /api/campaigns/[id]/retry-failed` — popis toho, čo by zopakovanie urobilo.
+ *
+ * Posledné tri sú neskorší prírastok a majú spoločné jedno: ich odpoveď sa
+ * NEBERIE naslepo. Parsovanie žije v `queue-model.ts` (čisté, testovateľné) a
+ * čokoľvek, čo nesedí, skončí ako chyba obálky — nie ako prázdna fronta. Nula
+ * čakajúcich položiek je tvrdenie a to sa z neznalosti povedať nesmie (P7).
  *
  * Pravidlá, ktoré tento modul drží:
  *
@@ -29,11 +37,19 @@
 import type { ApiError, Envelope } from '@/components/campaigns/api';
 import { getJson, postJson } from '@/components/campaigns/api';
 import {
+  parseQueueSnapshot,
+  parseRetryPlan,
+  type QueueSnapshotView,
+  type RetryPlanView,
+} from '@/components/campaigns/queue-model';
+import {
   catalogSearchParams,
   type CatalogFilterState,
 } from '@/components/products/catalog-filter';
+import type { StatusPayload } from '@/lib/status/snapshot';
 
 export type { ApiError, Envelope };
+export type { QueueSnapshotView, RetryPlanView, StatusPayload };
 
 /* ═══════════════════════════ 1. Zoznam zliav ══════════════════════════════ */
 
@@ -325,6 +341,60 @@ export function retryFailed(
   previewToken: string,
 ): Promise<Envelope<{ campaignId: number }>> {
   return postJson<{ campaignId: number }>(`/api/campaigns/${id}/retry-failed`, { previewToken });
+}
+
+/**
+ * POPIS toho, čo by zopakovanie urobilo — čisto čítacie, nič nezapisuje a
+ * žiadny token nevydáva.
+ *
+ * Existuje preto, že samotný `POST` sa bez čerstvého potvrdenia odmietne (I3,
+ * D16) a odmietnutie bez vysvetlenia je na povrchu neprijateľné. Táto odpoveď
+ * nesie sadu produktov, jej rozpad na „nezapísalo sa" a „nevieme, či sa
+ * zapísalo" (D45), okno opravnej zľavy a vetu s ďalším krokom.
+ */
+export async function retryPlan(id: number): Promise<Envelope<RetryPlanView>> {
+  const res = await getJson<unknown>(`/api/campaigns/${id}/retry-failed`);
+  if (!res.ok) return res;
+  const plan = parseRetryPlan(res.data);
+  if (plan === null) {
+    return {
+      ok: false,
+      error: { code: 'shape', message: 'Popis opakovania sa nepodarilo prečítať.' },
+    };
+  }
+  return { ok: true, data: plan };
+}
+
+/* ═════════════ 6. Živý stav fronty a celý obraz stavu appky ═══════════════ */
+
+/**
+ * `GET /api/queue` — kde je fronta, koľko rozpočtu ostáva, čo bude zajtra a
+ * prečo to prípadne stojí. Lacný, čisto čítací endpoint; volá sa aj periodicky.
+ *
+ * Nečitateľná odpoveď končí ako chyba obálky, NIE ako prázdna fronta: nula
+ * čakajúcich položiek je tvrdenie a to sa z neznalosti povedať nesmie (P7).
+ */
+export async function fetchQueue(): Promise<Envelope<QueueSnapshotView>> {
+  const res = await getJson<unknown>('/api/queue');
+  if (!res.ok) return res;
+  const snapshot = parseQueueSnapshot(res.data);
+  if (snapshot === null) {
+    return {
+      ok: false,
+      error: { code: 'shape', message: 'Stav fronty sa nepodarilo prečítať.' },
+    };
+  }
+  return { ok: true, data: snapshot };
+}
+
+/**
+ * `GET /api/status` — fakty o stave appky plus hotový zoznam prekážok pre
+ * PRÁZDNY výber. Obrazovka s výberom si prekážky prepočíta nad vlastnou sadou
+ * cez `statusSnapshotFromPayload()`; to je jediná podporovaná cesta, ako to
+ * urobiť bez druhého volania servera.
+ */
+export function fetchStatus(): Promise<Envelope<StatusPayload>> {
+  return getJson<StatusPayload>('/api/status');
 }
 
 /**

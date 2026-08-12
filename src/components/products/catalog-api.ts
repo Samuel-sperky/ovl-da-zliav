@@ -4,9 +4,19 @@
  * Aura Zľavy — klientske volania tabu Produkty (V10; kontrakt V3 K7, K8, I11).
  *
  * Modul zámerne NEIMPORTUJE nič z `components/campaigns` ani z `products/api.ts`
- * (správa povolených produktov). Tab Produkty číta katalóg a nič nezapisuje;
- * keby zdieľal klienta so zápisovou obrazovkou, jedna zmena tam by mohla ticho
- * zmeniť správanie tu.
+ * (správa povolených produktov). Tab Produkty číta katalóg a do shopu NIKDY
+ * nezapisuje; keby zdieľal klienta so zápisovou obrazovkou, jedna zmena tam by
+ * mohla ticho zmeniť správanie tu.
+ *
+ * JEDNA VÝNIMKA A PREČO NIE JE ZÁPIS
+ * ----------------------------------
+ * `runCatalogBatch()` posiela `POST /api/catalog/sync`. Je to jediné `POST`
+ * v tomto module a je to ČÍTANIE zo shopu: načíta ďalšiu stránku katalógu do
+ * `catalog_cache`. Nedotkne sa zápisového rozpočtu ani zliav a nemá ako —
+ * synchronizácia sa ku klientovi shopu dostane len cez `listProducts`. Tlačidlo
+ * tu musí byť preto, že vety prekážok posielajú používateľa načítať katalóg
+ * PRÁVE do Produktov (`BLOCKER_PATHS.products`); obrazovka bez toho tlačidla by
+ * z tej vety urobila slepú uličku.
  *
  * Čo tento modul NEROBÍ:
  *
@@ -15,12 +25,19 @@
  *  · nedopočítava „Dáta k …" — `dataAsOf` je meraný fakt, `null` znamená
  *    prázdny katalóg a obrazovka to má povedať, nie odhadnúť (P7),
  *  · netvrdí, že pozná stav zľavy v shope — `discountedNow` je náš vlastný
- *    zápis (I11) a tak sa aj pomenúva na povrchu.
+ *    zápis (I11) a tak sa aj pomenúva na povrchu,
+ *  · neskladá vety o prekážkach — `GET /api/status` ich vracia hotové
+ *    z `lib/status/blockers.ts` a obrazovka ich len vykreslí.
  *
  * Vlastník: V10.
  */
 import type { CatalogFilterState } from '@/components/products/catalog-filter';
 import { catalogSearchQuery } from '@/components/products/catalog-filter';
+import type {
+  CatalogRunReportView,
+  CatalogStatusView,
+} from '@/components/products/catalog-status';
+import type { StatusPayload } from '@/lib/status/snapshot';
 
 /* ═══════════════════════════ 1. Obálka odpovede ═══════════════════════════ */
 
@@ -54,6 +71,33 @@ async function readJson<T>(url: string, signal?: AbortSignal): Promise<Result<T>
     return { ok: false, error: UNEXPECTED };
   } catch (error) {
     // Zrušený dotaz nie je chyba — používateľ len rýchlo klikol ďalej.
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return { ok: false, error: { code: 'aborted', message: '' } };
+    }
+    return { ok: false, error: OFFLINE };
+  }
+}
+
+/**
+ * `POST` s prázdnym telom. Používa ho výhradne `runCatalogBatch()` — pozri
+ * hlavičku modulu, prečo je jedno `POST` v čítacom klientovi v poriadku.
+ */
+async function postJson<T>(url: string, signal?: AbortSignal): Promise<Result<T>> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: '{}',
+      signal,
+    });
+    try {
+      const body = (await res.json()) as Result<T>;
+      if (body !== null && typeof body === 'object' && 'ok' in body) return body;
+    } catch {
+      /* neplatné telo — spadne na `UNEXPECTED` nižšie */
+    }
+    return { ok: false, error: UNEXPECTED };
+  } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       return { ok: false, error: { code: 'aborted', message: '' } };
     }
@@ -167,14 +211,54 @@ export function productWrites(
   return readJson<ProductWritesView>(`/api/insights/product/${productId}`, signal);
 }
 
-/* ═══════════════════════════ 4. Strop na zľavu ════════════════════════════ */
+/* ═════════════════ 4. Stav katalógu (koľko z koľkých, prečo sa čaká) ══════ */
 
-export interface ScopeLimitsView {
-  /** Účinný strop produktov na jednu zľavu (K1). */
-  readonly maxProducts: number;
-  readonly scopeFailClosed: boolean;
+/**
+ * Odpoveď `GET /api/catalog/sync`.
+ *
+ * Route posiela aj `lastRun` — posledný beh synchronizácie. Obrazovka ho
+ * ZÁMERNE ignoruje: pri otvorení tabu by to bola veta o dávke, ktorú spustil
+ * scheduler o tretej v noci, a používateľ by hľadal, čo práve urobil on. Vetu
+ * o behu ukazujeme len ako odpoveď na kliknutie (`runCatalogBatch`).
+ */
+export interface CatalogSyncView {
+  readonly catalog: CatalogStatusView;
 }
 
-export function scopeLimits(signal?: AbortSignal): Promise<Result<ScopeLimitsView>> {
-  return readJson<ScopeLimitsView>('/api/settings', signal);
+/**
+ * Stav katalógu BEZ toho, aby sa čokoľvek spustilo — na shop neodíde ani jeden
+ * request, takže sa to dá volať aj opakovane pri otvorení obrazovky.
+ */
+export function catalogSyncStatus(signal?: AbortSignal): Promise<Result<CatalogSyncView>> {
+  return readJson<CatalogSyncView>('/api/catalog/sync', signal);
+}
+
+/** Odpoveď `POST` — čo urobil TENTO beh, plus stav katalógu po ňom. */
+export interface CatalogBatchView extends CatalogRunReportView {
+  readonly catalog: CatalogStatusView;
+}
+
+/**
+ * Načíta ďalšiu dávku katalógu. Jeden `POST` NIE JE celý katalóg — prečíta, čo
+ * sa zmestí do rozpočtu čítaní, uloží pokrok a povie, kde skončil. Pokračovanie
+ * od poslednej strany je vlastnosť servera, nie tohto volania.
+ */
+export function runCatalogBatch(signal?: AbortSignal): Promise<Result<CatalogBatchView>> {
+  return postJson<CatalogBatchView>('/api/catalog/sync', signal);
+}
+
+/* ═══════════ 5. Prekážky a stropy — jeden endpoint pre celý obraz ═════════ */
+
+/**
+ * Fakty o stave appky aj HOTOVÝ zoznam prekážok z `lib/status/blockers.ts`.
+ * Obrazovka Produkty si z neho berie tri veci: účinný strop na jednu zľavu
+ * (K1), prekážky okolo katalógu a podklad na prepočet prekážok nad VLASTNÝM
+ * výberom (`statusSnapshotFromPayload`). Endpoint je lacný a nevolá shop.
+ *
+ * Doteraz sa strop čítal z `/api/settings`; dvom zdrojom toho istého čísla sa
+ * obrazovka vyhýba zámerne — rozišli by sa v okamihu, keď jeden z nich
+ * fail-closed spadne na pilotnú desiatku a druhý nie.
+ */
+export function appStatus(signal?: AbortSignal): Promise<Result<StatusPayload>> {
+  return readJson<StatusPayload>('/api/status', signal);
 }

@@ -9,6 +9,15 @@
  */
 import type { Envelope } from '@/components/campaigns/api';
 import { getJson, postJson } from '@/components/campaigns/api';
+import type { BlockerWire, StatusPayload } from '@/lib/status/snapshot';
+
+/**
+ * Prekážky a celý obraz stavu appky sa NEODVODZUJÚ tu — prichádzajú hotové
+ * zo servera z jediného zdroja pravdy (`lib/status/blockers.ts`). Typy sa dajú
+ * doniesť aj do prehliadača, lebo `lib/status/snapshot.ts` je zámerne čistý
+ * modul bez jediného serverového importu.
+ */
+export type { BlockerWire, StatusPayload };
 
 /** Kód chyby, pri ktorom treba znova overiť heslo (D70, I3). */
 export const SUDO_REQUIRED_CODE = 'sudo_required';
@@ -71,6 +80,56 @@ export interface QueueView {
   queue: { pending: number; total: number; done: number; campaigns: number };
   estimate: { pending: number; perDay: number; days: number; date: string } | null;
   heartbeat: { lastTickAt: string | null; staleMs: number | null; stale: boolean };
+  /**
+   * Stropy eshopu a kedy sa denný rozpočet obnoví. Zámerne VOLITEĽNÉ: pole
+   * pribudlo neskôr a obrazovka nesmie spadnúť na staršej odpovedi — keď chýba,
+   * veta o obnove sa jednoducho nekreslí (vymyslený čas by bol tvrdenie).
+   */
+  limits?: {
+    shopPerUtcDay: number;
+    shopPerMinute: number;
+    configuredPerDay: number;
+    /** Presný okamih obnovy denného stropu. */
+    nextResetAt: string;
+  } | null;
+}
+
+/**
+ * Denný ČÍTACÍ rozpočet katalógu (`GET /api/catalog/sync`).
+ *
+ * Je to iná kvóta než zápisová: čítania idú bez kľúča, počítajú sa na
+ * zdrojovú adresu počítača a zo zápisov si neberú nič. Preto sú v Nastaveniach
+ * dva prúžky vedľa seba, nie jeden spoločný.
+ */
+export interface CatalogReadsView {
+  day: string;
+  /** Koľko čítaní si appka za deň dovolí (rezerva pod stropom eshopu). */
+  limit: number;
+  used: number;
+  remaining: number;
+  exhausted: boolean;
+  resetAt: string;
+  minuteLimit: number;
+  usedThisMinute: number;
+  /** `false` = počítadlo sa nedalo prečítať, čísla sú bezpečný odhad. */
+  known: boolean;
+}
+
+/**
+ * Stav zrkadla katalógu. Tvar je podmnožina odpovede `GET /api/catalog/sync`;
+ * typ z tej route sa sem doniesť NEDÁ — ťahá databázu aj klienta eshopu, teda
+ * celý server do prehliadača.
+ */
+export interface CatalogView {
+  loadedProducts: number;
+  shopTotalProducts: number | null;
+  percent: number | null;
+  complete: boolean;
+  lastFetchedAt: string | null;
+  nextBatchAt: string | null;
+  estimatedDaysLeft: number | null;
+  estimatedFinishAt: string | null;
+  reads: CatalogReadsView;
 }
 
 export interface KeyMetaView {
@@ -126,6 +185,18 @@ export const getKeyMeta = () => getJson<KeyMetaView>('/api/key');
 
 /** Rozpočet a fronta pre sekciu Rozpočet. Čisto čítacie. */
 export const getQueue = () => getJson<QueueView>('/api/queue');
+
+/**
+ * Celý obraz stavu appky aj s hotovým zoznamom prekážok. Lacný endpoint —
+ * žiadne volanie eshopu, počty idú po indexoch.
+ */
+export const getStatus = () => getJson<StatusPayload>('/api/status');
+
+/**
+ * Stav katalógu a jeho denný čítací rozpočet. `GET` nič nespúšťa a na eshop
+ * neodošle ani jeden dotaz; načítanie katalógu spúšťa iná obrazovka.
+ */
+export const getCatalog = () => getJson<{ catalog: CatalogView }>('/api/catalog/sync');
 
 /**
  * Prepnutie režimu rozsahu. Uvoľnenie (pilotný → plný) si server vypýta heslom;

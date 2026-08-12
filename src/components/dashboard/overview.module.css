@@ -123,6 +123,87 @@
 }
 
 /*
+ * ŽIVÝ STAV — štyri merateľné veci vedľa seba: dve stavové pilulky a dva
+ * meracie prúžky. Rovnaké stĺpce zámerne: sú to štyri odpovede na jednu
+ * otázku („čím je appka práve obmedzená"), nie hlavná vec a tri doplnky.
+ */
+.liveTop {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+/* Riadky „čo sa deje" pod prúžkami. Rovnaká geometria ako `.suggest`. */
+.stateList {
+  border-top: 1px solid var(--line);
+}
+
+.stateRow {
+  display: grid;
+  grid-template-columns: 190px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.stateRow:last-child {
+  border-bottom: 0;
+}
+
+/*
+ * PREKÁŽKA — dva riadky textu vľavo (čo sa deje, čo s tým) a cesta ďalej
+ * vpravo. Ďalší krok NIE JE pod rozklikom: prekážka bez neho je zase len log.
+ */
+.reason {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.reason:last-child {
+  border-bottom: 0;
+}
+
+.reasonBody {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Priznaná domnienka — stojí v tlmenom riadku vedľa ďalšieho kroku. */
+.assumed {
+  font-style: italic;
+}
+
+/* Tri kroky prvej zľavy. Číslo je obsah, nie ozdoba, preto `<ol>`. */
+.steps {
+  margin: 10px 0 12px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13.5px;
+  color: var(--ink2);
+}
+
+.steps li::marker {
+  color: var(--dim);
+  font-weight: 650;
+}
+
+/* Priznaná medzera v stave — vysvetlivka pod riadkami, nie cez celú stránku. */
+.gapNote {
+  margin-top: 10px;
+}
+
+/*
  * Pod 1100 px sa stĺpce skladajú pod seba. Appka beží na jednom počítači
  * v 1440, ale zúžené okno nesmie vyrobiť vodorovný skrol (P4).
  */
@@ -131,5 +212,24 @@
   .mid,
   .salesGrid {
     grid-template-columns: 1fr;
+  }
+
+  .liveTop {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stateRow {
+    grid-template-columns: 150px 1fr auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .liveTop {
+    grid-template-columns: 1fr;
+  }
+
+  .stateRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }

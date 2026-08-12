@@ -109,19 +109,30 @@ describe('Nastavenia — kotvy a sekcie', () => {
   it('kotvy sú jedinečné a v poradí, v akom sa sekcie kreslia', () => {
     const ids = SETTINGS_ANCHORS.map((a) => a.id);
     expect(new Set(ids).size).toBe(ids.length);
+    // Poradie zoskupuje sekcie podľa OTÁZKY, na ktorú odpovedajú
+    // (KONTRAKT-DOKONCENIE-2026-08-12, body C3 a C5), nie podľa toho,
+    // v akom poradí historicky vznikali:
+    //   čo appka vie      → covie
+    //   na čo je napojená → pripojenie, kluce
+    //   čo smie robiť     → rozsah, zapisy
+    //   koľko toho smie   → rozpocet
+    //   čo už spravila    → historia, diagnostika, zamknute
+    //   núdzové brzdy     → poistky, odhlasenie, cervena
+    //
+    // `covie` je navrchu zámerne: používateľ mesiace netušil, že strop
+    // desiatich produktov je iba prepínač, takže rozcestník „čo appka vie"
+    // nesmie byť schovaný až pod formulármi.
     expect(ids).toEqual([
+      'covie',
       'pripojenie',
       'kluce',
-      'rozpocet',
       'rozsah',
-      'poistky',
-      // Chvost je poradie z `design/v3/nastavenia.html`: audit (u nás
-      // „historia" podľa K9) → diagnostika → zamknuté → červená zóna.
-      // Pred dobehom V3 tu bolo `zamknute` pred `historia` a `diagnostika`
-      // chýbala celá (`docs/53-AUDIT-1-1-V3.md` §A.1).
+      'zapisy',
+      'rozpocet',
       'historia',
       'diagnostika',
       'zamknute',
+      'poistky',
       'odhlasenie',
       'cervena',
     ]);

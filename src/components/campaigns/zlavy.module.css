@@ -389,6 +389,233 @@
   color: var(--dim);
 }
 
+/* ───────────────── prekážky: prečo sa niečo nestalo (C2) ───────────────── */
+
+/*
+ * Farba prúžku ide podľa `data-tone`, ktoré `BlockerList` odvodzuje zo SPÔSOBU
+ * RIEŠENIA prekážky, nie z jej závažnosti — vyčerpaný rozpočet blokuje, ale nie
+ * je to chyba (K2). Tón je len tretí kanál: vedľa neho vždy stojí glyf a slovo.
+ */
+.blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.blockersTitle {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 650;
+}
+
+.blocker {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--st-idle);
+  border-radius: var(--r);
+  background: var(--paper2);
+}
+
+.blocker[data-tone='attention'] {
+  border-left-color: var(--st-attention);
+}
+
+.blocker[data-tone='critical'] {
+  border-left-color: var(--st-critical);
+}
+
+.blocker[data-tone='good'] {
+  border-left-color: var(--st-good);
+}
+
+.blockerGlyph {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--st-idle);
+}
+
+.blocker[data-tone='attention'] .blockerGlyph {
+  color: var(--st-attention);
+}
+
+.blocker[data-tone='critical'] .blockerGlyph {
+  color: var(--st-critical);
+}
+
+.blockerBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.blockerWhat {
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.blockerStep {
+  font-size: 12px;
+  color: var(--ink2);
+  margin-top: 3px;
+  line-height: 1.45;
+}
+
+.blockerMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.ruleRow + .ruleRow {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+/* ───────────────── ponuka uvoľnenia rozsahu (B1, R4) ──────────────────── */
+
+.scopeRelease {
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.scopeNumbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.scopeBig {
+  font-size: 22px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.scopeStep {
+  font-size: 12px;
+  color: var(--ink2);
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .scopeNumbers {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ───────────────── panel štartu: prúžok a poznámka o okne ─────────────── */
+
+.startMeter {
+  margin-bottom: 11px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.startNote {
+  margin-top: 10px;
+}
+
+/* ───────────────── fronta naživo v detaile zľavy (B5) ─────────────────── */
+
+.liveGrid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 18px;
+  align-items: start;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.liveNext {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink2);
+  line-height: 1.5;
+}
+
+.aheadLine {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.5;
+}
+
+@media (max-width: 860px) {
+  .liveGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ───────────────── zopakovanie toho, čo sa nepodarilo (B7) ────────────── */
+
+.retryNumbers {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.retryAck {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 11px;
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+@media (max-width: 860px) {
+  .retryNumbers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ───────────────── zoznam zliav: čitateľnosť bez rozkliku (B5) ────────── */
+
+.listFoot {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 18px;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.listFootText {
+  font-size: 12.5px;
+  color: var(--ink2);
+  line-height: 1.5;
+}
+
+@media (max-width: 860px) {
+  .listFoot {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ─────────────────────────── užšie okno (P4) ─────────────────────────── */
 
 /*

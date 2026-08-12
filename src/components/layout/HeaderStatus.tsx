@@ -3,24 +3,34 @@
 /**
  * Aura Zľavy — pravá strana hlavičky (ARCHITEKTURA §0, K2).
  *
- * Presne tri veci a nič viac: **rozpočet zápisov**, **stav fronty**, **prepínač
- * témy**. Žiadne vyhľadávanie, žiadne notifikácie, žiadne stavové badge —
- * platnosť kľúčov a detail rozpočtu majú svoje miesto v Nastaveniach
- * (ARCHITEKTURA §3.6, kotva „Kľúče a rozpočet"), nie v každom riadku hlavičky.
+ * Presne dve veci a nič viac: **stav fronty** a **prepínač témy**. Žiadne
+ * vyhľadávanie, žiadne notifikácie, žiadne stavové badge — platnosť kľúčov
+ * a detail rozpočtu majú svoje miesto v Nastaveniach (ARCHITEKTURA §3.6,
+ * kotva „Kľúče a rozpočet"), nie v každom riadku hlavičky.
+ *
+ * KAM SA PODEL ROZPOČET ZÁPISOV
+ * -----------------------------
+ * Do stáleho stavového pruhu pod hlavičkou (`layout/StatusBar.tsx`), a to
+ * zámerne: tunajší prúžok bol ručne dorobená kópia primitíva `ui/BudgetMeter`
+ * — tá istá vec nakreslená druhýkrát, bez slova o úrovni („blíži sa strop")
+ * a bez času obnovy. Dve kópie meradla rozpočtu sa skôr či neskôr rozídu, tak
+ * zostala tá, ktorá je otestovaná (`ui-primitives.spec.ts`). Rozpočet je preto
+ * VIDNO ROVNAKO STÁLE ako predtým, len o riadok nižšie a pravdivejšie.
  *
  * DVE VECI, KTORÉ SA TU NESMÚ POKAZIŤ:
  *
- * 1. **Vyčerpaný rozpočet nie je chyba.** Pri 200/200 sa mení len text na
- *    „Zápisy 200/200 · pokračujem o 02:00" a zostáva NEUTRÁLNY (K2, odpoveď
- *    59). Červená je vyhradená pre stratu dát a zastavený zápis.
- * 2. **Neznáme číslo sa nedopĺňa.** Kým `/api/queue` nedodá V8 (alebo keď
- *    appka neodpovedá), hlavička píše pomlčku a povie prečo. Appka zapisuje do
- *    produkčného shopu — číslo „0/200" by tu bolo tvrdenie, nie medzera.
+ * 1. **Vyčerpaný rozpočet nie je chyba.** Pri 200/200 sa nič nerozbilo — appka
+ *    len počká na obnovu stropu (K2, odpoveď 59). Červená je vyhradená pre
+ *    stratu dát a zastavený zápis.
+ * 2. **Neznáme číslo sa nedopĺňa.** Kým `/api/queue` nedodá čísla (alebo keď
+ *    appka neodpovedá), hlavička píše, že je fronta prázdna, len keď to naozaj
+ *    vie. Appka zapisuje do produkčného shopu — vymyslené číslo by tu bolo
+ *    tvrdenie, nie medzera.
  */
 import Link from 'next/link';
 
 import { useHealth, type HealthData } from '@/components/layout/health';
-import { formatCount, formatResumeTime, useQueueHeader } from '@/components/layout/queue';
+import { formatCount, useQueueHeader } from '@/components/layout/queue';
 import ReadOnlyNotice from '@/components/layout/ReadOnlyNotice';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import type { StatusTone } from '@/components/ui/ToneBadge';
@@ -86,59 +96,6 @@ export function headerStatusView(input: HeaderStatusInput): HeaderStatusView {
   return { kind: 'ok' };
 }
 
-const BUDGET_UNKNOWN_TITLE =
-  'Koľko zápisov dnes prebehlo, sa zatiaľ nepodarilo zistiť — číslo preto nedopĺňame.';
-
-/** Meradlo denného rozpočtu. Vyčerpaný rozpočet zostáva neutrálny (K2). */
-function BudgetMeter({
-  spentToday,
-  budget,
-  resumeAt,
-}: {
-  spentToday: number | null;
-  budget: number | null;
-  resumeAt: string | null;
-}) {
-  if (spentToday === null || budget === null) {
-    return (
-      <span className="hmeter" data-testid="header-budget" data-state="unknown" title={BUDGET_UNKNOWN_TITLE}>
-        Zápisy <b>—</b> dnes
-      </span>
-    );
-  }
-
-  if (spentToday >= budget) {
-    return (
-      <span
-        className="hmeter"
-        data-testid="header-budget"
-        data-state="exhausted"
-        title="Denný rozpočet zápisov je vyčerpaný. Nie je to chyba — fronta pokračuje po obnovení rozpočtu."
-      >
-        Zápisy{' '}
-        <b>
-          {formatCount(spentToday)}/{formatCount(budget)}
-        </b>{' '}
-        · pokračujem o {formatResumeTime(resumeAt)}
-      </span>
-    );
-  }
-
-  const pct = Math.max(0, Math.min(100, Math.round((spentToday / budget) * 100)));
-  return (
-    <span className="hmeter" data-testid="header-budget" data-state="ok" title="Denný rozpočet zápisov">
-      Zápisy{' '}
-      <b>
-        {formatCount(spentToday)}/{formatCount(budget)}
-      </b>{' '}
-      dnes
-      <span className="hbar" aria-hidden="true">
-        <i style={{ width: `${pct}%` }} />
-      </span>
-    </span>
-  );
-}
-
 /** Súhrn všetkých bežiacich front. Klik vedie na tab Zľavy. */
 function QueueLink({ done, total }: { done: number | null; total: number | null }) {
   const empty = done === null || total === null || total === 0;
@@ -172,19 +129,13 @@ function QueueLink({ done, total }: { done: number | null; total: number | null 
 export function HeaderRight() {
   const { health, loading, unreachable, unauthenticated } = useHealth();
   const view = headerStatusView({ loading, unauthenticated, unreachable, health });
-  const { writes, queue } = useQueueHeader();
+  const { queue } = useQueueHeader();
 
   // Kým sa nevie, či appka odpovedá, čísla sa netvrdia.
   const trusted = view.kind === 'ok';
 
   return (
     <div className="hdr-r">
-      <BudgetMeter
-        spentToday={trusted && writes !== null ? writes.spentToday : null}
-        budget={trusted && writes !== null ? writes.budget : null}
-        resumeAt={writes?.resumeAt ?? null}
-      />
-      <span className="hsep" aria-hidden="true" />
       <QueueLink
         done={trusted && queue !== null ? queue.done : null}
         total={trusted && queue !== null ? queue.total : null}
