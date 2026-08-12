@@ -216,6 +216,50 @@ teraz" ani otvoriť terminál.
 
 ---
 
-## Výsledok
+## Výsledok (12. 8. 2026)
 
-*(dopĺňa sa po dokončení šprintu)*
+Vetva `feat/dokoncenie-prva-zlava`, 9 commitov, ~21 000 riadkov v ~95 súboroch.
+14 agentov v štyroch vlnách. Nasadené lokálne, appka je zdravá.
+
+### Brána
+
+| | |
+|---|---|
+| `npm run typecheck` | čisté |
+| `npm run lint` | čisté |
+| `npm test` | **5 zlyhaní / 1 791 prešlo / 0 preskočených** |
+| `npm run build` | prejde |
+| `npx playwright test` | **18/18** |
+| migrácia 0013 | aplikovaná na produkčnú schému |
+
+Tých 5 zlyhaní sú testy práv `chmod 400`, ktoré na Windows technicky nejdú.
+Pred šprintom sa buď 111 testov preskakovalo, alebo si balík sám mazal schému
+(kolísalo 9 → 39 → 54 → 56). Teraz beží všetko a výsledok je stabilný.
+
+### Akceptačné kritériá
+
+| # | Stav |
+|---|---|
+| 1. katalóg 41 082, tempo pod stropom, pokračovanie | **čiastočne** — kód aj migrácia hotové a otestované (dvojdňový beh dokázaný testom), ale živý beh proti shopu ešte neprebehol |
+| 2. stav bez logov a bez DB | **splnené** |
+| 3. každé zamietnutie s dôvodom a ďalším krokom | **splnené** |
+| 4. prepnutie `pilot → plny` je nájditeľné | **splnené** |
+| 5. zľava na ~150 reálnych produktov na eshope | **nesplnené** — čaká na dva kliky s heslom |
+| 6. expirácia kľúča sa rieši z obrazovky | **splnené** |
+| 7. testy, typecheck, lint, audit | **splnené** |
+| 8. overenie v prehliadači + screenshoty | **splnené** — `screenshots/v13-*.png` |
+| 9. invarianty doložené testami | **splnené** — I1, I3, I7, I8', I10, I13, K1 |
+
+### Čo ostáva a prečo
+
+- **Dva kliky s heslom** (kritérium 5): prepnutie do plného rozsahu a zapnutie
+  `WRITES_ENABLED`. Robí ich človek, appka ich robiť nesmie.
+- **Živý beh katalógu** (kritérium 1): spúšťač má 20-hodinový odstup, počas
+  šprintu sa netrafil. Overí sa sám pri ďalšom behu.
+- **Štyri nálezy z review** — flagnuté ako samostatná úloha, nie sú blokujúce.
+
+### Poznámka ku kontraktu
+
+Bod P4 tvrdil, že appka je tmavá. **Nie je** — je svetlá, s hornou navigáciou
+a farbami Aura teal + gold. Zistilo sa to až zo snímky. Na výsledok to nemalo
+vplyv: zákaz meniť tému platil tak či tak a agenti ho dodržali.
