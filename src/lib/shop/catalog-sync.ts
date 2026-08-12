@@ -508,6 +508,19 @@ export async function syncCatalog(deps: CatalogSyncDeps): Promise<CatalogSyncRes
     if (data.length === 0) {
       // Prázdna stránka za koncom katalógu = dočítané. Pri prvej stránke to
       // znamená prázdny shop — ani to nie je chyba.
+      //
+      // ALE: keď shop hlási `total` a my sme ešte ani zďaleka pri ňom, prázdna
+      // stránka NIE JE koniec katalógu, je to výpadok (deploy, chyba
+      // stránkovania na strane shopu). Označiť to za „dočítané" by znamenalo
+      // zahodiť chvost a tvrdiť o katalógu niečo, čo nie je pravda (I11) —
+      // appka by hlásila 100 % nad polovicou dát a ďalšia dávka by sa
+      // nespustila. Radšej sa priznať a nechať beh pokračovať nabudúce.
+      if (total !== null && page * perPage < total) {
+        error = 'short_page';
+        stoppedBy = 'error';
+        progress = { ...progress, lastError: 'short_page' };
+        break;
+      }
       progress = { ...progress, completed: true, finishedAt: readAt };
       break;
     }
@@ -544,7 +557,19 @@ export async function syncCatalog(deps: CatalogSyncDeps): Promise<CatalogSyncRes
       lastError: null,
     };
 
-    const done = (total !== null && page * perPage >= total) || data.length < perPage;
+    // Krátka stránka je koniec katalógu LEN vtedy, keď to nepopiera `total`.
+    // Shop, ktorý na strane 200 z 411 vráti 99 položiek namiesto 100, nám
+    // nehovorí „koniec" — hovorí, že sa mu niečo stalo. Rovnaká úvaha ako
+    // pri prázdnej stránke vyššie.
+    const reachedTotal = total !== null && page * perPage >= total;
+    const shortPage = data.length < perPage;
+    const done = reachedTotal || (shortPage && total === null);
+    if (shortPage && !reachedTotal && total !== null) {
+      error = 'short_page';
+      stoppedBy = 'error';
+      progress = { ...progress, lastError: 'short_page' };
+      break;
+    }
     if (done) {
       // Pokrok sa uloží až v závere behu (jeden zápis, nie dva za sebou).
       progress = { ...progress, completed: true, finishedAt: readAt };

@@ -38,6 +38,12 @@ import type { ProductDetail, ProductListItem } from '@/contracts';
  * Prázdny string ani text bez číslice číslom nie sú — vracajú `NaN`, aby ich
  * `numberLike` odmietlo ako drift (`Number('')` je 0, čo by ticho vyrobilo
  * cenu 0 €).
+ *
+ * SAMOTNÁ ČIARKA S TROMI ČÍSLICAMI JE NEJEDNOZNAČNÁ a nehádame ju. `'1,234'`
+ * je v slovenskom zápise 1,234 a v anglickom 1 234 — teda tisícnásobný rozdiel
+ * v cene. Vraciame `NaN`, takže sa to prizná ako `schema_drift` (D54) namiesto
+ * toho, aby appka ticho uložila 1,23 € miesto 1 234 €. Cena je peniaz;
+ * priznaná medzera je vždy lepšia než tichý nesprávny údaj (I11).
  */
 function parseNumberLike(value: string): number {
   const compact = value.trim().replace(/\s+/g, '').replace(/[^0-9,.-]/g, '');
@@ -45,6 +51,15 @@ function parseNumberLike(value: string): number {
 
   const comma = compact.lastIndexOf(',');
   const dot = compact.lastIndexOf('.');
+
+  if (comma >= 0 && dot < 0) {
+    // Jediná čiarka a nič iné: rozhodne počet číslic za ňou. Dve a menej je
+    // bezpečne desatinná časť, tri sú nerozhodnuteľné, viac než tri nie je
+    // ani jedno.
+    const za = compact.length - comma - 1;
+    if (compact.indexOf(',') !== comma || za === 3 || za > 3) return Number.NaN;
+  }
+
   const normalized =
     comma >= 0 && dot >= 0
       ? comma > dot
@@ -187,8 +202,21 @@ export type ParseOutcome<T> =
  */
 export function unwrapShopResult(value: unknown): unknown {
   if (typeof value !== 'object' || value === null) return value;
-  const inner = (value as Record<string, unknown>).result;
-  return typeof inner === 'object' && inner !== null ? inner : value;
+  const outer = value as Record<string, unknown>;
+  const inner = outer.result;
+  if (typeof inner !== 'object' || inner === null) return value;
+
+  // `ok` patrí obálke, payload je vnútri. Keď teda shop odpovie
+  // `{"ok":true,"result":{"id":72}}`, samotné rozbalenie by príznak úspechu
+  // zahodilo a `setReductionSuccessSchema` (vyžaduje `ok: true`) by na
+  // vydarenom zápise ohlásilo `schema_drift` — teda D54 „stav je NEISTÝ".
+  // Používateľ by dostal „nevieme, či sa zapísalo" pri zľave, ktorá v shope
+  // riadne je. Vonkajšie `ok` preto prenášame dovnútra, ale NIKDY neprepíšeme
+  // vnútorné: keď obe úrovne hovoria, vnútorná je bližšie k payloadu.
+  // (`readErrorBody()` nižšie číta obe úrovne z toho istého dôvodu.)
+  const merged = inner as Record<string, unknown>;
+  if ('ok' in outer && !('ok' in merged)) return { ...merged, ok: outer.ok };
+  return merged;
 }
 
 /**

@@ -119,6 +119,16 @@ export function scopeChangeRequiresSudo(
   intent: ScopeChangeIntent,
 ): boolean {
   const releasingMode = intent.mode === 'plny' && before.mode !== 'plny';
+
+  // Návrat do `pilot` je SPRÍSNENIE vždy, aj keď efektívny strop pritom
+  // číselne stúpne. Stane sa to pri uloženom strope pod desať: `plny` s
+  // `max_products_per_campaign = 5` má efektívny strop 5, `pilot` má 10, takže
+  // porovnanie čísel by z brzdy spravilo uvoľnenie a vypýtalo si heslo. To je
+  // presne ten prípad, keď človek appku zastavuje a heslo po ruke mať nemusí —
+  // K1 bod 4 hovorí „sprísnenie je vždy voľné" bez výnimky. Rozsah `pilot` je
+  // navyše užší aj vtedy, keď je číslo vyššie: vynucuje sa v ňom allowlist.
+  if (intent.mode === 'pilot') return false;
+
   const after: ScopeSettings = {
     ...before,
     mode: intent.mode,

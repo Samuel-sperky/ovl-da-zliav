@@ -153,6 +153,20 @@ describe('scopeChangeRequiresSudo — uvoľnenie chce heslo, sprísnenie nikdy',
     expect(scopeChangeRequiresSudo(scope('plny', 10_000), { mode: 'pilot' })).toBe(false);
   });
 
+  it('návrat do `pilot` nepýta heslo ANI pri uloženom strope pod desať', () => {
+    // Našiel review 12. 8.: pri `plny` so stropom 5 je efektívny strop 5,
+    // v `pilot` je 10, takže porovnanie čísel spravilo z brzdy „uvoľnenie"
+    // a vypýtalo si heslo — presne vo chvíli, keď človek appku zastavuje.
+    // `pilot` je pritom užší rozsah aj s vyšším číslom: vynucuje allowlist.
+    for (const strop of [1, 5, 9, 10, 11, 10_000]) {
+      expect(scopeChangeRequiresSudo(scope('plny', strop), { mode: 'pilot' })).toBe(false);
+    }
+    // Aj vtedy, keď sa pri sprísnení pošle strop, ktorý by inak bol uvoľnením.
+    expect(
+      scopeChangeRequiresSudo(scope('plny', 5), { mode: 'pilot', maxProductsPerCampaign: 10_000 }),
+    ).toBe(false);
+  });
+
   it('zdvihnutie stropu v rámci `plny` je tiež uvoľnenie — heslo si vypýta', () => {
     expect(
       scopeChangeRequiresSudo(scope('plny', 8_000), {

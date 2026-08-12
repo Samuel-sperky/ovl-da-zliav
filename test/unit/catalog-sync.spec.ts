@@ -197,6 +197,39 @@ describe('toCatalogRow — riadok katalógu', () => {
     expect(row.fetchedAt).toBe(fetchedAt);
   });
 
+  it('krátka stránka uprostred katalógu NIE JE koniec — je to výpadok', async () => {
+    // Našli obaja recenzenti 12. 8. nezávisle: shop na strane 2 z 5 vráti
+    // prázdnu alebo neúplnú stránku (deploy, chyba stránkovania) a beh to
+    // označí za „dočítané". Chvost katalógu sa tým zahodí a appka o polovici
+    // dát tvrdí, že má všetko — presne to, čo I11 zakazuje.
+    const shop = fakeShop(23);
+    const povodne = shop.listProducts.bind(shop);
+    let volanie = 0;
+    const dieravy = {
+      pagesRequested: shop.pagesRequested,
+      async listProducts(params: { page?: number; perPage?: number }, ctx: ShopCtx) {
+        volanie += 1;
+        // Druhá stránka príde prázdna, hoci `total` hovorí 23.
+        if (volanie === 2) return { data: [], page: params.page ?? 1, perPage: 5, total: 23 };
+        return povodne(params, ctx);
+      },
+    };
+    const catalog = fakeCatalog();
+
+    const result = await syncCatalog({
+      shopClient: dieravy,
+      catalog,
+      progress: catalog,
+      budget: catalog,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+
+    expect(catalog.progress.completed).toBe(false);
+    expect(result.outcome).not.toBe('ok');
+    expect(catalog.progress.lastError).toBe('short_page');
+  });
+
   it('zrkadlená veľkosť stránky v repozitári sa nerozišla s modulom', () => {
     // `catalog.repo.ts` si `CATALOG_PAGE_SIZE` zrkadlí, aby nezáviselo na module
     // synchronizácie. Keby sa čísla rozišli, pokrok by ukazoval na iné stránky.

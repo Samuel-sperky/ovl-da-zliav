@@ -35,6 +35,8 @@ import {
   parseShopPayload,
   productListItemSchema,
   readErrorBody,
+  setReductionSuccessSchema,
+  unwrapShopResult,
 } from '@/lib/shop/schemas';
 
 /* ═════════════════════════ 0. Testovací harness ═══════════════════════════ */
@@ -206,6 +208,27 @@ describe('readErrorBody — chybový tvar prichádza tiež v obálke', () => {
     expect(read.codes).toEqual(['vonku', 'vnutri']);
   });
 
+  it('vonkajšie `ok:true` sa pri rozbalení NESTRATÍ (inak by úspešný zápis bol neistý)', () => {
+    // Shop odpovie na setReduction `{"ok":true,"result":{"id":72}}`. Samotné
+    // rozbalenie by príznak úspechu zahodilo, `setReductionSuccessSchema`
+    // vyžaduje `ok:true`, a D54 by z vydareného zápisu spravilo „stav NEISTÝ" —
+    // teda „nevieme, či sa zapísalo" pri zľave, ktorá v shope riadne je.
+    const parsed = parseShopPayload(
+      setReductionSuccessSchema,
+      unwrapShopResult({ ok: true, result: { id: 72 } }),
+    );
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('vnútorné `ok` má prednosť pred vonkajším — je bližšie k payloadu', () => {
+    const rozbalene = unwrapShopResult({ ok: true, result: { ok: false, id: 7 } }) as {
+      ok: unknown;
+    };
+    expect(rozbalene.ok).toBe(false);
+    // A `ok:false` vnútri sa naďalej správne prečíta ako neúspech.
+    expect(bodySignalsFailure({ ok: true, result: { ok: false, id: 7 } })).toBe(true);
+  });
+
   it('úspešná obálka nesignalizuje chybu', () => {
     expect(bodySignalsFailure(wrapped(LIST_PAYLOAD))).toBe(false);
     expect(readErrorBody(wrapped(LIST_PAYLOAD)).okFalse).toBe(false);
@@ -244,6 +267,24 @@ describe('cena — PHP `DECIMAL` smie prísť s desatinnou čiarkou', () => {
     expect(price('nie je cena')).toBeNull();
     expect(price('')).toBeNull();
     expect(price(null)).toBeNull();
+  });
+
+  it('samotná čiarka s tromi číslicami je NEJEDNOZNAČNÁ a hlási sa ako drift', () => {
+    // `'1,234'` je slovensky 1,234 a anglicky 1 234 — tisícnásobný rozdiel
+    // v cene. Hádať sa nesmie: appka radšej prizná medzeru, než by ticho
+    // uložila 1,23 € namiesto 1 234 €.
+    expect(price('1,234')).toBeNull();
+    expect(price('12,345')).toBeNull();
+    // Viac než tri číslice za čiarkou nie je ani desatinná časť, ani tisíce.
+    expect(price('1,23456')).toBeNull();
+    // Dve čiarky bez bodky sú tiež nerozhodnuteľné.
+    expect(price('1,234,567')).toBeNull();
+
+    // Jednoznačné tvary prechádzajú ďalej.
+    expect(price('1,5')).toBe(1.5);
+    expect(price('12,50')).toBe(12.5);
+    expect(price('1,234.50')).toBe(1234.5);
+    expect(price('1 234,50')).toBe(1234.5);
   });
 });
 
