@@ -10,8 +10,8 @@ Zdroj pravdy pre limity shopu: `docs/api/sperky-api-v4.md`.
 
 ## Prečo tento šprint
 
-Appka je postavená, otestovaná (1 247 testov) a nasadená, ale **nikdy nezapísala
-ani jednu zľavu do eshopu**. Samuel ju nevie použiť z dvoch dôvodov:
+Appka je postavená, otestovaná a nasadená, ale Samuel ju nevie použiť
+z dvoch dôvodov:
 
 1. **Nevidí do nej.** Nevie čo práve robí, prečo sa niečo nestalo, ani čo appka
    vôbec vie — napríklad že strop desiatich produktov je len prepínač
@@ -21,6 +21,28 @@ ani jednu zľavu do eshopu**. Samuel ju nevie použiť z dvoch dôvodov:
 
 Cieľ šprintu je jedna veta: **Samuel spustí reálnu zľavu na produktoch svojho
 eshopu a po celý čas vidí, čo sa deje — bez toho, aby otvoril logy alebo DB.**
+
+### Pozor — jeden ostrý zápis UŽ PREBEHOL
+
+Zistené 12. 8. z produkčného auditu (`audit_log` id 22–23), nie z dokumentácie:
+
+```
+2026-08-07 11:19:09  write_ok  product_id=72  http 200
+sentPayload: {"id":72,"from":"2026-08-07","to":"2026-08-31","reduction":10}
+message:     „Rýchla zľava zapísaná bez vytvorenia kampane."
+```
+
+Z toho plynú tri veci:
+
+1. **Na produkte 72 je pravdepodobne živá 10 % zľava** s oknom do 31. 8. 2026.
+   Appka ju zrušiť nevie a ani nebude (I7) — expiruje sama.
+2. Zápisová cesta proti produkčnému shopu je **overená v praxi**, nielen proti
+   mocku. Akceptačné kritérium 5 je tým menej rizikové, než sa zdalo.
+3. Zápis prišiel z funkcie „rýchla zľava", ktorá žije na neintegrovanej vetve
+   `wip/rychla-zlava-2026-08-07` a mala **vlastný zápisový príznak** mimo
+   `executor.ts`. Vo V3 taká cesta neexistuje a nesmie vzniknúť — grep test
+   stráži, že `setReduction` volá jediné miesto. Pri prípadnom preberaní tej
+   vetvy je toto prvá vec na kontrolu.
 
 ---
 
