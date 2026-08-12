@@ -627,8 +627,12 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
    *
    * V3 pridala `catalog-sync.ts` (K7 — stránkované zrkadlenie katalógu, číta,
    * nezapisuje). Prijatá vedome; I7 aj I8' nad ňou platia.
+   *
+   * `rate-limits.ts` pridané 12. 8. 2026 — samé konštanty a čisté funkcie nad
+   * dátumami, žiadne volanie shopu. Prijaté vedome; I7 aj I8' nad ním platia
+   * rovnako ako nad zvyškom modulu.
    */
-  it('má všetkých 8 súborov modulu', () => {
+  it('má všetkých 9 súborov modulu', () => {
     expect(sources.map((s) => s.file).sort()).toEqual([
       'catalog-sync.ts',
       'client.ts',
@@ -636,6 +640,7 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
       'errors.ts',
       'messages.sk.ts',
       ORDERS_CLIENT_FILE,
+      'rate-limits.ts',
       'retry.ts',
       'schemas.ts',
     ]);

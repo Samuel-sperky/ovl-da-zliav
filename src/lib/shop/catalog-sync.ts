@@ -17,9 +17,11 @@
  *    pre `SecretRef` (D48), takže `X-Api-Key` sa pri synchronizácii vôbec
  *    nezostaví (I1). Sync teda funguje aj vtedy, keď kľúč nie je vložený.
  *  - **Stránky idú SEKVENČNE** s pauzou medzi nimi. Nie kvôli I10 (to je o
- *    zápisoch), ale kvôli čítaciemu limitu shopu 300 volaní / 60 s: 40 tisíc
- *    produktov po 100 je vyše 400 requestov a paralelizácia by ich zhodila
- *    naraz.
+ *    zápisoch), ale kvôli čítaciemu limitu shopu. Ten je pre volania BEZ kľúča
+ *    **30 za minútu a 300 za UTC deň** (`docs/api/sperky-api-v4.md`), nie
+ *    „300 za 60 s", ako tu roky stálo — a z tej zámeny vzišla pauza 250 ms,
+ *    teda 240 volaní za minútu, osemnásobok stropu. Čísla teraz žijú v
+ *    `@/lib/shop/rate-limits` a nedajú sa podliezť ani konfiguráciou.
  *  - **`fetched_at` na riadok** je meraný fakt, nie odhad (K7, P7) — každá
  *    stránka nesie čas, kedy sa naozaj prečítala.
  *  - **Modul NIKDY nehádže.** Zlyhanie na stránke N zastaví beh, ale riadky
@@ -37,6 +39,7 @@ import type { AuditWriter, Logger, ProductListItem, ShopClient, ShopCtx, Ulid, U
 
 import type { CatalogUpsertInput } from '@/lib/repo/catalog.repo';
 import { newOperationId } from '@/lib/shop/correlation';
+import { MIN_ANON_READ_PAUSE_MS } from '@/lib/shop/rate-limits';
 
 /* ═══════════════════════════ konštanty (K7) ═══════════════════════════════ */
 
@@ -44,10 +47,13 @@ import { newOperationId } from '@/lib/shop/correlation';
 export const CATALOG_PAGE_SIZE = 100;
 
 /**
- * Pauza medzi stránkami. Čítací limit shopu je 300 volaní / 60 s = 200 ms na
- * volanie; 250 ms je pod ním s rezervou a 405 stránok stihne za ~2 minúty.
+ * Pauza medzi stránkami — odvodená z anonymného minútového stropu, nie zvolená.
+ * Pri 24 povolených čítaniach za minútu to je 2 500 ms.
+ *
+ * Denný strop 300 volaní znamená, že 405 stránok sa do jedného UTC dňa
+ * nezmestí; celý katalóg je dvojdňový beh a musí vedieť pokračovať.
  */
-export const CATALOG_PAGE_PAUSE_MS = 250;
+export const CATALOG_PAGE_PAUSE_MS = MIN_ANON_READ_PAUSE_MS;
 
 /**
  * Poistka proti nekonečnému stránkovaniu. 40 483 produktov po 100 je 405
@@ -135,7 +141,13 @@ export async function syncCatalog(deps: CatalogSyncDeps): Promise<CatalogSyncRes
   const log = deps.logger;
   const sleepFn = deps.sleepFn ?? defaultSleep;
   const perPage = Math.min(CATALOG_PAGE_SIZE, Math.max(1, Math.trunc(deps.perPage ?? CATALOG_PAGE_SIZE)));
-  const pauseMs = Math.max(0, Math.trunc(deps.pausePerPageMs ?? CATALOG_PAGE_PAUSE_MS));
+  // Podlaha, nie predvoľba: pauza sa nedá podliezť ani konfiguráciou, rovnako
+  // ako `MIN_WRITE_PAUSE_MS` na zápisovej strane. Rýchlosť testov to nebrzdí —
+  // tie si podsúvajú vlastné `sleepFn`.
+  const pauseMs = Math.max(
+    MIN_ANON_READ_PAUSE_MS,
+    Math.trunc(deps.pausePerPageMs ?? CATALOG_PAGE_PAUSE_MS),
+  );
   const maxPages = Math.max(1, Math.trunc(deps.maxPages ?? CATALOG_MAX_PAGES));
   const ctx: ShopCtx = { operationId: deps.operationId ?? newOperationId() };
 

@@ -28,6 +28,7 @@ import {
   CATALOG_STALE_MS,
 } from '@/lib/scheduler/catalog-runner';
 import { syncCatalog, toCatalogRow, type CatalogSyncSink } from '@/lib/shop/catalog-sync';
+import { MIN_ANON_READ_PAUSE_MS } from '@/lib/shop/rate-limits';
 
 /* ───────────────────────────── fake shop a sink ────────────────────────── */
 
@@ -195,12 +196,14 @@ describe('syncCatalog — stránkovanie celého katalógu (K7)', () => {
     expect(result.products).toBe(5);
   });
 
-  it('medzi stránkami sa čaká — čítací limit shopu je 300/60 s', async () => {
+  it('medzi stránkami sa čaká — anonymný limit shopu je 30/min a 300/UTC deň', async () => {
     const pauses: number[] = [];
     await syncCatalog({
       shopClient: fakeShop(12),
       catalog: memorySink(),
       perPage: 5,
+      // Zámerne podliezame podlahu — modul ju musí zdvihnúť späť. Kratšia
+      // pauza znamená viac než 24 volaní za minútu, čo shop odmení banom.
       pausePerPageMs: 250,
       sleepFn: async (ms) => {
         pauses.push(ms);
@@ -208,7 +211,8 @@ describe('syncCatalog — stránkovanie celého katalógu (K7)', () => {
     });
 
     // Tri stránky = dve pauzy; po poslednej sa nečaká.
-    expect(pauses).toEqual([250, 250]);
+    expect(pauses).toEqual([MIN_ANON_READ_PAUSE_MS, MIN_ANON_READ_PAUSE_MS]);
+    expect(MIN_ANON_READ_PAUSE_MS).toBe(2_500);
   });
 });
 
