@@ -3213,3 +3213,21 @@ details.tech.bare {
     position: static;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Primitíva priehľadnosti — rozmerové tokeny (U1)
+
+   Výhradne PRÍDAVOK na konci súboru: nič vyššie sa nemení ani neprepisuje.
+   Vlastný vzhľad primitív žije v `src/components/ui/primitives.module.css`;
+   sem patria len dve miery, ktoré musí vedieť aj okolitá obrazovka, keď si
+   chce prúžok alebo bodku zarovnať do svojho riadku.
+
+   Vlastník: U1.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Výška koľajnice meracieho prúžku rozpočtu (predloha mala 4 px). */
+  --ovl-meter-h: 4px;
+  /* Zvýraznený prúžok — v karte, kde je rozpočet hlavnou informáciou. */
+  --ovl-meter-h-lg: 6px;
+}

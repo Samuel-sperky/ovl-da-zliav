@@ -1,0 +1,228 @@
+/*
+ * Aura Zľavy — geometria primitív priehľadnosti (U1).
+ *
+ * Zámerne LEN to, čo v `globals.css` naozaj chýba: merací prúžok rozpočtu,
+ * stavová pilulka a smer zmeny v dlaždici. Vysvetlivka (`Note`), prázdny stav
+ * (`EmptyState`), zámok (`LockBadge`) a telo dlaždice (`StatTile`) žiadny
+ * vlastný vzhľad NEMAJÚ — dedia `.ovl-note`, `.ovl-empty`, `.locked-note`
+ * a `.kpi`, ktoré v `globals.css` už existujú a vlastní ich V2/V3. Druhá,
+ * takmer rovnaká sada tried by sa o mesiac rozišla s prvou.
+ *
+ * Farby sa berú výhradne z existujúcich tokenov (`--st-*`, `--track`,
+ * `--barfill`, `--line2`, `--dim`). Žiadna nová farba, žiadny teal ani gold
+ * v úlohe stavu.
+ *
+ * Vlastník: U1.
+ */
+
+/* ═══════════════════ 1. Merací prúžok rozpočtu (BudgetMeter) ══════════════ */
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 140px;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+.meterRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--ovl-s3);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.meterLabel {
+  font-weight: 600;
+  color: var(--ink2);
+}
+
+.meterCount {
+  white-space: nowrap;
+  color: var(--ink2);
+  font-weight: 620;
+}
+
+/*
+ * Koľajnica má pevnú výšku a `overflow: hidden` — výplň sa do nej nikdy
+ * nezmestí viac než na 100 %, aj keby prišlo pokazené číslo.
+ */
+.meterTrack {
+  height: var(--ovl-meter-h);
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--barfill);
+  transition: width var(--ovl-dur-grow) var(--ovl-ease-out);
+}
+
+/*
+ * Tón nesie ROVNAKÝ atribút na koreni ako glyf a slovo v `.meterState` —
+ * jedna hodnota, tri kanály. Nikdy sa nemôže stať, že prúžok zožltne a text
+ * zostane pokojný.
+ */
+.meter[data-tone='attention'] .meterFill {
+  background: var(--st-attention);
+}
+
+.meter[data-tone='critical'] .meterFill {
+  background: var(--st-critical);
+}
+
+.meterState {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+.meterGlyph {
+  font-family:
+    'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols', 'DejaVu Sans',
+    var(--ovl-font);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.meter[data-tone='attention'] .meterState,
+.meter[data-tone='attention'] .meterGlyph {
+  color: var(--st-attention-ink);
+}
+
+.meter[data-tone='critical'] .meterState,
+.meter[data-tone='critical'] .meterGlyph {
+  color: var(--st-critical-ink);
+}
+
+.meterReset {
+  color: var(--dim);
+}
+
+/* ═══════════════════ 2. Stavová pilulka spojenia (StatusPill) ═════════════ */
+
+.pill {
+  display: inline-block;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  background: var(--paper2);
+  padding: 8px 11px;
+  max-width: 100%;
+}
+
+.pillTop {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/*
+ * Bodka z predlohy, ale so znakom vnútri. Samotný farebný krúžok je v darku
+ * pre časť používateľov nerozlíšiteľný od susedného tónu — glyf ho zachráni
+ * a text vedľa neho povie zvyšok.
+ */
+.pillMark {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  border: 1px solid var(--st-idle-edge);
+  background: var(--st-idle-tint);
+  color: var(--st-idle-ink);
+  font-family:
+    'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols', 'DejaVu Sans',
+    var(--ovl-font);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pill[data-tone='good'] .pillMark {
+  border-color: var(--st-good-edge);
+  background: var(--st-good-tint);
+  color: var(--st-good-ink);
+}
+
+.pill[data-tone='attention'] .pillMark {
+  border-color: var(--st-attention-edge);
+  background: var(--st-attention-tint);
+  color: var(--st-attention-ink);
+}
+
+.pill[data-tone='critical'] .pillMark {
+  border-color: var(--st-critical-edge);
+  background: var(--st-critical-tint);
+  color: var(--st-critical-ink);
+}
+
+.pill[data-tone='progress'] .pillMark {
+  border-color: var(--st-progress-edge);
+  background: var(--st-progress-tint);
+  color: var(--st-progress-ink);
+}
+
+.pillLabel {
+  font-size: var(--ovl-fs-small);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/*
+ * Adresa pod stavom. `break-all` je tu naschvál: dlhá doména sa musí zlomiť
+ * a nie roztlačiť pilulku cez celú hlavičku.
+ */
+.pillDetail {
+  margin-top: 3px;
+  font-family: var(--ovl-mono);
+  font-size: var(--ovl-fs-micro);
+  color: var(--ink2);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* ═══════════════════ 3. Smer zmeny v dlaždici (StatTile) ══════════════════ */
+
+.trend {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: var(--ovl-fs-micro);
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--dim);
+}
+
+.trendGlyph {
+  font-weight: 700;
+  line-height: 1;
+}
+
+.trend[data-tone='good'],
+.trend[data-tone='good'] .trendGlyph {
+  color: var(--st-good-ink);
+}
+
+.trend[data-tone='critical'],
+.trend[data-tone='critical'] .trendGlyph {
+  color: var(--st-critical-ink);
+}
+
+/* Dlaždica dedí `.kpi`; toto je len odsadenie riadku so smerom pod detailom. */
+.tileTrend {
+  margin-top: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meterFill {
+    transition: none;
+  }
+}
