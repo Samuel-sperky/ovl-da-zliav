@@ -4,14 +4,28 @@
  * Runaway zámok (`writes_locked`) sa odomyká VÝHRADNE explicitne: sudo okno
  * + heslo znova. Audit `writes_unlocked` je povinný (I4).
  *
+ * DVE RÔZNE VECI, KTORÉ SA DAJÚ ĽAHKO POMÝLIŤ
+ * -------------------------------------------
+ *  - **`writes_locked`** je poistka appky v DB (D79). Odomyká ju tento endpoint
+ *    heslom, teda z obrazovky.
+ *  - **`WRITES_ENABLED`** je env poistka (I13). Z obrazovky sa nedá prepnúť
+ *    vôbec a tento endpoint s ňou NIČ neurobí.
+ *
+ * Preto odpoveď vracia aj `writesEnabled` a prekážku `writes_disabled`: bez
+ * toho používateľ odomkol zámok, nič sa nerozbehlo a nemal sa ako dozvedieť,
+ * že ho zastavuje druhá, úplne iná poistka. Odomknutie je úspech aj vtedy —
+ * len nie postačujúca podmienka zápisu.
+ *
  * Vlastník: A11.
  */
 import { z } from 'zod';
 
 import type { SettingsRepo } from '@/contracts';
 
+import { writesAllowedByEnv } from '@/env';
 import { verifyPassword } from '@/lib/auth';
 import { appendAudit } from '@/lib/audit/write';
+import { writesBlockers } from '@/lib/engine/guards';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 import { unauthorized } from '@/lib/http/errors';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
@@ -26,6 +40,8 @@ export interface UnlockWritesRouteDeps {
   users?: { getById(id: number): Promise<{ passwordHash: string } | null> };
   verify?: typeof verifyPassword;
   audit?: typeof appendAudit;
+  /** Env poistka I13 (`writesAllowedByEnv()`) — injektovateľná pre testy. */
+  writesEnabled?: () => boolean;
   routeDeps?: RouteDeps;
 }
 
@@ -34,6 +50,7 @@ export function createUnlockWritesRoute(deps: UnlockWritesRouteDeps = {}): NextR
   const users = deps.users ?? defaultUsersRepo;
   const verify = deps.verify ?? verifyPassword;
   const audit = deps.audit ?? appendAudit;
+  const readWritesEnabled = deps.writesEnabled ?? ((): boolean => writesAllowedByEnv());
 
   return defineRoute(
     {
@@ -60,7 +77,21 @@ export function createUnlockWritesRoute(deps: UnlockWritesRouteDeps = {}): NextR
           userAgent: ctx.info.userAgent,
         });
 
-        return { writesLocked: false };
+        /* I13 — nečitateľná env poistka je „vypnuté", nie „asi zapnuté". */
+        let writesEnabled = false;
+        try {
+          writesEnabled = readWritesEnabled() === true;
+        } catch {
+          writesEnabled = false;
+        }
+
+        return {
+          writesLocked: false,
+          /** Druhá, úplne iná poistka — z obrazovky sa neprepína (I13). */
+          writesEnabled,
+          /** Prázdne pole = po odomknutí už zápisom nič nebráni. */
+          blockers: writesBlockers(writesEnabled),
+        };
       },
     },
     deps.routeDeps,

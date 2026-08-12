@@ -1,68 +1,212 @@
 /**
- * Aura Zľavy — `POST /api/catalog/sync` (KONTRAKT V3: K7).
+ * Aura Zľavy — `GET`/`POST /api/catalog/sync` (KONTRAKT V3: K7;
+ * KONTRAKT-DOKONCENIE-2026-08-12: A2–A5).
  *
- * Manuálne načítanie celého katalógu („Načítať katalóg" v Nastaveniach).
- * K7 žiada plnú synchronizáciu stránkovane **manuálne aj raz denne cronom**;
- * cron vlastní scheduler (V7, `runCatalogSyncIfDue`), túto polovicu route.
+ * Dve polovice tej istej veci:
+ *
+ *  - **GET** — STAV katalógu na čítanie: koľko z koľkých je načítaných, kedy sa
+ *    naposledy čítalo, kedy pôjde ďalšia dávka, prečo sa čaká a dokedy to
+ *    potrvá (A5). Nič nespúšťa a na shop neodošle ani jeden request, takže sa
+ *    dá volať aj z hlavičky každých pár sekúnd.
+ *  - **POST** — manuálne načítanie („Načítať katalóg" v Nastaveniach). K7 žiada
+ *    plnú synchronizáciu **manuálne aj raz denne cronom**; cron vlastní
+ *    scheduler (V7, `runCatalogSyncIfDue`), túto polovicu route.
  *
  * Čo tu platí:
  *
  *  - **Je to ČÍTANIE.** Synchronizácia nemíňa zápisový rozpočet (K7) a nedotkne
  *    sa `setReduction` — klient sa sem podáva len cez `listProducts`, takže
  *    zápis sa do tejto cesty nedá podstrčiť ani omylom (I10, K11 bod 2).
- *  - **Súbežnosť je jediná vec, ktorú manuálny beh NEobchádza.** `runCatalogSyncNow()`
- *    obíde okno mimo špičky aj odstup 20 h — človek si oň povedal — ale dva
- *    behy naraz odmietne (`already_running`), lebo by z jedného katalógu
- *    urobili dva a zdvojili ~400 requestov.
- *  - **Trvá to minúty**, nie milisekundy: 40 483 produktov po 100 na stránku
- *    s pauzou medzi stránkami. UI to musí zniesť (a preto je `rateLimit`
- *    prísny — dva klikatia za sebou nič nezrýchlia).
+ *  - **Jeden POST nie je celý katalóg.** 41 082 produktov po 100 na stránku je
+ *    411 čítaní a anonymný denný strop je 300 — celý katalóg je dvojdňový beh.
+ *    Jeden POST prečíta dávku, uloží pokrok a povie, kde skončil; zvyšok
+ *    dočítava scheduler sám. Odpoveď preto vždy nesie aj `catalog` (stav),
+ *    nielen `sync` (čo urobil tento beh).
+ *  - **Súbežnosť POST NEobchádza.** `runCatalogSyncNow()` obíde okno mimo špičky
+ *    aj odstup 20 h, ale dva behy naraz odmietne (`already_running`), lebo by si
+ *    prepisovali pokrok. Denný rozpočet ani pauzu po 429 neobíde tiež — strop
+ *    shopu neprehovorí ani kliknutie.
+ *  - **`restart: true`** znamená „zabudni pokrok a načítaj odznova od stránky 1".
+ *    Bez neho POST POKRAČUJE tam, kde beh skončil (A2).
  *
  * Vlastník: V8.
  */
+import { z } from 'zod';
+
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
-import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
+import {
+  catalogRepo as defaultCatalogRepo,
+  type CatalogRepoExt,
+  type CatalogSyncStatus,
+} from '@/lib/repo/catalog.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import {
   lastCatalogRun,
   runCatalogSyncNow,
+  CATALOG_READ_RETRY_POLICY,
   type CatalogRunnerDeps,
   type CatalogRunReport,
 } from '@/lib/scheduler/catalog-runner';
 import { createShopClientFromSettings } from '@/lib/shop/client';
 
+/* ═══════════════════════════ 1. Tvar odpovede ═════════════════════════════ */
+
+/**
+ * Stav katalógu tak, ako ho číta UI a agregátor stavu. Dátumy idú ako ISO
+ * reťazce (JSON nemá dátum) a čísla ostávajú číslami — vety o katalógu skladá
+ * `@/lib/status/blockers`, nie táto route.
+ */
+export interface CatalogStatusView {
+  loadedProducts: number;
+  shopTotalProducts: number | null;
+  percent: number | null;
+  complete: boolean;
+  lastFetchedAt: string | null;
+  lastReadAt: string | null;
+  pagesDone: number;
+  pagesTotal: number | null;
+  pagesLeft: number | null;
+  perPage: number;
+  /** Zdieľaný denný rozpočet ANONYMNÝCH čítaní (A4) — nie zápisový (K2). */
+  reads: {
+    day: string;
+    limit: number;
+    used: number;
+    remaining: number;
+    exhausted: boolean;
+    resetAt: string;
+    minuteLimit: number;
+    usedThisMinute: number;
+    /** `false` = počítadlo sa nedalo prečítať, čísla sú fail-closed domnienka. */
+    known: boolean;
+  };
+  /** Prečo sa nečíta: `rate_limited` | `daily_budget` | `error` | `catalog_complete`. */
+  waiting: CatalogSyncStatus['waiting'];
+  nextBatchAt: string | null;
+  estimatedDaysLeft: number | null;
+  estimatedFinishAt: string | null;
+  /** KÓD poslednej chyby behu (I1) — nikdy obsah odpovede shopu. */
+  lastError: string | null;
+}
+
+/** `CatalogSyncStatus` (dátumy) → JSON pohľad (ISO reťazce). */
+export function toCatalogStatusView(status: CatalogSyncStatus): CatalogStatusView {
+  const iso = (value: Date | null): string | null => (value === null ? null : value.toISOString());
+  return {
+    loadedProducts: status.loadedProducts,
+    shopTotalProducts: status.shopTotalProducts,
+    percent: status.percent,
+    complete: status.complete,
+    lastFetchedAt: iso(status.lastFetchedAt),
+    lastReadAt: iso(status.lastReadAt),
+    pagesDone: status.pagesDone,
+    pagesTotal: status.pagesTotal,
+    pagesLeft: status.pagesLeft,
+    perPage: status.perPage,
+    reads: {
+      day: status.reads.day,
+      limit: status.reads.limit,
+      used: status.reads.used,
+      remaining: status.reads.remaining,
+      exhausted: status.reads.exhausted,
+      resetAt: status.reads.resetAt.toISOString(),
+      minuteLimit: status.reads.minuteLimit,
+      usedThisMinute: status.reads.usedThisMinute,
+      known: status.reads.known,
+    },
+    waiting: status.waiting,
+    nextBatchAt: iso(status.nextBatchAt),
+    estimatedDaysLeft: status.estimatedDaysLeft,
+    estimatedFinishAt: iso(status.estimatedFinishAt),
+    lastError: status.lastError,
+  };
+}
+
+/* ═══════════════════════════ 2. Závislosti ════════════════════════════════ */
+
 export interface CatalogSyncRouteDeps {
   /** Prepis celého behu — testy nevolajú shop ani DB. */
-  run?: (deps: CatalogRunnerDeps) => Promise<CatalogRunReport>;
+  run?: (deps: CatalogRunnerDeps, opts: { restart: boolean }) => Promise<CatalogRunReport>;
   runnerDeps?: Partial<CatalogRunnerDeps>;
+  /** Zdroj stavu pre GET (a pre `catalog` v odpovedi POST-u). */
+  status?: Pick<CatalogRepoExt, 'syncStatus'>;
   routeDeps?: RouteDeps;
 }
 
+const bodySchema = z
+  .object({
+    /** `true` = zahodiť pokrok a načítať odznova od stránky 1 (A2). */
+    restart: z.boolean().optional(),
+  })
+  .optional();
+
+/* ═══════════════════════════ 3. GET — stav ════════════════════════════════ */
+
+/**
+ * A5 — stav katalógu bez toho, aby sa čokoľvek spustilo. Toto je pole, ktoré
+ * číta agregátor stavu (`catalog`); `lastRun` je navyše, aby sa v Nastaveniach
+ * dalo ukázať, čo urobil posledný beh.
+ */
+export function createCatalogSyncStatusRoute(deps: CatalogSyncRouteDeps = {}): NextRouteHandler {
+  return defineRoute(
+    {
+      method: 'GET',
+      auth: 'session',
+      handler: async () => {
+        const source = deps.status ?? defaultCatalogRepo;
+        return {
+          catalog: toCatalogStatusView(await source.syncStatus()),
+          lastRun: lastCatalogRun(),
+        };
+      },
+    },
+    deps.routeDeps,
+  );
+}
+
+/* ═══════════════════════════ 4. POST — dávka ══════════════════════════════ */
+
 export function createCatalogSyncRoute(deps: CatalogSyncRouteDeps = {}): NextRouteHandler {
-  const run = deps.run ?? ((d: CatalogRunnerDeps) => runCatalogSyncNow(d));
+  const run =
+    deps.run ??
+    ((d: CatalogRunnerDeps, opts: { restart: boolean }) =>
+      runCatalogSyncNow(d, opts.restart ? { restart: true } : {}));
 
   return defineRoute(
     {
       method: 'POST',
       auth: 'session',
+      body: bodySchema,
       // Jeden beh za minútu na IP. Katalóg sa nezosynchronizuje rýchlejšie tým,
       // že sa tlačidlo stlačí päťkrát.
       rateLimit: { limit: 2, windowMs: 60_000, bucket: 'catalog-sync' },
-      handler: async () => {
+      handler: async (ctx) => {
         // ENV a doména shopu sa čítajú AŽ TU, vo funkcii — na module scope by
         // eager `env.*` zlomilo `next build` (route factory beží pri kompilácii).
         const runnerDeps: CatalogRunnerDeps = {
           shopClient:
-            deps.runnerDeps?.shopClient ?? createShopClientFromSettings(defaultSettingsRepo),
+            deps.runnerDeps?.shopClient ??
+            // A3 — 429 nesmie klient opakovať; pauzu drží celý beh (viď politiku).
+            createShopClientFromSettings(defaultSettingsRepo, {
+              policy: { ...CATALOG_READ_RETRY_POLICY },
+            }),
           catalog: deps.runnerDeps?.catalog ?? defaultCatalogRepo,
           ...(deps.runnerDeps?.audit !== undefined ? { audit: deps.runnerDeps.audit } : {}),
           ...(deps.runnerDeps?.logger !== undefined ? { logger: deps.runnerDeps.logger } : {}),
         };
 
-        const report = await run(runnerDeps);
+        const report = await run(runnerDeps, { restart: ctx.body?.restart === true });
+        const source = deps.status ?? defaultCatalogRepo;
+
         return {
           outcome: report.outcome,
           sync: report.sync,
+          /** Kedy sa oplatí skúsiť znova (pauza, polnoc UTC). */
+          resumeAt: report.resumeAt === undefined || report.resumeAt === null
+            ? null
+            : report.resumeAt.toISOString(),
+          /** A5 — stav PO behu, aby UI nemuselo hneď volať GET. */
+          catalog: toCatalogStatusView(await source.syncStatus()),
           /** Posledný známy beh (aj keď tento skončil na `already_running`). */
           lastRun: lastCatalogRun(),
         };
@@ -72,4 +216,5 @@ export function createCatalogSyncRoute(deps: CatalogSyncRouteDeps = {}): NextRou
   );
 }
 
+export const GET = createCatalogSyncStatusRoute();
 export const POST = createCatalogSyncRoute();

@@ -17,6 +17,15 @@
  *    s explicitnou zónou (`todayInZone(now, 'UTC')`), nie cez `toISOString()` —
  *    jedna cesta k dátumu, jedna vec, ktorá sa môže pokaziť.
  *
+ * ČO SA V TOMTO MODULE NESMIE POKAZIŤ
+ * -----------------------------------
+ *  1. **Strop shopu a náš rozpočet sú DVE čísla, nie jedno.** 200/deň je hranica
+ *     politiky kľúča na strane shopu; `settings.daily_write_budget` je naša
+ *     brzda, ktorá sa dá posunúť len NADOL. `describeWriteBudgetLimits()` ich
+ *     vracia vždy spolu, aby ich žiadna odpoveď nezliala do jedného.
+ *  2. **Čísla limitov sa neopisujú, importujú sa** z `shop/rate-limits.ts`.
+ *     Jedna ručne prepísaná kópia limitu už raz zabila synchronizáciu katalógu.
+ *
  * Čo tu ZÁMERNE nie je:
  *  - žiadny zápis (I4 — do `audit_log` sa píše jedine cez `lib/audit/write.ts`),
  *  - žiadne rozhodnutie o stave kampane. Tento modul odpovie „koľko sa dnes
@@ -28,6 +37,7 @@ import type { DateOnly, Queryable, UtcDate } from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
 import { addDays, todayInZone } from '@/lib/domain/dates';
+import { SHOP_KEYED_LIMIT, nextUtcDayReset } from '@/lib/shop/rate-limits';
 
 /* ═══════════════════════════ konštanty (K2) ═══════════════════════════════ */
 
@@ -38,11 +48,18 @@ import { addDays, todayInZone } from '@/lib/domain/dates';
  */
 export const BUDGET_TIME_ZONE = 'UTC';
 
-/** Strop shopu na UTC deň (`ck_settings_daily_budget`, migrácia 0010). */
-export const MAX_DAILY_WRITE_BUDGET = 200;
+/**
+ * Strop SHOPU na UTC deň (`ck_settings_daily_budget`, migrácia 0010).
+ *
+ * Číslo sa sem NEOPISUJE — berie sa z `shop/rate-limits.ts`, ktorý je jediný
+ * zdroj pravdy o limitoch shopu. Raz už jedna ručne prepísaná kópia („300 za
+ * deň" vs. „300 za minútu") stála celý katalóg; druhá kópia by to zopakovala
+ * na zápisovej strane, kde je cena chyby ban kľúča na 10 minút.
+ */
+export const MAX_DAILY_WRITE_BUDGET = SHOP_KEYED_LIMIT.perUtcDay;
 
 /** Predvolený rozpočet, keď nastavenia hodnotu neponúkajú (K2). */
-export const DEFAULT_DAILY_WRITE_BUDGET = 200;
+export const DEFAULT_DAILY_WRITE_BUDGET = SHOP_KEYED_LIMIT.perUtcDay;
 
 /**
  * Fail-closed rozpočet: „neviem" znamená 1 zápis na deň. Fronta sa tým
@@ -351,4 +368,64 @@ export function estimateFinish(
 
   const days = Math.ceil((left - todayCapacity) / perDay);
   return { pending: left, perDay, days, date: addDays(today, days) };
+}
+
+/* ═════════════ dva rôzne stropy, ktoré sa nesmú zamieňať (K2) ═════════════ */
+
+/**
+ * DVA STROPY, NIE JEDEN.
+ *
+ *  - **Strop shopu** (`shopPerUtcDay`, `shopPerMinute`) je tvrdá hranica
+ *    politiky priradenej kľúču. Za ňou shop kľúč zabanuje; appka ju zmeniť
+ *    nevie a nikdy ju sama nezdvihne — je to administratívny úkon na strane
+ *    shopu (`docs/20-BACKLOG-SHOP-API.md`, bod B7).
+ *  - **Náš rozpočet** (`configuredPerDay`, `settings.daily_write_budget`) je
+ *    nastavenie tejto appky. Dá sa posunúť len NADOL (1 … strop shopu) — je to
+ *    brzda, nie povolenie.
+ *
+ * Keď sa tieto dve čísla zlejú do jedného, používateľ prestane rozumieť tomu,
+ * čo môže zmeniť sám (náš rozpočet) a na čo musí niekoho poprosiť (strop shopu).
+ * Preto ich každá odpoveď uvádza OBE vedľa seba a nikdy len jedno.
+ */
+export interface WriteBudgetLimits {
+  /** Strop shopu na kľúč a UTC deň. Appka ho nezdvihne. */
+  shopPerUtcDay: number;
+  /** Strop shopu na minútu. Drží ho pauza medzi zápismi (I10, D46). */
+  shopPerMinute: number;
+  /** Náš denný strop z nastavení. `null` = nepodarilo sa prečítať (P7). */
+  configuredPerDay: number | null;
+  /** `true` = nastavili sme si menej, než shop dovolí (vedomá brzda). */
+  belowShopCap: boolean;
+  /** Kedy sa strop shopu obnoví — UTC polnoc (`rate-limits.nextUtcDayReset`). */
+  nextResetAt: Date;
+  /** Koľko sekúnd do obnovy. Nikdy záporné. */
+  secondsToReset: number;
+}
+
+/**
+ * Popis oboch stropov naraz. Čisté počítanie — žiadna DB, žiadny `process.env`,
+ * takže to smie volať aj route, aj obrazovka.
+ *
+ * `configuredPerDay` mimo rozsahu 1…strop shopu sa berie ako „neviem" (`null`),
+ * nie ako platná hodnota: rovnako fail-closed ako `clampBudget()` vyššie.
+ */
+export function describeWriteBudgetLimits(
+  configuredPerDay: number | null,
+  now: UtcDate = new Date(),
+): WriteBudgetLimits {
+  const shopPerUtcDay = SHOP_KEYED_LIMIT.perUtcDay;
+  const parsed =
+    typeof configuredPerDay === 'number' && Number.isFinite(configuredPerDay)
+      ? Math.trunc(configuredPerDay)
+      : null;
+  const configured = parsed !== null && parsed >= 1 && parsed <= shopPerUtcDay ? parsed : null;
+  const nextResetAt = nextUtcDayReset(now);
+  return {
+    shopPerUtcDay,
+    shopPerMinute: SHOP_KEYED_LIMIT.perMinute,
+    configuredPerDay: configured,
+    belowShopCap: configured !== null && configured < shopPerUtcDay,
+    nextResetAt,
+    secondsToReset: Math.max(0, Math.ceil((nextResetAt.getTime() - now.getTime()) / 1000)),
+  };
 }

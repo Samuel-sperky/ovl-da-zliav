@@ -371,10 +371,20 @@ describe('POST /api/settings/unlock-writes', () => {
       makeRequest({ method: 'POST', body: { password: GOOD_PASSWORD } }),
     );
     expect(response.status).toBe(200);
-    expect((await readBody(response)).data).toEqual({ writesLocked: false });
+    const data = (await readBody(response)).data as {
+      writesLocked: boolean;
+      blockers?: readonly { id: string }[];
+    };
+    expect(data.writesLocked).toBe(false);
     expect(settings.unlockCalls()).toBe(1);
     expect(settings.record().writesLocked).toBe(false);
     expect(audits.map((a) => a.eventType)).toEqual(['writes_unlocked']);
+
+    // Odomknutie runaway zámku (D79) NIE JE to isté ako zapnuté zápisy (I13).
+    // Odpoveď preto nesie aj zvyšné prekážky — bez toho by obrazovka po
+    // úspešnom odomknutí tvrdila „hotovo", hoci `WRITES_ENABLED` je vypnuté
+    // a nezapísal by sa ani jeden produkt.
+    expect(data.blockers?.some((b) => b.id === 'writes_disabled')).toBe(true);
   });
 
   it('zlé heslo vráti 401 a zámok zostáva (fail-closed, I12)', async () => {

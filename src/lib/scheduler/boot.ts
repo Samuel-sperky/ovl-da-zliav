@@ -40,6 +40,7 @@ import { createShopClientFromSettings } from '@/lib/shop/client';
 import {
   runCatalogSyncIfDue,
   runCatalogSyncNow,
+  CATALOG_READ_RETRY_POLICY,
   type CatalogRunnerDeps,
   type CatalogRunReport,
 } from './catalog-runner';
@@ -95,7 +96,14 @@ export function createSchedulerQueueExecutor(
 function catalogRunnerDeps(): CatalogRunnerDeps {
   return {
     // Čítacia časť klienta — zápis sa cez tento typ nedá zavolať (K7).
-    shopClient: createShopClientFromSettings(settingsRepo),
+    //
+    // Katalóg si NESMIE nechať opakovať 429 tri razy: každý pokus sa počíta do
+    // denného stropu 240 čítaní, takže tri pokusy na tú istú stránku spália tri
+    // čítania na to isté miesto a ban tým len predĺžia. Opakovanie rieši sám
+    // runner — pozastaví CELÝ beh podľa `Retry-After` (A3).
+    shopClient: createShopClientFromSettings(settingsRepo, {
+      policy: { ...CATALOG_READ_RETRY_POLICY },
+    }),
     catalog: catalogRepo,
     audit: auditWriter,
     logger: log,

@@ -7,15 +7,19 @@
  *  - výška rozpočtu je fail-closed: „neviem" znamená 1/deň, nie 200/deň,
  *  - runaway strop je `rozpočet + 20 %` s podlahou 60/h (K2),
  *  - odhad dobehnutia fronty sedí na aritmetike z kontraktu:
- *    8 000 položiek pri 200/deň = 40 dní.
+ *    8 000 položiek pri 200/deň = 40 dní,
+ *  - **strop SHOPU a NÁŠ rozpočet sú dve rôzne čísla** a limity shopu sa
+ *    neopisujú ručne — importujú sa z `shop/rate-limits.ts` (K2).
  */
 import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_DAILY_WRITE_BUDGET,
   FAIL_CLOSED_DAILY_BUDGET,
+  MAX_DAILY_WRITE_BUDGET,
   budgetDay,
   createBudget,
+  describeWriteBudgetLimits,
   estimateFinish,
   remainingToday,
   resolveDailyBudget,
@@ -23,6 +27,7 @@ import {
   spentToday,
   type WriteAttemptCounter,
 } from '@/lib/engine/budget';
+import { SHOP_KEYED_LIMIT } from '@/lib/shop/rate-limits';
 
 /** Počítadlo `write_attempt` podľa UTC dňa. */
 function counterOf(byDay: Record<string, number>): WriteAttemptCounter {
@@ -173,5 +178,52 @@ describe('estimateFinish — kedy fronta dobehne (K5, K6)', () => {
   it('rozpočet mimo rozsahu nespôsobí NaN ani nekonečno', () => {
     expect(estimateFinish(10, 0, { now }).perDay).toBe(DEFAULT_DAILY_WRITE_BUDGET);
     expect(estimateFinish(Number.NaN, 200, { now })).toMatchObject({ pending: 0, days: 0 });
+  });
+});
+
+describe('describeWriteBudgetLimits — dva stropy, nie jeden (K2)', () => {
+  const now = new Date('2026-08-12T09:00:00.000Z');
+
+  it('limity shopu sa neopisujú ručne, berú sa z `shop/rate-limits.ts`', () => {
+    // Jedna ručne prepísaná kópia limitu už raz zabila synchronizáciu katalógu;
+    // na zápisovej strane by tá istá chyba stála ban kľúča.
+    expect(MAX_DAILY_WRITE_BUDGET).toBe(SHOP_KEYED_LIMIT.perUtcDay);
+    expect(DEFAULT_DAILY_WRITE_BUDGET).toBe(SHOP_KEYED_LIMIT.perUtcDay);
+
+    const limits = describeWriteBudgetLimits(200, now);
+    expect(limits.shopPerUtcDay).toBe(SHOP_KEYED_LIMIT.perUtcDay);
+    expect(limits.shopPerMinute).toBe(SHOP_KEYED_LIMIT.perMinute);
+  });
+
+  it('náš rozpočet pod stropom shopu je vedomá brzda a je to vidieť', () => {
+    const limits = describeWriteBudgetLimits(120, now);
+    expect(limits.configuredPerDay).toBe(120);
+    expect(limits.belowShopCap).toBe(true);
+  });
+
+  it('rozpočet na úrovni stropu shopu nie je „pribrzdené"', () => {
+    expect(describeWriteBudgetLimits(200, now).belowShopCap).toBe(false);
+  });
+
+  it('hodnota mimo 1…strop shopu je „neviem", nie platné číslo (fail-closed)', () => {
+    expect(describeWriteBudgetLimits(0, now).configuredPerDay).toBeNull();
+    expect(describeWriteBudgetLimits(5000, now).configuredPerDay).toBeNull();
+    expect(describeWriteBudgetLimits(Number.NaN, now).configuredPerDay).toBeNull();
+    expect(describeWriteBudgetLimits(null, now).configuredPerDay).toBeNull();
+    // A „neviem" sa nikdy netvári ako pribrzdené.
+    expect(describeWriteBudgetLimits(null, now).belowShopCap).toBe(false);
+  });
+
+  it('strop shopu sa obnovuje o UTC polnoci, nie o polnoci v Bratislave', () => {
+    const limits = describeWriteBudgetLimits(200, now);
+    expect(limits.nextResetAt.toISOString()).toBe('2026-08-13T00:00:00.000Z');
+    expect(limits.secondsToReset).toBe(15 * 3600);
+  });
+
+  it('tesne pred polnocou UTC je do obnovy sekunda, nikdy záporné číslo', () => {
+    const late = new Date('2026-08-12T23:59:59.000Z');
+    expect(describeWriteBudgetLimits(200, late).secondsToReset).toBe(1);
+    const midnight = new Date('2026-08-13T00:00:00.000Z');
+    expect(describeWriteBudgetLimits(200, midnight).secondsToReset).toBe(24 * 3600);
   });
 });

@@ -631,8 +631,13 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
    * `rate-limits.ts` pridané 12. 8. 2026 — samé konštanty a čisté funkcie nad
    * dátumami, žiadne volanie shopu. Prijaté vedome; I7 aj I8' nad ním platia
    * rovnako ako nad zvyškom modulu.
+   *
+   * `read-budget.ts` pridané 12. 8. 2026 — počítadlo minutých čítaní nad
+   * stropmi z `rate-limits`, aby si katalóg a predajnosť nekradli denný
+   * rozpočet. Na shop nevolá vôbec. Prijaté vedome; skeny I7 aj I8' nad ním
+   * prechádzajú.
    */
-  it('má všetkých 9 súborov modulu', () => {
+  it('má všetkých 10 súborov modulu', () => {
     expect(sources.map((s) => s.file).sort()).toEqual([
       'catalog-sync.ts',
       'client.ts',
@@ -641,6 +646,7 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
       'messages.sk.ts',
       ORDERS_CLIENT_FILE,
       'rate-limits.ts',
+      'read-budget.ts',
       'retry.ts',
       'schemas.ts',
     ]);

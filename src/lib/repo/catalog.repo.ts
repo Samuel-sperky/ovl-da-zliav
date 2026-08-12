@@ -27,11 +27,24 @@
  * `raw` MUSÍ prísť už redigované volajúcim (I1, D66) — repozitár ho len
  * serializuje do JSON stĺpca, nič nemaskuje. I4: žiadny prístup k `audit_log`.
  *
+ * POKROK DVOJDŇOVÉHO BEHU (A2, migrácia 0013)
+ * -------------------------------------------
+ * 41 082 produktov po 100 je 411 čítaní, anonymný strop je 300 za UTC deň —
+ * celý katalóg sa do jedného dňa nezmestí. Preto tu okrem samotných riadkov žije
+ * aj POKROK behu (`catalog_sync_state`): kde sa skončilo, koľko hlási shop, kedy
+ * sa naposledy čítalo a prečo sa prípadne čaká. Bez neho by sa beh po každom
+ * prerušení vracal na stránku 1 a chvost katalógu by sa neprečítal nikdy.
+ *
+ * Repozitár je zároveň JEDINÉ DVERE k zdieľanému rozpočtu čítaní
+ * (`shop_read_budget` cez `@/lib/repo/read-budget.repo`), aby synchronizácia
+ * nemusela poznať ani SQL, ani stropy — a aby si nikto nezaložil vlastné
+ * počítadlo, ktoré by si so zvyškom appky kradlo rozpočet (A4).
+ *
  * Raw parametrizované SQL, žiadne ORM. Do SQL sa NEINTERPOLUJE žiadna hodnota;
  * dynamické sú výhradne počty `?` placeholderov a whitelistované názvy stĺpcov
  * pri triedení.
  *
- * Vlastník: V4.
+ * Vlastník: V4 (katalóg + pokrok behu: V7).
  */
 import type {
   AllowlistShopStatus,
@@ -47,6 +60,13 @@ import type {
 
 import { query as poolQuery } from '@/db/pool';
 import { addDays, todayInZone } from '@/lib/domain/dates';
+import { anonReadBudget } from '@/lib/repo/read-budget.repo';
+import {
+  readDaysNeeded,
+  type ReadBudget,
+  type ReadBudgetStatus,
+  type ReadReservation,
+} from '@/lib/shop/read-budget';
 
 /* ═══════════════════════════════ 1. Typy ══════════════════════════════════ */
 
@@ -150,6 +170,93 @@ export type CatalogUpsertInput = Omit<CatalogCacheRecord, 'fetchedAt'> & {
   shopStatus?: CatalogShopStatus;
 };
 
+/* ─────────────── Pokrok dvojdňového behu (`catalog_sync_state`) ─────────── */
+
+/**
+ * Prečo beh stojí. `daily_budget` a `rate_limited` NIE SÚ chyby — sú to
+ * naplánované čakania, z ktorých sa appka prebudí sama.
+ */
+export type CatalogPauseReason = 'rate_limited' | 'daily_budget' | 'error';
+
+/**
+ * Kde beh skončil. Jeden riadok pre celý katalóg (`id = 1`).
+ *
+ * `lastPage` je posledná stránka, ktorá sa ÚSPEŠNE zapísala — nie posledná,
+ * o ktorú sa žiadalo. Pokračuje sa od `lastPage + 1`, takže prerušenie stojí
+ * najviac jednu stránku.
+ */
+export interface CatalogSyncProgress {
+  /** Veľkosť stránky, voči ktorej má `lastPage` význam. */
+  perPage: number;
+  /** Posledná úspešne zapísaná stránka; `0` = prechod sa ešte nezačal. */
+  lastPage: number;
+  /** Koľko produktov hlási shop. `null` = zatiaľ sme sa to nedozvedeli (I11). */
+  shopTotal: number | null;
+  /** Koľko riadkov zapísal AKTUÁLNY prechod (nie koľko má tabuľka celkovo). */
+  rowsWritten: number;
+  /** `true` = prechod dočítal katalóg po koniec; ďalší začne od stránky 1. */
+  completed: boolean;
+  startedAt: UtcDate | null;
+  /** Kedy sa naposledy naozaj čítalo zo shopu (meraný fakt, P7). */
+  lastReadAt: UtcDate | null;
+  finishedAt: UtcDate | null;
+  /** Dokedy beh stojí (`Retry-After`, polnoc UTC). `null` = nič nebráni. */
+  pausedUntil: UtcDate | null;
+  pauseReason: CatalogPauseReason | null;
+  /** KÓD chyby, nikdy obsah odpovede shopu (I1). */
+  lastError: string | null;
+  updatedAt: UtcDate | null;
+}
+
+/** Prečo sa práve teraz nečíta. `null` = nič nebráni ďalšej dávke. */
+export type CatalogWaitingReason = CatalogPauseReason | 'catalog_complete';
+
+/**
+ * Stav katalógu pre UI (A5) — „koľko z koľkých, kedy naposledy, kedy ďalšia
+ * dávka, prečo sa čaká, dokedy to potrvá".
+ *
+ * Vracajú sa FAKTY a kódy, nie hotové vety: slovenské vety o katalógu skladá
+ * `@/lib/status/blockers` (`catalog_incomplete`, `catalog_reads_day_exhausted`)
+ * a duplikovať ich tu by znamenalo dva texty o tej istej veci. Názvy
+ * `loadedProducts` a `shopTotalProducts` sú zámerne zhodné s `CatalogSnapshot`
+ * v blockers, aby ich agregátor stavu vedel odovzdať bez prekladu.
+ */
+export interface CatalogSyncStatus {
+  /** Koľko riadkov má katalóg teraz (`COUNT(*)`). */
+  loadedProducts: number;
+  /** Koľko ich hlási shop. `null` = nevieme — appka si číslo nedopočítava. */
+  shopTotalProducts: number | null;
+  /** `0`–`100`, alebo `null`, keď nevieme, z koľkých. */
+  percent: number | null;
+  /** `true` = posledný prechod dočítal katalóg po koniec. */
+  complete: boolean;
+  /** „Dáta k …" — `MAX(fetched_at)`, meraný fakt (P7). */
+  lastFetchedAt: UtcDate | null;
+  /** Kedy sa naposledy čítalo zo shopu (aj keď stránka nič nezmenila). */
+  lastReadAt: UtcDate | null;
+  /** Koľko stránok má aktuálny prechod za sebou. */
+  pagesDone: number;
+  /** Koľko stránok má katalóg celkovo. `null` = nevieme koľko. */
+  pagesTotal: number | null;
+  /** Koľko stránok ešte chýba. `null` = nevieme. */
+  pagesLeft: number | null;
+  perPage: number;
+  /** Zdieľaný denný rozpočet ANONYMNÝCH čítaní (A4). */
+  reads: ReadBudgetStatus;
+  /** Prečo sa nečíta. `null` = nič nebráni ďalšej dávke. */
+  waiting: CatalogWaitingReason | null;
+  /** Kedy sa smie čítať ďalšia dávka. `null` = hneď, ako scheduler tikne. */
+  nextBatchAt: UtcDate | null;
+  /** Koľko ďalších UTC dní potrvá dočítanie. `0` = ešte dnes, `null` = nevieme. */
+  estimatedDaysLeft: number | null;
+  /** Odhad dokončenia (presnosť na deň). `null` = nevieme. */
+  estimatedFinishAt: UtcDate | null;
+  /** KÓD poslednej chyby behu (I1). */
+  lastError: string | null;
+  /** Surový pokrok — pre diagnostiku a pre runner. */
+  progress: CatalogSyncProgress;
+}
+
 /* ═══════════════════════════ 2. Konštanty ═════════════════════════════════ */
 
 /** Koľko riadkov ide do jedného `INSERT … ON DUPLICATE KEY UPDATE` (K7). */
@@ -178,6 +285,20 @@ const LOCKED_FILTERS: readonly LockedCatalogFilter[] = [
 ];
 
 const KNOWN_SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'not_found', 'unknown'];
+
+/**
+ * Veľkosť stránky, s ktorou sa počíta, kým pokrok neexistuje. Zhoda
+ * s `CATALOG_PAGE_SIZE` v `shop/catalog-sync.ts` (tvrdý strop `per_page` shopu);
+ * zrkadlí sa tu zámerne, aby repozitár nezávisel na module synchronizácie —
+ * zhodu čísel stráži `test/unit/catalog-sync.spec.ts`.
+ */
+export const DEFAULT_CATALOG_PER_PAGE = 100;
+
+const KNOWN_PAUSE_REASONS: readonly CatalogPauseReason[] = [
+  'rate_limited',
+  'daily_budget',
+  'error',
+];
 
 /** Fail-closed default (K1 bod 2): `not_found` produkt sa neponúka na zápis. */
 const DEFAULT_SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'unknown'];
@@ -212,6 +333,32 @@ const SQL_MARK_SHOP_STATUS = 'UPDATE catalog_cache SET shop_status = ? WHERE pro
 
 const SQL_TOTAL_ROWS = 'SELECT COUNT(*) AS total FROM catalog_cache';
 const SQL_LAST_FETCHED = 'SELECT MAX(fetched_at) AS last_fetched FROM catalog_cache';
+
+/* Pokrok dvojdňového behu (`catalog_sync_state`, migrácia 0013). */
+
+const PROGRESS_COLUMNS =
+  'per_page, last_page, shop_total, rows_written, completed, started_at, ' +
+  'last_read_at, finished_at, paused_until, pause_reason, last_error, updated_at';
+
+const SQL_PROGRESS_GET = `SELECT ${PROGRESS_COLUMNS} FROM catalog_sync_state WHERE id = 1 LIMIT 1`;
+
+/**
+ * Zápis pokroku. `INSERT … ON DUPLICATE KEY UPDATE`, a nie `UPDATE`, zámerne:
+ * riadok síce zakladá migrácia, ale beh, ktorý by kvôli chýbajúcemu riadku
+ * potichu nezapisoval pokrok, by sa vrátil presne k pôvodnej chybe — reštart od
+ * stránky 1 po každom prerušení.
+ */
+const SQL_PROGRESS_SAVE =
+  'INSERT INTO catalog_sync_state ' +
+  '(id, per_page, last_page, shop_total, rows_written, completed, started_at, ' +
+  'last_read_at, finished_at, paused_until, pause_reason, last_error) ' +
+  'VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+  'ON DUPLICATE KEY UPDATE per_page = VALUES(per_page), last_page = VALUES(last_page), ' +
+  'shop_total = VALUES(shop_total), rows_written = VALUES(rows_written), ' +
+  'completed = VALUES(completed), started_at = VALUES(started_at), ' +
+  'last_read_at = VALUES(last_read_at), finished_at = VALUES(finished_at), ' +
+  'paused_until = VALUES(paused_until), pause_reason = VALUES(pause_reason), ' +
+  'last_error = VALUES(last_error)';
 
 /**
  * Predané kusy za okno. Odvodená tabuľka (nie korelovaný poddotaz v SELECT-e):
@@ -294,6 +441,72 @@ function mapSearchRow(row: SearchRow): CatalogSearchRow {
 }
 
 const isValidProductId = (id: number): boolean => Number.isInteger(id) && id > 0;
+
+/* ── pokrok behu: riadok ⇄ objekt ───────────────────────────────────────── */
+
+interface ProgressRow {
+  per_page: number | string | null;
+  last_page: number | string | null;
+  shop_total: number | string | null;
+  rows_written: number | string | null;
+  completed: number | boolean | null;
+  started_at: Date | string | null;
+  last_read_at: Date | string | null;
+  finished_at: Date | string | null;
+  paused_until: Date | string | null;
+  pause_reason: string | null;
+  last_error: string | null;
+  updated_at: Date | string | null;
+}
+
+const toDateOrNull = (value: Date | string | null): UtcDate | null =>
+  value == null ? null : toDate(value);
+
+/** Nezáporné celé číslo, alebo `fallback` pri čomkoľvek, čo sa nedá prečítať. */
+function toCount(value: number | string | null, fallback: number): number {
+  if (value == null) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : fallback;
+}
+
+const isPauseReason = (value: unknown): value is CatalogPauseReason =>
+  KNOWN_PAUSE_REASONS.includes(value as CatalogPauseReason);
+
+/** Pokrok, ktorý platí, kým sa nič neprečítalo — „ešte sa nezačalo". */
+export function emptyCatalogProgress(perPage = DEFAULT_CATALOG_PER_PAGE): CatalogSyncProgress {
+  return {
+    perPage,
+    lastPage: 0,
+    shopTotal: null,
+    rowsWritten: 0,
+    completed: false,
+    startedAt: null,
+    lastReadAt: null,
+    finishedAt: null,
+    pausedUntil: null,
+    pauseReason: null,
+    lastError: null,
+    updatedAt: null,
+  };
+}
+
+function mapProgressRow(row: ProgressRow): CatalogSyncProgress {
+  const shopTotal = row.shop_total == null ? null : Number(row.shop_total);
+  return {
+    perPage: Math.max(1, toCount(row.per_page, DEFAULT_CATALOG_PER_PAGE)),
+    lastPage: toCount(row.last_page, 0),
+    shopTotal: shopTotal !== null && Number.isFinite(shopTotal) ? shopTotal : null,
+    rowsWritten: toCount(row.rows_written, 0),
+    completed: Boolean(row.completed),
+    startedAt: toDateOrNull(row.started_at),
+    lastReadAt: toDateOrNull(row.last_read_at),
+    finishedAt: toDateOrNull(row.finished_at),
+    pausedUntil: toDateOrNull(row.paused_until),
+    pauseReason: isPauseReason(row.pause_reason) ? row.pause_reason : null,
+    lastError: row.last_error,
+    updatedAt: toDateOrNull(row.updated_at),
+  };
+}
 
 const DECIMAL_RE = /^-?\d{1,8}(\.\d{1,2})?$/;
 
@@ -424,6 +637,12 @@ function buildWhere(filter: CatalogSearchFilter, includeFacets: boolean): WhereP
 export interface CatalogRepoDeps {
   /** Výhradne pre testy: spojenie namiesto poolu. */
   defaultConn?: Queryable;
+  /**
+   * Zdieľaný rozpočet anonymných čítaní. Default je jediná produkčná inštancia
+   * (`anonReadBudget`) — vlastné počítadlo si tu nikto nezakladá (A4). Prepis
+   * je výhradne pre testy.
+   */
+  readBudget?: ReadBudget;
 }
 
 /** Rozhranie po KONTRAKTE V3 — nadmnožina `CatalogRepo` z kontraktov. */
@@ -445,9 +664,28 @@ export interface CatalogRepoExt extends CatalogRepo {
   totalRows(conn?: Queryable): Promise<number>;
   /** K7: „Dáta k …" — meraný fakt, nie odhad (P7). `null` = katalóg je prázdny. */
   lastFetchedAt(conn?: Queryable): Promise<UtcDate | null>;
+
+  /* ── A2/A4: dvojdňový beh ────────────────────────────────────────────── */
+
+  /** Kde beh skončil. Prázdny pokrok = „ešte sa nezačalo", nikdy výnimka. */
+  loadSyncProgress(conn?: Queryable): Promise<CatalogSyncProgress>;
+  /** Uloží pokrok (celý riadok naraz — jeden zápis na stránku). */
+  saveSyncProgress(progress: CatalogSyncProgress, conn?: Queryable): Promise<void>;
+  /**
+   * A4 — rezervácia zo ZDIEĽANÉHO denného rozpočtu anonymných čítaní. Volá sa
+   * PRED requestom na shop; neúspešný request sa do stropu shopu počíta rovnako
+   * ako úspešný.
+   */
+  reserveShopReads(count?: number): Promise<ReadReservation>;
+  /** Stav zdieľaného čítacieho rozpočtu bez rezervovania (pre UI). */
+  shopReadBudget(): Promise<ReadBudgetStatus>;
+  /** A5 — stav katalógu pre UI a pre agregátor stavu. */
+  syncStatus(opts?: { now?: UtcDate; conn?: Queryable }): Promise<CatalogSyncStatus>;
 }
 
 export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
+  const readBudget = deps.readBudget ?? anonReadBudget;
+
   const run = async <T>(conn: Queryable | undefined, sql: string, values: unknown[]): Promise<T> => {
     const target = conn ?? deps.defaultConn;
     if (target) return (await target.query(sql, values)) as T;
@@ -642,6 +880,133 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
       );
       const value = Array.isArray(rows) ? rows[0]?.last_fetched : null;
       return value == null ? null : toDate(value);
+    },
+
+    /* ── A2/A4: dvojdňový beh ──────────────────────────────────────────── */
+
+    async loadSyncProgress(conn?: Queryable): Promise<CatalogSyncProgress> {
+      const rows = await run<ProgressRow[]>(conn, SQL_PROGRESS_GET, []);
+      const row = Array.isArray(rows) ? rows[0] : undefined;
+      // Chýbajúci riadok nie je chyba: migrácia ho síce zakladá, ale „ešte sa
+      // nezačalo" je platný stav a beh z neho vie vyjsť (začne od stránky 1).
+      return row === undefined ? emptyCatalogProgress() : mapProgressRow(row);
+    },
+
+    async saveSyncProgress(progress: CatalogSyncProgress, conn?: Queryable): Promise<void> {
+      await run(conn, SQL_PROGRESS_SAVE, [
+        Math.max(1, Math.trunc(progress.perPage)),
+        Math.max(0, Math.trunc(progress.lastPage)),
+        progress.shopTotal === null ? null : Math.max(0, Math.trunc(progress.shopTotal)),
+        Math.max(0, Math.trunc(progress.rowsWritten)),
+        progress.completed ? 1 : 0,
+        progress.startedAt,
+        progress.lastReadAt,
+        progress.finishedAt,
+        progress.pausedUntil,
+        progress.pauseReason,
+        // I1 — do `last_error` ide KÓD, nikdy obsah odpovede shopu; orez je
+        // poistka proti stĺpcu `VARCHAR(200)`, nie filter obsahu.
+        progress.lastError === null ? null : progress.lastError.slice(0, 200),
+      ]);
+    },
+
+    reserveShopReads(count = 1): Promise<ReadReservation> {
+      return readBudget.reserve(count);
+    },
+
+    shopReadBudget(): Promise<ReadBudgetStatus> {
+      return readBudget.status();
+    },
+
+    /**
+     * A5 — jeden dotaz do sveta pre celé UI: koľko z koľkých, kedy naposledy,
+     * kedy ďalšia dávka, prečo sa čaká a dokedy to potrvá.
+     *
+     * Odhad je zámerne hrubý (presnosť na deň): denný strop čítaní je tvrdý,
+     * takže o dokončení rozhodujú DNI, nie minúty. Presnejší odhad by bol
+     * presnejšie vyzerajúce klamstvo.
+     */
+    async syncStatus(opts: { now?: UtcDate; conn?: Queryable } = {}): Promise<CatalogSyncStatus> {
+      const now = opts.now ?? new Date();
+      const conn = opts.conn;
+
+      const [loadedProducts, lastFetchedAt, progress, reads] = await Promise.all([
+        repo.totalRows(conn),
+        repo.lastFetchedAt(conn),
+        repo.loadSyncProgress(conn),
+        readBudget.status(),
+      ]);
+
+      const perPage = Math.max(1, progress.perPage);
+      const shopTotalProducts = progress.shopTotal;
+      const pagesTotal =
+        shopTotalProducts === null ? null : Math.max(1, Math.ceil(shopTotalProducts / perPage));
+      const pagesDone = progress.completed ? (pagesTotal ?? progress.lastPage) : progress.lastPage;
+      const pagesLeft = pagesTotal === null ? null : Math.max(0, pagesTotal - pagesDone);
+
+      const paused =
+        progress.pausedUntil !== null && progress.pausedUntil.getTime() > now.getTime();
+
+      const waiting: CatalogWaitingReason | null = progress.completed
+        ? 'catalog_complete'
+        : paused
+          ? (progress.pauseReason ?? 'rate_limited')
+          : reads.exhausted
+            ? 'daily_budget'
+            : null;
+
+      const nextBatchAt: UtcDate | null = progress.completed
+        ? null
+        : paused
+          ? progress.pausedUntil
+          : reads.exhausted
+            ? reads.resetAt
+            : null;
+
+      /**
+       * Koľko ďalších UTC dní to potrvá. `0` = dočíta sa ešte dnes, `null` =
+       * nevieme, z koľkých stránok (shop zatiaľ nepovedal `total`) — a vtedy sa
+       * odhad NEVYMÝŠĽA (I11).
+       */
+      let estimatedDaysLeft: number | null = null;
+      if (progress.completed) estimatedDaysLeft = 0;
+      else if (pagesLeft !== null) {
+        estimatedDaysLeft = readDaysNeeded(pagesLeft, reads.remaining, reads.limit);
+      }
+
+      // Odhad dokončenia s presnosťou na deň: `0` je koniec dnešného UTC dňa
+      // (`reads.resetAt` je najbližšia polnoc UTC), každý ďalší deň o 24 h viac.
+      // Pri dočítanom katalógu to nie je odhad, ale meraný čas dokončenia.
+      let estimatedFinishAt: UtcDate | null = progress.finishedAt;
+      if (!progress.completed) {
+        estimatedFinishAt =
+          estimatedDaysLeft === null
+            ? null
+            : new Date(reads.resetAt.getTime() + Math.max(0, estimatedDaysLeft - 1) * 86_400_000);
+      }
+
+      return {
+        loadedProducts,
+        shopTotalProducts,
+        percent:
+          shopTotalProducts === null || shopTotalProducts <= 0
+            ? null
+            : Math.min(100, Math.round((loadedProducts / shopTotalProducts) * 100)),
+        complete: progress.completed,
+        lastFetchedAt,
+        lastReadAt: progress.lastReadAt,
+        pagesDone,
+        pagesTotal,
+        pagesLeft,
+        perPage,
+        reads,
+        waiting,
+        nextBatchAt,
+        estimatedDaysLeft,
+        estimatedFinishAt,
+        lastError: progress.lastError,
+        progress,
+      };
     },
   };
 

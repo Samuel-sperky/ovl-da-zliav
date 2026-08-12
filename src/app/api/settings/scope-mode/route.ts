@@ -6,15 +6,22 @@
  *
  * Asymetria, ktorá je celým zmyslom K1 bodu 4:
  *
- *  | Smer | Sudo | Audit |
+ *  | Zmena | Sudo | Audit |
  *  |---|---|---|
  *  | `pilot → plny` (UVOĽNENIE) | **áno** | `scope_mode_changed` |
+ *  | zdvihnutie stropu v `plny` (UVOĽNENIE) | **áno** | `scope_mode_changed` |
  *  | `plny → pilot` (SPRÍSNENIE) | nie | `scope_mode_changed` |
+ *  | zníženie stropu (SPRÍSNENIE) | nie | `scope_mode_changed` |
  *
  * „Sprísnenie je vždy voľné, uvoľnenie nikdy." Preto route beží na
  * `auth: 'session'` a sudo si vyžiada SAMA — `defineRoute({ auth: 'sudo' })`
  * je statické a vyžadovalo by heslo aj na cestu späť do `pilot`, čiže by
  * v núdzi bránilo pribrzdiť appku.
+ *
+ * Kde je to rozhodnutie napísané: `scopeChangeRequiresSudo()` v
+ * `lib/repo/settings.repo.ts`. Tu sa NEVYHODNOCUJE druhýkrát — `GET
+ * /api/settings` ohlasuje tú istú odpoveď dopredu a dve kópie pravidla by
+ * znamenali, že obrazovka sľúbi jedno a route urobí druhé.
  *
  * Fail-closed detaily:
  *  - Neznámy/chýbajúci režim v DB sa číta ako `pilot` (K1 bod 1) — to zaručuje
@@ -35,6 +42,7 @@ import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/d
 import {
   settingsRepo as defaultSettingsRepo,
   effectiveMaxProducts,
+  scopeChangeRequiresSudo,
   HARD_MAX_PRODUCTS,
   PILOT_MAX_PRODUCTS,
   type ScopeMode,
@@ -91,8 +99,18 @@ export function createScopeModeRoute(deps: ScopeModeRouteDeps = {}): NextRouteHa
         const before = await settings.readScope();
 
         /* 2. K1 bod 4 — sudo LEN pri uvoľnení. Kontrola je pred akýmkoľvek
-         * zápisom, takže bez platného okna sa nezmení ani strop. */
-        if (next === 'plny' && before.mode !== 'plny') {
+         * zápisom, takže bez platného okna sa nezmení ani strop.
+         *
+         * Rozhodnutie NEROBÍ táto route: robí ho `scopeChangeRequiresSudo()`
+         * v `settings.repo`, aby si tú istú otázku vedeli položiť aj
+         * Nastavenia (dopredu, `GET /api/settings`) a dostali tú istú odpoveď.
+         * Pokrýva tým aj zdvihnutie stropu v rámci `plny` — to je tiež
+         * rozšírenie rozsahu a rozšírenie sa bez hesla nedeje. */
+        const requiresSudo = scopeChangeRequiresSudo(before, {
+          mode: next,
+          maxProductsPerCampaign: ctx.body.maxProductsPerCampaign,
+        });
+        if (requiresSudo) {
           sudoGate(ctx.claims, now());
         }
 
@@ -121,11 +139,14 @@ export function createScopeModeRoute(deps: ScopeModeRouteDeps = {}): NextRouteHa
             maxProductsPerCampaign: after.maxProductsPerCampaign,
             effectiveMaxProducts: effectiveMaxProducts(after),
             failClosed: after.failClosed,
+            /* Aby sa z auditu dalo prečítať, či išlo o uvoľnenie (heslo) alebo
+             * o sprísnenie (bez hesla) — inak sa to o pol roka nedá rozlíšiť. */
+            requiredSudo: requiresSudo,
           },
           message:
             before.mode === after.mode
-              ? `Rozsah zostal „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov.`
-              : `Rozsah zmenený z „${before.mode}" na „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov.`,
+              ? `Rozsah zostal „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov${requiresSudo ? ' (uvoľnenie potvrdené heslom)' : ''}.`
+              : `Rozsah zmenený z „${before.mode}" na „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov${requiresSudo ? ' (uvoľnenie potvrdené heslom)' : ''}.`,
           ip: ctx.info.ip,
           userAgent: ctx.info.userAgent,
         });
@@ -138,6 +159,12 @@ export function createScopeModeRoute(deps: ScopeModeRouteDeps = {}): NextRouteHa
           dailyWriteBudget: after.dailyWriteBudget,
           previousScopeMode: before.mode,
           pilotMaxProducts: PILOT_MAX_PRODUCTS,
+          /** Tvrdý strop DB — vyššie sa nedá ísť ani v plnom režime. */
+          hardMaxProducts: HARD_MAX_PRODUCTS,
+          /** `true` = hodnoty sú fail-closed default, nie čítanie z DB (K1 bod 1). */
+          scopeFailClosed: after.failClosed,
+          /** `true` = táto zmena bola uvoľnenie a bola potvrdená heslom. */
+          requiredSudo: requiresSudo,
         };
       },
     },

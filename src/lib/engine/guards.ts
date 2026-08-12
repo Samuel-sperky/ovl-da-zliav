@@ -37,6 +37,19 @@
  * v produkčnom kóde (I13): produkčná cesta číta výhradne `src/env.ts`,
  * injektáž len umožňuje testom overiť správanie oboch strán poistky.
  *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *  1. **Brána rozhoduje, `blockers.ts` pomenúva.** Odmietnutia pre strop
+ *     rozsahu a pre env poistku nesú v `detail.blockers` vety z
+ *     `lib/status/blockers.ts`. Vety sa sem NEKOPÍRUJÚ a rozhodnutie sa
+ *     NEPRESÚVA tam — druhá kópia ktorejkoľvek strany znamená, že sa raz
+ *     rozídu a obrazovka bude tvrdiť niečo iné, než čo brána urobí.
+ *  2. **Do `detail` idú len prekážky tej oblasti, ktorú brána naozaj overila.**
+ *     `collectOperationBlockers()` chýbajúce sekcie dopĺňa fail-closed, takže
+ *     nezúžený zoznam by tvrdil aj o kľúči a rozpočte, ktoré tu nikto nečítal.
+ *  3. **Zúženie výberu nie je jediná odpoveď.** Strop je prepínač (K1) — detail
+ *     preto vždy nesie aj to, že sa dá zdvihnúť, a že to chce heslo.
+ *
  * Vlastník: A9 / V5.
  */
 import type {
@@ -78,6 +91,7 @@ import {
   settingsRepo as defaultSettingsRepo,
   type ScopeMode,
 } from '@/lib/repo/settings.repo';
+import { collectOperationBlockers, type Blocker } from '@/lib/status/blockers';
 
 /* ═══════════════════════════════ kódy ════════════════════════════════════ */
 
@@ -271,8 +285,17 @@ async function resolveScope(d: ResolvedDeps): Promise<ResolvedScope> {
   if (raw === TIMED_OUT) return pilot(); // zaseknutá DB je tiež „neviem"
 
   const mode = fieldOf(raw, 'mode') ?? fieldOf(raw, 'scopeMode');
+  /**
+   * `settings.repo.readScope()` sám priznáva, že odpovedal fail-closed
+   * defaultom (`ScopeSettings.failClosed`). Bez tohto riadku sa priznanie
+   * stratilo: repozitár povedal „neviem, beriem `pilot`", guardy z toho urobili
+   * `pilot` a `failClosed: false`, teda „viem, že je pilot". Rozhodnutie by bolo
+   * rovnaké, ale appka by o ňom klamala — a `blockers.ts` stavia práve na tomto
+   * príznaku (`assumed`), keď má priznať, že veta stojí na domnienke.
+   */
+  const declaredFailClosed = fieldOf(raw, 'failClosed') === true;
   if (!isScopeMode(mode) || mode === 'pilot') {
-    return { ...pilot(), failClosed: !isScopeMode(mode) };
+    return { ...pilot(), failClosed: !isScopeMode(mode) || declaredFailClosed };
   }
 
   const rawMax = fieldOf(raw, 'maxProductsPerCampaign');
@@ -282,7 +305,7 @@ async function resolveScope(d: ResolvedDeps): Promise<ResolvedScope> {
       ? Math.min(HARD_MAX_PRODUCTS, Math.trunc(parsed))
       : PILOT_MAX_PRODUCTS;
 
-  return { mode: 'plny', maxProducts, failClosed: false };
+  return { mode: 'plny', maxProducts, failClosed: declaredFailClosed };
 }
 
 /** Verejná (nehádžuca) podoba pre volajúcich, ktorí chcú rozsah zobraziť. */
@@ -290,15 +313,111 @@ export async function readScopeForWrite(deps: GuardsDeps = {}): Promise<Resolved
   return resolveScope(resolve(deps));
 }
 
+/* ═════════ strojovo spracovateľný dôvod odmietnutia (blockers.ts) ═════════ */
+
+/**
+ * Prečo brána odmietla, v tvare, z ktorého sa dá postaviť PONUKA — nie holý
+ * text.
+ *
+ * Doteraz odmietnutie pre strop rozsahu nieslo vetu „Jedna operácia smie
+ * v režime „pilot" zapísať najviac 10 produktov" a nič viac. Obrazovka z toho
+ * vedela postaviť len oznam. Aby vedela ponúknuť „prepnúť do plného rozsahu",
+ * musí dostať fakty: KTORÝ režim platí, AKÝ je efektívny a tvrdý strop a či
+ * prepnutie chce heslo. Vety k tomu NEPÍŠEME znova — berú sa z jediného zdroja
+ * pravdy `lib/status/blockers.ts`, ktorý ich už raz zložil pre celú appku.
+ *
+ * `blockers` je preto zúžený výsledok `collectOperationBlockers()`. Zúženie na
+ * jednu OBLASŤ je zámerné: brána vie povedať pravdu o rozsahu a o env poistke,
+ * ale o kľúči, rozpočte ani katalógu tu nič nečítala — a `blockers.ts` by pri
+ * chýbajúcich sekciách fail-closed dopísal prekážky, ktoré by tvrdili viac,
+ * než čo brána naozaj overila.
+ */
+export interface ScopeRefusalDetail {
+  /** Koľko unikátnych produktov operácia chcela zapísať. */
+  count: number;
+  /** Efektívny strop, o ktorý sa operácia zastavila. */
+  max: number;
+  mode: ScopeMode;
+  /** `true` = režim sa nepodarilo prečítať a platí fail-closed `pilot`. */
+  failClosed: boolean;
+  /** Strop pilotného režimu (10) — pevný bod, o ktorý sa dá porovnávať. */
+  pilotMaxProducts: number;
+  /** Tvrdý strop DB (10 000) — vyššie sa nedá ísť ani v plnom režime. */
+  hardMaxProducts: number;
+  /** `true` = zdvihnúť strop sa dá len s heslom (K1 bod 4). Nikdy nie `false`. */
+  requiresSudoToRelease: boolean;
+  /** Prekážky oblasti `rozsah` presne tak, ako ich pomenúva `blockers.ts`. */
+  blockers: readonly Blocker[];
+}
+
+/**
+ * Prekážky JEDNEJ oblasti nad snapshotom, ktorý volajúci naozaj prečítal.
+ * Ostatné oblasti sa zahadzujú — viď komentár pri `ScopeRefusalDetail`.
+ */
+function blockersOfArea(
+  snapshot: Parameters<typeof collectOperationBlockers>[0],
+  area: Blocker['area'],
+): readonly Blocker[] {
+  return collectOperationBlockers(snapshot).filter((blocker) => blocker.area === area);
+}
+
+/** Prekážky rozsahu pre daný výber. `null` = koľko ich je, volajúci nevie. */
+export function scopeBlockers(
+  scope: ResolvedScope,
+  selectedCount: number | null,
+): readonly Blocker[] {
+  return blockersOfArea(
+    {
+      scope: { mode: scope.mode, maxProducts: scope.maxProducts, failClosed: scope.failClosed },
+      ...(selectedCount === null ? {} : { selection: { selectedCount } }),
+    },
+    'rozsah',
+  );
+}
+
+/** Prekážky env poistky zápisu (I13) — prázdne pole, keď sú zápisy povolené. */
+export function writesBlockers(enabled: boolean): readonly Blocker[] {
+  return blockersOfArea({ writes: { enabled } }, 'zapisy');
+}
+
+/** Celý obraz rozsahu k jednému odmietnutiu. */
+function scopeRefusalDetail(scope: ResolvedScope, count: number): ScopeRefusalDetail {
+  return {
+    count,
+    max: scope.maxProducts,
+    mode: scope.mode,
+    failClosed: scope.failClosed,
+    pilotMaxProducts: PILOT_MAX_PRODUCTS,
+    hardMaxProducts: HARD_MAX_PRODUCTS,
+    // Obe cesty k vyššiemu stropu si pýtajú heslo (K1 bod 4,
+    // `scopeChangeRequiresSudo()`): z `pilot` prepnutie do `plny`, v `plny`
+    // zdvihnutie `max_products_per_campaign`. Konštanta je preto pravda, nie
+    // zjednodušenie — a `false` by tu bol sľub, ktorý route nedodrží.
+    requiresSudoToRelease: true,
+    blockers: scopeBlockers(scope, count),
+  };
+}
+
 /* ═══════════════════ jednotlivé guardy (aj samostatne) ════════════════════ */
 
-/** I13/D77 — dve env poistky. Bez nich je vynútený dry-run. */
+/**
+ * I13/D77 — dve env poistky. Bez nich je vynútený dry-run.
+ *
+ * Odmietnutie nesie aj strojový dôvod z `blockers.ts`: vypnuté zápisy sú
+ * VEDOMÉ nastavenie a jediná pravdivá odpoveď na „ako to zapnem" je „mimo
+ * appky, v jej konfigurácii" (`resolution: 'mimo_appky'`, `path: null`).
+ * Bez toho vyzeral tento stav ako tichý neúspech, ktorý sa dá niekde odkliknúť.
+ */
 export function checkWritesEnabled(flags: GuardFlags): GuardResult {
   if (flags.nodeEnv === 'production' && flags.writesEnabled === true) return { ok: true };
   return refuse(
     GUARD_CODES.writesDisabled,
     'Ostrý zápis je vypnutý — vyžaduje NODE_ENV=production a WRITES_ENABLED=true (I13). Prebehol by len dry-run.',
-    { nodeEnv: flags.nodeEnv, writesEnabled: flags.writesEnabled },
+    {
+      nodeEnv: flags.nodeEnv,
+      writesEnabled: flags.writesEnabled,
+      blockers: writesBlockers(false),
+    },
   );
 }
 
@@ -421,10 +540,14 @@ export async function checkScope(
     return refuse(GUARD_CODES.notInAllowlist, 'Dávka obsahuje neplatné ID produktu (I2).');
   }
   if (unique.length > max) {
+    // B1 — TOTO je moment, v ktorom appka doteraz mlčky odmietla a používateľ
+    // sa nedozvedel, že strop je len prepínač. Detail nesie celý obraz rozsahu
+    // aj vety z `blockers.ts`, aby obrazovka vedela ponúknuť prepnutie do
+    // plného rozsahu namiesto slepej uličky.
     return refuse(
       GUARD_CODES.tooManyProducts,
       `Jedna operácia smie v režime „${scope.mode}" zapísať najviac ${max} produktov (I2, K1).`,
-      { count: unique.length, max, mode: scope.mode },
+      scopeRefusalDetail(scope, unique.length),
     );
   }
 

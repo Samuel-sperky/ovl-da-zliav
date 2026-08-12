@@ -18,6 +18,12 @@
  *    znamená najprísnejší režim. `get()` naopak hádže ďalej — je to bežné
  *    čítanie nastavení a tichý default by tam bol klamstvo.
  *
+ * Čo sa tu NESMIE pokaziť: `scopeChangeRequiresSudo()` je jediné miesto, kde je
+ * napísaná asymetria K1 bodu 4 („sprísnenie je vždy voľné, uvoľnenie nikdy").
+ * Route ju vynucuje, obrazovka ju ohlasuje dopredu — ale rozhodnutie musí
+ * pochádzať z jednej funkcie, inak sa raz rozídu a heslo si vypýta niečo iné,
+ * než čo obrazovka sľúbila.
+ *
  * Vlastník: V4.
  */
 import type { Queryable, SettingsRecord, SettingsRepo, UtcDate } from '@/contracts';
@@ -76,6 +82,50 @@ export function effectiveMaxProducts(scope: ScopeSettings): number {
   const value = Math.trunc(scope.maxProductsPerCampaign);
   if (!Number.isFinite(value) || value < 1) return PILOT_MAX_PRODUCTS;
   return Math.min(HARD_MAX_PRODUCTS, value);
+}
+
+/* ──────────────── asymetria uvoľnenia a sprísnenia (K1 bod 4) ───────────── */
+
+/** Zámer zmeny rozsahu — čo chce volajúci nastaviť. */
+export interface ScopeChangeIntent {
+  mode: ScopeMode;
+  /** Nový strop pre `plny`. `undefined` = uložená hodnota ostáva. */
+  maxProductsPerCampaign?: number | undefined;
+}
+
+/**
+ * K1 bod 4 — „sprísnenie je vždy voľné, uvoľnenie nikdy."
+ *
+ * Vracia `true`, keď zmena rozsah UVOĽŇUJE, a teda si musí vypýtať heslo
+ * (sudo). Uvoľnením sú DVE veci, nie jedna:
+ *
+ *  1. **`pilot → plny`** — aj pri rovnakom čísle stropu. V `plny` sa prestáva
+ *     vynucovať allowlist a nastupuje katalóg (K1 bod 2), takže sa mení to,
+ *     KTORÉ produkty prejdú, nie len koľko ich prejde.
+ *  2. **zvýšenie efektívneho stropu** — vrátane `plny → plny` z 8 000 na
+ *     10 000. Bez tejto vetvy by sa dal strop zdvihnúť bez hesla a z vety
+ *     „rozsah sa nedá rozšíriť bez sudo" (I2 po K1) by ostala polovica.
+ *
+ * Opačný smer (`plny → pilot`, zníženie stropu, rovnaký stav) heslo NIKDY
+ * nepýta — v núdzi sa appka musí dať pribrzdiť aj bez neho. Preto sa tu
+ * porovnávajú EFEKTÍVNE stropy: uložený `max_products_per_campaign` sa
+ * v `pilot` nepoužíva a jeho zmena tam nie je uvoľnením ničoho.
+ *
+ * Fail-closed: `before` z nečitateľnej DB je `pilot` (`FAIL_CLOSED_SCOPE`),
+ * takže prechod z „neviem" do `plny` je uvoľnenie a heslo si vypýta.
+ */
+export function scopeChangeRequiresSudo(
+  before: ScopeSettings,
+  intent: ScopeChangeIntent,
+): boolean {
+  const releasingMode = intent.mode === 'plny' && before.mode !== 'plny';
+  const after: ScopeSettings = {
+    ...before,
+    mode: intent.mode,
+    maxProductsPerCampaign: intent.maxProductsPerCampaign ?? before.maxProductsPerCampaign,
+  };
+  const raisingCap = effectiveMaxProducts(after) > effectiveMaxProducts(before);
+  return releasingMode || raisingCap;
 }
 
 /* ─────────────────────────────────── SQL ───────────────────────────────── */
