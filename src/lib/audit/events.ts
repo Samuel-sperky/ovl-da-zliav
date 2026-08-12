@@ -31,6 +31,7 @@ export const AUDIT_EVENT_TYPES = [
   'key_panic_wipe',
   // nastavenia, allowlist, katalóg (D80, I2, D56–D57)
   'domain_changed',
+  'scope_mode_changed',
   'allowlist_added',
   'allowlist_removed',
   'allowlist_marked_unknown',
@@ -111,6 +112,7 @@ export const AuditEvent = {
   KEY_WIPED: 'key_wiped',
   KEY_PANIC_WIPE: 'key_panic_wipe',
   DOMAIN_CHANGED: 'domain_changed',
+  SCOPE_MODE_CHANGED: 'scope_mode_changed',
   ALLOWLIST_ADDED: 'allowlist_added',
   ALLOWLIST_REMOVED: 'allowlist_removed',
   ALLOWLIST_MARKED_UNKNOWN: 'allowlist_marked_unknown',
@@ -178,6 +180,7 @@ export const AUDIT_EVENT_LABEL_SK: Record<AuditEventType, string> = {
   key_wiped: 'API kľúč vymazaný',
   key_panic_wipe: 'API kľúč vymazaný — panic button',
   domain_changed: 'Zmena domény shopu',
+  scope_mode_changed: 'Zmena režimu rozsahu',
   allowlist_added: 'Produkt pridaný do allowlistu',
   allowlist_removed: 'Produkt odobraný z allowlistu',
   allowlist_marked_unknown: 'Produkt označený ako neznámy',

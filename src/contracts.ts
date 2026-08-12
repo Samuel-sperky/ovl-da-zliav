@@ -167,6 +167,10 @@ export type AuditEventType =
   | 'key_wiped'
   | 'key_panic_wipe'
   | 'domain_changed'
+  // K1 bod 4 — prepnutie režimu rozsahu `pilot` ↔ `plny`. Uvoľnenie stropu
+  // desiatich produktov musí byť dohľadateľné, inak sa nedá zistiť, kedy a kto
+  // appku pustil na celý katalóg.
+  | 'scope_mode_changed'
   | 'allowlist_added'
   | 'allowlist_removed'
   | 'allowlist_marked_unknown'

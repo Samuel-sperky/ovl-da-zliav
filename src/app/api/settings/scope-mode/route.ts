@@ -44,15 +44,13 @@ import {
 /**
  * K1 bod 4 — audit prepnutia režimu.
  *
- * `AuditEventType` v `src/contracts.ts` (vlastník A0) ani runtime zoznam
- * v `src/lib/audit/events.ts` (vlastník A2) túto hodnotu zatiaľ nemajú a V8
- * cudzie súbory needituje. Stĺpec `audit_log.event_type` je `VARCHAR(48)`,
- * takže riadok sa uloží správne a append-only (I4) platí; `appendAudit()` k nemu
- * len zaloguje `audit_unknown_event_type`, kým sa hodnota do oboch zoznamov
- * nedoplní. Požiadavka je vo výstupe V8 — bez nej by sa prepnutie do `plny`
- * nedalo dohľadať, čo K1 výslovne vyžaduje.
+ * Hodnota je od 12. 8. 2026 riadnym členom `AuditEventType` v `src/contracts.ts`
+ * aj runtime zoznamu v `src/lib/audit/events.ts`. Dovtedy sa sem musela
+ * pretypovať a `appendAudit()` pri každom prepnutí režimu zapísal riadok, ale
+ * zároveň zalogoval `audit_unknown_event_type` — teda jediná udalosť, ktorú K1
+ * bod 4 vyžaduje dohľadať, sa hlásila ako neznáma.
  */
-export const SCOPE_MODE_CHANGED_EVENT = 'scope_mode_changed' as AuditEventType;
+export const SCOPE_MODE_CHANGED_EVENT: AuditEventType = 'scope_mode_changed';
 
 export const scopeModeBodySchema = z.object({
   mode: z.enum(['pilot', 'plny']),
