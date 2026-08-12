@@ -37,7 +37,13 @@ interface MigrationFile {
   name: string;
   path: string;
   raw: string;
+  /** SHA-256 obsahu s normalizovanými koncami riadkov (LF). */
   checksum: string;
+  /**
+   * Checksumy tej istej migrácie spočítané z iných koncov riadkov. Rozdiel
+   * oproti nim NIE JE zmena obsahu — viď kontrola driftu nižšie.
+   */
+  eolVariants: string[];
 }
 
 interface AppliedRow {
@@ -113,14 +119,38 @@ export function loadMigrationFiles(dir: string): MigrationFile[] {
 
     const path = join(dir, name);
     const raw = readFileSync(path, 'utf8');
-    return {
-      id,
-      name,
-      path,
-      raw,
-      checksum: createHash('sha256').update(raw, 'utf8').digest('hex'),
-    };
+    return { id, name, path, raw, ...checksumsFor(raw) };
   });
+}
+
+export const sha256 = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex');
+
+/** CRLF aj CR → LF. Obsah migrácie je SQL; konce riadkov v ňom nič neznamenajú. */
+export const normalizeEol = (text: string): string => text.replace(/\r\n?/g, '\n');
+
+export const toCrlf = (text: string): string => normalizeEol(text).replace(/\n/g, '\r\n');
+
+/** Ako dopadlo porovnanie uloženého checksumu s tým, čo je práve na disku. */
+export type ChecksumVerdict = 'ok' | 'eol_only' | 'drift';
+
+/**
+ * Rozhodne, či je rozdiel checksumu skutočnou zmenou migrácie, alebo len iným
+ * koncom riadkov. Čistá funkcia, aby sa dalo otestovať to podstatné: že
+ * `drift` naďalej znamená STOP.
+ */
+export function classifyChecksum(stored: string, file: Pick<MigrationFile, 'checksum' | 'eolVariants'>): ChecksumVerdict {
+  if (stored === file.checksum) return 'ok';
+  if (file.eolVariants.includes(stored)) return 'eol_only';
+  return 'drift';
+}
+
+/** Checksum a jeho „historické" podoby pre obsah načítaný zo súboru. */
+export function checksumsFor(raw: string): Pick<MigrationFile, 'checksum' | 'eolVariants'> {
+  return {
+    checksum: sha256(normalizeEol(raw)),
+    eolVariants: [sha256(raw), sha256(toCrlf(raw))],
+  };
 }
 
 /* ───────────────────────── rozdelenie na príkazy ───────────────────────── */
@@ -296,15 +326,34 @@ async function main(): Promise<void> {
     const applied = new Map(appliedRows.map((row) => [Number(row.id), row]));
 
     // 1) Fail-fast pri zmene checksumu už aplikovanej migrácie.
+    //
+    // VÝNIMKA — KONCE RIADKOV. Checksum sa od 12. 8. 2026 počíta z obsahu s
+    // normalizovanými koncami riadkov, lebo na Windows dá `git checkout` raz
+    // LF a raz CRLF pre ten istý commit (`.gitattributes` má `text=auto
+    // eol=lf`, ale `git status` normalizuje pri porovnaní, takže sa rozdiel
+    // nikde neukáže). Migrácia sa tým NEZMENÍ — SQL je bajt za bajtom to isté,
+    // len má iné oddeľovače riadkov. Predtým to znamenalo, že sa appka po
+    // nevinnej operácii s gitom odmietla spustiť a testovacia DB sa rozišla
+    // s produkčnou.
+    //
+    // D88 tým NEOSLABUJEME: keď sa líši čokoľvek iné než konce riadkov,
+    // beh padne rovnako tvrdo ako doteraz. Rozpoznaný rozdiel v koncoch
+    // riadkov sa nahlási a uložený checksum sa prepíše na normalizovaný,
+    // aby to bola jednorazová udalosť a nie večné varovanie.
     const drift: string[] = [];
+    const healed: { id: number; name: string; checksum: string }[] = [];
     for (const migration of migrations) {
       const row = applied.get(migration.id);
       if (!row) continue;
-      if (row.checksum !== migration.checksum) {
-        drift.push(
-          `${migration.name}: v DB ${row.checksum.slice(0, 12)}…, v repe ${migration.checksum.slice(0, 12)}…`,
-        );
+      const verdict = classifyChecksum(row.checksum, migration);
+      if (verdict === 'ok') continue;
+      if (verdict === 'eol_only') {
+        healed.push({ id: migration.id, name: migration.name, checksum: migration.checksum });
+        continue;
       }
+      drift.push(
+        `${migration.name}: v DB ${row.checksum.slice(0, 12)}…, v repe ${migration.checksum.slice(0, 12)}…`,
+      );
     }
     for (const row of applied.values()) {
       if (!migrations.some((m) => m.id === Number(row.id))) {
@@ -315,6 +364,21 @@ async function main(): Promise<void> {
       throw new Error(
         'Migrácie sa rozišli s DB — už aplikovanú migráciu NESMIEŠ meniť ' +
           `(rollback je manuálny, D88):\n  - ${drift.join('\n  - ')}`,
+      );
+    }
+
+    // 1b) Prepíš checksumy, ktoré sa líšili LEN koncami riadkov.
+    if (healed.length > 0) {
+      for (const item of healed) {
+        await conn.query('UPDATE _migrations SET checksum = ? WHERE id = ?', [
+          item.checksum,
+          item.id,
+        ]);
+      }
+      console.log(
+        `[migrate] ${healed.length} už aplikovaných migrácií malo checksum spočítaný z iných ` +
+          'koncov riadkov (Windows). Obsah je zhodný, checksum prepisujem na normalizovaný: ' +
+          healed.map((h) => h.name).join(', '),
       );
     }
 
