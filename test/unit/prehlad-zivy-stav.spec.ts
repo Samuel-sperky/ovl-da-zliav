@@ -76,6 +76,7 @@ function sync(patch: Partial<CatalogSyncView> = {}): CatalogSyncView {
     loadedProducts: 2900,
     shopTotalProducts: 41082,
     complete: false,
+    refreshing: false,
     lastReadAt: '2026-08-12T08:40:00.000Z',
     waiting: null,
     nextBatchAt: '2026-08-12T09:15:00.000Z',
@@ -274,6 +275,26 @@ describe('Prehľad — riadky „čo appka práve robí"', () => {
       null,
     );
     expect(klamlivyPriznak.word).not.toBe('načítaný celý');
+  });
+
+  /**
+   * Po KAŽDOM dokončenom prechode beží nový (obnovovací) a ten začína od
+   * stránky 0. Prehľad vtedy hlásil „načítaný celý", kým karta v Produktoch
+   * vedľa toho tvrdila „382 stránok ostáva, ešte 2 dni". Katalóg je celý — a
+   * Prehľad má povedať aj to, že sa práve obnovuje, inak je čítanie shopu
+   * pri „hotovom" katalógu záhada.
+   */
+  it('obnova nad celým katalógom je „načítaný celý", a je vidieť, že beží', () => {
+    const obnova = catalogActivity(
+      sync({ loadedProducts: 41_082, complete: false, refreshing: true }),
+      null,
+    );
+
+    expect(obnova.tone).toBe('ok');
+    expect(obnova.word).toBe('načítaný celý');
+    expect(obnova.text).toContain('obnovuje');
+    // Žiadny odhad dokončenia — nie je čo dokončovať.
+    expect(obnova.text).not.toContain('≈');
   });
 
   it('chýbajúci krok fronty znamená „appka nekontroluje", nie pokoj', () => {

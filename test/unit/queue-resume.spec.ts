@@ -30,7 +30,7 @@ import type {
 
 import { createQueueResumePost } from '@/app/api/queue/resume/route';
 import type { RoutesDeps } from '@/app/api/campaigns/_shared';
-import type { RouteDeps } from '@/lib/http/define-route';
+import { resetRateLimiter, type RouteDeps } from '@/lib/http/define-route';
 import { isQueuePaused, pauseQueue, resetQueueGate } from '@/lib/scheduler/pause';
 
 /* ═══════════════════════════ 1. Fixtures ══════════════════════════════════ */
@@ -182,26 +182,30 @@ interface ResumeBody {
   };
 }
 
+function resumeRequest(): Request {
+  return new Request(`${APP_ORIGIN}/api/queue/resume`, {
+    method: 'POST',
+    headers: {
+      cookie: 'ovl_zliav_session=x',
+      origin: APP_ORIGIN,
+      host: 'zlavy.local',
+      'content-type': 'application/json',
+    },
+    body: '{}',
+  });
+}
+
 async function callResume(world: World): Promise<ResumeBody> {
   const handler = createQueueResumePost(world.deps, sessionDeps());
-  const response = await handler(
-    new Request(`${APP_ORIGIN}/api/queue/resume`, {
-      method: 'POST',
-      headers: {
-        cookie: 'ovl_zliav_session=x',
-        origin: APP_ORIGIN,
-        host: 'zlavy.local',
-        'content-type': 'application/json',
-      },
-      body: '{}',
-    }),
-  );
+  const response = await handler(resumeRequest());
   expect(response.status).toBe(200);
   return (await response.json()) as ResumeBody;
 }
 
 beforeEach(() => {
   resetQueueGate();
+  // Okenný limit je stav modulu — bez vynulovania by sa testy tlmili navzájom.
+  resetRateLimiter();
 });
 
 /* ══════════════════════ 2. Brána — jadro opravy ═══════════════════════════ */
@@ -336,5 +340,50 @@ describe('POST /api/queue/resume — zľavy, ktorým chýba kľúč', () => {
 
     expect(body.data.resumed).toBe(0);
     expect(world.requeued).toEqual([]);
+  });
+});
+
+/* ══════════════════════ 5. Cena jedného kliknutia ═════════════════════════ */
+
+describe('POST /api/queue/resume — okenný limit', () => {
+  /**
+   * JEDEN KLIK = AŽ ~200 ZÁPISOV DO DB.
+   *
+   * Route prejde až sto prepadnutých zliav a ku každej pripíše audit záznam,
+   * takže jedna požiadavka je stovka `UPDATE`-ov a stovka `INSERT`-ov nad
+   * `audit_log` (append-only, I4 — zmazať sa nedajú). Držané tlačidlo alebo
+   * cyklus v skripte tým vie zaplniť audit a vyprázdniť pool (`DB_CONNECTION_LIMIT`,
+   * default 8) presne vtedy, keď má fronta zapisovať. Rýchlejšie sa fronta
+   * nerozbehne tým, že sa klikne desaťkrát — brána je otvorená po prvom klike.
+   */
+  it('opakované klikanie sa utlmí, nie sto zápisov na požiadavku', async () => {
+    const world = makeWorld({
+      missed: [campaign(1, 'missed', 'Prvá'), campaign(2, 'missed', 'Druhá')],
+    });
+    const handler = createQueueResumePost(world.deps, sessionDeps());
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      statuses.push((await handler(resumeRequest())).status);
+    }
+
+    expect(statuses[0]).toBe(200);
+    const throttled = statuses.filter((status) => status === 429);
+    expect(throttled.length).toBeGreaterThan(0);
+    // Utlmená požiadavka sa k DB vôbec nedostane — žiadne ďalšie zápisy.
+    expect(world.audit.length).toBeLessThan(8 * 2);
+  });
+
+  it('utlmená odpoveď povie, kedy to skúsiť znova', async () => {
+    const world = makeWorld({ missed: [] });
+    const handler = createQueueResumePost(world.deps, sessionDeps());
+
+    let last = await handler(resumeRequest());
+    for (let i = 0; i < 8 && last.status !== 429; i += 1) {
+      last = await handler(resumeRequest());
+    }
+
+    expect(last.status).toBe(429);
+    expect(Number(last.headers.get('Retry-After'))).toBeGreaterThan(0);
   });
 });

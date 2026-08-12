@@ -83,10 +83,19 @@ export interface CatalogStatusView {
   readonly shopTotalProducts: number | null;
   readonly percent: number | null;
   readonly complete: boolean;
+  /**
+   * `true` = katalóg appka MÁ celý, ale beží nad ním nový (obnovovací) prechod.
+   * Bez tohto poľa si karta protirečila: `pagesDone` patrí prechodu, ktorý po
+   * dokončení predchádzajúceho začína od nuly, takže vedľa „0 chýba" stálo
+   * „382 stránok, na každej 100 produktov" a „ešte 2 dni".
+   */
+  readonly refreshing: boolean;
   readonly lastFetchedAt: string | null;
   readonly lastReadAt: string | null;
+  /** Pokrok AKTUÁLNEHO prechodu — nie „koľko z katalógu appka má". */
   readonly pagesDone: number;
   readonly pagesTotal: number | null;
+  /** Koľko stránok appke CHÝBA. Pri obnove `0` — nechýba nič. */
   readonly pagesLeft: number | null;
   readonly perPage: number;
   readonly reads: CatalogReadsView;
@@ -316,6 +325,12 @@ export function catalogStateView(status: CatalogStatusView | null): CatalogState
   if (status.complete) {
     return { tone: 'good', label: 'Katalóg je načítaný celý', detail };
   }
+  // Obnova nad celým katalógom NIE JE dopĺňanie — nechýba nič, len sa znova
+  // čítajú tie isté stránky. Rovnaká veta ako na Prehľade, inak by dve
+  // obrazovky o tom istom stave tvrdili dve rôzne veci.
+  if (status.refreshing) {
+    return { tone: 'good', label: 'Katalóg je načítaný celý, obnovuje sa', detail };
+  }
   if (status.waiting === 'error') {
     return { tone: 'attention', label: 'Načítanie katalógu sa zastavilo', detail };
   }
@@ -401,6 +416,9 @@ export function loadedTile(status: CatalogStatusView | null): CatalogTileView {
 export function missingTile(status: CatalogStatusView | null): CatalogTileView {
   if (status === null) return { value: '—', detail: 'stav sa načítava' };
   if (status.complete) return { value: '0', detail: 'katalóg je celý' };
+  // Obnova: nechýba nič, takže `pagesLeft` sa NESMIE vydávať za zvyšok. Predtým
+  // tu stálo „0" a hneď pod tým „382 stránok, na každej 100 produktov".
+  if (status.refreshing) return { value: '0', detail: 'katalóg je celý, appka ho obnovuje' };
   if (status.shopTotalProducts === null) {
     return { value: '—', detail: 'bez celkového počtu zo shopu sa to nedá povedať' };
   }
@@ -439,6 +457,11 @@ export function nextBatchTile(
 export function finishTile(status: CatalogStatusView | null): CatalogTileView {
   if (status === null) return { value: '—', detail: 'stav sa načítava' };
   if (status.complete) return { value: 'hotovo', detail: 'nič sa už nedočítava' };
+  // Pri obnove nie je čo dokončovať — odhad „ešte 2 dni" by hovoril o katalógu,
+  // ktorý appka má celý na disku.
+  if (status.refreshing) {
+    return { value: 'hotovo', detail: 'katalóg je celý, obnova beží na pozadí' };
+  }
 
   const days = status.estimatedDaysLeft;
   const at = status.estimatedFinishAt === null ? null : new Date(status.estimatedFinishAt);

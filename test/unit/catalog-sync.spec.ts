@@ -317,7 +317,8 @@ describe('syncCatalog — stránkovanie celého katalógu (K7)', () => {
     });
 
     expect(result.outcome).toBe('partial');
-    expect(result.error).toContain('shop_unreachable');
+    // KÓD, nie hláška z knižnice (I1) — viď test „chyba je KÓD…" nižšie.
+    expect(result.error).toBe('local_Error');
     expect(result.products).toBe(10);
     expect(catalog.rows.size).toBe(10);
     // A2 — pokrok ostal na poslednej ÚSPEŠNE zapísanej stránke.
@@ -354,6 +355,56 @@ describe('syncCatalog — stránkovanie celého katalógu (K7)', () => {
     expect(result.outcome).toBe('partial');
     expect(result.error).toContain('upsert_failed');
     expect(result.products).toBe(5);
+  });
+
+  /**
+   * CHYBA JE KÓD, NIKDY TEXT (I1).
+   *
+   * Doc-blok modulu aj migrácia 0013 to sľubujú oboje („`last_error` je KÓD,
+   * nikdy obsah odpovede shopu"), lenže `errorCode()` vracal
+   * `` `${name}: ${message}` `` — teda celú hlášku z knižnice. Odtiaľ išla do
+   * `catalog_sync_state.last_error`, do logu aj do „Technického detailu"
+   * v Nastaveniach. Hláška z `mariadb` alebo z `fetch` pritom bežne nesie
+   * connection string, cestu k súboru či hostname. `sales-sync.ts` to má
+   * správne (`local_${name}`) a tieto dva moduly sa nesmú rozísť.
+   */
+  it('chyba je KÓD — hláška z knižnice sa do stavu ani do logu nedostane', async () => {
+    const secret = 'Access denied for user ovl_zliav_app@127.0.0.1 (password: YES)';
+    const catalog = fakeCatalog();
+
+    const result = await syncCatalog({
+      shopClient: {
+        async listProducts() {
+          throw new Error(secret);
+        },
+      },
+      catalog,
+      progress: catalog,
+      budget: catalog,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+
+    expect(result.error).toBe('local_Error');
+    expect(result.error).not.toContain('ovl_zliav_app');
+    expect(result.error).not.toContain('password');
+    // Do pokroku (a teda do `catalog_sync_state.last_error`) ide ten istý kód.
+    expect(catalog.progress.lastError).toBe('local_Error');
+  });
+
+  it('kód chyby prežije aj cestu cez `upsert_failed`', async () => {
+    const catalog = fakeCatalog({ failOnCall: 1 });
+    const result = await syncCatalog({
+      shopClient: fakeShop(23),
+      catalog,
+      progress: catalog,
+      budget: catalog,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+
+    expect(result.error).toBe('upsert_failed: local_Error');
+    expect(result.error).not.toContain('DB je preč');
   });
 
   it('medzi stránkami sa čaká — anonymný limit shopu je 30/min a 300/UTC deň', async () => {
@@ -665,6 +716,99 @@ describe('syncCatalog — denný rozpočet čítaní (A4)', () => {
     expect(result.pages).toBe(1);
     // Dve rezervácie: úspešná stránka 1 aj neúspešná stránka 2.
     expect(catalog.reads).toBe(2);
+  });
+
+  /**
+   * NEČITATEĽNÉ POČÍTADLO NIE JE MINUTÝ ROZPOČET.
+   *
+   * `createReadBudget().reserve()` pri nedostupnom úložisku NEHÁDŽE — vráti
+   * `granted: 0` a fail-closed `status`, kde `exhausted: true`, ale
+   * `known: false`. Keby sa `known` prehliadlo, jedna prechodná chyba DB by
+   * zapísala `paused_until` na polnoc UTC a zamrazila katalóg na 24 hodín:
+   * nepustí ho ani `POST /api/catalog/sync {restart:true}` (pauza sa
+   * kontroluje PRED `restart`) a UI by tvrdilo „dnešný rozpočet je minutý",
+   * hoci počítadlo môže stáť na 12 z 240. Domnienka sa nesmie zapísať do
+   * pokroku ako fakt (I11).
+   */
+  it('nečitateľné počítadlo je prechodná chyba, nie minutý rozpočet', async () => {
+    const catalog = fakeCatalog({ now });
+    const budget = createReadBudget({
+      store: {
+        async used() {
+          throw new Error('DB je preč');
+        },
+        async add() {
+          throw new Error('DB je preč');
+        },
+      },
+      lane: 'anon',
+      now,
+    });
+    const shop = fakeShop(50);
+
+    const result = await syncCatalog({
+      shopClient: shop,
+      catalog,
+      progress: catalog,
+      budget: { reserveShopReads: (count = 1) => budget.reserve(count) },
+      now,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+
+    // Na shop sa nesiahlo (fail-closed), ale ani sa netvrdí, že je minutý deň.
+    expect(shop.pagesRequested).toHaveLength(0);
+    expect(result.stoppedBy).toBe('error');
+    expect(result.error).toBe('read_budget_unknown');
+    expect(result.outcome).toBe('failed');
+    // A hlavne: NIJAKÁ pauza do polnoci UTC.
+    expect(catalog.progress.pauseReason).not.toBe('daily_budget');
+    expect(result.resumeAt?.toISOString()).not.toBe('2026-08-13T00:00:00.000Z');
+  });
+
+  it('po nečitateľnom počítadle sa ďalší beh smie hneď pokúsiť znova', async () => {
+    // Prechodná chyba nesmie po sebe nechať zámok: keď DB o minútu funguje,
+    // beh musí pokračovať, nie čakať na polnoc UTC.
+    let brokenCalls = 0;
+    const store = createMemoryReadBudgetStore();
+    const budget = createReadBudget({
+      store: {
+        async used(lane, day) {
+          brokenCalls += 1;
+          if (brokenCalls === 1) throw new Error('DB je preč');
+          return store.used(lane, day);
+        },
+        add: (lane, day, count) => store.add(lane, day, count),
+      },
+      lane: 'anon',
+      now,
+    });
+    const catalog = fakeCatalog({ now });
+    const gate = { reserveShopReads: (count = 1) => budget.reserve(count) };
+
+    const first = await syncCatalog({
+      shopClient: fakeShop(10),
+      catalog,
+      progress: catalog,
+      budget: gate,
+      now,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+    expect(first.outcome).toBe('failed');
+
+    const second = await syncCatalog({
+      shopClient: fakeShop(10),
+      catalog,
+      progress: catalog,
+      budget: gate,
+      now,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+
+    expect(second.outcome).toBe('ok');
+    expect(catalog.progress.completed).toBe(true);
   });
 });
 
@@ -1009,6 +1153,142 @@ describe('runCatalogSyncIfDue — kedy sa sync spustí (K7, A2)', () => {
         sleepFn: noSleep,
       },
       { now: offPeak },
+    );
+
+    expect(report.outcome).toBe('failed');
+    expect(shop.pagesRequested).toHaveLength(0);
+  });
+});
+
+/* ═══════════ Dva behy naraz — a to aj z dvoch module grafov ════════════════ */
+
+/**
+ * IN-PROCESS `running` NESTAČÍ.
+ *
+ * Next.js kompiluje `instrumentation` do vlastného module grafu, takže premenná
+ * `running` v tomto module existuje DVAKRÁT: raz ju vidí tick schedulera, raz
+ * route `POST /api/catalog/sync`. Doc-blok route pritom sľuboval, že „dva behy
+ * naraz odmietne" — a ten sľub in-process boolean cez dva grafy nedrží. Dva
+ * súbežné behy si prepisujú pokrok a zdvoja čítania z denného rozpočtu.
+ *
+ * Druhá vrstva je preto DB advisory lock (`GET_LOCK`, rovnaký vzor ako zápisový
+ * mutex v `engine/mutex.ts`): jedno spojenie na celú databázu, takže ho vidia
+ * oba grafy — aj omylom spustená druhá inštancia procesu.
+ */
+describe('runner — druhý súbežný beh sa odmietne aj z druhého module grafu', () => {
+  const now = new Date('2026-08-12T22:00:00.000Z');
+
+  /** Lock, ktorý drží „niekto iný" — presne to, čo vráti obsadený `GET_LOCK`. */
+  function heldByOther() {
+    let attempts = 0;
+    return {
+      attempts: () => attempts,
+      lock: async () => {
+        attempts += 1;
+        return null;
+      },
+    };
+  }
+
+  function freeLock() {
+    let released = 0;
+    return {
+      released: () => released,
+      lock: async () => ({
+        release: async () => {
+          released += 1;
+        },
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    resetCatalogRunnerState();
+  });
+
+  it('obsadený DB lock odmietne manuálne načítanie, na shop sa nesiahne', async () => {
+    const shop = fakeShop(12);
+    const catalog = fakeCatalog();
+    const other = heldByOther();
+
+    const report = await runCatalogSyncNow(
+      { shopClient: shop, catalog, sleepFn: noSleep, lock: other.lock },
+      { now },
+    );
+
+    expect(report.outcome).toBe('already_running');
+    expect(report.sync).toBeNull();
+    expect(shop.pagesRequested).toHaveLength(0);
+    expect(catalog.calls).toBe(0);
+    expect(other.attempts()).toBe(1);
+  });
+
+  it('obsadený DB lock odmietne aj plánovaný beh', async () => {
+    const shop = fakeShop(12);
+    const catalog = fakeCatalog();
+    const other = heldByOther();
+
+    const report = await runCatalogSyncIfDue(
+      { shopClient: shop, catalog, sleepFn: noSleep, lock: other.lock },
+      { now },
+    );
+
+    expect(report.outcome).toBe('already_running');
+    expect(shop.pagesRequested).toHaveLength(0);
+  });
+
+  it('voľný lock beh pustí a po ňom ho VŽDY uvolní', async () => {
+    const shop = fakeShop(12);
+    const catalog = fakeCatalog();
+    const free = freeLock();
+
+    const report = await runCatalogSyncNow(
+      { shopClient: shop, catalog, perPage: 5, sleepFn: noSleep, lock: free.lock },
+      { now },
+    );
+
+    expect(report.outcome).toBe('ran');
+    expect(catalog.rows.size).toBe(12);
+    expect(free.released()).toBe(1);
+  });
+
+  it('lock sa uvolní aj po zlyhaní behu — inak by ostal držaný do reštartu', async () => {
+    const catalog = fakeCatalog();
+    const free = freeLock();
+
+    const report = await runCatalogSyncIfDue(
+      {
+        shopClient: fakeShop(12),
+        catalog: {
+          ...catalog,
+          async loadSyncProgress(): Promise<CatalogSyncProgress> {
+            throw new Error('DB je preč');
+          },
+        },
+        sleepFn: noSleep,
+        lock: free.lock,
+      },
+      { now },
+    );
+
+    expect(report.outcome).toBe('failed');
+    expect(free.released()).toBe(1);
+  });
+
+  it('nedostupná DB pri lockovaní beh NESPUSTÍ (fail-closed)', async () => {
+    const shop = fakeShop(12);
+    const catalog = fakeCatalog();
+
+    const report = await runCatalogSyncNow(
+      {
+        shopClient: shop,
+        catalog,
+        sleepFn: noSleep,
+        lock: async () => {
+          throw new Error('DB je preč');
+        },
+      },
+      { now },
     );
 
     expect(report.outcome).toBe('failed');

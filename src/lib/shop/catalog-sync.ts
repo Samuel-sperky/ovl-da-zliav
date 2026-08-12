@@ -265,11 +265,19 @@ function createMemoryBudgetGate(): CatalogReadBudgetGate {
 
 /**
  * Chyba → KÓD (I1). Nikdy text odpovede shopu, nikdy hláška z knižnice — len
- * zaradenie, ktoré si appka vyrobila sama. Rovnaké pravidlo ako v `sales-sync`.
+ * zaradenie, ktoré si appka vyrobila sama. Rovnaké pravidlo ako v `sales-sync`,
+ * a rovnaká implementácia: `local_${name}`, nie `${name}: ${message}`.
+ *
+ * Prečo NIE `message`: odtiaľto ide kód do `catalog_sync_state.last_error`
+ * (migrácia 0013 to sľubuje slovom „KÓD"), do logu a do „Technického detailu"
+ * v Nastaveniach. Hlášky z `mariadb` a z `fetch` pritom bežne nesú connection
+ * string, cestu k súboru alebo hostname — teda presne to, čo I1 z povrchu
+ * vyhadzuje. Diagnostika sa tým nestráca: celú výnimku dostane logger na svojej
+ * strane, nie stav appky.
  */
 function errorCode(error: unknown): string {
   if (isShopRequestError(error)) return error.shopError.code ?? error.shopError.kind;
-  if (error instanceof Error && error.name.length > 0) return `${error.name}: ${error.message}`;
+  if (error instanceof Error && error.name.length > 0) return `local_${error.name}`;
   return 'local_unknown';
 }
 
@@ -461,6 +469,23 @@ export async function syncCatalog(deps: CatalogSyncDeps): Promise<CatalogSyncRes
       break;
     }
     if (reservation.granted < 1) {
+      // ROZDIEL MEDZI „DNES UŽ NIČ" A „NEVIEME, KOĽKO DNES ODIŠLO" (I11).
+      //
+      // `reserve()` pri nedostupnom úložisku NEHÁDŽE — vráti `granted: 0` a
+      // fail-closed `status`, v ktorom je `exhausted: true`, ale `known: false`.
+      // Nečítať je správne (rovnako ako pri minutom rozpočte), ALE zapísať
+      // `paused_until` na polnoc UTC by z jednej prechodnej chyby DB spravilo
+      // 24-hodinové zamrznutie katalógu: pauza sa kontroluje PRED `restart`,
+      // takže ju nepustí ani „načítať odznova", a UI by hlásilo minutý rozpočet
+      // pri počítadle, ktoré môže stáť na 12 z 240. Domnienka sa preto do
+      // pokroku NEZAPISUJE — je to prechodná chyba a ďalší beh to skúsi znova
+      // (runner ju odloží o `CATALOG_RECHECK_MS`, nie o deň).
+      if (!reservation.status.known) {
+        error = 'read_budget_unknown';
+        stoppedBy = 'error';
+        log?.error('catalog_budget_unknown', { page });
+        break;
+      }
       stoppedBy = 'daily_budget';
       resumeAt = reservation.status.resetAt;
       progress = {

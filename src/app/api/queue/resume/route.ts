@@ -85,6 +85,18 @@ export function createQueueResumePost(
     {
       method: 'POST',
       auth: 'session',
+      /**
+       * JEDEN KLIK JE AŽ ~200 ZÁPISOV DO DB: sto `requeueMissed()` a sto
+       * záznamov do `audit_log`, ktorý je append-only (I4) — teda sa nedajú
+       * zmazať. Držané tlačidlo alebo cyklus v skripte tým vie zaplniť audit
+       * a vyprázdniť pool spojení presne vtedy, keď má fronta zapisovať.
+       *
+       * Fronta sa pritom rýchlejšie nerozbehne tým, že sa klikne desaťkrát:
+       * brána je otvorená po prvom klike a zvyšné volania len znovu prejdú
+       * ten istý zoznam. Šesť za minútu je priestor na „nefungovalo to, skúsim
+       * ešte raz" a zároveň strop, ktorý audit neutopí.
+       */
+      rateLimit: { limit: 6, windowMs: 60_000, bucket: 'queue-resume' },
       handler: (ctx) =>
         withRouteErrors(async () => {
           /* 1. Brána. Otvára sa PRVÁ: keby sa najprv vracali kampane do fronty

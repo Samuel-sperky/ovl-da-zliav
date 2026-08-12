@@ -44,6 +44,12 @@
  *  4. **Čísla sa neduplikujú, importujú sa.** Limity čítania prichádzajú
  *     z `@/lib/shop/rate-limits` — tam sa raz na tejto zámene („300 za deň" vs
  *     „300 za minútu") rozbil celý katalóg a druhá kópia by to zopakovala.
+ *     To isté platí pre ODHADY: koľko dní potrvá dočítanie katalógu, počíta
+ *     `readDaysNeeded()` z `@/lib/shop/read-budget` — tá istá funkcia ako
+ *     v `catalogRepo.syncStatus()`. Kým si tento modul počítal vlastnou
+ *     formulou, vedľa seba v jednom paneli stáli dva odhady, ktoré sa líšili
+ *     o deň. A keď odhad prišiel už spočítaný v snapshote, použije sa ON:
+ *     `syncStatus()` pozná pokrok prechodu, tento modul len počty riadkov.
  *
  * PREČO SÚ TU PREDSA PÄŤ ZRKADLENÝCH KONŠTÁNT
  * -------------------------------------------
@@ -64,9 +70,12 @@ import {
   ANON_READS_PER_MINUTE,
   ANON_READS_PER_UTC_DAY,
   SHOP_ANON_LIMIT,
-  anonReadDaysNeeded,
   nextUtcDayReset,
 } from '@/lib/shop/rate-limits';
+// Dni do dočítania katalógu počíta TÁ ISTÁ funkcia ako `catalogRepo.syncStatus()`
+// (bod 4 hlavičky). `shop/read-budget.ts` je čistý modul bez DB, takže sa smie
+// importovať aj v client komponente — na rozdiel od repozitára.
+import { readDaysNeeded } from '@/lib/shop/read-budget';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ══════════════════ 1. Zrkadlené konštanty (stráži ich test) ═══════════════ */
@@ -259,6 +268,15 @@ export interface CatalogSnapshot {
    * Prázdne pole = overené, nechýba nič. `null`/chýba = NEOVERENÉ (fail-closed).
    */
   readonly missingProductIds?: readonly number[] | null;
+  /**
+   * Koľko ďalších UTC dní potrvá dočítanie — už spočítané serverom
+   * (`catalogRepo.syncStatus().estimatedDaysLeft`). Keď chýba, modul si ho
+   * dopočíta tou istou funkciou z počtov riadkov; serverovo číslo je ale
+   * presnejšie, lebo pozná pokrok prechodu (`last_page`), nie len počty.
+   */
+  readonly estimatedDaysLeft?: number | null;
+  /** Odhad dokončenia od servera (presnosť na deň) — `clearsAt` prekážky. */
+  readonly estimatedFinishAt?: Date | null;
 }
 
 /** Denný zápisový rozpočet (`BudgetStatus` z `engine/budget.ts`, K2). */
@@ -382,6 +400,11 @@ function hoursBetween(from: Date, to: Date): number {
  * Koľko ĎALŠÍCH UTC dní bude fronta bežať. Zámerne rovnaká aritmetika ako
  * `estimateFinish()` v `engine/budget.ts` (ktorý sa sem nedá importovať —
  * ťahá `@/db/pool`); zhodu výsledkov stráži test.
+ *
+ * Je to ZÁPISOVÁ strana (K2). Čítacia má vlastnú kvótu aj vlastného vlastníka
+ * a počíta ju `readDaysNeeded()` z `@/lib/shop/read-budget` — arytmetika je tá
+ * istá, ale zliať ich do jednej funkcie by znamenalo, že zmena stropu zápisov
+ * ticho pohne odhadom katalógu.
  */
 function daysToFinish(pending: number, perDay: number, remainingToday: number): number {
   if (pending <= 0) return 0;
@@ -761,6 +784,7 @@ function catalogBlockers(
   snapshot: StatusSnapshot,
   scope: ResolvedScope,
   selected: number | null,
+  now: Date,
 ): Blocker[] {
   const list: Blocker[] = [];
   const catalog = snapshot.catalog;
@@ -833,9 +857,42 @@ function catalogBlockers(
 
   const rest = total - loaded;
   const pages = Math.ceil(rest / CATALOG_PAGE_SIZE);
-  const needsDays = anonReadDaysNeeded(pages);
+
+  /**
+   * JEDEN ODHAD, NIE DVA (bod 4 hlavičky).
+   *
+   * Prednosť má číslo od servera: `catalogRepo.syncStatus()` pozná pokrok
+   * prechodu (`last_page`), tento modul len počty riadkov. Keď neprišlo,
+   * dopočíta sa TOU ISTOU funkciou — `readDaysNeeded`, nie druhou formulou.
+   * Zvyšok dnešného rozpočtu ide z opt-in sekcie `catalogReads`; keď ju
+   * volajúci neposlal, platí fail-closed „dnes už nič", a odhad je teda ten
+   * dlhší z možných.
+   */
+  const remainingToday = readCount(snapshot.catalogReads?.usedThisUtcDay);
+  const needsDays =
+    readCount(catalog?.estimatedDaysLeft) ??
+    readDaysNeeded(
+      pages,
+      remainingToday === null ? 0 : Math.max(0, ANON_READS_PER_UTC_DAY - remainingToday),
+      ANON_READS_PER_UTC_DAY,
+    );
+
+  /**
+   * DOKEDY SA ČAKÁ (bod 3 hlavičky). Prekážka, ktorá tvrdí „počkaj si" a
+   * nepovie dokedy, je mŕtvy bod — presne to, čo tento modul vznikol odstrániť.
+   *
+   * `0` dní znamená „ešte dnes", teda najneskôr do najbližšej polnoci UTC (vtedy
+   * sa rozpočet obnoví a číta sa ďalej); každý ďalší deň je o 24 h viac. Tá istá
+   * aritmetika ako `estimatedFinishAt` v `syncStatus()`, aby oba časy v jednom
+   * paneli ukazovali na ten istý deň. Je to ODHAD, a veta ho tak aj podáva
+   * („približne"); istý je len smer — čakaním sa to pohne samo.
+   */
+  const clearsAt =
+    readDate(catalog?.estimatedFinishAt) ??
+    new Date(nextUtcDayReset(now).getTime() + Math.max(0, needsDays - 1) * 86_400_000);
+
   const estimate =
-    needsDays <= 1
+    needsDays <= 0
       ? 'Zvyšok sa dočíta ešte dnes, ak sa zmestí do denného rozpočtu čítaní.'
       : `Dočítanie potrvá približne ${days(needsDays)} — za jeden UTC deň sa zmestí ${formatCountSk(ANON_READS_PER_UTC_DAY)} čítaní po ${products(CATALOG_PAGE_SIZE)}.`;
 
@@ -850,7 +907,7 @@ function catalogBlockers(
     path: BLOCKER_PATHS.products,
     resolution: 'cakanie',
     passableNow: false,
-    clearsAt: null,
+    clearsAt,
     assumed: false,
   });
   return list;
@@ -946,7 +1003,7 @@ export function collectOperationBlockers(snapshot: StatusSnapshot = {}): readonl
     ...keyBlockers(snapshot, now, selected),
     ...writeBudgetBlockers(snapshot, now, selected),
     ...scopeBlockers(scope, selected),
-    ...catalogBlockers(snapshot, scope, selected),
+    ...catalogBlockers(snapshot, scope, selected, now),
     ...catalogReadBlockers(snapshot, now),
   ]);
 }

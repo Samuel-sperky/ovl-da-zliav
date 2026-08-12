@@ -45,9 +45,10 @@ import {
 import {
   ANON_READS_PER_MINUTE,
   ANON_READS_PER_UTC_DAY,
-  anonReadDaysNeeded,
   nextUtcDayReset,
 } from '@/lib/shop/rate-limits';
+// Odhad dní má počítať JEDNA funkcia — tá istá, akú používa `syncStatus()`.
+import { readDaysNeeded } from '@/lib/shop/read-budget';
 
 /* ─────────────── originály zrkadlených čísel (len pre porovnanie) ───────── */
 
@@ -546,9 +547,11 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
       ),
       'catalog_incomplete',
     );
-    // 28 483 chýbajúcich po 100 na stránku = 285 stránok; pri 240 čítaniach
-    // na UTC deň to sú 2 dni — a to číslo počíta `anonReadDaysNeeded`, nie test.
-    const expectedDays = anonReadDaysNeeded(Math.ceil(28_483 / CATALOG_PAGE_SIZE));
+    // 28 483 chýbajúcich po 100 na stránku = 285 stránok. Koľko je to DNÍ,
+    // počíta `readDaysNeeded` — tá istá funkcia ako v `syncStatus()`, nie druhá
+    // formula. Bez známeho zvyšku dnešného rozpočtu je fail-closed vstup
+    // „dnes už nič", teda 285 / 240 = 2 ďalšie dni.
+    const expectedDays = readDaysNeeded(Math.ceil(28_483 / CATALOG_PAGE_SIZE), 0);
     expect(expectedDays).toBe(2);
     expect(blocker.severity).toBe('obmedzuje');
     expect(blocker.what).toContain('12 000 z 40 483 produktov');
@@ -556,6 +559,92 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
     expect(blocker.what).toContain(`približne ${expectedDays} dni`);
     expect(blocker.resolution).toBe('cakanie');
     expect(blocker.passableNow).toBe(false);
+  });
+
+  /**
+   * JEDEN ODHAD, NIE DVA.
+   *
+   * Prekážka a `catalogRepo.syncStatus()` sa kreslia do TOHO ISTÉHO panelu a
+   * pritom počítali dvoma formulami: prekážka cez `anonReadDaysNeeded(pages)`
+   * (dnešný zvyšok rozpočtu ignorovala a dnešok počítala ako celý deň),
+   * `syncStatus()` cez `readDaysNeeded(pages, remaining, limit)`. Čísla sa
+   * líšili o deň a používateľ ich videl vedľa seba.
+   */
+  it('odhad počíta s dnešným zvyškom rozpočtu čítaní, rovnako ako syncStatus', () => {
+    // 285 chýbajúcich stránok a dnes je celý rozpočet (240) voľný: dnes 240,
+    // zajtra zvyšok — teda ešte JEDEN ďalší UTC deň, nie dva.
+    const blocker = byId(
+      collectOperationBlockers(
+        healthy({
+          scope: full,
+          catalog: {
+            loadedProducts: 12_000,
+            shopTotalProducts: 40_483,
+            missingProductIds: [],
+          },
+          catalogReads: { usedThisUtcDay: 0, usedThisMinute: 0 },
+        }),
+      ),
+      'catalog_incomplete',
+    );
+
+    const pages = Math.ceil(28_483 / CATALOG_PAGE_SIZE);
+    expect(readDaysNeeded(pages, ANON_READS_PER_UTC_DAY)).toBe(1);
+    expect(blocker.what).toContain('približne 1 deň');
+    expect(blocker.what).not.toContain('2 dni');
+  });
+
+  it('keď server odhad už spočítal, prekážka použije JEHO číslo', () => {
+    // `syncStatus()` pozná pokrok prechodu (`last_page`), prekážka len počty
+    // riadkov. Keď teda odhad prišiel v snapshote, druhý sa nedopočítava — inak
+    // by v jednom paneli stáli dve čísla o tej istej veci.
+    const finish = new Date('2026-08-18T00:00:00.000Z');
+    const blocker = byId(
+      collectOperationBlockers(
+        healthy({
+          scope: full,
+          catalog: {
+            loadedProducts: 12_000,
+            shopTotalProducts: 40_483,
+            missingProductIds: [],
+            estimatedDaysLeft: 6,
+            estimatedFinishAt: finish,
+          },
+          catalogReads: { usedThisUtcDay: 0, usedThisMinute: 0 },
+        }),
+      ),
+      'catalog_incomplete',
+    );
+
+    expect(blocker.what).toContain('približne 6 dní');
+    expect(blocker.clearsAt?.toISOString()).toBe(finish.toISOString());
+  });
+
+  /**
+   * Bod 3 hlavičky modulu: kto tvrdí, že sa čaká, musí povedať aj NA ČO.
+   * `catalog_incomplete` to porušovala — čakala s `clearsAt: null`.
+   */
+  it('čakanie na dočítanie katalógu povie, dokedy', () => {
+    const blocker = byId(
+      collectOperationBlockers(
+        healthy({
+          scope: full,
+          catalog: {
+            loadedProducts: 12_000,
+            shopTotalProducts: 40_483,
+            missingProductIds: [],
+          },
+          catalogReads: { usedThisUtcDay: 0, usedThisMinute: 0 },
+        }),
+      ),
+      'catalog_incomplete',
+    );
+
+    expect(blocker.resolution).toBe('cakanie');
+    expect(blocker.passableNow).toBe(false);
+    expect(blocker.clearsAt).not.toBeNull();
+    // Ten istý deň, o akom hovorí veta: 285 stránok, dnes celý rozpočet → zajtra.
+    expect(blocker.clearsAt?.toISOString()).toBe(nextUtcDayReset(NOW).toISOString());
   });
 
   it('dočítaný katalóg mlčí', () => {
@@ -766,6 +855,17 @@ const ALL_SNAPSHOTS: readonly StatusSnapshot[] = [
   healthy({ scope: { mode: 'plny' }, catalog: { missingProductIds: [1] } }),
   healthy({ catalogReads: {} }),
   healthy({ catalog: { loadedProducts: 0 } }),
+  // Rozčítaný katalóg — jediný stav, v ktorom `catalog_incomplete` čaká. Bez
+  // neho plošné invarianty tú prekážku v jej čakajúcej podobe nikdy nevidia.
+  healthy({
+    scope: { mode: 'plny', maxProducts: 500, failClosed: false },
+    catalog: { loadedProducts: 12_000, shopTotalProducts: 40_483, missingProductIds: [] },
+  }),
+  healthy({
+    scope: { mode: 'plny', maxProducts: 500, failClosed: false },
+    catalog: { loadedProducts: 12_000, shopTotalProducts: 40_483, missingProductIds: [] },
+    catalogReads: { usedThisUtcDay: 0, usedThisMinute: 0 },
+  }),
   healthy({ writeBudget: {} }),
   healthy({ apiKey: { present: true, expiresAt: new Date(NOW.getTime() - HOUR) } }),
 ];
@@ -782,8 +882,18 @@ describe('plošné invarianty každej prekážky', () => {
     }
   });
 
-  it('kto čaká, povie na čo — alebo aspoň nesľubuje čas, ktorý nepozná', () => {
+  /**
+   * Bod 3 hlavičky modulu — a obe strany, nie len jedna. Pôvodne sa tu overovalo
+   * iba to, že kto nesie `clearsAt`, ten naozaj čaká; smer „kto čaká, povie na
+   * čo" chýbal a `catalog_incomplete` sa doňho zmestila s `clearsAt: null`.
+   * Prekážka, ktorá tvrdí „počkaj si" a nepovie dokedy, je pre používateľa
+   * mŕtvy bod — presne to, čo tento modul vznikol odstrániť.
+   */
+  it('kto čaká, povie na čo — a kto nesie čas, ten naozaj čaká', () => {
     for (const blocker of EVERY_BLOCKER) {
+      if (blocker.resolution === 'cakanie') {
+        expect(blocker.clearsAt, `prekážka ${blocker.id} čaká bez času`).not.toBeNull();
+      }
       if (blocker.clearsAt !== null) {
         expect(blocker.passableNow).toBe(false);
         expect(blocker.clearsAt.getTime()).toBeGreaterThan(NOW.getTime());

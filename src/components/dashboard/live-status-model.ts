@@ -362,11 +362,18 @@ export function catalogActivity(
     (sync?.complete === true || (total !== null && total > 0 && loaded >= total));
 
   if (complete) {
+    // OBNOVA SA MUSÍ PRIZNAŤ. Po každom dokončenom prechode beží nový a ten
+    // začína od stránky 0 — appka teda číta shop pri „hotovom" katalógu. Kým to
+    // riadok nepovedal, javilo sa to ako záhada a karta v Produktoch to vedľa
+    // toho vydávala za „382 stránok ostáva, ešte 2 dni" (pokrok prechodu nie je
+    // chýbajúci katalóg).
+    const refreshing = sync?.refreshing === true;
+    const whole = done === null ? 'Katalóg je načítaný celý.' : `Načítaných je všetkých ${done}.`;
     return {
       ...base,
       tone: 'ok',
       word: 'načítaný celý',
-      text: done === null ? 'Katalóg je načítaný celý.' : `Načítaných je všetkých ${done}.`,
+      text: refreshing ? `${whole} Appka ho na pozadí obnovuje, aby ceny boli čerstvé.` : whole,
       path: '/produkty',
     };
   }

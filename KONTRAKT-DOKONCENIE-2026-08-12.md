@@ -256,7 +256,23 @@ Pred šprintom sa buď 111 testov preskakovalo, alebo si balík sám mazal sché
   `WRITES_ENABLED`. Robí ich človek, appka ich robiť nesmie.
 - **Živý beh katalógu** (kritérium 1): spúšťač má 20-hodinový odstup, počas
   šprintu sa netrafil. Overí sa sám pri ďalšom behu.
-- **Štyri nálezy z review** — flagnuté ako samostatná úloha, nie sú blokujúce.
+
+### Odložené nálezy z review — dorobené (12. 8. 2026)
+
+Osem bodov, ktoré review označila ako neblokujúce a šprint ich odložil. Každý
+najprv padajúcim testom, potom oprava; brána zelená (1 816 prešlo, 5 známych
+Windows `chmod 400`, `npx playwright test` 20/20, build prejde).
+
+| # | Nález | Čo sa zmenilo |
+|---|---|---|
+| 1 | Nečitateľné počítadlo čítaní sa nedalo odlíšiť od minutého rozpočtu — jedna chyba DB zamrazila katalóg na 24 h a nepustil ho ani `restart` | `syncCatalog()` berie `known === false` ako prechodnú chybu (`read_budget_unknown`), nezapisuje `paused_until`; `syncStatus()` z domnienky nerobí `waiting: 'daily_budget'` ani odhad |
+| 2 | Po každom dokončenom prechode karta hlásila „0 chýba" vedľa „382 stránok ostáva, ešte 2 dni" | `CatalogSyncStatus.refreshing` rozlišuje obnovu od prvého napĺňania; karta v Produktoch aj riadok na Prehľade hovoria to isté (snímky `screenshots/katalog-obnova-*.png`) |
+| 3 | Dva odhady dočítania v jednom paneli, líšili sa o deň | Jediná formula `readDaysNeeded()`; prekážka použije číslo, ktoré už spočítal `syncStatus()`. `anonReadDaysNeeded()` zrušená |
+| 4 | `catalog_incomplete` čakala bez `clearsAt` (bod 3 hlavičky modulu) | Prekážka nesie odhad dokončenia; plošný invariant testuje OBA smery pravidla |
+| 5 | `errorCode()` vracal hlášku knižnice, hoci doc aj migrácia 0013 sľubujú kód | `local_${name}` ako v `sales-sync`; test dokazuje, že sa do `last_error` nedostane text s prihlasovacími údajmi DB |
+| 6 | „Druhý súbežný beh sa odmietne" nebolo zaručené cez dva module grafy | DB advisory lock `ovl_zliav_catalog_sync` nad in-process `running`; `lastCatalogRun()` je priznane best-effort |
+| 7 | `POST /api/queue/resume` bez `rateLimit` pri ~200 zápisoch na volanie | `limit: 6 / 60 s` |
+| 8 | `syncStatus()` bral štyri spojenia z poolu naraz | Dotazy idú po jednom (test meria súbežnosť) |
 
 ### Poznámka ku kontraktu
 

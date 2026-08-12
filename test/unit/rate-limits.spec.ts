@@ -18,10 +18,11 @@ import {
   RATE_SAFETY_FACTOR,
   SHOP_ANON_LIMIT,
   SHOP_KEYED_LIMIT,
-  anonReadDaysNeeded,
   nextUtcDayReset,
   utcDayStart,
 } from '@/lib/shop/rate-limits';
+// Odhad dní má JEDNU formulu — tú, ktorou počíta aj `catalogRepo.syncStatus()`.
+import { readDaysNeeded } from '@/lib/shop/read-budget';
 
 describe('limity shopu sedia s dokumentáciou v4', () => {
   it('anonymné čítanie je 30/min a 300/UTC deň', () => {
@@ -64,18 +65,22 @@ describe('plánovanie viacdňového čítania', () => {
   it('celý katalóg sa do jedného UTC dňa nezmestí', () => {
     const pages = Math.ceil(41_082 / 100); // 411
     expect(pages).toBeGreaterThan(ANON_READS_PER_UTC_DAY);
-    expect(anonReadDaysNeeded(pages)).toBe(2);
+    // Dnes celý rozpočet voľný: dnes 240, zajtra zvyšok — teda JEDEN ďalší deň.
+    expect(readDaysNeeded(pages, ANON_READS_PER_UTC_DAY)).toBe(1);
+    // A keď z dneška neostalo nič, sú to dva.
+    expect(readDaysNeeded(pages, 0)).toBe(2);
   });
 
   it('nulová a záporná práca netrvá žiadny deň', () => {
-    expect(anonReadDaysNeeded(0)).toBe(0);
-    expect(anonReadDaysNeeded(-5)).toBe(0);
+    expect(readDaysNeeded(0, 0)).toBe(0);
+    expect(readDaysNeeded(-5, 0)).toBe(0);
   });
 
-  it('jedna stránka je jeden deň, presne denný strop tiež', () => {
-    expect(anonReadDaysNeeded(1)).toBe(1);
-    expect(anonReadDaysNeeded(ANON_READS_PER_UTC_DAY)).toBe(1);
-    expect(anonReadDaysNeeded(ANON_READS_PER_UTC_DAY + 1)).toBe(2);
+  it('odhad ráta s tým, čo z dnešného rozpočtu ostalo', () => {
+    expect(readDaysNeeded(1, 0)).toBe(1);
+    expect(readDaysNeeded(1, 1)).toBe(0);
+    expect(readDaysNeeded(ANON_READS_PER_UTC_DAY, 0)).toBe(1);
+    expect(readDaysNeeded(ANON_READS_PER_UTC_DAY + 1, 0)).toBe(2);
   });
 
   it('UTC deň sa počíta v UTC, nie v lokálnom čase', () => {

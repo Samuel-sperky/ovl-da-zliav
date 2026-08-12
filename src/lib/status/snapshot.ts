@@ -130,6 +130,17 @@ export interface CatalogFacts {
   readonly shopTotalProducts: number | null;
   /** „Dáta k …" — meraný fakt, nie odhad (P7). */
   readonly lastFetchedAt: Date | null;
+  /**
+   * Koľko ďalších UTC dní potrvá dočítanie (`syncStatus().estimatedDaysLeft`).
+   *
+   * Prenáša sa preto, aby si ho `blockers.ts` NEPOČÍTAL druhýkrát: zdroj pozná
+   * pokrok prechodu (`last_page`), prekážka len počty riadkov — a dva odhady
+   * vedľa seba v jednom paneli sa raz rozišli o deň. Voliteľné: keď zdroj odhad
+   * nepošle, prekážka si ho dopočíta TOU ISTOU funkciou z toho, čo má.
+   */
+  readonly estimatedDaysLeft?: number | null;
+  /** Odhad dokončenia s presnosťou na deň — z neho je `clearsAt` prekážky. */
+  readonly estimatedFinishAt?: Date | null;
 }
 
 /** Čítací rozpočet katalógu — opt-in, viď `CatalogReadsSnapshot` v `blockers.ts`. */
@@ -309,6 +320,9 @@ export async function buildStatusSnapshot(sources: StatusSources): Promise<Statu
           shopTotalProducts,
           // Výber je prázdny, takže „chýbajúce z vybraných" je overene prázdne.
           missingProductIds: EMPTY_SELECTION_MISSING,
+          // Odhad od zdroja — prekážka si druhý nedopočítava (viď `CatalogFacts`).
+          estimatedDaysLeft: catalogFacts?.estimatedDaysLeft ?? null,
+          estimatedFinishAt: catalogFacts?.estimatedFinishAt ?? null,
         };
 
   const snapshot: StatusSnapshot = {

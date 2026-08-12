@@ -230,15 +230,30 @@ export interface CatalogSyncStatus {
   percent: number | null;
   /** `true` = posledný prechod dočítal katalóg po koniec. */
   complete: boolean;
+  /**
+   * `true` = katalóg už appka MÁ celý, ale práve nad ním beží nový prechod
+   * (obnova). Je to iná vec než `complete` a bez nej si dve čísla v tej istej
+   * karte protirečia: `loadedProducts` je `COUNT(*)` za celý katalóg, kdežto
+   * `pagesDone` patrí AKTUÁLNEMU prechodu — a ten po dokončení predchádzajúceho
+   * začína od stránky 0. Karta potom vedľa seba tvrdila „0 chýba" aj „411
+   * stránok ostáva, ešte 2 dni". Nechýba nič; len sa znova čítajú tie isté
+   * stránky, aby boli ceny čerstvé.
+   */
+  refreshing: boolean;
   /** „Dáta k …" — `MAX(fetched_at)`, meraný fakt (P7). */
   lastFetchedAt: UtcDate | null;
   /** Kedy sa naposledy čítalo zo shopu (aj keď stránka nič nezmenila). */
   lastReadAt: UtcDate | null;
-  /** Koľko stránok má aktuálny prechod za sebou. */
+  /** Koľko stránok má AKTUÁLNY prechod za sebou (nie celý katalóg). */
   pagesDone: number;
   /** Koľko stránok má katalóg celkovo. `null` = nevieme koľko. */
   pagesTotal: number | null;
-  /** Koľko stránok ešte chýba. `null` = nevieme. */
+  /**
+   * Koľko stránok katalógu appka ešte NEMÁ. `null` = nevieme koľko.
+   *
+   * Pri obnove je to `0` — nie počet stránok, ktoré prechod ešte prečíta.
+   * Pýtame sa „čo appke chýba", nie „kde je prechod"; to druhé je `pagesDone`.
+   */
   pagesLeft: number | null;
   perPage: number;
   /** Zdieľaný denný rozpočet ANONYMNÝCH čítaní (A4). */
@@ -925,33 +940,68 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
      * Odhad je zámerne hrubý (presnosť na deň): denný strop čítaní je tvrdý,
      * takže o dokončení rozhodujú DNI, nie minúty. Presnejší odhad by bol
      * presnejšie vyzerajúce klamstvo.
+     *
+     * DOTAZY IDÚ PO JEDNOM, NIE V `Promise.all`. Endpoint `GET /api/status` sa
+     * volá z každej obrazovky pri každom obnovení a tri súbežné dotazy si berú
+     * tri spojenia z poolu (`DB_CONNECTION_LIMIT`, default 8) namiesto jedného.
+     * Dve otvorené karty a pool je na hrane presne vtedy, keď má appka povedať,
+     * čo sa deje. Séria je tu o jednotky milisekúnd pomalšia a o tri spojenia
+     * lacnejšia.
      */
     async syncStatus(opts: { now?: UtcDate; conn?: Queryable } = {}): Promise<CatalogSyncStatus> {
       const now = opts.now ?? new Date();
       const conn = opts.conn;
 
-      const [loadedProducts, lastFetchedAt, progress, reads] = await Promise.all([
-        repo.totalRows(conn),
-        repo.lastFetchedAt(conn),
-        repo.loadSyncProgress(conn),
-        readBudget.status(),
-      ]);
+      const loadedProducts = await repo.totalRows(conn);
+      const lastFetchedAt = await repo.lastFetchedAt(conn);
+      const progress = await repo.loadSyncProgress(conn);
+      const reads = await readBudget.status();
 
       const perPage = Math.max(1, progress.perPage);
       const shopTotalProducts = progress.shopTotal;
       const pagesTotal =
         shopTotalProducts === null ? null : Math.max(1, Math.ceil(shopTotalProducts / perPage));
+
+      /**
+       * OBNOVA NIE JE CHÝBAJÚCI KATALÓG.
+       *
+       * `pagesDone` je pokrok AKTUÁLNEHO prechodu, `loadedProducts` je `COUNT(*)`
+       * za celý katalóg. Po dokončenom prechode začína obnova od stránky 0, takže
+       * holý rozdiel `pagesTotal - pagesDone` tvrdil, že appke chýba celý katalóg,
+       * ktorý má na disku — a karta vedľa seba ukázala „0 chýba" aj „411 stránok
+       * ostáva, ešte 2 dni". Keď máme aspoň toľko riadkov, koľko shop hlási,
+       * nechýba ani stránka; prechod len osviežuje ceny.
+       */
+      const refreshing =
+        !progress.completed &&
+        shopTotalProducts !== null &&
+        shopTotalProducts > 0 &&
+        loadedProducts >= shopTotalProducts;
+
       const pagesDone = progress.completed ? (pagesTotal ?? progress.lastPage) : progress.lastPage;
-      const pagesLeft = pagesTotal === null ? null : Math.max(0, pagesTotal - pagesDone);
+      const pagesLeft =
+        pagesTotal === null ? null : refreshing ? 0 : Math.max(0, pagesTotal - pagesDone);
 
       const paused =
         progress.pausedUntil !== null && progress.pausedUntil.getTime() > now.getTime();
+
+      /**
+       * NEZNÁME POČÍTADLO NIE JE MINUTÝ ROZPOČET (A4, I11).
+       *
+       * `reads.exhausted` je pri `known: false` fail-closed domnienka: nečítať je
+       * správne, ale hlásiť „dnešný rozpočet je vyčerpaný" znamená tvrdiť číslo,
+       * ktoré appka nepozná — počítadlo môže stáť na 12 z 240. Dôvod čakania sa
+       * preto uvádza len z prečítaného stavu; neprečítané počítadlo má vlastnú
+       * prekážku (`catalog_reads_day_exhausted` s `assumed: true`), ktorá to
+       * povie ako domnienku.
+       */
+      const budgetSpent = reads.known && reads.exhausted;
 
       const waiting: CatalogWaitingReason | null = progress.completed
         ? 'catalog_complete'
         : paused
           ? (progress.pauseReason ?? 'rate_limited')
-          : reads.exhausted
+          : budgetSpent
             ? 'daily_budget'
             : null;
 
@@ -959,26 +1009,32 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         ? null
         : paused
           ? progress.pausedUntil
-          : reads.exhausted
+          : budgetSpent
             ? reads.resetAt
             : null;
 
       /**
        * Koľko ďalších UTC dní to potrvá. `0` = dočíta sa ešte dnes, `null` =
        * nevieme, z koľkých stránok (shop zatiaľ nepovedal `total`) — a vtedy sa
-       * odhad NEVYMÝŠĽA (I11).
+       * odhad NEVYMÝŠĽA (I11). Rovnako sa nevymýšľa z neprečítaného počítadla:
+       * fail-closed `remaining: 0` by aj pri jednej chýbajúcej stránke tvrdilo
+       * „ešte deň".
        */
       let estimatedDaysLeft: number | null = null;
-      if (progress.completed) estimatedDaysLeft = 0;
-      else if (pagesLeft !== null) {
+      if (progress.completed || refreshing) estimatedDaysLeft = 0;
+      else if (pagesLeft !== null && reads.known) {
         estimatedDaysLeft = readDaysNeeded(pagesLeft, reads.remaining, reads.limit);
       }
 
       // Odhad dokončenia s presnosťou na deň: `0` je koniec dnešného UTC dňa
       // (`reads.resetAt` je najbližšia polnoc UTC), každý ďalší deň o 24 h viac.
       // Pri dočítanom katalógu to nie je odhad, ale meraný čas dokončenia.
+      // Pri obnove nie je čo dokončovať — katalóg už je celý, preto `null`;
+      // vetu o obnove nesie `refreshing`, nie vymyslený dátum.
       let estimatedFinishAt: UtcDate | null = progress.finishedAt;
-      if (!progress.completed) {
+      if (refreshing) {
+        estimatedFinishAt = null;
+      } else if (!progress.completed) {
         estimatedFinishAt =
           estimatedDaysLeft === null
             ? null
@@ -993,6 +1049,7 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
             ? null
             : Math.min(100, Math.round((loadedProducts / shopTotalProducts) * 100)),
         complete: progress.completed,
+        refreshing,
         lastFetchedAt,
         lastReadAt: progress.lastReadAt,
         pagesDone,

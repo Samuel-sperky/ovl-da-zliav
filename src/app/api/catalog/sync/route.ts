@@ -26,6 +26,15 @@
  *    aj odstup 20 h, ale dva behy naraz odmietne (`already_running`), lebo by si
  *    prepisovali pokrok. Denný rozpočet ani pauzu po 429 neobíde tiež — strop
  *    shopu neprehovorí ani kliknutie.
+ *
+ *    Drží to DB advisory lock (`CATALOG_SYNC_LOCK_NAME`), nie in-process
+ *    premenná: `running` v runneri žije v module grafe TEJTO route, kdežto tick
+ *    schedulera má vlastný (`instrumentation`) — takže sama by odmietla len
+ *    druhé kliknutie, nie beh, ktorý práve robí scheduler. Nález review z 12. 8.
+ *  - **`lastRun` je IN-PROCESS a best-effort** z toho istého dôvodu: je to
+ *    posledný beh, ktorý videl module graf tejto route. Keď naposledy
+ *    synchronizoval scheduler, býva `null`, hoci katalóg sa hýbal. Dôkazom
+ *    pokroku je `catalog` (číta sa z `catalog_sync_state`), nie `lastRun`.
  *  - **`restart: true`** znamená „zabudni pokrok a načítaj odznova od stránky 1".
  *    Bez neho POST POKRAČUJE tam, kde beh skončil (A2).
  *
@@ -33,6 +42,7 @@
  */
 import { z } from 'zod';
 
+import { tryAcquireLock } from '@/db/advisory-lock';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 import {
   catalogRepo as defaultCatalogRepo,
@@ -44,6 +54,7 @@ import {
   lastCatalogRun,
   runCatalogSyncNow,
   CATALOG_READ_RETRY_POLICY,
+  CATALOG_SYNC_LOCK_NAME,
   type CatalogRunnerDeps,
   type CatalogRunReport,
 } from '@/lib/scheduler/catalog-runner';
@@ -61,10 +72,14 @@ export interface CatalogStatusView {
   shopTotalProducts: number | null;
   percent: number | null;
   complete: boolean;
+  /** `true` = katalóg je celý, ale beží nad ním nový (obnovovací) prechod. */
+  refreshing: boolean;
   lastFetchedAt: string | null;
   lastReadAt: string | null;
+  /** Pokrok AKTUÁLNEHO prechodu — nie „koľko z katalógu appka má". */
   pagesDone: number;
   pagesTotal: number | null;
+  /** Koľko stránok appke CHÝBA. Pri obnove `0` — nechýba nič. */
   pagesLeft: number | null;
   perPage: number;
   /** Zdieľaný denný rozpočet ANONYMNÝCH čítaní (A4) — nie zápisový (K2). */
@@ -97,6 +112,7 @@ export function toCatalogStatusView(status: CatalogSyncStatus): CatalogStatusVie
     shopTotalProducts: status.shopTotalProducts,
     percent: status.percent,
     complete: status.complete,
+    refreshing: status.refreshing,
     lastFetchedAt: iso(status.lastFetchedAt),
     lastReadAt: iso(status.lastReadAt),
     pagesDone: status.pagesDone,
@@ -191,6 +207,10 @@ export function createCatalogSyncRoute(deps: CatalogSyncRouteDeps = {}): NextRou
               policy: { ...CATALOG_READ_RETRY_POLICY },
             }),
           catalog: deps.runnerDeps?.catalog ?? defaultCatalogRepo,
+          // Súbežnosť cez DVA module grafy: `running` v runneri je premenná
+          // TOHTO grafu, tick schedulera beží vo svojom (`instrumentation`).
+          // Sľub „dva behy naraz odmietne" drží až DB lock.
+          lock: deps.runnerDeps?.lock ?? (() => tryAcquireLock(CATALOG_SYNC_LOCK_NAME, 0)),
           ...(deps.runnerDeps?.audit !== undefined ? { audit: deps.runnerDeps.audit } : {}),
           ...(deps.runnerDeps?.logger !== undefined ? { logger: deps.runnerDeps.logger } : {}),
         };

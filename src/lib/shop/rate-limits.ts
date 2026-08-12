@@ -94,12 +94,12 @@ export function nextUtcDayReset(at: Date): Date {
   return new Date(start.getTime() + 24 * 60 * 60 * 1000);
 }
 
-/**
- * Koľko UTC dní potrvá prečítať `pages` stránok pri dennom strope
- * `ANON_READS_PER_UTC_DAY`. Slúži na to, aby UI vedelo povedať „hotovo
- * pozajtra", a nie mlčať.
+/*
+ * Odhad „koľko dní potrvá dočítanie katalógu" tu ZÁMERNE nie je.
+ *
+ * Býval (`anonReadDaysNeeded(pages)`): počítal dnešok ako celý deň a nepoznal
+ * zvyšok dnešného rozpočtu, takže vedľa odhadu z `catalogRepo.syncStatus()`
+ * hlásil o deň viac — a používateľ videl obe čísla v jednom paneli (nález review
+ * z 12. 8. 2026). Jediná formula je `readDaysNeeded()` v `@/lib/shop/read-budget`;
+ * tá berie aj to, čo z dnešného rozpočtu ostalo. Druhú tu nezakladaj.
  */
-export function anonReadDaysNeeded(pages: number): number {
-  if (pages <= 0) return 0;
-  return Math.ceil(pages / ANON_READS_PER_UTC_DAY);
-}

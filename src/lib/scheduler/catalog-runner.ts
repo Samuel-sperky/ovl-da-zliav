@@ -99,6 +99,19 @@ export const CATALOG_PAGES_PER_BATCH = 30;
  */
 export const CATALOG_READ_RETRY_POLICY = { maxAttempts: 1 } as const;
 
+/**
+ * Meno DB advisory locku, ktorý drží JEDEN beh synchronizácie katalógu.
+ *
+ * Prečo vôbec, keď je v module `running`: Next.js kompiluje `instrumentation`
+ * do vlastného module grafu, takže `running` existuje DVAKRÁT — raz ho vidí tick
+ * schedulera, raz route `POST /api/catalog/sync`. Manuálne načítanie tak vie
+ * bežať súbežne s plánovaným, oba behy si prepisujú pokrok (A2) a zdvoja
+ * čítania z denného rozpočtu (A4). `GET_LOCK` je naopak jeden na databázu, takže
+ * ho vidia oba grafy aj omylom spustená druhá inštancia procesu — presne ako
+ * zápisový mutex (`engine/mutex.ts`, D37/I12).
+ */
+export const CATALOG_SYNC_LOCK_NAME = 'ovl_zliav_catalog_sync';
+
 export type CatalogRunOutcome =
   | 'already_running'
   | 'too_soon'
@@ -130,6 +143,18 @@ export interface CatalogRunnerDeps {
       /** K7 — „Dáta k …". `null` = katalóg je prázdny, sync je potrebný hneď. */
       lastFetchedAt(): Promise<UtcDate | null>;
     };
+  /**
+   * DRUHÁ VRSTVA SÚBEŽNOSTI — DB advisory lock (viď `CATALOG_SYNC_LOCK_NAME`).
+   *
+   * Vracia handle, alebo `null`, keď lock drží niekto iný; vtedy je výsledok
+   * `already_running`. Výnimka (nedostupná DB) beh NESPUSTÍ — fail-closed, ako
+   * všade v tomto module.
+   *
+   * Zapája sa v produkčnom drôtovaní (`scheduler/boot.ts` a route), nie tu:
+   * modul zostáva bez závislosti na poole, takže unit testy bežia bez DB. Keď
+   * chýba, platí len in-process `running` — a to je záruka na JEDEN module graf.
+   */
+  lock?: (() => Promise<{ release(): Promise<void> } | null>) | undefined;
   audit?: AuditWriter;
   logger?: Logger;
   timeZone?: string;
@@ -171,7 +196,16 @@ let running = false;
 let nextAllowedMs = 0;
 let lastReport: CatalogRunReport | null = null;
 
-/** Posledný výsledok — číta ho `/api/catalog/*` (V8) a Nastavenia (V12). */
+/**
+ * Posledný výsledok — číta ho `/api/catalog/*` (V8) a Nastavenia (V12).
+ *
+ * BEST-EFFORT, a je to vedomé: je to posledný beh, ktorý videl TENTO module graf.
+ * Next.js kompiluje `instrumentation` samostatne, takže route vidí svoje
+ * kliknutia, nie behy schedulera — a naopak. `null` teda neznamená „katalóg sa
+ * nehýbal"; to sa dá povedať len z `catalog_sync_state` (`syncStatus()`), ktorý
+ * je v DB. Trvalý „posledný beh" pre obe strany je požiadavka na V7, nie chyba
+ * tohto miesta; súbežnosť medzi grafmi rieši DB lock (`CATALOG_SYNC_LOCK_NAME`).
+ */
 export function lastCatalogRun(): CatalogRunReport | null {
   return lastReport === null ? null : { ...lastReport };
 }
@@ -181,6 +215,35 @@ export function resetCatalogRunnerState(): void {
   running = false;
   nextAllowedMs = 0;
   lastReport = null;
+}
+
+/* ═══════════════════════ DB vrstva súbežnosti (druhá) ══════════════════════ */
+
+/**
+ * Ako dopadol pokus o DB lock. Tri stavy, nie dva: „obsadený" znamená, že beží
+ * niekto iný (`already_running`), kdežto „nedostupný" znamená, že sa to nedalo
+ * ani zistiť — a to je fail-closed chyba, nie pokoj.
+ */
+type LockAttempt =
+  | { kind: 'held'; release(): Promise<void> }
+  | { kind: 'busy' }
+  | { kind: 'unavailable' };
+
+/** Bez zapojeného locku ostáva len in-process `running` (viď `CatalogRunnerDeps.lock`). */
+const NO_LOCK: LockAttempt = { kind: 'held', release: async () => undefined };
+
+async function acquireSyncLock(deps: CatalogRunnerDeps): Promise<LockAttempt> {
+  if (deps.lock === undefined) return NO_LOCK;
+  try {
+    const held = await deps.lock();
+    if (held === null) return { kind: 'busy' };
+    return { kind: 'held', release: () => held.release() };
+  } catch (error) {
+    deps.logger?.error('catalog_sync_lock_failed', {
+      error: error instanceof Error ? error.name : 'unknown',
+    });
+    return { kind: 'unavailable' };
+  }
 }
 
 /* ═══════════════════════════ spustenie ════════════════════════════════════ */
@@ -260,7 +323,19 @@ export async function runCatalogSyncIfDue(
   if (nowMs < nextAllowedMs) return { outcome: 'too_soon', sync: null };
 
   running = true;
+  let releaseLock: (() => Promise<void>) | null = null;
   try {
+    // 0. Druhá vrstva súbežnosti: DB lock vidia OBA module grafy (tick aj route),
+    //    in-process `running` len jeden. Bez neho by manuálne načítanie bežalo
+    //    súbežne s plánovaným a obe by si prepisovali pokrok.
+    const lock = await acquireSyncLock(deps);
+    if (lock.kind === 'busy') return { outcome: 'already_running', sync: null };
+    if (lock.kind === 'unavailable') {
+      nextAllowedMs = nowMs + CATALOG_RECHECK_MS;
+      return { outcome: 'failed', sync: null };
+    }
+    releaseLock = () => lock.release();
+
     // 1. Pokrok je prvá otázka: nedokončený prechod má prednosť pred všetkými
     //    pravidlami o veku dát a o špičke (A2).
     let progress: CatalogSyncProgress;
@@ -350,6 +425,9 @@ export async function runCatalogSyncIfDue(
     });
     return { outcome: 'failed', sync: null };
   } finally {
+    // Lock sa uvoľní VŽDY — držaný lock by inak zablokoval synchronizáciu do
+    // reštartu procesu (`GET_LOCK` žije na spojení, nie na transakcii).
+    if (releaseLock !== null) await releaseLock();
     running = false;
   }
 }
@@ -358,7 +436,9 @@ export async function runCatalogSyncIfDue(
  * Manuálne načítanie z UI („Načítať katalóg", K7). Obchádza okno mimo špičky aj
  * odstup 20 h — človek si oň povedal — ale NIE tri veci:
  *
- *  - **súbežnosť**: dva behy naraz by si prepisovali pokrok a zdvojili čítania,
+ *  - **súbežnosť**: dva behy naraz by si prepisovali pokrok a zdvojili čítania.
+ *    Odmieta ich in-process `running` a nad ním DB lock, ktorý platí aj medzi
+ *    module grafmi (route vs. `instrumentation`) — viď `CATALOG_SYNC_LOCK_NAME`,
  *  - **denný rozpočet**: strop shopu neobíde ani človek. Keď je rozpočet minutý,
  *    beh sa pokojne skončí s informáciou „pokračujem po polnoci UTC" (A4),
  *  - **pauzu po 429**: shop práve povedal „dosť". Kliknutie na tlačidlo ho
@@ -374,7 +454,19 @@ export async function runCatalogSyncNow(
   const nowMs = (opts.now ?? new Date()).getTime();
   if (running) return { outcome: 'already_running', sync: null };
   running = true;
+  let releaseLock: (() => Promise<void>) | null = null;
   try {
+    // Súbežnosť neobíde ani človek: kliknutie počas plánovaného behu by pokrok
+    // prepísalo a zdvojilo čítania. `running` chráni tento module graf, DB lock
+    // aj ten druhý (tick schedulera beží v `instrumentation`).
+    const lock = await acquireSyncLock(deps);
+    if (lock.kind === 'busy') return { outcome: 'already_running', sync: null };
+    if (lock.kind === 'unavailable') {
+      nextAllowedMs = nowMs + CATALOG_RECHECK_MS;
+      return { outcome: 'failed', sync: null };
+    }
+    releaseLock = () => lock.release();
+
     return await run(deps, nowMs, 'manual', { ...(opts.restart === true ? { restart: true } : {}) });
   } catch (error) {
     nextAllowedMs = nowMs + CATALOG_RECHECK_MS;
@@ -383,6 +475,7 @@ export async function runCatalogSyncNow(
     });
     return { outcome: 'failed', sync: null };
   } finally {
+    if (releaseLock !== null) await releaseLock();
     running = false;
   }
 }

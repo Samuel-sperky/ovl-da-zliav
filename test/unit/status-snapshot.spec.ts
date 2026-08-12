@@ -116,6 +116,39 @@ describe('buildStatusSnapshot — číta fakty a priznáva medzery', () => {
     expect(reading.snapshot.catalogReads).toEqual({ usedThisMinute: 0, usedThisUtcDay: 12 });
   });
 
+  /**
+   * Odhad dočítania katalógu počíta `catalogRepo.syncStatus()` — pozná pokrok
+   * prechodu, nie len počty riadkov. Snapshot ho preto musí PRENIESŤ, inak si ho
+   * `blockers.ts` dopočíta z hrubších vstupov a v jednom paneli stoja dve čísla
+   * o tej istej veci.
+   */
+  it('prenesie odhad dočítania od servera, nedopočítava druhý', async () => {
+    const finish = new Date('2026-08-14T00:00:00.000Z');
+    const reading = await buildStatusSnapshot(
+      healthySources({
+        catalog: {
+          read: async () => ({
+            loadedProducts: 12_000,
+            shopTotalProducts: 40_483,
+            lastFetchedAt: LAST_FETCH,
+            estimatedDaysLeft: 2,
+            estimatedFinishAt: finish,
+          }),
+        },
+      }),
+    );
+
+    expect(reading.snapshot.catalog?.estimatedDaysLeft).toBe(2);
+    expect(reading.snapshot.catalog?.estimatedFinishAt).toEqual(finish);
+
+    // A prekážka z toho vyrobí vetu aj čas, nie vlastný odhad.
+    const blocker = collectOperationBlockers(reading.snapshot).find(
+      (row) => row.id === 'catalog_incomplete',
+    );
+    expect(blocker?.what).toContain('približne 2 dni');
+    expect(blocker?.clearsAt).toEqual(finish);
+  });
+
   it('bez merača čítaní sa sekcia catalogReads NEPOSIELA (je opt-in)', async () => {
     const sources = healthySources();
     delete (sources as { catalogReads?: unknown }).catalogReads;

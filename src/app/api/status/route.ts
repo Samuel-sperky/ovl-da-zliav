@@ -136,6 +136,12 @@ export function productionStatusSources(now: () => Date = () => new Date()): Sta
           loadedProducts: status.loadedProducts,
           shopTotalProducts: status.shopTotalProducts,
           lastFetchedAt: status.lastFetchedAt,
+          // Odhad dočítania sa POSIELA, nie prepočítava: `syncStatus()` pozná
+          // pokrok prechodu (`last_page`), `blockers.ts` len počty riadkov —
+          // a kým si počítal vlastný, dva odhady v jednom paneli sa líšili
+          // o deň (nález review z 12. 8.).
+          estimatedDaysLeft: status.estimatedDaysLeft,
+          estimatedFinishAt: status.estimatedFinishAt,
         };
       },
     },

@@ -255,6 +255,13 @@ export interface CatalogSyncView {
   readonly loadedProducts: number | null;
   readonly shopTotalProducts: number | null;
   readonly complete: boolean;
+  /**
+   * `true` = katalóg appka MÁ celý, ale beží nad ním nový (obnovovací) prechod.
+   * Bez tohto poľa Prehľad hlásil „načítaný celý", kým karta v Produktoch vedľa
+   * toho tvrdila „382 stránok ostáva" — pokrok prechodu sa zamieňal za
+   * chýbajúce dáta.
+   */
+  readonly refreshing: boolean;
   /** Kedy sa naposledy naozaj čítalo zo shopu — meraný fakt, nie odhad. */
   readonly lastReadAt: string | null;
   /** Prečo sa čaká; `null` = nič nebráni ďalšej dávke. */
@@ -276,6 +283,7 @@ export function parseCatalogSync(raw: unknown): CatalogSyncView | null {
     loadedProducts: readCount(catalog, 'loadedProducts'),
     shopTotalProducts: readCount(catalog, 'shopTotalProducts'),
     complete: readFlag(catalog, 'complete'),
+    refreshing: readFlag(catalog, 'refreshing'),
     lastReadAt: readText(catalog, 'lastReadAt'),
     waiting: readCode(catalog, 'waiting', CATALOG_WAITING_CODES),
     nextBatchAt: readText(catalog, 'nextBatchAt'),

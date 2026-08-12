@@ -23,6 +23,7 @@
  */
 import { env, writesAllowedByEnv } from '@/env';
 
+import { tryAcquireLock } from '@/db/advisory-lock';
 import { auditWriter } from '@/lib/audit/write';
 import { createBudget } from '@/lib/engine/budget';
 import { executeCampaign, isGracefulStopRequested, type ExecutorDeps } from '@/lib/engine/executor';
@@ -41,6 +42,7 @@ import {
   runCatalogSyncIfDue,
   runCatalogSyncNow,
   CATALOG_READ_RETRY_POLICY,
+  CATALOG_SYNC_LOCK_NAME,
   type CatalogRunnerDeps,
   type CatalogRunReport,
 } from './catalog-runner';
@@ -105,6 +107,10 @@ function catalogRunnerDeps(): CatalogRunnerDeps {
       policy: { ...CATALOG_READ_RETRY_POLICY },
     }),
     catalog: catalogRepo,
+    // Druhá vrstva súbežnosti. `running` v runneri chráni len TENTO module graf;
+    // tick beží v `instrumentation`, manuálne načítanie v route, takže bez DB
+    // locku sa dva behy môžu prekryť a prepísať si pokrok (A2) aj rozpočet (A4).
+    lock: () => tryAcquireLock(CATALOG_SYNC_LOCK_NAME, 0),
     audit: auditWriter,
     logger: log,
     timeZone: env.LOGIC_TIMEZONE,

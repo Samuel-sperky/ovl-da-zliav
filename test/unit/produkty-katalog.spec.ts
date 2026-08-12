@@ -69,6 +69,7 @@ const STATUS: CatalogStatusView = {
   shopTotalProducts: 41082,
   percent: 7,
   complete: false,
+  refreshing: false,
   lastFetchedAt: '2026-08-12T01:00:00.000Z',
   lastReadAt: '2026-08-12T01:00:00.000Z',
   pagesDone: 29,
@@ -102,6 +103,24 @@ const COMPLETE: CatalogStatusView = {
   pagesLeft: 0,
   waiting: 'catalog_complete',
   nextBatchAt: null,
+  estimatedDaysLeft: 0,
+  estimatedFinishAt: null,
+};
+
+/**
+ * Stav po KAŽDOM dokončenom prechode: katalóg appka má celý, ale nový
+ * (obnovovací) prechod stojí na stránke 0. Karta z toho predtým poskladala
+ * „0 chýba" vedľa „382 stránok ostáva, ešte 2 dni".
+ */
+const REFRESHING: CatalogStatusView = {
+  ...STATUS,
+  loadedProducts: 41082,
+  percent: 100,
+  complete: false,
+  refreshing: true,
+  pagesDone: 0,
+  pagesLeft: 0,
+  waiting: null,
   estimatedDaysLeft: 0,
   estimatedFinishAt: null,
 };
@@ -166,6 +185,30 @@ describe('V10 — karta stavu katalógu', () => {
     expect(catalogStateView(COMPLETE).tone).toBe('good');
     expect(nextBatchTile(COMPLETE, NOW).value).toBe('—');
     expect(finishTile(COMPLETE).value).toBe('hotovo');
+  });
+
+  /**
+   * OBNOVA NIE JE CHÝBAJÚCI KATALÓG.
+   *
+   * `pagesDone` patrí aktuálnemu prechodu, `loadedProducts` je `COUNT(*)` za
+   * celý katalóg. Po dokončenom prechode začína obnova od stránky 0 a karta
+   * vedľa seba tvrdila „0 chýba" a „382 stránok, na každej 100 produktov",
+   * plus „ešte 2 dni" — pri katalógu, ktorý appka má celý na disku.
+   */
+  it('obnova celého katalógu nehlási chýbajúce stránky ani dva dni čakania', () => {
+    const missing = missingTile(REFRESHING);
+    expect(missing.value).toBe('0');
+    expect(missing.detail).not.toContain('stránok');
+    expect(missing.detail).toContain('obnovuje');
+
+    const finish = finishTile(REFRESHING);
+    expect(finish.value).toBe('hotovo');
+    expect(finish.detail).not.toContain('dni');
+
+    // Stav jednou vetou musí súhlasiť s Prehľadom: katalóg JE načítaný celý.
+    const state = catalogStateView(REFRESHING);
+    expect(state.tone).toBe('good');
+    expect(state.label).toContain('celý');
   });
 
   it('čas ďalšej dávky je hotová fráza s predložkou', () => {
