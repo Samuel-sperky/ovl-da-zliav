@@ -14,7 +14,10 @@
  * Vlastník: A17.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
+
+/** `src\lib\x.ts` → `src/lib/x.ts`. Porovnania ciest v teste sú s lomkami. */
+const toPosix = (p: string): string => p.split(sep).join('/');
 
 import { describe, expect, it } from 'vitest';
 
@@ -117,7 +120,10 @@ export function stripComments(source: string): string {
 export function loadSources(): SourceFile[] {
   return listSourceFiles().map((path) => {
     const code = stripComments(readFileSync(path, 'utf8'));
-    return { path: relative(process.cwd(), path), code, lines: code.split('\n') };
+    // Lomky normalizujeme, lebo `relative()` dá na Windows `src\lib\…` a všetky
+    // porovnania nižšie sú písané s `/`. Bez toho tieto testy na Windows
+    // nekontrolujú invariant I7, len ticho padnú na sanity kroku.
+    return { path: toPosix(relative(process.cwd(), path)), code, lines: code.split('\n') };
   });
 }
 
