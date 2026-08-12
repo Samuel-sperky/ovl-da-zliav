@@ -84,7 +84,16 @@ test.describe('K12 — celá cesta appky', () => {
     /* ── 2. Prehľad ── */
     await page.goto('/');
     await expect(page.getByTestId('overview')).toBeVisible();
-    await expect(page.getByTestId('overview-queue')).toBeVisible();
+
+    // V tomto bode ešte NEEXISTUJE ani jedna zľava, takže dominantou Prehľadu
+    // je poučný prázdny stav „prvá zľava", nie fronta. Fronta sa na to isté
+    // miesto vráti, len čo nejaká zľava vznikne — overuje sa nižšie, po
+    // potvrdení. Kým tu stál `overview-queue` s prázdnym režimom, používateľ
+    // videl nulu bez toho, aby sa dozvedel, čo s ňou.
+    await expect(page.getByTestId('overview-first-discount')).toBeVisible();
+
+    // Živý stav je vidieť VŽDY — to je celý zmysel priehľadnosti (C1).
+    await expect(page.getByTestId('overview-live-status')).toBeVisible();
 
     /* ── 3. Produkty a filter ── */
     await page.goto('/produkty');
@@ -149,6 +158,12 @@ test.describe('K12 — celá cesta appky', () => {
     expect(queueBody.data.queue.pending).toBe(SELECTED_TOTAL);
     expect(queueBody.data.queue.total).toBe(SELECTED_TOTAL);
     expect(queueBody.data.queue.campaigns).toBe(1);
+
+    // Druhá strana tej istej výmeny: teraz už zľava existuje, takže dominantou
+    // Prehľadu je fronta a poučný prázdny stav zmizol.
+    await page.goto('/');
+    await expect(page.getByTestId('overview-queue')).toBeVisible();
+    await expect(page.getByTestId('overview-first-discount')).toHaveCount(0);
 
     // A DB to potvrdzuje z druhej strany: stav `queued`, dve pásma s rôznym
     // percentom, hlavička = najvyššie percento (K3), položky ešte `pending`.

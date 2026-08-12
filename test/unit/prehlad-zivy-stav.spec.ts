@@ -256,6 +256,26 @@ describe('Prehľad — riadky „čo appka práve robí"', () => {
     expect(catalogActivity(null, null).word).toBe('nevieme');
   });
 
+  it('prázdny katalóg NIE JE načítaný celý — nula nie je hotovo', () => {
+    // Nájdené na snímke z prehliadača 12. 8.: hore svietilo „Katalóg prázdny"
+    // a o kúsok nižšie „✓ načítaný celý — Načítaných je všetkých 0".
+    // Príčinou bolo holé `loaded >= total`, kde 0 >= 0 vyjde ako pravda,
+    // takže appka o prázdnej tabuľke tvrdila, že má celý katalóg.
+    const prazdny = catalogActivity(
+      sync({ loadedProducts: 0, shopTotalProducts: 0, complete: false }),
+      null,
+    );
+    expect(prazdny.word).not.toBe('načítaný celý');
+    expect(prazdny.tone).not.toBe('ok');
+
+    // Ani meraný príznak z `catalog_sync_state` neplatí nad prázdnou tabuľkou.
+    const klamlivyPriznak = catalogActivity(
+      sync({ loadedProducts: 0, shopTotalProducts: 41_082, complete: true }),
+      null,
+    );
+    expect(klamlivyPriznak.word).not.toBe('načítaný celý');
+  });
+
   it('chýbajúci krok fronty znamená „appka nekontroluje", nie pokoj', () => {
     expect(heartbeatSummary(null).tone).toBe('warn');
     expect(heartbeatSummary({ lastTickAt: null, stale: true }).detail).toContain('nepoznáme');

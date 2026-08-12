@@ -348,7 +348,18 @@ export function catalogActivity(
 
   const done = loaded === null ? null : formatCountSk(loaded);
   const all = total === null ? null : formatCountSk(total);
-  const complete = sync?.complete === true || (loaded !== null && total !== null && loaded >= total);
+  /**
+   * PRÁZDNY KATALÓG NIE JE DOKONČENÝ KATALÓG. Kým sa nič neprečítalo, je
+   * `loaded` aj `total` nula a holé `loaded >= total` z toho spraví „načítaný
+   * celý" — appka by tvrdila, že má všetkých 41 082 produktov, a pritom nemá
+   * ani jeden. Odvodený záver preto vyžaduje, aby sa naozaj niečo načítalo;
+   * `sync.complete` je meraný fakt zo `catalog_sync_state`, ale ani ten
+   * neplatí nad prázdnou tabuľkou.
+   */
+  const somethingLoaded = loaded !== null && loaded > 0;
+  const complete =
+    somethingLoaded &&
+    (sync?.complete === true || (total !== null && total > 0 && loaded >= total));
 
   if (complete) {
     return {
@@ -363,6 +374,23 @@ export function catalogActivity(
   const where = done === null ? '' : all === null ? `Načítaných ${done}. ` : `Načítaných ${done} z ${all}. `;
   const finish = dayMonthOf(sync?.estimatedFinishAt ?? null);
   const nextBatch = clockSk(sync?.nextBatchAt ?? null);
+
+  // Nula načítaných je vlastný stav, nie „dočítava sa" s tónom v poriadku:
+  // z prázdneho katalógu sa nedá vybrať ani jeden produkt, takže to nie je
+  // pokoj. Zhoduje sa to aj s pruhom nad obrazovkou, ktorý hlási „Katalóg
+  // prázdny" — dve miesta nesmú o tom istom hovoriť rozdielne.
+  if (loaded === 0) {
+    return {
+      ...base,
+      tone: 'warn',
+      word: 'prázdny',
+      text:
+        nextBatch === null
+          ? 'Zatiaľ nie je načítaný ani jeden produkt. Bez katalógu sa nedá vybrať, čo zlacniť.'
+          : `Zatiaľ nie je načítaný ani jeden produkt. Prvá dávka o ${nextBatch}.`,
+      path: '/produkty',
+    };
+  }
 
   if (sync?.waiting === 'error') {
     return {
