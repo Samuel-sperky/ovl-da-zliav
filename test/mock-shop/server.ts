@@ -295,6 +295,33 @@ function handleSetReduction(input: HandlerInput): MockResponse {
   return { status: 200, body: { ok: true, id } };
 }
 
+/**
+ * `GET /api/whoami` (API v5) — introspekcia kľúča.
+ *
+ * Vyžaduje AKÝKOĽVEK platný kľúč, ale ŽIADNY konkrétny scope; presne preto
+ * ním appka nahradila sondu na zápisovom endpointe. Pozor na dôsledok, ktorý
+ * mock musí vedieť zahrať: kľúč BEZ `product:edit` tu prejde s 200 a zoznamom
+ * svojich scopes — odmietnuť ho musí až appka, nie shop.
+ */
+function handleWhoami(input: HandlerInput): MockResponse {
+  const { state, apiKey } = input;
+  const scopes = state.scopesOf(apiKey);
+  if (scopes === null) return transport(401, 'unauthorized');
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      id: 20,
+      name: 'mock-key',
+      owner: null,
+      expires_at: null,
+      scopes,
+      remaining: { per_minute: 59, per_day: 9987 },
+    },
+  };
+}
+
 /** `POST /api/batch` — položky bežia jedna po druhej, chyba položky dávku nezhodí. */
 function handleBatch(input: HandlerInput): { response: MockResponse; items: RecordedBatchItem[] } {
   const { state, body } = input;
@@ -370,6 +397,12 @@ function route(input: HandlerInput): { response: MockResponse; batchItems?: Reco
       return { response: handleSetReduction(input) };
     }
     return { response: transport(404, 'invalid_action') };
+  }
+
+  if (controller === 'whoami') {
+    if (action !== 'index') return { response: transport(404, 'invalid_action') };
+    if (method !== 'GET') return { response: transport(405, 'method_not_allowed') };
+    return { response: handleWhoami(input) };
   }
 
   if (controller === 'batch') {

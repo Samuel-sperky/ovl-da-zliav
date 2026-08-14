@@ -184,8 +184,17 @@ describe('I7 — v zdrojoch neexistuje rušenie zľavy v shope', () => {
     const shopWritePaths = [...paths].filter(
       (p) => p.startsWith('/api/products/') || p.startsWith('/api/batch'),
     );
+    // `getFull` pribudol 13. 8. 2026 s API v5 — je to ČÍTANIE so scope
+    // `product:read` (vracia skutočný stav zľavy, maržu, sklad, kategórie).
+    // Zapisovať sa ním nedá; v zozname je preto, že filter nižšie berie všetko
+    // pod `/api/products/`, nielen zápisové cesty.
     for (const path of shopWritePaths) {
-      expect(['/api/products/setReduction', '/api/products/get', '/api/batch']).toContain(path);
+      expect([
+        '/api/products/setReduction',
+        '/api/products/get',
+        '/api/products/getFull',
+        '/api/batch',
+      ]).toContain(path);
     }
   });
 

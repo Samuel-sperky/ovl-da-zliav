@@ -508,8 +508,21 @@ describe('GET /api/key?kind=orders_read', () => {
     const body = await readBody(await route(makeRequest({ query: '?kind=orders_read' })));
 
     expect(body.data).toMatchObject({ present: true, last4: ORDERS_KEY_PLAINTEXT.slice(-4) });
+    // Zoznam je ÚMYSELNE vymenovaný (I1) — k API v5 pribudli štyri polia
+    // o scopes kľúča. Ani jedno nenesie nič, z čoho by sa kľúč dal odvodiť.
     expect(Object.keys(body.data ?? {}).sort()).toEqual(
-      ['expiresAt', 'last4', 'present', 'savedAt', 'secondsLeft', 'verifyStatus'].sort(),
+      [
+        'expiresAt',
+        'last4',
+        'present',
+        'productRead',
+        'productReadNote',
+        'savedAt',
+        'scopes',
+        'scopesCheckedAt',
+        'secondsLeft',
+        'verifyStatus',
+      ].sort(),
     );
     // Presne to zlyhalo v minulosti: redaktor zamaskoval celý stav kľúča a UI
     // tvrdilo, že kľúč chýba. Odpoveď je preto plochá a `present` je pravdivé.

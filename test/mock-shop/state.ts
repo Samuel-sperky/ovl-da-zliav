@@ -262,6 +262,13 @@ export class MockShopState {
     return (this.keys.get(key) ?? []).includes(scope);
   }
 
+  /** Scopes kľúča — pre `GET /api/whoami` (API v5). Neznámy kľúč → `null`. */
+  scopesOf(key: string | null): MockScope[] | null {
+    if (key === null) return null;
+    const scopes = this.keys.get(key);
+    return scopes === undefined ? null : [...scopes];
+  }
+
   /* ── scenáre (fluent API) ──────────────────────────────────────────────── */
 
   /** Umelé zdržanie každej odpovede (test timeoutov a tempa). */

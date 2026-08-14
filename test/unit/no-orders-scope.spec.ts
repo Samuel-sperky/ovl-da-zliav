@@ -137,8 +137,15 @@ const ORDERS_CLIENT = 'src/lib/shop/orders-client.ts';
  */
 const ALLOWED_DDL_IDENTIFIERS: readonly string[] = ['orders_seen'];
 
-/** Scopes, ktoré appka smie poznať. Nič iné (zákazníci, košíky, faktúry). */
-const ALLOWED_SCOPES = ['orders:read', 'product:edit'];
+/**
+ * Scopes, ktoré appka smie poznať. Nič iné (zákazníci, košíky, faktúry).
+ *
+ * `product:read` pribudol 13. 8. 2026 s API v5: `getFull`, `search`
+ * a `categories` ho vyžadujú a bez neho appka nevie prečítať SKUTOČNÝ stav
+ * zľavy na produkte — dovtedy poznala len to, čo sama zapísala. Je to čítací
+ * scope; zapisovať sa ním nedá.
+ */
+const ALLOWED_SCOPES = ['orders:read', 'product:edit', 'product:read'];
 
 function outsideOrdersClient(files: SourceFile[]): SourceFile[] {
   return files.filter((file) => file.path.split('\\').join('/') !== ORDERS_CLIENT);

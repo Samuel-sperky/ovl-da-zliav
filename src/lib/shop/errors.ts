@@ -20,6 +20,39 @@
  *     sa nepreukáže, že požiadavka odísť nemohla — nepoznať stav je bezpečnejšie
  *     než predpokladať, že sa nič nestalo.
  *
+ * ── Blokovanie bežiacou akciou (API v5, bod F kontraktu) ──────────────────────
+ *
+ * v5 pridal kód `blocked_by_flash_sale` (HTTP 409): produkt má práve rozbehnutú
+ * akciu TurboSaleUltimate a tá vlastní polia zľavy, kým beží. Platí rovnako pre
+ * zápis zľavy aj pre jej odstránenie.
+ *
+ * VLASTNÝ `kind` NEDOSTAL a je to vedomé rozhodnutie:
+ *
+ *   1. `ShopErrorKind` je uzavretý zoznam DÔSLEDKOV, nie príčin (D41). Dôsledok
+ *      blokovania je presne dôsledok terminálnej chyby: shop zápis odmietol,
+ *      nič nezapísal a okamžité zopakovanie narazí na tú istú bežiacu akciu.
+ *      Nový druh by nepridal ani jedno nové rozhodnutie — retry politika
+ *      (`retry.ts`), executor ani mapovanie na HTTP by s ním robili to isté.
+ *   2. Zaradiť ho ako retryable by bola chyba. Akcia trvá hodiny až dni, takže
+ *      by sa zápisový rozpočet (I10, I13) minul na pokusy, ktoré vyjsť nemôžu.
+ *   3. Zaradiť ho ako „stav neistý" by bola chyba tiež. Shop odpovedal jasne,
+ *      že nezapísal; `uncertain` je vyhradené pre D45/D54 a je drahé — núti
+ *      človeka overovať v admine shopu niečo, čo je isté.
+ *   4. `ShopErrorKind` žije v `src/contracts.ts` a existujú nad ním vyčerpávajúce
+ *      mapy (`SHOP_KIND_STATUS` v `lib/http/errors.ts`, `KIND_MESSAGES`).
+ *      Pridanie člena je zmena zdieľaného kontraktu, ktorú by musel prevziať
+ *      každý konzument taxonómie — za rozlíšenie, ktoré nikto z nich nepotrebuje.
+ *
+ * Rozlíšenie, ktoré POTREBUJE ČLOVEK — „produkt sa preskočil, nie je to chyba
+ * tvojich údajov a dá sa to skúsiť znova, keď akcia skončí" — nesie raw kód
+ * (D47) a slovenská veta v `messages.sk.ts`. Strojovo sa naň dá spýtať cez
+ * `isFlashSaleBlocked()`, takže nikto nemusí porovnávať reťazce sám.
+ *
+ * ČO SA V TEJTO ČASTI NESMIE POKAZIŤ: blokovanie akciou NIE JE trvalá chyba
+ * produktu. Nikdy z neho nesmie vzniknúť `not_found`, odobratie z povolených
+ * produktov ani iné trvalé označenie — produkt je v poriadku, len má práve inú
+ * akciu. A nikdy nesmie byť retryable: shop by sa tlkol tou istou požiadavkou.
+ *
  * Vlastník: A3.
  */
 import type { ShopError, ShopErrorKind, Ulid } from '@/contracts';
@@ -189,8 +222,39 @@ const BATCH_NOT_ALLOWED_CODES: ReadonlySet<string> = new Set(['batch_not_allowed
 /** Kódy, ktoré znamenajú „produkt neexistuje" bez ohľadu na HTTP status (D49). */
 const NOT_FOUND_CODES: ReadonlySet<string> = new Set(['not found', 'not_found']);
 
+/**
+ * Kódy, ktorými v5 hlási, že polia zľavy práve vlastní bežiaca akcia v shope
+ * (bod F). Zoznam je jednoprvkový zámerne — keby shop pridal ďalší názov toho
+ * istého stavu, pribudne sem a nikam inam.
+ */
+const FLASH_SALE_CODES: ReadonlySet<string> = new Set(['blocked_by_flash_sale']);
+
 function normalized(codes: readonly string[]): string[] {
   return codes.map((c) => c.trim().toLowerCase());
+}
+
+/**
+ * True pre kód, ktorým shop hlási blokovanie bežiacou akciou (bod F).
+ *
+ * Vstup je zámerne `string | null | undefined`: rovnaký kód sa číta aj
+ * z auditu a z DB (`campaign_items.error_code`), kde chýbať smie, a volajúci
+ * tak nemusí ošetrovať nič navyše.
+ */
+export function isFlashSaleBlockedCode(code: string | null | undefined): boolean {
+  if (typeof code !== 'string') return false;
+  return FLASH_SALE_CODES.has(code.trim().toLowerCase());
+}
+
+/**
+ * True, keď zápis neprešiel kvôli bežiacej akcii v shope (bod F).
+ *
+ * Pre UI a report: položka skončí ako zlyhaná, ale NIE JE to chyba údajov ani
+ * trvalá chyba produktu — po skončení akcie sa dá zopakovať. Rozhoduje sa podľa
+ * `ShopError.code`, ktorý nesie prvý kód z odpovede (D47); v5 tento kód posiela
+ * samostatne, takže kombináciu s iným kódom nepredpokladáme.
+ */
+export function isFlashSaleBlocked(error: ShopError): boolean {
+  return isFlashSaleBlockedCode(error.code);
 }
 
 /**
@@ -206,6 +270,14 @@ export function classifyFailure(httpStatus: number, codes: readonly string[] = [
   if (lower.some((c) => BATCH_NOT_ALLOWED_CODES.has(c))) return 'batch_not_allowed';
   if (lower.some((c) => NOT_FOUND_CODES.has(c))) return 'not_found';
 
+  // Blokovanie bežiacou akciou (bod F). Vetva vracia to isté, čo by vrátil
+  // pád na 4xx nižšie — a je tu práve preto, aby to tak zostalo: pomenúva
+  // jediný 409, ktorý v5 pozná, a drží ho terminálny. Kto by ho chcel raz
+  // preklopiť na retry alebo na „stav neistý", musí prepísať túto vetvu
+  // a prečítať si v doc-bloku, prečo sa to nesmie. Rozdiel medzi „zlé údaje"
+  // a „dočasná prekážka" nesie kód a slovenská veta, nie druh chyby.
+  if (lower.some((c) => FLASH_SALE_CODES.has(c))) return 'bad_request';
+
   if (httpStatus === 429) return 'rate_limited';
   if (httpStatus >= 500) return 'server_error';
   if (httpStatus === 401) return 'unauthorized';
@@ -214,6 +286,8 @@ export function classifyFailure(httpStatus: number, codes: readonly string[] = [
 
   // 400, 405, 409, 422 a všetko ostatné 4xx → terminal „neplatná požiadavka".
   // 405/404 na úrovni smerovania sú tiež terminal: opakovanie ich nevylieči.
+  // 409 sem padá len vtedy, keď ho shop neoznačil kódom — jediný 409, ktorý
+  // v5 pomenúva, odchytila vetva o bežiacej akcii vyššie.
   if (httpStatus >= 400) return 'bad_request';
 
   // HTTP 2xx s `ok:false` bez rozpoznateľného kódu: shop hlási neúspech, ale

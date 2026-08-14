@@ -25,7 +25,15 @@
  */
 import { z } from 'zod';
 
-import type { ProductDetail, ProductListItem } from '@/contracts';
+import type {
+  DateOnly,
+  ProductDetail,
+  ProductFullDetail,
+  ProductListItem,
+  ShopReductionState,
+} from '@/contracts';
+
+import { isDateOnly } from '@/lib/domain/dates';
 
 /* ═════════════════════════ 1. Tolerantné primitívy ════════════════════════ */
 
@@ -135,6 +143,63 @@ export const productDetailSchema = z.looseObject({
   attributes: z.array(productAttributeSchema).optional(),
 });
 
+/* ───────────── 2b. `getFull` — back-office polia (v5, bod A1/B1) ────────── */
+
+/**
+ * Číslo, ktoré shop smie poslať aj ako `null`, aj vynechať. Peniaze prechádzajú
+ * `numberLike`, takže PHP `DECIMAL` v tvare `'12,50'` aj `'1 234.50'` sa
+ * prečíta rovnako ako číslo — vlastný parser sa TU NEPÍŠE (§2).
+ */
+const optionalNumberLike = numberLike.nullable().optional();
+
+/** To isté pre celé čísla (sklad, počty kusov, id kategórií). */
+const optionalIntLike = intLike.nullable().optional();
+
+/**
+ * `GET /api/products/getFull?id=` (docs/api/sperky-api-v5.md) — nadstavba nad
+ * `productDetailSchema`, presne ako to popisuje shop: „same response shape as
+ * `GET /api/products/get`, plus back-office fields".
+ *
+ * ČO SA TU NESMIE POKAZIŤ A PREČO
+ * -------------------------------
+ *  1. **Trojica `reduction_*` je POVINNÁ, hoci smie byť `null`.** Je to jediný
+ *     dôvod, prečo appka tento endpoint vôbec volá (bod B1). Keby bola
+ *     `optional()`, shop by ju mohol prestať posielať a appka by to ticho
+ *     prežila s „nevieme" navždy. Takto sa jej zmiznutie ohlási ako
+ *     `schema_drift` (D54) → `onSchemaDrift` → „API sa zmenilo". `null` je
+ *     naopak legitímna odpoveď a znamená „žiadna zľava nebeží".
+ *  2. **Všetko ostatné je voliteľné.** Marža, sklad a kategórie (body C1–C3)
+ *     sú bonus; ich absencia NESMIE zhodiť čítanie stavu zľavy. Opačné
+ *     poradie priorít by z chýbajúceho `supplier` spravilo „stav zľavy
+ *     neistý", čo je horšia strata než chýbajúca marža.
+ *  3. **`looseObject`** — shop smie pridať pole (v5 ich pridal osem naraz),
+ *     ale nesmie odobrať povinné (§2, D54).
+ *  4. Dátumy `reduction_from` / `reduction_to` sa tu NEVALIDUJÚ na kalendárny
+ *     deň, len na string. Rozhodnutie „toto je použiteľné okno" robí až
+ *     `toShopReduction()` nižšie, aby sa nezmyselný dátum prejavil ako
+ *     `unknown` (vieme, že nevieme), nie ako drift celého produktu.
+ */
+export const productFullSchema = productDetailSchema.extend({
+  reduction_percent: numberLike.nullable(),
+  reduction_from: z.string().nullable(),
+  reduction_to: z.string().nullable(),
+
+  ean13: optionalText,
+  reference: optionalText,
+  purchase_price: optionalNumberLike,
+  margin: optionalNumberLike,
+  margin_percent: optionalNumberLike,
+  sell_price: optionalNumberLike,
+  sell_price_with_vat: optionalNumberLike,
+  active: boolLike.nullable().optional(),
+  date_add: optionalText,
+  last_time_in_order: optionalText,
+  qty: optionalIntLike,
+  qty_in_orders: optionalIntLike,
+  supplier: optionalText,
+  categories: z.array(intLike).nullable().optional(),
+});
+
 /** `POST /api/products/setReduction` — úspech (D50). */
 export const setReductionSuccessSchema = z.looseObject({
   ok: z.literal(true),
@@ -150,6 +215,7 @@ export const batchResponseSchema = z.looseObject({
 export type ParsedProductListResponse = z.infer<typeof productListResponseSchema>;
 export type ParsedProductDetail = z.infer<typeof productDetailSchema>;
 export type ParsedProductListItem = z.infer<typeof productListItemSchema>;
+export type ParsedProductFull = z.infer<typeof productFullSchema>;
 
 /* ══════════════════════════ 3. Prevod na kontrakty ════════════════════════ */
 
@@ -183,6 +249,86 @@ export function toProductDetail(parsed: ParsedProductDetail): ProductDetail {
     }));
   }
   return detail;
+}
+
+/**
+ * Trojica `reduction_*` → jeden stav (bod B1).
+ *
+ * Shop sľubuje dve možnosti: buď sú všetky tri `null` (žiadna zľava nebeží),
+ * alebo sú všetky tri vyplnené. Tretia možnosť — časť `null`, časť nie —
+ * v dokumentácii nie je, a práve preto ju TREBA ošetriť: keby sa `percent`
+ * bral samostatne, produkt s `reduction_percent = 15` a prázdnymi dátumami by
+ * appka ohlásila ako 15 % zľavu s neznámym oknom.
+ *
+ * `none` a `unknown` sú DVE RÔZNE veci a nikdy sa nezlievajú:
+ *   - `none`    = shop povedal „nič nebeží" (meraný fakt),
+ *   - `unknown` = appka nevie (medzera v poznaní, I11).
+ * Zliatie by z medzery spravilo tvrdenie o produkčnom shope.
+ *
+ * Dátum sa berie ako prvých desať znakov, aby prešlo aj `'2026-08-14 00:00:00'`
+ * (PrestaShop drží zľavové okno ako `DATETIME`). Čo po orezaní nie je existujúci
+ * kalendárny deň — vrátane sentinelu `'0000-00-00'` — je `unknown/invalid`,
+ * nikdy „žiadna zľava".
+ *
+ * Percento sa neopravuje ani neklampuje: 0–100 sa prepustí tak, ako prišlo.
+ * Shop môže mať zľavu mimo nášho rozsahu 1–30 (ruka v admine, flash sale)
+ * a zamlčať to by znamenalo hlásiť zhodu tam, kde je rozdiel (bod A2).
+ * Hodnota mimo 0–100 už nie je percento — `unknown/invalid`.
+ */
+export function toShopReduction(
+  parsed: Pick<ParsedProductFull, 'reduction_percent' | 'reduction_from' | 'reduction_to'>,
+): ShopReductionState {
+  const { reduction_percent: percent, reduction_from: from, reduction_to: to } = parsed;
+
+  const nulls = [percent, from, to].filter((v) => v === null).length;
+  if (nulls === 3) return { state: 'none' };
+  if (nulls > 0 || percent === null || from === null || to === null) {
+    return { state: 'unknown', reason: 'partial' };
+  }
+
+  if (percent < 0 || percent > 100) return { state: 'unknown', reason: 'invalid' };
+
+  const fromDay = from.trim().slice(0, 10);
+  const toDay = to.trim().slice(0, 10);
+  if (!isDateOnly(fromDay) || !isDateOnly(toDay)) {
+    return { state: 'unknown', reason: 'invalid' };
+  }
+
+  return { state: 'active', percent, from: fromDay as DateOnly, to: toDay as DateOnly };
+}
+
+/**
+ * `ParsedProductFull` → kontraktový `ProductFullDetail`.
+ *
+ * Základ (`id`, `name`, `price`, `has_attributes`, popisy, varianty) prechádza
+ * cez `toProductDetail()` — druhý prevod tých istých polí sa TU NEPÍŠE, inak by
+ * sa `get` a `getFull` časom rozišli. Dopĺňajú sa len back-office polia a stav
+ * zľavy. Voliteľné pole sa do výsledku vloží len keď v odpovedi naozaj bolo,
+ * takže `undefined` (shop pole neposlal) sa nezamení za `null` (shop poslal
+ * prázdnu hodnotu).
+ */
+export function toProductFull(parsed: ParsedProductFull): ProductFullDetail {
+  const full: ProductFullDetail = {
+    ...toProductDetail(parsed),
+    reduction: toShopReduction(parsed),
+  };
+  if (parsed.ean13 !== undefined) full.ean13 = parsed.ean13;
+  if (parsed.reference !== undefined) full.reference = parsed.reference;
+  if (parsed.purchase_price !== undefined) full.purchase_price = parsed.purchase_price;
+  if (parsed.margin !== undefined) full.margin = parsed.margin;
+  if (parsed.margin_percent !== undefined) full.margin_percent = parsed.margin_percent;
+  if (parsed.sell_price !== undefined) full.sell_price = parsed.sell_price;
+  if (parsed.sell_price_with_vat !== undefined) {
+    full.sell_price_with_vat = parsed.sell_price_with_vat;
+  }
+  if (parsed.active !== undefined) full.active = parsed.active;
+  if (parsed.date_add !== undefined) full.date_add = parsed.date_add;
+  if (parsed.last_time_in_order !== undefined) full.last_time_in_order = parsed.last_time_in_order;
+  if (parsed.qty !== undefined) full.qty = parsed.qty;
+  if (parsed.qty_in_orders !== undefined) full.qty_in_orders = parsed.qty_in_orders;
+  if (parsed.supplier !== undefined) full.supplier = parsed.supplier;
+  if (parsed.categories !== undefined) full.categories = parsed.categories;
+  return full;
 }
 
 /* ═══════════════════════ 4. Validácia s hlásením driftu ═══════════════════ */

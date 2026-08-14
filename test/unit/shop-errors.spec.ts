@@ -367,11 +367,21 @@ describe('hlavičky a kľúč (D48, D53, D58, I1)', () => {
     }
   });
 
-  it('setReduction a probeKey posielajú X-Api-Key a kľúč hneď wipnú (D64)', async () => {
-    const h = harness([
-      () => json({ ok: true, id: 123 }),
-      () => json({ ok: false, errors: ['invalid_reduction'] }, 400),
-    ]);
+  /** Odpoveď `GET /api/whoami` v tvare, v akom ju posiela shop (v5, obálka). */
+  const whoamiBody = (scopes: string[] = ['product:edit']): unknown => ({
+    result: {
+      ok: true,
+      id: 20,
+      name: 'aura-zlavy',
+      owner: null,
+      expires_at: null,
+      scopes,
+      remaining: { per_minute: 59, per_day: 9987 },
+    },
+  });
+
+  it('setReduction aj sonda posielajú X-Api-Key a kľúč hneď wipnú (D64)', async () => {
+    const h = harness([() => json({ ok: true, id: 123 }), () => json(whoamiBody())]);
     const shop = client(h.fetchImpl);
     const key = fakeKey();
 
@@ -382,31 +392,44 @@ describe('hlavičky a kľúč (D48, D53, D58, I1)', () => {
     expect(probe).toBe('valid');
 
     expect(h.calls).toHaveLength(2);
-    for (const call of h.calls) {
-      expect(call.headers['x-api-key']).toBe(TEST_KEY);
-      expect(call.method).toBe('POST');
-      expect(call.url).toContain(SHOP_PATHS.setReduction);
-    }
+    for (const call of h.calls) expect(call.headers['x-api-key']).toBe(TEST_KEY);
+
+    // Zápis je POST na `setReduction`, sonda je od v5 GET na `whoami`.
+    expect(h.calls[0].method).toBe('POST');
+    expect(h.calls[0].url).toContain(SHOP_PATHS.setReduction);
+    expect(h.calls[1].method).toBe('GET');
+    expect(h.calls[1].url).toContain(SHOP_PATHS.whoami);
+
     expect(key.releases).toBe(2);
     expect(key.zeroed).toEqual([true, true]);
   });
 
-  it('sonda posiela reduction=0 a neexistujúce id — nikdy nič nezapíše (D53)', async () => {
-    const h = harness(() => json({ ok: false, errors: ['invalid_reduction'] }, 400));
+  it('sonda je ČÍTANIE — nikdy nesiahne na zápisový endpoint (v5, D53)', async () => {
+    // Do v4 sa platnosť kľúča nedala overiť inak než POSTom na `setReduction`
+    // s `id=0` a `reduction=0`. Nikdy nič nezapísala, ale v štatistike shopu
+    // vyzerala ako zápis a obchádzala `WRITES_ENABLED` (I13). `whoami` to
+    // zrušil — a tento test stráži, že sa sonda na zápisový endpoint nevráti.
+    const h = harness(() => json(whoamiBody()));
     await client(h.fetchImpl).probeKey(fakeKey().ref, ctx());
-    const body = new URLSearchParams(h.calls[0].body ?? '');
-    expect(body.get('reduction')).toBe('0');
-    expect(body.get('id')).toBe('0');
+
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0].method).toBe('GET');
+    expect(h.calls[0].body).toBeNull();
+    expect(h.calls[0].url).toContain(SHOP_PATHS.whoami);
+    expect(h.calls[0].url).not.toContain(SHOP_PATHS.setReduction);
   });
 
   it('sonda mapuje odpovede fail-closed', async () => {
     const cases: Array<[Response, string]> = [
-      [json({ ok: false, errors: ['invalid_reduction'] }, 400), 'valid'],
-      [json({ ok: false, errors: ['not found'] }, 404), 'valid'],
-      [json({ error: 'unauthorized' }, 401), 'invalid'],
+      [json(whoamiBody()), 'valid'],
+      [json(whoamiBody(['product:edit', 'product:read'])), 'valid'],
+      [json({ error: 'forbidden' }, 401), 'invalid'],
       [json({ error: 'forbidden' }, 403), 'forbidden'],
       [json({ error: 'request_failed' }, 500), 'unknown'],
-      [json({ ok: true, id: 0 }, 200), 'unknown'],
+      [json({ error: 'rate_limited' }, 429), 'unknown'],
+      // HTTP 200 v nečakanom tvare NIE JE platný kľúč (D54, §6).
+      [json({ result: { ok: true } }, 200), 'unknown'],
+      [json({ ok: false, errors: ['whatever'] }, 200), 'unknown'],
     ];
     for (const [response, expected] of cases) {
       const h = harness(() => response.clone());
@@ -672,9 +695,21 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
     }
   });
 
-  it('cesty pozná len pre produkty a dávku', () => {
+  it('cesty pozná len pre produkty, dávku a introspekciu kľúča', () => {
+    // Zoznam je ÚMYSELNE vymenovaný (I8): nová cesta musí zhodiť tento test,
+    // aby sa na ňu pozrel človek. K v5 pribudli dve a obe sú ČÍTACIE:
+    //   · `getFull`  — skutočný stav zľavy, marža, sklad, kategórie (product:read)
+    //   · `whoami`   — overenie kľúča; nahradilo sondu na zápisovom endpointe
+    // Objednávkové cesty tu nesmú byť NIKDY — tie pozná výhradne orders-client (I8').
     expect(Object.values(SHOP_PATHS).sort()).toEqual(
-      ['/api/batch', '/api/products', '/api/products/get', '/api/products/setReduction'].sort(),
+      [
+        '/api/batch',
+        '/api/products',
+        '/api/products/get',
+        '/api/products/getFull',
+        '/api/products/setReduction',
+        '/api/whoami',
+      ].sort(),
     );
   });
 });

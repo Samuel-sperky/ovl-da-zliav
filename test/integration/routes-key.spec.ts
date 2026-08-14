@@ -251,9 +251,18 @@ beforeEach(() => {
   mock.state.reset();
 });
 
-/** Sonda proti mocku — reálny klient A3, base URL mocku (I6). */
-const probeAgainstMock = (key: SecretRef, ctx: ShopCtx) =>
-  createShopClient({ baseUrl: mock.baseUrl }).probeKey(key, ctx);
+/**
+ * Overenie kľúča proti mocku — reálny klient A3, base URL mocku (I6).
+ *
+ * Od API v5 sa používa `inspectKey` (`GET /api/whoami`), NIE `probeKey`.
+ * Je to podstatný rozdiel: `probeKey` vracia len „platí / neplatí", kým
+ * `whoami` prináša aj SCOPES — a bez nich route nevie odmietnuť kľúč, ktorý
+ * síce platí, ale zapisovať nesmie. Keď sa sem podsunie `probeKey`, route
+ * scopes nepozná a fail-closed sa správa tak, že kľúč uloží a stav prizná
+ * vetou; presne to sa dá vidieť v teste „bez scopes sa kľúč uloží".
+ */
+const inspectAgainstMock = (key: SecretRef, ctx: ShopCtx) =>
+  createShopClient({ baseUrl: mock.baseUrl }).whoami(key, ctx);
 
 function baseDeps(overrides: Partial<KeyRouteDeps> = {}): KeyRouteDeps {
   return {
@@ -262,7 +271,7 @@ function baseDeps(overrides: Partial<KeyRouteDeps> = {}): KeyRouteDeps {
     users: { getById: async () => ({ passwordHash: 'argon2-fake-hash' }) },
     verify: async (_hash, password) => password === GOOD_PASSWORD,
     audit: async () => {},
-    probeKey: probeAgainstMock,
+    inspectKey: inspectAgainstMock,
     execute: async (campaignId) =>
       ({ campaignId, status: 'done', itemsTotal: 0, itemsOk: 0, itemsFailed: 0, itemsUncertain: 0, items: [] }) as ExecutorResult,
     now: () => NOW,
@@ -282,10 +291,29 @@ describe('GET /api/key', () => {
     expect(response.status).toBe(200);
     const body = await readBody(response);
     expect(body.data).toMatchObject({ present: true, last4: '0001', verifyStatus: 'valid' });
+
+    // Zoznam je ÚMYSELNE vymenovaný: nové pole v odpovedi o kľúči musí zhodiť
+    // tento test, aby sa naň pozrel človek (I1). K API v5 pribudli štyri a ani
+    // jedno nenesie nič z kľúča — `scopes` je uzavretý číselník produktových
+    // scopes, zvyšok je odvodený stav. `whoami` vracia aj `id`, `name`
+    // a `owner` kľúča; klient ich zámerne ani neparsuje.
     expect(Object.keys(body.data ?? {}).sort()).toEqual(
-      ['expiresAt', 'last4', 'present', 'savedAt', 'secondsLeft', 'verifyStatus'].sort(),
+      [
+        'expiresAt',
+        'last4',
+        'present',
+        'productRead',
+        'productReadNote',
+        'savedAt',
+        'scopes',
+        'scopesCheckedAt',
+        'secondsLeft',
+        'verifyStatus',
+      ].sort(),
     );
     expect(JSON.stringify(body)).not.toContain(VALID_API_KEY);
+    // Ani meno či vlastník kľúča z `whoami` sa von nedostanú.
+    expect(JSON.stringify(body)).not.toContain('mock-key');
   });
 
   it('bez kľúča hlási present:false', async () => {

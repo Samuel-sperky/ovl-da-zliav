@@ -9,10 +9,14 @@
  *   - **I1 / D64** — API kľúč prichádza VÝHRADNE ako `SecretRef`; dešifruje sa
  *     tesne pred odoslaním, `release()` (a teda `Buffer.fill(0)`) beží vo
  *     `finally`, hlavička sa z objektu okamžite maže a NIKDY sa neloguje.
- *   - **D48 / D53** — `X-Api-Key` sa posiela len pri `setReduction` a pri sonde
- *     `probeKey`. Čítacie volania (`listProducts`, `getProduct`,
- *     `batchGetProducts`, `canary`) sú verejné a hlavičku vôbec nezostavia:
- *     čítacia cesta nemá parameter, ktorým by sa kľúč dal podstrčiť.
+ *   - **D48 / D53** — `X-Api-Key` sa posiela len pri `setReduction` a pri
+ *     `whoami` (overenie kľúča, API v5). Čítacie volania (`listProducts`,
+ *     `getProduct`, `batchGetProducts`, `canary`) sú verejné a hlavičku vôbec
+ *     nezostavia: čítacia cesta nemá parameter, ktorým by sa kľúč dal podstrčiť.
+ *   - **I1 pri `whoami`** — odpoveď nesie `id`, `name` a `owner` kľúča. Tento
+ *     modul ich ZÁMERNE ani neparsuje: von ide výhradne zoznam scopes (uzavretý
+ *     číselník produktových scopes) a dve čísla zostatku. Z ničoho z toho sa kľúč
+ *     odvodiť nedá, takže to smie ísť do logu, auditu aj do odpovede API.
  *   - **§6** — HTTP 200 s `ok:false` NIKDY nie je úspech; HTTP 200 s tvarom,
  *     ktorý neprejde zod, je `schema_drift`, teda „stav neistý" (D54).
  *   - **D45** — timeout po odoslaní zápisu = `uncertain` + PRESNE JEDEN
@@ -28,6 +32,8 @@
  *
  * Vlastník: A3.
  */
+import { z } from 'zod';
+
 import type {
   CanaryResult,
   DateOnly,
@@ -35,6 +41,7 @@ import type {
   Logger,
   Paged,
   ProductDetail,
+  ProductFullDetail,
   ProductListItem,
   SecretHandle,
   SecretRef,
@@ -68,6 +75,10 @@ import {
   type RequestPhase,
 } from '@/lib/shop/errors';
 import {
+  normalizeRemaining,
+  type RemainingFromWhoami,
+} from '@/lib/shop/rate-limits';
+import {
   DEFAULT_READ_TIMEOUT_MS,
   DEFAULT_WRITE_TIMEOUT_MS,
   parseRetryAfterSeconds,
@@ -80,10 +91,12 @@ import {
   bodySignalsFailure,
   parseShopPayload,
   productDetailSchema,
+  productFullSchema,
   productListResponseSchema,
   readErrorBody,
   setReductionSuccessSchema,
   toProductDetail,
+  toProductFull,
   toProductListItem,
   unwrapShopResult,
 } from '@/lib/shop/schemas';
@@ -98,8 +111,12 @@ import { APP_VERSION } from '@/version';
 export const SHOP_PATHS = {
   productList: '/api/products',
   productGet: '/api/products/get',
+  /** `GET /api/products/getFull` (v5, bod A1) — čítanie so scope `product:read`. */
+  productGetFull: '/api/products/getFull',
   setReduction: '/api/products/setReduction',
   batch: '/api/batch',
+  /** `GET /api/whoami` (v5) — introspekcia kľúča, nevyžaduje žiadny scope. */
+  whoami: '/api/whoami',
 } as const;
 
 /** `POST /api/batch` — max 25 položiek (D56). */
@@ -112,12 +129,21 @@ export const MAX_REDUCTION_PERCENT = 30;
 /** Maximálna dĺžka okna zľavy v mesiacoch (D29, shop `range_too_long`). */
 export const MAX_WINDOW_MONTHS = 3;
 
-/**
- * ID produktu pre sondu (D53). `0` neexistuje, takže ani teoretická zmena
- * shopu (ktorá by prijala `reduction=0`) nemôže nič prepísať — sonda je
- * dvojnásobne neškodná: neplatný produkt A neplatné percento.
+/*
+ * `PROBE_PRODUCT_ID` tu ZÁMERNE už nie je.
+ *
+ * Do API v4 sa platnosť kľúča nedala overiť inak než sondou na ZÁPISOVOM
+ * endpointe: `POST /api/products/setReduction` s `id=0` a `reduction=0`, teda
+ * požiadavkou, ktorú shop musí odmietnuť. Nikdy nič nezapísala, ale v štatistike
+ * shopu vyzerala ako zápis — maintainer videl 22 volaní `setReduction`, z toho
+ * 21 skutočných zápisov a jednu sondu, ktorú nikto nevedel vysvetliť.
+ *
+ * API v5 pridal `GET /api/whoami` (akýkoľvek platný kľúč, žiadny konkrétny
+ * scope), takže sonda stratila dôvod existovať a je preč — aj konštanta, aj
+ * parameter `probeProductId`. Overenie kľúča je odteraz ČÍTANIE. Nezakladaj ju
+ * znova: `setReduction` smie volať výhradne skutočný zápis zľavy (I13 — zápis
+ * len keď je `WRITES_ENABLED`; sonda ten prepínač obchádzala).
  */
-export const PROBE_PRODUCT_ID = 0;
 
 /* ══════════════════════════ 2. Base URL (D80, I6) ═════════════════════════ */
 
@@ -280,6 +306,142 @@ export function setReductionPayload(params: SetReductionParams): Record<string, 
   };
 }
 
+/* ══════════════ 3b. `whoami` — scopes a živé limity (v5, bod D) ═══════════ */
+
+/**
+ * Scopes, ktoré tento klient pozná — VÝHRADNE produktové.
+ *
+ * `product:read` pribudol vo v5 pre `getFull`, `search` a `categories`. Appka
+ * doteraz poznala len `product:edit` (zápis zľavy), takže kľúč bez
+ * `product:read` sa prejavil ako mlčanie — funkcia sa jednoducho nedala použiť
+ * a nikto nevedel prečo. Odteraz sa to dá povedať vetou (`missingScopeSentence`).
+ *
+ * Scope objednávok v tomto zozname ZÁMERNE nie je a nesmie tu byť ani ako text:
+ * I8' hovorí, že objednávkovú cestu vlastní `orders-client.ts` a tento modul
+ * o nej nevie ani slovo (stráži to grep test `test/unit/shop-errors.spec.ts`).
+ * Objednávkový kľúč sa neoveruje cez `whoami`, ale čítaním objednávok, takže
+ * tu jeho scope nemá čo robiť. Scope, ktorý sem nepatrí, sa preto len SPOČÍTA
+ * ako „iný" — nie je to chyba, len to nie je vec produktovej cesty.
+ */
+export const SHOP_SCOPES = ['product:read', 'product:edit'] as const;
+
+export type ShopScope = (typeof SHOP_SCOPES)[number];
+
+const SHOP_SCOPE_SET: ReadonlySet<string> = new Set<string>(SHOP_SCOPES);
+
+export function isShopScope(value: unknown): value is ShopScope {
+  return typeof value === 'string' && SHOP_SCOPE_SET.has(value);
+}
+
+/**
+ * Čo si z `whoami` odnášame.
+ *
+ * ZÁMERNE tu NIE JE `id`, `name` ani `owner` (I1). Odpoveď shopu ich nesie, ale
+ * meno kľúča a meno jeho vlastníka sú metadáta kľúča: nemajú v tejto appke
+ * jediného spotrebiteľa a v logu alebo v odpovedi API by boli len zbytočnou
+ * stopou po tom, ktorý kľúč sa práve používa. Von ide uzavretý číselník scopes
+ * a dve čísla zostatku — a nič z toho sa nedá spätne priradiť ku kľúču.
+ */
+export interface WhoamiInfo {
+  /** Produktové scopes, ktoré tento klient pozná. Poradie je z odpovede shopu. */
+  readonly scopes: readonly ShopScope[];
+  /**
+   * Koľko scopes shop poslal navyše — či už mimo produktovej cesty (objednávky,
+   * I8'), alebo úplne neznámych. Ukladá sa POČET, nie hodnoty: je to signál
+   * „kľúč vie aj niečo iné", nie údaj do UI.
+   */
+  readonly otherScopeCount: number;
+  /** Živý zostatok rozpočtu tohto kľúča; `null` v poli = „nevieme". */
+  readonly remaining: RemainingFromWhoami;
+}
+
+/**
+ * Výsledok `whoami`. Fail-closed: čokoľvek, čo nie je jednoznačná odpoveď
+ * shopu, je `unknown` — nikdy sa z neistoty nestane „kľúč je v poriadku".
+ */
+export type WhoamiOutcome =
+  | { readonly status: 'ok'; readonly info: WhoamiInfo }
+  /** 401 — shop kľúč nepozná. */
+  | { readonly status: 'invalid'; readonly error: ShopError }
+  /** 403 — kľúč existuje, ale shop mu volanie zakázal. */
+  | { readonly status: 'forbidden'; readonly error: ShopError }
+  /** 429, 500, timeout, zmenený tvar odpovede, nedostupná doména. */
+  | { readonly status: 'unknown'; readonly error: ShopError };
+
+/**
+ * Tvar odpovede `GET /api/whoami` (v5).
+ *
+ * `looseObject` podľa konvencie §2 — shop smie pridať pole, nesmie odobrať
+ * povinné. Povinné je preň `ok` a `scopes`; `remaining` je zámerne NEPOVINNÉ,
+ * lebo jeho absencia je legitímne „nevieme" a nie `schema_drift` — appka vtedy
+ * spadne na zálohu (`resolveKeyedBudget`) namiesto toho, aby overenie kľúča
+ * zlyhalo pre chýbajúce číslo. `id`, `name` a `owner` sa neuvádzajú, takže sa
+ * ani neparsujú (I1).
+ */
+export const whoamiResponseSchema = z.looseObject({
+  ok: z.literal(true),
+  scopes: z.array(z.unknown()),
+  remaining: z
+    .looseObject({
+      per_minute: z.unknown().optional(),
+      per_day: z.unknown().optional(),
+    })
+    .optional(),
+});
+
+/** Rozdelí scopes zo shopu na produktové (známe) a spočíta tie ostatné. */
+export function parseShopScopes(raw: readonly unknown[]): {
+  scopes: ShopScope[];
+  otherScopeCount: number;
+} {
+  const scopes: ShopScope[] = [];
+  let otherScopeCount = 0;
+  for (const value of raw) {
+    if (isShopScope(value)) {
+      if (!scopes.includes(value)) scopes.push(value);
+      continue;
+    }
+    otherScopeCount += 1;
+  }
+  return { scopes, otherScopeCount };
+}
+
+/**
+ * Má kľúč tento scope? Tri stavy, nie dva.
+ *
+ * `null` znamená „nevieme" — `whoami` sa nedalo prečítať, alebo sa od uloženia
+ * kľúča nevolalo. Vracať pri tom `false` by bola lož („kľúč to nemá"), vracať
+ * `true` by bolo nebezpečné. Volajúci MUSÍ rozlíšiť všetky tri.
+ */
+export function hasShopScope(
+  scopes: readonly ShopScope[] | null | undefined,
+  scope: ShopScope,
+): boolean | null {
+  if (scopes === null || scopes === undefined) return null;
+  return scopes.includes(scope);
+}
+
+/** Slovenské pomenovanie toho, čo scope odomyká — pre vetu používateľovi. */
+const SCOPE_PURPOSE: Readonly<Record<ShopScope, string>> = {
+  'product:read': 'čítanie skladu, marže a kategórií produktu',
+  'product:edit': 'zápis zľavy',
+};
+
+/**
+ * Veta o scope, ktorý kľúču chýba alebo o ktorom nevieme.
+ *
+ * Mlčanie je najhoršia možnosť: funkcia sa nedá použiť a používateľ nemá ako
+ * zistiť prečo. Názov scope vo vete zostáva zámerne — je to presne to slovo,
+ * ktoré má používateľ napísať správcovi shopu, keď o kľúč žiada.
+ */
+export function missingScopeSentence(scope: ShopScope, known: boolean): string {
+  const co = SCOPE_PURPOSE[scope];
+  if (!known) {
+    return `Nevieme, či kľúč má oprávnenie ${scope} (${co}) — shop sa na to zatiaľ nepodarilo opýtať. Kým to nevieme, appka sa oň neopiera.`;
+  }
+  return `Kľúč nemá oprávnenie ${scope}, takže ${co} zatiaľ nefunguje. Vypýtaj si od správcu shopu kľúč s týmto oprávnením (alebo rozšírenie toho súčasného).`;
+}
+
 /* ═══════════════════════════ 4. Závislosti klienta ════════════════════════ */
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -298,8 +460,6 @@ export interface ShopClientDeps {
   now?: () => number;
   /** Zóna pre kontrolu „`to` nie je v minulosti" (D31). */
   timeZone?: string;
-  /** ID produktu pre sondu (D53) — prepisovateľné pre mock. */
-  probeProductId?: number;
   /**
    * 401/403 pri ZÁPISE (D51, D52). Klient sám kľúč NEWIPUJE (nevlastní
    * `api-key.repo.ts`) — len ohlási, že kľúč shop odmietol.
@@ -330,7 +490,19 @@ interface SuccessEnvelope {
 
 /* ══════════════════════════════ 5. Klient ═════════════════════════════════ */
 
-export function createShopClient(deps: ShopClientDeps): ShopClient {
+/**
+ * `ShopClient` (A0) rozšírený o to, čo pribudlo s API v5.
+ *
+ * Kontrakt `src/contracts.ts` vlastní iný agent, preto rozšírenie žije tu.
+ * Je to nadmnožina — všade, kde sa čaká `ShopClient`, sa táto hodnota dosadí
+ * bez pretypovania.
+ */
+export interface ShopClientV5 extends ShopClient {
+  /** Introspekcia kľúča: scopes a živý zostatok rozpočtu (v5). */
+  whoami(key: SecretRef, ctx: ShopCtx): Promise<WhoamiOutcome>;
+}
+
+export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
   const log = deps.logger ?? defaultLogger;
   const fetchImpl: FetchLike =
     deps.fetchImpl ??
@@ -634,6 +806,101 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
       if (error instanceof ShopConfigError) return error.shopError;
       throw error;
     }
+  }
+
+  /* ────────── 5.3a čítanie S KĽÚČOM — `getFull` (v5, bod A1/B1) ─────────── */
+
+  /**
+   * `GET /api/products/getFull?id=` — všetko, čo `get`, plus back-office polia
+   * vrátane SKUTOČNÉHO stavu zľavy (`reduction_percent/_from/_to`, bod B1).
+   *
+   * PREČO BERIE `SecretRef`, KEĎ JE TO ČÍTANIE
+   * ------------------------------------------
+   * Endpoint vyžaduje scope `product:read`; bez hlavičky odpovie `forbidden`.
+   * Je to teda prvé ČÍTANIE, ktoré nesie kľúč — dovtedy platilo, že kľúč sa
+   * posiela len pri `setReduction` a pri sonde (D48, D53).
+   *
+   * Pravidlo D48/I1 sa tým NEUVOĽŇUJE, len sa ukazuje, čo naozaj chránilo:
+   * nie „čítanie nikdy nemá kľúč", ale „čítacia cesta katalógu nemá parameter,
+   * ktorým by sa kľúč dal podstrčiť". `listProducts`, `getProduct`,
+   * `batchGetProducts` a `canary` žiadny `SecretRef` naďalej neprijímajú —
+   * anonymná cesta zostáva anonymná. Tu je kľúč VÝSLOVNÝ parameter, takže
+   * volajúci ho musí vedome podať a je na prvý pohľad vidieť, ktoré volanie
+   * kľúč minie.
+   *
+   * Zaobchádzanie s kľúčom je identické so zápisom, lebo ide cez ten istý
+   * `sendOnce()`: dešifruje sa tesne pred odoslaním, hlavička sa vo `finally`
+   * maže, `release()` prepíše Buffer nulami, `redirect: 'error'` bráni tomu,
+   * aby ho presmerovanie odnieslo na cudzí host, a NIKDY sa neloguje (I1, D64).
+   * Kľúč ide výhradne do hlavičky — do query sa nedostane, `query` nesie len
+   * `id`.
+   *
+   * PREČO `phase: 'read'`, A NIE `'write'`
+   * -------------------------------------
+   * Rozhoduje účinok volania, nie prítomnosť kľúča. `GET` je idempotentný,
+   * takže platí čítací timeout a bežná retry politika; opakovanie nič nezmení.
+   * Pravidlo D45 („po timeoute PRESNE JEDEN identický resend, stav neistý")
+   * sa sem nevzťahuje — neistota po zápise je neistota o TOM, ČO SA STALO
+   * V SHOPE, a tu sa nestane nič. Z rovnakého dôvodu sa volanie netýka I13
+   * (`WRITES_ENABLED`) ani I3 (čerstvé potvrdenie): nič nezapisuje.
+   *
+   * Rozpočet je iná vec: volanie s kľúčom spadá do rozpočtu NA KĽÚČ, nie do
+   * anonymného rozpočtu na IP (`rate-limits.ts`). Overovanie preto nesmie ísť
+   * cez celý katalóg (riziko RZ3) a rozpočtovanie patrí volajúcemu.
+   *
+   * 401/403 sa hlási len do logu a chybou; `deps.onKeyRejected` sa ZÁMERNE
+   * NEVOLÁ. Ten callback je viazaný na životný cyklus ZÁPISOVÉHO kľúča
+   * (D51/D52 — volajúci ho na jeho základe wipuje). `getFull` beží s iným
+   * kľúčom (`product:read`), takže spustiť ho by znamenalo zmazať kľúč, ktorý
+   * shop vôbec neodmietol.
+   */
+  async function getProductFull(
+    id: number,
+    key: SecretRef,
+    ctx: ShopCtx,
+  ): Promise<ProductFullDetail> {
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new ShopRequestError(
+        makeShopError({ kind: 'bad_request', code: 'local_invalid_product_id' }),
+      );
+    }
+    const result = await send({
+      method: 'GET',
+      path: SHOP_PATHS.productGetFull,
+      query: { id },
+      phase: 'read',
+      key,
+      ctx,
+    });
+
+    if (result.outcome === 'error') {
+      if (result.error.kind === 'unauthorized' || result.error.kind === 'forbidden') {
+        // Bez `product:read` je endpoint nedostupný. Nie je to chyba údajov ani
+        // dôvod čokoľvek wipovať — je to chýbajúce oprávnenie, ktoré musí
+        // volajúci ukázať používateľovi ako „nevieme overiť", nie ako „zľava
+        // nebeží" (I11).
+        log.warn('shop_full_read_key_rejected', {
+          ...correlationLogFields(ctx, result.error.requestId),
+          productId: id,
+          kind: result.error.kind,
+          httpStatus: result.error.httpStatus ?? undefined,
+        });
+      }
+      throw new ShopRequestError(result.error);
+    }
+
+    const parsed = parseShopPayload(productFullSchema, unwrapShopResult(result.value.body));
+    if (!parsed.ok) {
+      const error = schemaDriftError({
+        requestId: result.value.requestId,
+        httpStatus: result.value.httpStatus,
+        issues: parsed.issues,
+        raw: result.value.body,
+      });
+      reportDrift(SHOP_PATHS.productGetFull, ctx, error);
+      throw new ShopRequestError(error);
+    }
+    return toProductFull(parsed.value);
   }
 
   /* ─────────────────── 5.4 dávkové čítanie s fallbackom (D56) ───────────── */
@@ -943,65 +1210,119 @@ export function createShopClient(deps: ShopClientDeps): ShopClient {
     };
   }
 
-  /* ───────────────────────── 5.7 sonda kľúča (D53) ──────────────────────── */
+  /* ────────────── 5.7 overenie kľúča cez `whoami` (v5, bod D1) ──────────── */
 
   /**
-   * Overenie kľúča sondou `POST /api/products/setReduction` s `reduction=0`.
+   * `GET /api/whoami` — introspekcia kľúča.
    *
-   * **Vedomý trik (D53, backlog B4):** shop nemá `whoami` endpoint, takže
-   * platnosť kľúča sa dá overiť len na zapisovacom endpointe. Sonda je
-   * konštruovaná tak, aby NIKDY nič nezapísala:
-   *   - `reduction = 0` je mimo povoleného rozsahu (`0 < x <= 30`) → shop
-   *     odpovie `400 invalid_reduction`,
-   *   - `id = 0` neexistuje → aj keby budúca verzia shopu `reduction=0`
-   *     prijala, nie je čo prepísať.
-   * Vyhodnotenie: 400 alebo „not found" = kľúč prešiel autentifikáciou a má
-   * scope (teda `valid`); 401 = `invalid`; 403 = `forbidden`; čokoľvek iné
-   * (429, 500, timeout, drift) = `unknown` — fail-closed, nikdy `valid`.
+   * Nahradilo sondu na `POST /api/products/setReduction` s `reduction=0`. Tá
+   * bola vedomý trik z čias, keď shop introspekciu nemal: nikdy nič nezapísala,
+   * ale v štatistike shopu vyzerala ako zápis (tá jedna 22. požiadavka, ktorú
+   * maintainer nevedel vysvetliť) a POSTovala na produkčný zápisový endpoint
+   * bez ohľadu na `WRITES_ENABLED`. `whoami` je oproti tomu čítanie a shop pri
+   * ňom nevyžaduje žiadny konkrétny scope — stačí platný kľúč.
    *
-   * HTTP 200 by znamenalo, že shop zápis prijal — to je vážna zmena API, preto
-   * `unknown` + `error` do logu (nikdy `valid`).
+   * Fail-closed vyhodnotenie: 200 s očakávaným tvarom = `ok`; 401 = `invalid`;
+   * 403 = `forbidden`; čokoľvek iné (429, 500, timeout, `schema_drift`,
+   * nedostupná doména) = `unknown`. Z neistoty sa NIKDY nestane „kľúč platí".
+   *
+   * Fáza je `read`, takže timeout je `timeout_before` a volanie sa smie
+   * bezpečne zopakovať — `whoami` nič nemení.
    */
-  async function probeKey(key: SecretRef, ctx: ShopCtx): Promise<KeyProbeResult> {
-    const today = todayInTimeZone(deps.timeZone ?? env.LOGIC_TIMEZONE, nowMs());
-    const probeId = deps.probeProductId ?? PROBE_PRODUCT_ID;
-    const result = await send({
-      method: 'POST',
-      path: SHOP_PATHS.setReduction,
-      form: { id: String(probeId), from: today, to: today, reduction: '0' },
-      phase: 'write',
-      key,
-      ctx,
-    });
-
-    if (result.outcome === 'ok') {
-      log.error('shop_probe_unexpected_success', {
-        ...correlationLogFields(ctx, result.value.requestId),
-        httpStatus: result.value.httpStatus,
+  async function whoami(key: SecretRef, ctx: ShopCtx): Promise<WhoamiOutcome> {
+    let result: Awaited<ReturnType<typeof send>>;
+    try {
+      result = await send({
+        method: 'GET',
+        path: SHOP_PATHS.whoami,
+        phase: 'read',
+        key,
+        ctx,
       });
-      return 'unknown';
+    } catch (error) {
+      // Chyba `SecretRef` (expirovaný/wipnutý kľúč) ani zlá doména nesmú zhodiť
+      // overenie — sú to dôvody povedať „nevieme", nie spadnúť.
+      if (error instanceof ShopConfigError) {
+        return { status: 'unknown', error: error.shopError };
+      }
+      if (error instanceof ShopRequestError) {
+        return { status: 'unknown', error: error.shopError };
+      }
+      throw error;
     }
 
-    const { kind } = result.error;
-    log.info('shop_probe_done', {
-      ...correlationLogFields(ctx, result.error.requestId),
-      kind,
-      httpStatus: result.error.httpStatus ?? undefined,
+    if (result.outcome === 'error') {
+      const { kind } = result.error;
+      log.info('shop_whoami_done', {
+        ...correlationLogFields(ctx, result.error.requestId),
+        kind,
+        httpStatus: result.error.httpStatus ?? undefined,
+      });
+      if (kind === 'unauthorized') return { status: 'invalid', error: result.error };
+      if (kind === 'forbidden') return { status: 'forbidden', error: result.error };
+      return { status: 'unknown', error: result.error };
+    }
+
+    const parsed = parseShopPayload(whoamiResponseSchema, unwrapShopResult(result.value.body));
+    if (!parsed.ok) {
+      const error = schemaDriftError({
+        requestId: result.value.requestId,
+        httpStatus: result.value.httpStatus,
+        issues: parsed.issues,
+        raw: result.value.body,
+      });
+      reportDrift(SHOP_PATHS.whoami, ctx, error);
+      return { status: 'unknown', error };
+    }
+
+    const { scopes, otherScopeCount } = parseShopScopes(parsed.value.scopes);
+    const remaining: RemainingFromWhoami = {
+      perMinute: normalizeRemaining(parsed.value.remaining?.per_minute),
+      perUtcDay: normalizeRemaining(parsed.value.remaining?.per_day),
+    };
+
+    // Do logu ide počet scopes a to, či shop povedal zostatok — nikdy `name`
+    // ani `owner` (tie sa ani neparsujú) a nikdy nič z kľúča (I1).
+    log.info('shop_whoami_done', {
+      ...correlationLogFields(ctx, result.value.requestId),
+      httpStatus: result.value.httpStatus,
+      scopeCount: scopes.length,
+      otherScopeCount,
+      remainingKnown: remaining.perMinute !== null || remaining.perUtcDay !== null,
     });
 
-    if (kind === 'bad_request' || kind === 'not_found') return 'valid';
-    if (kind === 'unauthorized') return 'invalid';
-    if (kind === 'forbidden') return 'forbidden';
-    return 'unknown';
+    return { status: 'ok', info: { scopes, otherScopeCount, remaining } };
+  }
+
+  /**
+   * Kontrakt `ShopClient.probeKey` (D53) — odteraz postavený nad `whoami`.
+   *
+   * Zostáva, lebo volajúcich zaujíma len „platí kľúč?" a nemajú dôvod poznať
+   * scopes ani zostatok. Kto ich potrebuje (`/api/key`), volá `whoami` priamo.
+   */
+  async function probeKey(key: SecretRef, ctx: ShopCtx): Promise<KeyProbeResult> {
+    const result = await whoami(key, ctx);
+    switch (result.status) {
+      case 'ok':
+        return 'valid';
+      case 'invalid':
+        return 'invalid';
+      case 'forbidden':
+        return 'forbidden';
+      default:
+        return 'unknown';
+    }
   }
 
   return {
     listProducts,
     getProduct,
+    getProductFull,
     batchGetProducts,
     setReduction,
     probeKey,
     canary,
+    whoami,
   };
 }
 
@@ -1019,7 +1340,7 @@ export interface SettingsSource {
 export function createShopClientFromSettings(
   settings: SettingsSource,
   deps: Omit<ShopClientDeps, 'baseUrl'> = {},
-): ShopClient {
+): ShopClientV5 {
   return createShopClient({
     ...deps,
     baseUrl: async () => shopBaseUrlFromSettings(await settings.get()),

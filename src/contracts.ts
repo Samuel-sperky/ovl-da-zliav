@@ -307,6 +307,93 @@ export interface ProductDetail {
   attributes?: ProductAttribute[];
 }
 
+/**
+ * Prečo appka NEVIE, aká zľava na produkte beží (`ShopReductionState.unknown`).
+ *
+ * Sú to štyri RÔZNE dôvody a nesmú sa zliať do jedného „—": prvé dva hovoria
+ * „nepýtali sme sa / nedostali sme odpoveď", druhé dva „odpoveď prišla, ale
+ * nedáva zmysel". Prvé dva sa riešia kľúčom alebo opakovaním, druhé dva sú
+ * hlásenie pre maintainera shopu.
+ */
+export type ReductionUnknownReason =
+  /** `getFull` sa vôbec nevolal — typicky chýba kľúč so scope `product:read`. */
+  | 'not_checked'
+  /** Volanie zlyhalo alebo prišlo v nečakanom tvare (`schema_drift`, 429, timeout). */
+  | 'read_failed'
+  /** Shop poslal trojicu `reduction_*` nekonzistentne — časť `null`, časť nie. */
+  | 'partial'
+  /** Trojica prišla celá, ale hodnoty sa nedajú prečítať (napr. `0000-00-00`). */
+  | 'invalid';
+
+/**
+ * SKUTOČNÝ stav zľavy na produkte tak, ako ho hlási shop (`getFull`, bod B1).
+ *
+ * Tri stavy, ktoré sa NIKDY nesmú zliať do dvoch:
+ *   - `none`    — shop výslovne povedal, že žiadna zľava nebeží (všetky tri
+ *                 polia `reduction_*` sú `null`). Je to MERANÝ fakt.
+ *   - `active`  — shop hlási konkrétnu zľavu s oknom.
+ *   - `unknown` — appka to NEVIE. To nie je „žiadna zľava"; je to medzera
+ *                 v poznaní a UI ju musí priznať (I11).
+ *
+ * Zliatie `none` a `unknown` do jedného „zľava nebeží" je presne tá chyba,
+ * kvôli ktorej appka roky tvrdila len „podľa vlastných zápisov": z „nevieme"
+ * by sa stalo tvrdenie o produkčnom shope, ktoré nikto nepremeral.
+ */
+export type ShopReductionState =
+  | { state: 'none' }
+  | {
+      state: 'active';
+      /**
+       * Percento tak, ako ho vrátil shop. NIE je zaručené, že padne do nášho
+       * rozsahu 1–30 (D11, I9) — zľavu tam mohla nastaviť ruka v admine alebo
+       * flash sale. Posúdenie rozdielu patrí porovnávaču (bod A2), nie sem.
+       */
+      percent: number;
+      from: DateOnly;
+      to: DateOnly;
+    }
+  | { state: 'unknown'; reason: ReductionUnknownReason };
+
+/**
+ * `GET /api/products/getFull?id=` (API v5, bod A1) — všetko, čo `get`, plus
+ * back-office polia. Vyžaduje kľúč so scope `product:read`.
+ *
+ * Názvy polí zámerne kopírujú shop (`snake_case`), rovnako ako `ProductDetail`
+ * a `ProductAttribute` — jediná výnimka je `reduction`, ktorá tri surové polia
+ * zlučuje do stavu vyššie, aby sa „nevieme" nedalo prehliadnuť.
+ *
+ * Všetko okrem `reduction` je voliteľné: back-office polia sú bonus (marža,
+ * sklad, kategórie — body C1–C3) a ich absencia nesmie zhodiť čítanie stavu
+ * zľavy, kvôli ktorému sa endpoint volá.
+ */
+export interface ProductFullDetail extends ProductDetail {
+  /** Bod B1 — najväčšia diera kontraktu. Nikdy nie je `undefined`. */
+  reduction: ShopReductionState;
+  ean13?: string | null;
+  reference?: string | null;
+  /** Nákupná cena bez DPH (bod C1). */
+  purchase_price?: number | null;
+  /** `sell_price - purchase_price` (bod C1). */
+  margin?: number | null;
+  /** Marža ako percento z `sell_price`, 2 desatinné miesta (bod C1). */
+  margin_percent?: number | null;
+  /** Tá istá hodnota ako `price`, bez DPH. */
+  sell_price?: number | null;
+  sell_price_with_vat?: number | null;
+  active?: boolean | null;
+  /** Dátum založenia produktu tak, ako ho poslal shop (nenormalizovaný). */
+  date_add?: string | null;
+  /** Deň poslednej objednávky s týmto produktom, alebo `null`. */
+  last_time_in_order?: string | null;
+  /** Skladová zásoba aj pre nevariantné produkty (bod C2). */
+  qty?: number | null;
+  /** Koľko kusov tohto produktu sa kedy objednalo, naprieč objednávkami. */
+  qty_in_orders?: number | null;
+  supplier?: string | null;
+  /** Id kategórií, do ktorých je produkt zaradený (bod C3). */
+  categories?: number[] | null;
+}
+
 /** Taxonómia chýb — jediné miesto, nekonfigurovateľné z DB (D41, §6). */
 export type ShopErrorKind =
   | 'rate_limited'
@@ -371,6 +458,15 @@ export interface ShopClient {
   ): Promise<Paged<ProductListItem>>;
 
   getProduct(id: number, ctx: ShopCtx): Promise<ProductDetail>;
+
+  /**
+   * `GET /api/products/getFull?id=` (v5, bod A1) — ČÍTANIE, ale s kľúčom:
+   * endpoint vyžaduje scope `product:read`, bez hlavičky vráti `forbidden`.
+   * Kľúč je preto výslovný parameter, nie skrytá závislosť — čítacia cesta
+   * katalógu (`listProducts`, `getProduct`, `batchGetProducts`, `canary`)
+   * ho naďalej nemá čím podstrčiť (D48, I1).
+   */
+  getProductFull(id: number, key: SecretRef, ctx: ShopCtx): Promise<ProductFullDetail>;
 
   /** `POST /api/batch`, max 25, fallback na jednotlivé GETy (D56). */
   batchGetProducts(

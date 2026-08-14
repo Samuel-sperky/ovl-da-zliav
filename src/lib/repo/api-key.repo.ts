@@ -17,6 +17,19 @@
  * Wipe z iného dôvodu (TTL, 401/403, rotácia) sa naopak drží výhradne svojho
  * druhu: expirovaný shop kľúč nesmie zhodiť platný objednávkový a naopak.
  *
+ * SCOPES KĽÚČA (API v5, bod D3)
+ * -----------------------------
+ * Od v5 vie shop cez `GET /api/whoami` povedať, aké scopes kľúč má. Repozitár
+ * si posledný známy zoznam pamätá, aby sa appka nemusela pýtať shopu pri každom
+ * zobrazení obrazovky. Pamäť je ZÁMERNE len v procese (`SCOPE_MEMORY`), nie
+ * v DB: pridať stĺpec znamená migráciu a scopes sú údaj, ktorý sa dá kedykoľvek
+ * znova zistiť. Cena je známa a je to tá správna strana omylu — po reštarte
+ * appka scopes nepozná a povie „nevieme" (`null`), nikdy si nedomyslí, že ich má.
+ *
+ * Do pamäti ide VÝHRADNE uzavretý číselník produktových scopes (`product:read`,
+ * `product:edit`) — nikdy `id`, `name` ani `owner` z `whoami`. Z tých by sa dalo
+ * odvodiť, ktorý kľúč je v appke uložený (I1).
+ *
  * Invarianty držané tu:
  *  - I1  — plaintext kľúča neopustí `Buffer` vnútri `SecretHandle`; `getMeta()`
  *          vracia výhradne `last4` + časy (D65). Žiadna metóda nevracia
@@ -58,6 +71,10 @@ import {
   wipeBuffer,
   type SecretBoxOptions,
 } from '@/lib/crypto/secret-box';
+// Typ scopes je len typ (`import type` — žiadna runtime závislosť repozitára na
+// klientovi shopu). Číselník vlastní `shop/client.ts`, lebo tam sa odpoveď
+// `whoami` parsuje; repozitár si ho len pamätá.
+import type { ShopScope } from '@/lib/shop/client';
 
 /**
  * Druh kľúča (migrácia 0009, P5). Typ žije TU, nie v `src/contracts.ts` —
@@ -96,6 +113,37 @@ export function maxTtlHoursForKind(kind: ApiKeyKind): number {
  * @deprecated Vyberaj podľa `kind`, nie podľa `id`.
  */
 export const API_KEY_ROW_ID = 1;
+
+/* ─────────────────────── scopes kľúča (v5, bod D3) ─────────────────────── */
+
+/**
+ * Posledné známe scopes kľúča daného druhu.
+ *
+ * `scopes: null` znamená **NEVIEME** — kľúč sa od štartu appky neoveroval,
+ * `whoami` sa nedalo prečítať, alebo bol kľúč vymenený či wipnutý. Prázdne pole
+ * je niečo iné: shop povedal, že kľúč nemá ani jeden scope. Volajúci MUSÍ tie
+ * dva stavy rozlíšiť, inak by z „nevieme" spravil „nemá" a poslal používateľa
+ * pýtať si kľúč, ktorý už dávno má.
+ */
+export interface KeyScopeMemory {
+  readonly scopes: readonly ShopScope[] | null;
+  readonly checkedAt: Date | null;
+}
+
+const SCOPES_UNKNOWN: KeyScopeMemory = { scopes: null, checkedAt: null };
+
+/**
+ * Pamäť scopes je na úrovni MODULU, nie inštancie, z jediného dôvodu:
+ * `wipe('panic_button')` maže kľúče všetkých druhov jedným príkazom a musí
+ * vedieť zabudnúť aj scopes všetkých druhov. Keby si každá inštancia držala
+ * svoju, panic button by po sebe nechal scopes toho druhého kľúča.
+ */
+const SCOPE_MEMORY = new Map<ApiKeyKind, KeyScopeMemory>();
+
+/** Výhradne pre testy — pamäť scopes prežíva medzi inštanciami repozitára. */
+export function resetKeyScopeMemory(): void {
+  SCOPE_MEMORY.clear();
+}
 
 export type ApiKeyErrorCode = 'bad_input' | 'unavailable' | 'expired';
 
@@ -290,6 +338,19 @@ export interface ApiKeyRepository extends ApiKeyRepo {
     conn?: Queryable,
     context?: { userId?: number | null },
   ): Promise<{ expiresAt: UtcDate; last4: string }>;
+  /**
+   * Zapamätá si scopes, ktoré shop ohlásil cez `whoami` (v5, bod D3).
+   *
+   * Metódy sú NEPOVINNÉ zámerne: kontrakt `ApiKeyRepo` (A0) o scopes nevie
+   * a in-memory fakes v cudzích testoch ich neimplementujú. Volajúci si preto
+   * musí poradiť aj s tým, že tam nie sú — a „nie sú" znamená to isté ako
+   * `null`, teda „nevieme".
+   */
+  rememberScopes?(scopes: readonly ShopScope[]): void;
+  /** Posledné známe scopes; `{scopes: null}` = nevieme. */
+  recallScopes?(): KeyScopeMemory;
+  /** Zabudne scopes tohto druhu (kľúč sa vymenil alebo zmizol). */
+  forgetScopes?(): void;
 }
 
 export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
@@ -402,6 +463,12 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
     const allKinds = reason === 'panic_button';
     // Pri panic wipe treba vedieť, čo v tabuľke bolo, EŠTE pred zmazaním.
     const wipedKinds = allKinds ? await selectPresentKinds(conn) : [];
+
+    // Scopes patria kľúču, nie druhu — s kľúčom teda musia zmiznúť, a to aj
+    // vtedy, keď už nebolo čo mazať. Inak by si appka po wipe ďalej myslela,
+    // že „kľúč má product:read", hoci žiadny kľúč nemá.
+    if (allKinds) SCOPE_MEMORY.clear();
+    else SCOPE_MEMORY.delete(kind);
 
     const overwritten = affected(
       allKinds
@@ -609,6 +676,25 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
       await runInTx(conn, async (tx) => {
         await tx.query(SQL_TOUCH_LAST_USED, [now(), kind]);
       });
+    },
+
+    /**
+     * Zapíše scopes z `whoami` (v5, bod D3). Zoznam sa kopíruje a zmrazí —
+     * volajúci nesmie po odovzdaní pamäť repozitára meniť.
+     */
+    rememberScopes(scopes: readonly ShopScope[]): void {
+      SCOPE_MEMORY.set(kind, {
+        scopes: Object.freeze([...scopes]),
+        checkedAt: now(),
+      });
+    },
+
+    recallScopes(): KeyScopeMemory {
+      return SCOPE_MEMORY.get(kind) ?? SCOPES_UNKNOWN;
+    },
+
+    forgetScopes(): void {
+      SCOPE_MEMORY.delete(kind);
     },
   };
 

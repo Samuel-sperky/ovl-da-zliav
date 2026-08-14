@@ -15,6 +15,28 @@
  * Tento súbor je jediné miesto so slovenskými vetami pre shop chyby — HTTP
  * pipeline (A5) ich NESMIE duplikovať (SPRINT-PLAN §A5).
  *
+ * ── Nové kódy z API v5 (bod F kontraktu) ─────────────────────────────────────
+ *
+ * `blocked_by_flash_sale` je jediný kód, kde veta musí povedať aj to, ČIA to
+ * chyba NIE JE: produkt má v shope rozbehnutú vlastnú akciu, ktorá si zľavu
+ * riadi sama. Zadanie je v poriadku, produkt je v poriadku, appka ho preskočila
+ * a po skončení akcie sa dá zápis zopakovať. Zaradenie (terminálne pre tento
+ * pokus, nikdy retryable, nikdy „stav neistý") je aj s odôvodnením v `errors.ts`.
+ *
+ * `range_too_long` hovorí NAHLAS, že ide o rozchod pravidiel. Appka má rovnaký
+ * strop ako shop (`MAX_WINDOW_MONTHS` v `lib/domain/dates.ts`), takže dlhšie
+ * okno nemá ako odísť; keď ho shop napriek tomu odmietne, je to nález pre
+ * človeka, nie bežná chyba zadania. Veta preto nesmie skončiť pri „skráť dátum".
+ *
+ * ČO SA V TOMTO SÚBORE NESMIE POKAZIŤ:
+ *   - každá veta hovorí ČO sa stalo a ČO S TÝM; nikdy nekončí pri čísle stavu
+ *     ani pri kóde shopu (D47, K10),
+ *   - z dočasnej prekážky sa nikdy nesmie stať chyba používateľa („oprav
+ *     hodnoty"), lebo tie hodnoty sú v poriadku,
+ *   - raw kód sa nikdy nemaskuje: neznámy kód ide do vety surovo (D47),
+ *   - do viet nepatrí nič z kľúča ani z odpovede shopu (I1) — sú to konštanty,
+ *     nie šablóny nad dátami.
+ *
  * Vlastník: A3.
  */
 import type { ShopErrorKind } from '@/contracts';
@@ -101,20 +123,28 @@ export function normalizeShopCode(code: string): string {
   return code.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
-/** Kódy z `docs/api/sperky-api.md` + lokálne kódy appky (prefix `local_`). */
+/** Kódy z `docs/api/sperky-api-v5.md` + lokálne kódy appky (prefix `local_`). */
 export const CODE_MESSAGES: Readonly<Record<string, ShopMessage>> = {
   /* ── validácia zápisu (400) ── */
   invalid_dates: {
-    message: 'Shop odmietol dátumy zľavy ako neplatné.',
-    recommendation: 'Skontroluj, že „do" nie je pred „od" a že oba dátumy sú platné kalendárne dni.',
+    message: 'Shop odmietol dátumy zľavy ako neplatné — na produkt sa nič nezapísalo.',
+    recommendation:
+      'Skontroluj, že „do" nie je pred „od" a že oba dátumy sú platné kalendárne dni, a zápis zopakuj.',
   },
   invalid_reduction: {
-    message: 'Shop odmietol percento zľavy.',
-    recommendation: 'Percento musí byť celé číslo od 1 do 30.',
+    message: 'Shop odmietol percento zľavy ako neplatné — na produkt sa nič nezapísalo.',
+    recommendation: 'Percento musí byť celé číslo od 1 do 30; oprav ho a zápis zopakuj.',
   },
+  /**
+   * Nie je to bežná chyba zadania: appka stráži rovnaké 3 mesiace ako shop,
+   * takže dlhšie okno sa nemá ako odoslať. Keď to shop napriek tomu odmietne,
+   * rozišli sa pravidlá a človek sa to musí dozvedieť, nie to len obísť.
+   */
   range_too_long: {
-    message: 'Okno zľavy je dlhšie ako 3 mesiace, čo shop nepovoľuje.',
-    recommendation: 'Skráť dátum „do" tak, aby okno od–do nepresahovalo 3 mesiace.',
+    message:
+      'Shop odmietol okno zľavy ako dlhšie než 3 mesiace, hoci appka rovnaký strop stráži sama — jej pravidlo sa teda rozišlo s pravidlom shopu.',
+    recommendation:
+      'Skráť dátum „do" a zápis zopakuj; zároveň to nahlás aj s ID operácie z auditu, lebo kým sa stropy nezrovnajú, môže to zastaviť aj ďalšie zľavy.',
   },
   no_id: {
     message: 'Požiadavka neobsahovala ID produktu.',
@@ -123,6 +153,20 @@ export const CODE_MESSAGES: Readonly<Record<string, ShopMessage>> = {
   invalid_input: {
     message: 'Shop vyhodnotil obsah požiadavky ako poškodený alebo príliš veľký.',
     recommendation: 'Skús operáciu zopakovať; ak to potrvá, nahlás ID operácie z auditu.',
+  },
+
+  /* ── dočasná prekážka na strane shopu (409) ── */
+  /**
+   * Tri veci, ktoré musí človek z vety pochopiť (bod F): produkt sa preskočil,
+   * nie je to jeho chyba, a dá sa to skúsiť znova po skončení akcie. Preto veta
+   * neposiela nikoho „opravovať hodnoty" — tie sú v poriadku — a preto menuje
+   * akciu tak, ako sa volá v shope, aby ju vedel nájsť a zistiť, dokedy beží.
+   */
+  blocked_by_flash_sale: {
+    message:
+      'Produkt má v shope práve rozbehnutú akciu TurboSaleUltimate a tá si zľavu na ňom riadi sama, takže shop náš zápis odmietol.',
+    recommendation:
+      'Nie je to chyba v zadaní ani v údajoch — appka produkt preskočila a ostatné dokončila. Keď akcia v shope skončí, spusti pri tejto zľave „Zopakovať to, čo sa nepodarilo".',
   },
 
   /* ── identita a oprávnenia ── */
@@ -177,7 +221,7 @@ export const CODE_MESSAGES: Readonly<Record<string, ShopMessage>> = {
   not_found: {
     message: 'Shop tento produkt nepozná.',
     recommendation:
-      'Skontroluj ID produktu v allowlistě; appka ho označila ako „nenájdený v shope" a pokračovala ďalšími.',
+      'Skontroluj ID produktu medzi povolenými produktmi; appka ho označila ako „nenájdený v shope" a pokračovala ďalšími.',
   },
   rate_limited: {
     message: 'Shop odmietol požiadavku pre prekročenie limitu volaní.',

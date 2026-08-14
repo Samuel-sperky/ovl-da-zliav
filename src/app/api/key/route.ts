@@ -8,13 +8,13 @@
  * (query pri GET, telo pri PUT). Bez parametra je to vždy zápisový kľúč, takže
  * doterajšie chovanie a doterajší klient zostávajú nezmenené.
  *
- *  - **GET** — výhradne metadáta: `last4`, časy, `verifyStatus` (D65, I1).
+ *  - **GET** — výhradne metadáta: `last4`, časy, `verifyStatus` (D65, I1)
+ *    a posledné známe oprávnenia kľúča (v5, bod D3).
  *    Celý kľúč sa NEVRÁTI nikdy a nikam — repozitár (A1) ho ani nevie vydať.
  *  - **PUT** (sudo) — kľúč sa najprv overí u shopu a až potom uloží:
- *      * `shop_write` sondou `setReduction` s `reduction=0` na neexistujúcom
- *        produkte (nikdy nič nezapíše, D53), TTL max 48 h (R2), a po uložení
- *        sa dopália kampane v stave `needs_key`, ktoré sú stále vo svojom okne
- *        (D24, D25);
+ *      * `shop_write` cez `GET /api/whoami` (v5). TTL max 48 h (R2), a po
+ *        uložení sa dopália kampane v stave `needs_key`, ktoré sú stále vo
+ *        svojom okne (D24, D25);
  *      * `orders_read` sondou čítania objednávok, ktorú poskytuje VÝHRADNE
  *        `src/lib/shop/orders-client.ts` (I8' bod 1) a route ju dostane cez
  *        `lib/keys/orders-key-probe.ts`. TTL `ORDERS_KEY_TTL_DAYS` (P2).
@@ -27,6 +27,24 @@
  *    a maže cez všetky druhy naraz), zrušenie čakajúcich kampaní, audit
  *    `key_panic_wipe` za každý zmazaný kľúč a odkaz na runbook. Po incidente
  *    nič nebeží automaticky.
+ *
+ * ČO SA ZMENILO S API v5 A ČO SA V TOM NESMIE POKAZIŤ
+ * ---------------------------------------------------
+ * Do v4 sa zápisový kľúč overoval sondou `POST /api/products/setReduction`
+ * s `reduction=0` na neexistujúcom produkte. Sonda nikdy nič nezapísala, ale
+ * bila na PRODUKČNÝ zápisový endpoint a v štatistike shopu vyzerala ako zápis.
+ * V5 pridal `GET /api/whoami`, takže overenie je odteraz čítanie.
+ *
+ * Má to jeden dôsledok, ktorý sa NESMIE prehliadnuť: **sonda mimochodom
+ * overovala aj scope.** Kľúč bez `product:edit` na nej dostal 403 a neuložil sa.
+ * `whoami` nevyžaduje žiadny scope, takže ním prejde aj kľúč, ktorý zapisovať
+ * nesmie. Tú kontrolu preto robí táto route výslovne (`requiredScopeForKind`)
+ * — bez nej by sa dal ako zápisový uložiť napríklad objednávkový kľúč a zlyhalo
+ * by to až pri prvom skutočnom zápise zľavy, uprostred kampane.
+ *
+ * Z `whoami` sa ďalej NIKDY nevracia `id`, `name` ani `owner` kľúča (I1) —
+ * `shop/client.ts` ich zámerne ani neparsuje. Von ide uzavretý číselník scopes
+ * a dve čísla zostatku rozpočtu.
  *
  * Business logika je v `lib/*` (A1 repo, A3 klient, A9 executor) — route len
  * skladá kroky v normatívnom poradí.
@@ -69,8 +87,21 @@ import {
 import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import { usersRepo as defaultUsersRepo } from '@/lib/repo/users.repo';
-import { createShopClientFromSettings } from '@/lib/shop/client';
+import {
+  createShopClientFromSettings,
+  hasShopScope,
+  missingScopeSentence,
+  type ShopScope,
+  type WhoamiInfo,
+  type WhoamiOutcome,
+} from '@/lib/shop/client';
 import { newRequestId } from '@/lib/shop/correlation';
+import {
+  keyedBudgetSentence,
+  resolveKeyedBudget,
+  type KeyedBudget,
+  type RemainingFromWhoami,
+} from '@/lib/shop/rate-limits';
 import {
   getOrdersKeyProbe,
   registerOrdersKeyProbe,
@@ -152,7 +183,18 @@ export interface KeyRouteDeps {
   users?: { getById(id: number): Promise<{ passwordHash: string } | null> };
   verify?: typeof verifyPassword;
   audit?: typeof appendAudit;
-  /** Sonda `reduction=0` (D53). Default: shop klient nad `settings` (A3). */
+  /**
+   * Overenie zápisového kľúča cez `GET /api/whoami` (v5). Default: shop klient
+   * nad `settings` (A3). Toto je jediná cesta, ktorou sa dozvieme scopes.
+   */
+  inspectKey?: (key: SecretRef, ctx: ShopCtx) => Promise<WhoamiOutcome>;
+  /**
+   * Náhrada overenia, ktorá vracia len „platí / neplatí".
+   *
+   * Existuje pre volajúcich (a testy), ktorí nechcú stavať celú `whoami`
+   * odpoveď. Keď je uvedená, PREBIJE `inspectKey` — a appka potom scopes kľúča
+   * NEPOZNÁ, takže povie „nevieme" namiesto toho, aby si niečo domyslela.
+   */
   probeKey?: (key: SecretRef, ctx: ShopCtx) => Promise<KeyProbeResult>;
   /**
    * Sonda objednávkového kľúča (I8'). Default: sonda zaregistrovaná
@@ -175,10 +217,10 @@ function resolveDeps(deps: KeyRouteDeps) {
   const verify = deps.verify ?? verifyPassword;
   const audit = deps.audit ?? appendAudit;
   const now = deps.now ?? (() => new Date());
-  const probeKey =
-    deps.probeKey ??
+  const inspectKey =
+    deps.inspectKey ??
     ((key: SecretRef, ctx: ShopCtx) =>
-      createShopClientFromSettings(defaultSettingsRepo).probeKey(key, ctx));
+      createShopClientFromSettings(defaultSettingsRepo).whoami(key, ctx));
   const execute: ExecuteCampaignById =
     deps.execute ??
     ((campaignId, opts) =>
@@ -202,7 +244,9 @@ function resolveDeps(deps: KeyRouteDeps) {
     verify,
     audit,
     now,
-    probeKey,
+    inspectKey,
+    // `null` = nikto vlastné overenie nedodal, ide sa cez `whoami`.
+    probeKey: deps.probeKey ?? null,
     probeOrdersKey: deps.probeOrdersKey ?? null,
     execute,
     timeZone,
@@ -238,13 +282,13 @@ export function ttlHoursForKind(kind: ApiKeyKind): number {
   }
 }
 
-/** Hlášky sondy podľa druhu kľúča — pravdivé a konkrétne, nikdy generické. */
+/** Hlášky overenia podľa druhu kľúča — pravdivé a konkrétne, nikdy generické. */
 const PROBE_REJECTION: Record<ApiKeyKind, { invalid: string; forbidden: string }> = {
   shop_write: {
     invalid:
       'Shop tento API kľúč odmietol (401) — kľúč sa NEULOŽIL. Skontroluj, či je skopírovaný celý.',
     forbidden:
-      'Kľúč shop prijal, ale nemá scope product:edit (403) — kľúč sa NEULOŽIL. Vygeneruj kľúč so správnym scope.',
+      'Shop tento kľúč zablokoval (403) — kľúč sa NEULOŽIL. Over si u správcu shopu, či je kľúč ešte platný.',
   },
   orders_read: {
     invalid:
@@ -254,7 +298,81 @@ const PROBE_REJECTION: Record<ApiKeyKind, { invalid: string; forbidden: string }
   },
 };
 
-/** `SecretRef` nad plaintextom z tela requestu — len pre sondu (D53, D64). */
+/* ═══════════════ oprávnenia kľúča (v5, bod D3) ════════════════════════════ */
+
+/**
+ * Scope, bez ktorého kľúč daného druhu nemá zmysel ukladať.
+ *
+ * Do v4 to overovala sonda mimochodom (403 na `setReduction`). `whoami` scope
+ * nevyžaduje, takže sa to musí skontrolovať tu — inak by sa ako zápisový uložil
+ * aj kľúč, ktorý zapisovať nesmie.
+ *
+ * Pre `orders_read` zostáva overením čítanie objednávok cez `orders-client.ts`
+ * (I8'); scope sa mu tu nekontroluje, lebo `whoami` sa preň nevolá.
+ */
+export function requiredScopeForKind(kind: ApiKeyKind): ShopScope | null {
+  return kind === 'shop_write' ? 'product:edit' : null;
+}
+
+/** `whoami` → „platí / neplatí" v reči, ktorej rozumie zvyšok route (D53). */
+export function whoamiToProbeResult(outcome: WhoamiOutcome): KeyProbeResult {
+  switch (outcome.status) {
+    case 'ok':
+      return 'valid';
+    case 'invalid':
+      return 'invalid';
+    case 'forbidden':
+      return 'forbidden';
+    default:
+      // 429, 500, timeout, zmenený tvar odpovede — nikdy sa z toho nestane
+      // „kľúč platí"; uloží sa ako neoverený (fail-closed).
+      return 'unknown';
+  }
+}
+
+/**
+ * Čo appka o oprávneniach kľúča vie a čo z toho plynie — v jednom tvare pre
+ * GET aj PUT, aby obe obrazovky hovorili to isté.
+ *
+ * `productRead` je trojstavové: `true` má, `false` nemá, `null` NEVIEME.
+ * Mlčanie je najhoršia možnosť — kľúč so `product:read` zatiaľ nemáme a keď
+ * príde, musí byť na prvý pohľad vidieť, že sa niečo zmenilo.
+ */
+export interface KeyScopeReport {
+  /** Posledné známe scopes; `null` = nevieme (neoverené od štartu appky). */
+  scopes: readonly ShopScope[] | null;
+  /** Má kľúč `product:read`? `null` = nevieme. */
+  productRead: boolean | null;
+  /** Veta pre používateľa, keď `product:read` chýba alebo o ňom nevieme. */
+  productReadNote: string | null;
+}
+
+export function scopeReport(scopes: readonly ShopScope[] | null): KeyScopeReport {
+  const productRead = hasShopScope(scopes, 'product:read');
+  return {
+    scopes,
+    productRead,
+    productReadNote:
+      productRead === true ? null : missingScopeSentence('product:read', productRead === false),
+  };
+}
+
+/** Rozpočet do odpovede — vždy aj s tým, či je meraný, alebo len odhadnutý. */
+function budgetReport(budget: KeyedBudget): {
+  perMinute: number;
+  perUtcDay: number;
+  measured: boolean;
+  note: string;
+} {
+  return {
+    perMinute: budget.perMinute,
+    perUtcDay: budget.perUtcDay,
+    measured: !budget.hasUnknown,
+    note: keyedBudgetSentence(budget),
+  };
+}
+
+/** `SecretRef` nad plaintextom z tela requestu — len pre overenie (D64). */
 function ephemeralSecretRef(plaintext: string): SecretRef {
   return async () => {
     const value = Buffer.from(plaintext, 'utf8');
@@ -368,7 +486,15 @@ export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
         // potom tvrdilo, že kľúč chýba (presne ten bug, ktorý riešila výnimka
         // `{present, expiresAt}` v `lib/log/redact.ts`).
         // `getMeta()` vracia VÝHRADNE last4 + časy + verifyStatus (D65, I1).
-        const meta = await repoForKind(resolved, ctx.query.kind).getMeta();
+        const repo = repoForKind(resolved, ctx.query.kind);
+        const meta = await repo.getMeta();
+
+        // Oprávnenia kľúča (v5, bod D3). `recallScopes` je v rozhraní nepovinné
+        // (in-memory fakes ho nemajú) a pamäť je len v procese — po reštarte
+        // teda `null`, čo znamená „nevieme", nie „nemá".
+        const remembered = meta.present ? (repo.recallScopes?.() ?? null) : null;
+        const scopes = scopeReport(remembered?.scopes ?? null);
+
         return {
           present: meta.present,
           last4: meta.last4,
@@ -376,6 +502,11 @@ export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           expiresAt: meta.expiresAt,
           secondsLeft: meta.secondsLeft,
           verifyStatus: meta.verifyStatus,
+          // Uzavretý číselník scopes — nič, z čoho sa dá odvodiť kľúč (I1).
+          scopes: scopes.scopes,
+          productRead: scopes.productRead,
+          productReadNote: scopes.productReadNote,
+          scopesCheckedAt: remembered?.checkedAt ?? null,
         };
       },
     },
@@ -387,7 +518,7 @@ export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
 
 export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
   const resolved = resolveDeps(deps);
-  const { probeKey } = resolved;
+  const { inspectKey, probeKey } = resolved;
 
   return defineRoute(
     {
@@ -399,14 +530,27 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
         const kind: ApiKeyKind = ctx.body.kind;
         const repo = repoForKind(resolved, kind);
 
-        /* 1. Sonda PRED uložením — pre `shop_write` `reduction=0` (D53, nikdy
-         * nič nezapíše), pre `orders_read` čítanie objednávok z jediného
-         * povoleného modulu (I8'). Bez prejdenej sondy sa NEUKLADÁ nič. */
+        /* 1. Overenie PRED uložením — pre `shop_write` `GET /api/whoami` (v5,
+         * čítanie, žiadny zápisový endpoint), pre `orders_read` čítanie
+         * objednávok z jediného povoleného modulu (I8'). Bez prejdeného
+         * overenia sa NEUKLADÁ nič. */
         const operationId: Ulid = newRequestId();
-        const probe = await ((): Promise<KeyProbeResult> => {
-          if (kind === 'shop_write') {
-            return probeKey(ephemeralSecretRef(ctx.body.apiKey), { operationId });
+
+        // Čo o kľúči povedalo `whoami`. `null` znamená „nevieme" — buď overoval
+        // niekto iný (`probeKey`), alebo odpoveď nebola jednoznačná.
+        let inspected: WhoamiInfo | null = null;
+        let probe: KeyProbeResult;
+
+        if (kind === 'shop_write') {
+          if (probeKey !== null) {
+            // Vlastné overenie od volajúceho — scopes z neho nevieme.
+            probe = await probeKey(ephemeralSecretRef(ctx.body.apiKey), { operationId });
+          } else {
+            const outcome = await inspectKey(ephemeralSecretRef(ctx.body.apiKey), { operationId });
+            probe = whoamiToProbeResult(outcome);
+            inspected = outcome.status === 'ok' ? outcome.info : null;
           }
+        } else {
           const ordersProbe = resolved.probeOrdersKey ?? getOrdersKeyProbe();
           if (!ordersProbe) {
             // Fail-closed: neoverený kľúč sa neuloží a hláška je pravdivá.
@@ -414,14 +558,34 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
               logAsError: false,
             });
           }
-          return ordersProbe(ephemeralSecretRef(ctx.body.apiKey), { operationId });
-        })();
+          probe = await ordersProbe(ephemeralSecretRef(ctx.body.apiKey), { operationId });
+        }
 
         if (probe === 'invalid') {
           throw conflict(PROBE_REJECTION[kind].invalid, 'key_invalid', { logAsError: false });
         }
         if (probe === 'forbidden') {
           throw conflict(PROBE_REJECTION[kind].forbidden, 'key_invalid', { logAsError: false });
+        }
+
+        /* 1b. Scope, bez ktorého kľúč daného druhu zapisovať nemôže.
+         *
+         * `whoami` nevyžaduje žiadny scope, takže ním prejde aj kľúč, ktorý
+         * `setReduction` volať nesmie — kontrolu, ktorú do v4 robila sonda
+         * mimochodom, musíme spraviť tu. Odmieta sa VÝHRADNE pri istote:
+         * keď scopes nepoznáme (`null`), kľúč sa uloží ako doteraz a chýbajúce
+         * oprávnenie sa prizná vo vete, nie sa domyslí. */
+        const required = requiredScopeForKind(kind);
+        if (
+          required !== null &&
+          inspected !== null &&
+          hasShopScope(inspected.scopes, required) === false
+        ) {
+          throw conflict(
+            `Kľúč nemá oprávnenie ${required}, takže ním zľavu zapísať nejde — kľúč sa NEULOŽIL. Vypýtaj si od správcu shopu kľúč s týmto oprávnením.`,
+            'key_invalid',
+            { logAsError: false },
+          );
         }
 
         /* 2. Uloženie zašifrované, TTL podľa druhu (R2 pre zápis, P2 pre
@@ -432,9 +596,14 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           userId: ctx.claims.sub,
         });
 
-        /* 3. Verify status podľa sondy; `unknown` (sieť) = `unverified`. */
+        /* 3. Verify status podľa overenia; `unknown` (sieť) = `unverified`. */
         const verifyStatus = probe === 'valid' ? 'valid' : 'unverified';
         await repo.setVerifyStatus(verifyStatus);
+
+        /* 3b. Zapamätanie scopes (v5, bod D3). `store()` predchádzajúce scopes
+         * zabudol (wipe `replaced_by_new_key`), takže sa zapisujú AŽ TERAZ
+         * a výhradne vtedy, keď ich shop naozaj povedal. */
+        if (inspected !== null) repo.rememberScopes?.(inspected.scopes);
 
         /* 4. D24 — dopálenie `needs_key` kampaní, ktoré sú stále vo svojom okne.
          * Výhradne pre zápisový kľúč: objednávkový kľúč nemá so zápisom zliav
@@ -443,7 +612,21 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           await relightNeedsKeyCampaigns(resolved, ctx.claims.sub, ctx.log);
         }
 
-        return { last4: stored.last4, expiresAt: stored.expiresAt, verifyStatus, kind };
+        /* 5. Odpoveď. Ide do nej uzavretý číselník scopes a dve čísla rozpočtu
+         * — nikdy `id`, `name` ani `owner` kľúča z `whoami` (I1). */
+        const remaining: RemainingFromWhoami | null = inspected?.remaining ?? null;
+        const scopes = scopeReport(inspected?.scopes ?? null);
+
+        return {
+          last4: stored.last4,
+          expiresAt: stored.expiresAt,
+          verifyStatus,
+          kind,
+          scopes: scopes.scopes,
+          productRead: scopes.productRead,
+          productReadNote: scopes.productReadNote,
+          budget: budgetReport(resolveKeyedBudget(remaining)),
+        };
       },
     },
     deps.routeDeps,
