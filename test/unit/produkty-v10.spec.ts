@@ -53,6 +53,8 @@ const ROW = {
   everDiscounted: false,
   discountedNow: false,
   fetchedAt: '2026-08-10T01:00:00.000Z',
+  // I11 — predvolene zo zrkadla katalógu.
+  origin: 'mirror' as const,
 };
 
 const LOCKED = {

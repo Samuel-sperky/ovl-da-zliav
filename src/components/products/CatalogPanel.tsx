@@ -63,6 +63,7 @@ import {
   catalogSyncStatus,
   isAborted,
   runCatalogBatch,
+  lookupInShop,
   searchCatalog,
 } from '@/components/products/catalog-api';
 import type { CatalogFilterState, PerPage } from '@/components/products/catalog-filter';
@@ -149,6 +150,16 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [lastRun, setLastRun] = useState<CatalogRunView | null>(null);
   const [running, setRunning] = useState(false);
+
+  /**
+   * DOHĽADANIE V ESHOPE (kontrakt UI, body 25–28).
+   *
+   * Zrkadlo katalógu má časť produktov, takže „ešte som to nenačítal" vyzerá
+   * presne ako „taký produkt neexistuje". Toto ten rozdiel odstráni. Míňa ale
+   * anonymný rozpočet čítaní, preto sa NIKDY nespúšťa samo pri písaní —
+   * výhradne na kliknutie.
+   */
+  const [lookingUp, setLookingUp] = useState(false);
   /** Prepočíta stav po dávke, bez toho, aby sa dotkol filtra. */
   const [statusTick, setStatusTick] = useState(0);
 
@@ -246,6 +257,36 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   }, [filter, reloadTick]);
 
   const rows = useMemo(() => (view === null ? [] : view.data), [view]);
+
+  /** Dohľadá v eshope to, čo zrkadlo nemá. Výhradne na kliknutie. */
+  async function lookupNow(): Promise<void> {
+    setLookingUp(true);
+    const res = await lookupInShop(filter);
+    setLookingUp(false);
+    if (res.ok) {
+      setView(res.data);
+      setError(null);
+      return;
+    }
+    if (!isAborted(res.error)) setError(res.error.message);
+  }
+
+  /**
+   * Veta o poslednom dohľadaní. Hovorí MERANÉ fakty: koľko riadkov pribudlo
+   * z eshopu a koľko sa ich nestihlo dotiahnuť. Žiadny odhad, teda ani `≈`.
+   */
+  const lookupNote = ((): string | null => {
+    const lookup = view?.lookup;
+    if (lookup === undefined || !lookup.requested) return null;
+    if (lookup.error !== null) return 'Dohľadanie v eshope neprešlo.';
+    if (lookup.addedFromShop === 0 && lookup.notFetched === 0) {
+      return 'V eshope sa nenašlo nič ďalšie.';
+    }
+    const pribudlo = `Z eshopu pribudlo ${lookup.addedFromShop} produktov.`;
+    return lookup.notFetched > 0
+      ? `${pribudlo} Ďalších ${lookup.notFetched} sa nestihlo dotiahnuť — dnešný rozpočet čítaní.`
+      : pribudlo;
+  })();
   const matching = view === null ? 0 : view.total;
   const catalogTotal = view === null ? 0 : view.catalogTotal;
 
@@ -470,6 +511,15 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
             {dataAsOfSentence(view === null ? null : view.dataAsOf)}
           </div>
 
+          {/* Výsledok posledného dohľadania — pri mieste, kde vzniklo. Sú to
+              MERANÉ čísla (koľko riadkov pribudlo, koľko sa nestihlo), takže
+              sa neoznačujú `≈` (P7). */}
+          {lookupNote !== null ? (
+            <Note variant="info" testId="catalog-lookup-note">
+              {lookupNote}
+            </Note>
+          ) : null}
+
           {/* Strop rozsahu a chýbajúce kusy — nad tabuľkou, teda tam, kde sa
               výber robí, a nie až v sprievodcovi ako tiché odmietnutie. */}
           <BlockerNotes
@@ -513,7 +563,22 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                     title={empty.title}
                     description={empty.description}
                     action={
-                      empty.offerLoad ? (
+                      /* Keď je vo vyhľadávaní text a zrkadlo nič nenašlo, prvá
+                         ponuka je DOHĽADAŤ V ESHOPE — zrkadlo má len časť
+                         katalógu, takže prázdny výsledok často neznamená, že
+                         produkt neexistuje. Načítanie ďalšej dávky ostáva
+                         druhou možnosťou. */
+                      filter.query.trim().length > 0 ? (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => void lookupNow()}
+                          disabled={lookingUp}
+                          data-testid="catalog-lookup"
+                        >
+                          {lookingUp ? 'Hľadám v eshope…' : 'Dohľadať v eshope'}
+                        </button>
+                      ) : empty.offerLoad ? (
                         <button
                           type="button"
                           className="btn sm"

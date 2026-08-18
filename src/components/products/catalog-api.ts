@@ -123,7 +123,19 @@ export interface CatalogRowView {
   readonly everDiscounted: boolean;
   readonly discountedNow: boolean;
   readonly fetchedAt: string;
+  /**
+   * I11 — ODKIAĽ je tento riadok. `mirror` = názov a cena z posledného
+   * prechodu synchronizácie katalógu. `shop` = appka si ich práve vypýtala
+   * z eshopu, lebo v zrkadle neboli.
+   *
+   * Bez tohto poľa by na jednej obrazovke stáli vedľa seba dva rôzne stupne
+   * istoty a vyzerali by rovnako.
+   */
+  readonly origin: ProductOrigin;
 }
+
+/** Odkiaľ pochádza riadok katalógu (I11). */
+export type ProductOrigin = 'mirror' | 'shop';
 
 export interface CatalogCountsView {
   readonly total: number;
@@ -153,6 +165,42 @@ export interface CatalogSearchView {
   readonly dataAsOf: string | null;
   readonly lockedFilters: Readonly<Record<string, LockedFilterView>>;
   readonly discountSource: 'own_writes';
+  /**
+   * `total` je počet v ZRKADLE, nie v eshope. Kým zrkadlo nie je úplné, je to
+   * DOLNÁ HRANICA a obrazovka ho musí označiť znakom `≈` (P7).
+   */
+  readonly totalSource: 'mirror';
+  /** Výsledok dohľadania v eshope. Spúšťa sa VÝHRADNE na vyžiadanie. */
+  readonly lookup: LookupView;
+  /** Čo appka zatiaľ nesmie — presné filtre, kategórie, kód produktu. */
+  readonly capabilities: readonly CapabilityView[];
+}
+
+/**
+ * Dohľadanie v eshope (`?lookup=1`). Míňa anonymný rozpočet čítaní, preto sa
+ * NIKDY nespúšťa samo — vždy až na kliknutie.
+ */
+export interface LookupView {
+  readonly requested: boolean;
+  readonly outcome: string;
+  /** Koľko produktov hlási eshop pre túto otázku. `null` = nevieme. */
+  readonly shopTotal: number | null;
+  /** Koľko riadkov pribudlo z eshopu (v zrkadle neboli). */
+  readonly addedFromShop: number;
+  /** Koľko sa ich nestihlo dotiahnuť — zvyčajne pre rozpočet. */
+  readonly notFetched: number;
+  readonly readsUsed: number;
+  /** Meraný čas hľadania, nie odhad. */
+  readonly at: string | null;
+  readonly error: string | null;
+}
+
+/** Funkcia, ktorú appka pozná, ale zatiaľ na ňu nemá oprávnenie (K8). */
+export interface CapabilityView {
+  readonly id: string;
+  readonly available: boolean;
+  /** Slovenská veta, prečo nie je dostupná. `null` = dostupná je. */
+  readonly note: string | null;
 }
 
 export function searchCatalog(
@@ -160,6 +208,26 @@ export function searchCatalog(
   signal?: AbortSignal,
 ): Promise<Result<CatalogSearchView>> {
   return readJson<CatalogSearchView>(`/api/catalog/search?${catalogSearchQuery(filter)}`, signal);
+}
+
+/**
+ * To isté hľadanie, ale s dohľadaním v eshope (`?lookup=1`).
+ *
+ * Zrkadlo katalógu má 2 900 zo 41 082 produktov, takže „ešte som to nenačítal"
+ * vyzerá presne ako „taký produkt neexistuje". Toto ten rozdiel odstráni:
+ * pýta sa verejného `searchIndex` a chýbajúce riadky dotiahne cez `get`.
+ *
+ * MÍŇA ANONYMNÝ ROZPOČET ČÍTANÍ (30/min, 300/UTC deň na IP), preto sa NIKDY
+ * nevolá samo pri písaní — výhradne na kliknutie. Kontrakt UI, bod 26.
+ */
+export function lookupInShop(
+  filter: CatalogFilterState,
+  signal?: AbortSignal,
+): Promise<Result<CatalogSearchView>> {
+  return readJson<CatalogSearchView>(
+    `/api/catalog/search?${catalogSearchQuery(filter)}&lookup=1`,
+    signal,
+  );
 }
 
 /**

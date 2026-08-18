@@ -135,6 +135,9 @@ const ROW = {
   everDiscounted: false,
   discountedNow: false,
   fetchedAt: '2026-08-10T01:00:00.000Z',
+  // I11 — predvolene zo zrkadla; testy, ktoré overujú dohľadanie v eshope,
+  // si `origin: 'shop'` prepíšu samy.
+  origin: 'mirror' as const,
 };
 
 const NOW = new Date('2026-08-12T09:00:00.000Z');
