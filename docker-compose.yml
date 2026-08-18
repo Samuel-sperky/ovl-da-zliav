@@ -1,0 +1,45 @@
+# Aura Zľavy (ovl-da-zliav) — lokálne nasadenie, bez Caddy.
+# Port publikovaný LEN na 127.0.0.1 (appka mení produkčné ceny — nepatrí na internet).
+services:
+  ovl-zliav-app:
+    build: .
+    container_name: ovl-zliav-app
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:3050:3050"
+    depends_on:
+      ovl-zliav-db:
+        condition: service_healthy
+    volumes:
+      - ./storage/app:/app/storage/app
+      - ./storage/logs:/app/storage/logs
+      - ./backups:/app/backups
+    networks:
+      - ovl-zliav-net
+
+  ovl-zliav-db:
+    image: mariadb:11.4
+    container_name: ovl-zliav-db
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: "${DB_DATABASE:-ovl_zliav}"
+      MARIADB_USER: "${DB_USERNAME:-ovl}"
+      MARIADB_PASSWORD: "${DB_PASSWORD:-zmen-ma}"
+      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-zmen-ma-root}"
+    volumes:
+      - ovl-zliav-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ovl-zliav-net
+
+volumes:
+  ovl-zliav-db-data:
+
+networks:
+  ovl-zliav-net:
+    driver: bridge
