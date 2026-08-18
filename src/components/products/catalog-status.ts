@@ -558,7 +558,11 @@ export function filterIsNarrowed(filter: CatalogFilterState): boolean {
     filter.priceFrom.trim() !== '' ||
     filter.priceTo.trim() !== '' ||
     filter.currentlyDiscounted ||
-    filter.neverDiscounted
+    filter.neverDiscounted ||
+    // Iný než predvolený stav v eshope je podmienka ako každá iná. Bez toho by
+    // prázdna tabuľka pri „len tie, ktoré eshop už nevracia" hlásila, že sa
+    // katalóg načítava — a pritom je načítaný celý a vinný je filter.
+    filter.shopPresence !== 'known'
   );
 }
 

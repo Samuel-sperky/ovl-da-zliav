@@ -21,10 +21,27 @@
  * Výber a jeho dve podoby
  * ───────────────────────
  * Naklikané riadky sa držia v množine čísel a prežijú prechod na ďalšiu
- * stránku. Hromadný výber („Vybrať všetkých 11 640") sa NEROZBAĽUJE do
- * zoznamu — je to príznak `allMatching` a do sprievodcu ide ako FILTER.
- * Zmena filtra výber zruší: ponechať výber z inej otázky by znamenalo
+ * stránku aj prechod medzi tabmi (kontrakt UI, bod 17 — odloží ho
+ * `catalog-selection.ts`). Hromadný výber („Vybrať všetkých 11 640") sa
+ * NEROZBAĽUJE do zoznamu — je to príznak `allMatching` a do sprievodcu ide ako
+ * FILTER. Zmena filtra výber zruší: ponechať výber z inej otázky by znamenalo
  * zlacniť niečo, na čo sa už používateľ nepozeral.
+ *
+ * Hľadanie: zrkadlo hneď, eshop na kliknutie
+ * ──────────────────────────────────────────
+ * Písanie do poľa hľadá v NAČÍTANÝCH riadkoch — podľa názvu a čísla produktu.
+ * Eshop pozná navyše kód, popis aj kategórie, ale hľadanie v ňom míňa anonymný
+ * rozpočet čítaní, takže sa NIKDY nespustí samo: je to tlačidlo, ktoré stojí
+ * hneď pri poli a je dostupné vždy, keď je v hľadaní text — aj keď zrkadlo
+ * niečo našlo. Zrkadlo má 2 900 zo 41 082 produktov, takže tri nájdené riadky
+ * nie sú dôkaz, že v eshope nie je tridsať ďalších.
+ *
+ * Počet zhôd je pri neúplnom zrkadle DOLNÁ HRANICA
+ * ────────────────────────────────────────────────
+ * `total` z API je počet v zrkadle (`totalSource`), nie v eshope. Kým katalóg
+ * nie je načítaný celý, obrazovka ho označí `≈` a stlmí (P7, kontrakt UI bod 8).
+ * Keď sa stav katalógu nepodarí zistiť, `≈` tam OSTÁVA — neistota sa nemá ako
+ * vyvrátiť a tvrdiť presné číslo by bolo horšie než priznať odhad.
  *
  * Prekážky výberu sa počítajú TU a lokálne
  * ────────────────────────────────────────
@@ -66,13 +83,18 @@ import {
   lookupInShop,
   searchCatalog,
 } from '@/components/products/catalog-api';
-import type { CatalogFilterState, PerPage } from '@/components/products/catalog-filter';
+import type { CatalogFilterState, CatalogSort, PerPage } from '@/components/products/catalog-filter';
 import {
   catalogFilterKey,
   DEFAULT_CATALOG_FILTER,
   newDiscountHref,
   parseCatalogFilterQuery,
 } from '@/components/products/catalog-filter';
+import {
+  readSelection,
+  restoreSelection,
+  writeSelection,
+} from '@/components/products/catalog-selection';
 import type { CatalogRunView, CatalogStatusView } from '@/components/products/catalog-status';
 import {
   CATALOG_PANEL_BLOCKERS,
@@ -232,9 +254,38 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
     setAllMatching(false);
   }, [filterKey]);
 
+  /**
+   * Obnova výberu z predošlej návštevy tabu (kontrakt UI, bod 17).
+   *
+   * Beží PRED prvým načítaním riadkov — inak by obrazovka stiahla predvolenú
+   * otázku a o okamih ju zahodila. Efekt je zámerne AŽ ZA efektom vyššie:
+   * pri pripojení komponentu bežia oba a keby bol prvý, obnovená otázka by sa
+   * tomu druhému javila ako zmena filtra a zmazala by práve obnovený výber.
+   * Z rovnakého dôvodu si prepíše aj `lastFilterKey` — obnova nie je zmena,
+   * ktorú urobil človek.
+   */
+  const bootFilter = useRef(initialFilter ?? DEFAULT_CATALOG_FILTER);
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    const next = restoreSelection(bootFilter.current, readSelection());
+    lastFilterKey.current = catalogFilterKey(next.filter);
+    setFilter(next.filter);
+    setQueryDraft(next.filter.query);
+    setSelected(new Set(next.productIds));
+    setAllMatching(next.allMatching);
+    setRestored(true);
+  }, []);
+
+  /* Odloženie výberu. Prázdny výber sa neukladá — o to sa stará modul. */
+  useEffect(() => {
+    if (!restored) return;
+    writeSelection({ filter: filterKey, productIds: [...selected], allMatching });
+  }, [restored, filterKey, selected, allMatching]);
+
   /* Načítanie stránky katalógu. Zrušený dotaz NIE JE chyba — používateľ len
      rýchlo preklikol ďalej a hneď za ním beží nový, takže sa nechá „Načítavam". */
   useEffect(() => {
+    if (!restored) return;
     const controller = new AbortController();
     let live = true;
     setLoading(true);
@@ -254,12 +305,20 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
       live = false;
       controller.abort();
     };
-  }, [filter, reloadTick]);
+  }, [filter, reloadTick, restored]);
 
   const rows = useMemo(() => (view === null ? [] : view.data), [view]);
 
-  /** Dohľadá v eshope to, čo zrkadlo nemá. Výhradne na kliknutie. */
+  /**
+   * Dohľadá v eshope to, čo zrkadlo nemá. Výhradne na kliknutie.
+   *
+   * Hľadá sa to, čo je vo FILTRI, nie to, čo je práve v poli — písmená do
+   * filtra dobiehajú s odstupom a bez tejto poistky by kliknutie hneď po
+   * doťukaní zaplatilo čítania za predošlé slovo. Tlačidlo je dovtedy vypnuté;
+   * toto je druhý zámok, nie ten prvý.
+   */
   async function lookupNow(): Promise<void> {
+    if (filter.query.trim() === '') return;
     setLookingUp(true);
     const res = await lookupInShop(filter);
     setLookingUp(false);
@@ -289,6 +348,22 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   })();
   const matching = view === null ? 0 : view.total;
   const catalogTotal = view === null ? 0 : view.catalogTotal;
+
+  /**
+   * P7 — je počet zhôd meraný fakt, alebo dolná hranica?
+   *
+   * Fakt je len vtedy, keď zrkadlo obsahuje celý eshop. Vo všetkých ostatných
+   * prípadoch — vrátane toho, keď sa stav katalógu NEPODARILO zistiť — je to
+   * dolná hranica a píše sa `≈`. Fail-closed je tu úmysel: neistota sa nemá
+   * ako vyvrátiť a presné číslo by bolo tvrdenie, ktoré appka nemá kryté.
+   */
+  const matchingIsLowerBound = catalog === null || !catalog.complete;
+
+  /** Je v hľadaní text, ktorý už dobehol do filtra? Bez neho nie je čo dohľadať. */
+  const searchTerm = filter.query.trim();
+  const searchDraft = queryDraft.trim();
+  /** Kým doťukané písmená nedobehnú do filtra, dohľadalo by sa iné slovo. */
+  const searchSettled = searchDraft === searchTerm;
 
   /**
    * Stav v shope pri každom riadku, ktorý používateľ počas tejto návštevy
@@ -458,14 +533,38 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
           <div className="row wrapx" style={{ marginBottom: '10px' }}>
             <input
               className="inp"
-              style={{ width: '340px', maxWidth: '100%' }}
+              style={{ width: '300px', maxWidth: '100%' }}
               type="search"
               value={queryDraft}
-              placeholder="Hľadať názov alebo číslo produktu"
+              placeholder="Hľadať názov, číslo alebo kód produktu"
               aria-label="Hľadať v katalógu"
               onChange={(event) => setQueryDraft(event.target.value)}
               data-testid="catalog-search"
             />
+
+            {/* DOHĽADANIE JE PONUKA, NIE AUTOMAT (kontrakt UI, body 25–28).
+                Stojí pri poli a je dostupné vždy, keď je v hľadaní text — aj
+                keď zrkadlo niečo našlo: 2 900 zo 41 082 riadkov znamená, že
+                nájdené tri nie sú dôkaz o neexistujúcich tridsiatich. Spúšťa
+                ho výhradne kliknutie, lebo míňa anonymný rozpočet čítaní. */}
+            {searchDraft === '' ? null : (
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => void lookupNow()}
+                disabled={lookingUp || !searchSettled}
+                title="Prehľadá celý eshop — názov, popis, kód aj kategórie."
+                data-testid="catalog-lookup"
+              >
+                {lookingUp ? 'Hľadám v eshope…' : 'Dohľadať v eshope'}
+              </button>
+            )}
+
+            {/* Čo hľadá pole a čo až eshop. Jedna veta, nie odstavec (P2). */}
+            <span className="lvl-3" data-testid="catalog-search-hint">
+              Načítané riadky podľa názvu a čísla; kód nájde eshop.
+            </span>
+
             {narrow ? (
               <button
                 type="button"
@@ -477,33 +576,45 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 Filtre
               </button>
             ) : null}
+            {/* P7 — dolná hranica nesie `≈` a tlmenejší odtieň; merané číslo
+                zostáva plné. Kým sa nenačítal ani prvý riadok, je tu POMLČKA:
+                nula je tvrdenie, a to appka v tej chvíli nemá čím kryť
+                (kontrakt UI, bod 5). */}
             <span
               className="num"
               style={{
                 marginLeft: 'auto',
                 fontSize: '22px',
-                fontWeight: 660,
+                fontWeight: matchingIsLowerBound ? 620 : 660,
+                color: matchingIsLowerBound ? 'var(--ink2)' : 'var(--ink)',
                 letterSpacing: '-0.02em',
                 lineHeight: 1.05,
                 whiteSpace: 'nowrap',
               }}
+              title={
+                matchingIsLowerBound
+                  ? 'Počet v načítaných riadkoch — v eshope ich môže byť viac.'
+                  : undefined
+              }
               data-testid="catalog-matching"
             >
-              {formatCountSk(matching)}
+              {view === null ? '—' : `${matchingIsLowerBound ? '≈ ' : ''}${formatCountSk(matching)}`}
               {/* „z … načítaných", nie „z … produktov": kým je katalóg neúplný,
                   druhé číslo je počet riadkov, ktoré appka má — nie veľkosť
                   eshopu. Bez toho slova vyzerá neúplný katalóg ako celý. */}
-              <small
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  color: 'var(--dim)',
-                  marginLeft: '6px',
-                  letterSpacing: 0,
-                }}
-              >
-                z {formatCountSk(catalogTotal)} načítaných
-              </small>
+              {view === null ? null : (
+                <small
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    color: 'var(--dim)',
+                    marginLeft: '6px',
+                    letterSpacing: 0,
+                  }}
+                >
+                  z {formatCountSk(catalogTotal)} načítaných
+                </small>
+              )}
             </span>
           </div>
 
@@ -547,6 +658,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 rows={rows}
                 soldWindowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
                 total={matching}
+                totalIsLowerBound={matchingIsLowerBound}
                 page={filter.page}
                 perPage={filter.perPage}
                 loading={loading}
@@ -557,28 +669,23 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 onOpenDetail={setDetailId}
                 onPage={(page) => change({ page })}
                 onPerPage={(perPage: PerPage) => change({ perPage, page: 1 })}
+                sort={filter.sort}
+                /* Poradie nie je iná otázka, preto sa výber NERUŠÍ — mení sa
+                   len `sort`, ktorý do kľúča filtra nevstupuje. */
+                onSort={(sort: CatalogSort) => change({ sort, page: 1 })}
                 rowReason={rowReason}
                 emptyState={
                   <EmptyState
                     title={empty.title}
                     description={empty.description}
                     action={
-                      /* Keď je vo vyhľadávaní text a zrkadlo nič nenašlo, prvá
-                         ponuka je DOHĽADAŤ V ESHOPE — zrkadlo má len časť
-                         katalógu, takže prázdny výsledok často neznamená, že
-                         produkt neexistuje. Načítanie ďalšej dávky ostáva
-                         druhou možnosťou. */
-                      filter.query.trim().length > 0 ? (
-                        <button
-                          type="button"
-                          className="btn sm"
-                          onClick={() => void lookupNow()}
-                          disabled={lookingUp}
-                          data-testid="catalog-lookup"
-                        >
-                          {lookingUp ? 'Hľadám v eshope…' : 'Dohľadať v eshope'}
-                        </button>
-                      ) : empty.offerLoad ? (
+                      /* Keď je v hľadaní text, ponuka „Dohľadať v eshope" už
+                         stojí pri poli o kúsok vyššie a je dostupná vždy —
+                         druhé rovnaké tlačidlo pár centimetrov pod ním by bola
+                         len šum. „Načítať ďalšiu dávku" sa pri hľadaní
+                         neponúka zámerne: na hľadaný kus je odpoveďou eshop,
+                         nie ďalšia stovka riadkov v abecednom poradí. */
+                      searchTerm.length > 0 ? undefined : empty.offerLoad ? (
                         <button
                           type="button"
                           className="btn sm"

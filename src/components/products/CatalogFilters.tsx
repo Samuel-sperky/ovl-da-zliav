@@ -15,8 +15,30 @@
  * (`lockedFilters`). Keď dáta zo shopu pribudnú, filter zmizne zo zoznamu
  * v repozitári a táto obrazovka ho prestane kresliť sivý sama od seba.
  *
+ * Jediná výnimka je „Skutočná zľava v eshope" a je vedomá: nie je to filter nad
+ * stĺpcom zrkadla, ale schopnosť, ktorú appka celú nemá, takže ju API do
+ * `lockedFilters` nemá ako poslať. Keby sa nekreslila, používateľ by pri
+ * políčku „práve v zľave" nemal ako zistiť, že to NIE JE stav eshopu — a presne
+ * to je otázka, kvôli ktorej na túto obrazovku prišiel. Až API začne vedieť
+ * filtrovať podľa skutočnej zľavy, tento riadok odtiaľto zmizne.
+ *
+ * ZĽAVA JE VLASTNÝ ZÁPIS, NIE STAV ESHOPU
+ * ───────────────────────────────────────
+ * „Práve v zľave" a „nikdy nezlacnené" hovoria o tom, čo appka SAMA zapísala.
+ * Nesie to nadpis skupiny, nie poznámka pod ňou — poznámku pod skupinou nikto
+ * nečíta a zámena týchto dvoch vecí je najdrahší omyl na tejto obrazovke.
+ *
  * Čísla pri možnostiach sú z `counts` — meraný fakt, nie odhad (P7), preto sú
  * bez značky `≈`. Kým čísla nie sú, nekreslí sa nič; nula by klamala.
+ *
+ * PÔVOD RIADKU SA FILTRUJE INDE
+ * ─────────────────────────────
+ * `origin` (zrkadlo vs. dohľadané v eshope) nie je súčasťou `filter` a nesmie
+ * ňou byť — zmena filtra spustí nový dotaz a dohľadané riadky zmiznú, takže
+ * voľba „len dohľadané" by vrátila prázdnu tabuľku. Preto ho panel dostáva ako
+ * dvojicu `origin` + `onOriginChange` od obrazovky, ktorá riadky drží.
+ * Voliteľné sú zámerne: kým ich obrazovka neposiela, skupina sa NEKRESLÍ.
+ * Vypínač, ktorý nič nerobí, je horší než chýbajúci vypínač.
  *
  * Vlastník: V10.
  */
@@ -25,6 +47,8 @@ import type { CSSProperties } from 'react';
 import type { CatalogCountsView, LockedFilterView } from '@/components/products/catalog-api';
 import type {
   CatalogFilterState,
+  OriginFilter,
+  ShopPresence,
   SoldBucket,
   SoldWindow,
 } from '@/components/products/catalog-filter';
@@ -59,6 +83,23 @@ const LOCKED_LABELS: Readonly<Record<string, string>> = {
 const LOCKED_IN_SOLD = ['turnover'] as const;
 const LOCKED_IN_STOCK = ['stock'] as const;
 const LOCKED_STANDALONE = ['category', 'metal', 'jewelryType', 'margin'] as const;
+
+/**
+ * Čo eshop o produkte povedal pri poslednom načítaní. Tri vylučujúce sa
+ * možnosti, z ktorých vždy platí práve jedna — pozri `ShopPresence`.
+ */
+const PRESENCE_LABELS: ReadonlyArray<{ value: ShopPresence; label: string }> = [
+  { value: 'known', label: 'Ktoré eshop pozná' },
+  { value: 'withMissing', label: 'Aj tie, ktoré už nevracia' },
+  { value: 'onlyMissing', label: 'Len tie, ktoré už nevracia' },
+];
+
+/** Odkiaľ je riadok v tabuľke. Kreslí sa len vtedy, keď to obrazovka vie použiť. */
+const ORIGIN_LABELS: ReadonlyArray<{ value: OriginFilter; label: string }> = [
+  { value: 'all', label: 'Všetky riadky' },
+  { value: 'mirror', label: 'Z načítaného katalógu' },
+  { value: 'shop', label: 'Dohľadané v eshope' },
+];
 
 /* ═══════════════════════════ 2. Drobné kúsky ══════════════════════════════ */
 
@@ -103,6 +144,43 @@ function Count({ value }: { value: number | null }) {
   return <span className="c num">{formatCountSk(value)}</span>;
 }
 
+/**
+ * Skupina možností, z ktorých platí práve jedna. Prepínač, nie zaškrtávacie
+ * políčka: pri políčkach by „nič nezaškrtnuté" muselo niečo znamenať, a to,
+ * čo by znamenalo (predvolený stav servera), by v paneli nebolo vidieť.
+ */
+function ChoiceGroup<T extends string>({
+  name,
+  options,
+  value,
+  onPick,
+  testIdPrefix,
+}: {
+  name: string;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  value: T;
+  onPick: (next: T) => void;
+  testIdPrefix: string;
+}) {
+  return (
+    <>
+      {options.map((option) => (
+        <label className="fopt" key={option.value}>
+          <input
+            className="cb"
+            type="radio"
+            name={name}
+            checked={option.value === value}
+            onChange={() => onPick(option.value)}
+            data-testid={`${testIdPrefix}-${option.value}`}
+          />
+          {option.label}
+        </label>
+      ))}
+    </>
+  );
+}
+
 /* ═══════════════════════════ 3. Panel ═════════════════════════════════════ */
 
 export interface CatalogFiltersProps {
@@ -117,6 +195,12 @@ export interface CatalogFiltersProps {
   onChange: (patch: Partial<CatalogFilterState>) => void;
   onApplySaved: (query: string) => void;
   onRemoveSaved: (name: string) => void;
+  /**
+   * Pôvod riadku — NIE je súčasťou filtra (pozri hlavičku modulu). Kým
+   * obrazovka dvojicu neposiela, skupina sa vôbec nekreslí.
+   */
+  origin?: OriginFilter;
+  onOriginChange?: (origin: OriginFilter) => void;
 }
 
 export function CatalogFilters({
@@ -129,6 +213,8 @@ export function CatalogFilters({
   onChange,
   onApplySaved,
   onRemoveSaved,
+  origin,
+  onOriginChange,
 }: CatalogFiltersProps) {
   const locked = Object.keys(lockedFilters);
 
@@ -241,8 +327,10 @@ export function CatalogFilters({
         </div>
       </div>
 
+      {/* Nadpis hovorí, čo tie dve políčka naozaj vedia. „História zliav" by
+          sľubovala stav eshopu — appka ho nepozná a políčka ho nefiltrujú. */}
       <div className="fgroup">
-        <h3>História zliav</h3>
+        <h3>Zľavy podľa vlastných zápisov</h3>
         <label className="fopt">
           <input
             className="cb"
@@ -265,10 +353,45 @@ export function CatalogFilters({
           Nikdy nezlacnené
           <Count value={counts === null ? null : counts.neverDiscounted} />
         </label>
+        <div
+          className="fopt locked"
+          aria-disabled="true"
+          title={SURFACE_TERMS.lockedFeature}
+          data-testid="filter-real-discount"
+        >
+          Skutočná zľava v eshope
+        </div>
         <div className="lvl-3" style={{ marginTop: '4px' }}>
-          Podľa vlastných zápisov appky.
+          Appka vidí len to, čo sama zapísala.
         </div>
       </div>
+
+      {/* Stav v eshope je fail-closed: predvolene sa neponúkajú kusy, ktoré
+          eshop pri poslednom načítaní nenašiel. Dostať sa k nim ale musí dať —
+          práve tie treba z výberu odobrať alebo skontrolovať. */}
+      <div className="fgroup">
+        <h3>Stav v eshope</h3>
+        <ChoiceGroup
+          name="shop-presence"
+          options={PRESENCE_LABELS}
+          value={filter.shopPresence}
+          onPick={(value) => onChange({ shopPresence: value, page: 1 })}
+          testIdPrefix="filter-presence"
+        />
+      </div>
+
+      {origin === undefined || onOriginChange === undefined ? null : (
+        <div className="fgroup" data-testid="filter-origin">
+          <h3>Odkiaľ je riadok</h3>
+          <ChoiceGroup
+            name="row-origin"
+            options={ORIGIN_LABELS}
+            value={origin}
+            onPick={onOriginChange}
+            testIdPrefix="filter-origin"
+          />
+        </div>
+      )}
 
       {LOCKED_STANDALONE.some((code) => locked.includes(code)) ? (
         <div className="fgroup">

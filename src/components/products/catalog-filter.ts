@@ -22,6 +22,16 @@
  *  3. **Predvolené okno je 30 dní** (architektúra §1, odpoveď 53). Repozitár
  *     má vlastný default 180, preto sa okno posiela VŽDY explicitne.
  *
+ * Triedenie je poradie, nie podmienka
+ * ───────────────────────────────────
+ * `sort` je súčasťou stavu (predvolene NAJDRAHŠIE PRVÉ — kontrakt UI, bod 19),
+ * ale do query stringu sa dostane LEN na vyžiadanie (`sorting: true`), a to
+ * z jediného miesta: z volaní tabuľky Produktov. Dôvod je, že ten istý reťazec
+ * slúži aj ako kľúč filtra a ako odkaz do novej zľavy — tam znamená OTÁZKU,
+ * a poradie riadkov otázku nemení. Keby sa započítalo, preklik na
+ * „najlacnejšie prvé" by zrušil naklikaný výber (kontrakt UI, bod 17) a zmenil
+ * by aj to, čo sa odovzdalo sprievodcovi.
+ *
  * Vlastník: V10.
  */
 
@@ -42,6 +52,71 @@ export const PER_PAGE_CHOICES = [50, 100] as const;
 
 export type PerPage = (typeof PER_PAGE_CHOICES)[number];
 
+/**
+ * Stav produktu v eshope tak, ako sa naň dá pýtať (kontrakt produktov A3).
+ *
+ * Nie je to zoznam zaškrtávacích políčok, ale TRI vylučujúce sa možnosti — a je
+ * to zámer. Repozitár aj API majú predvolený stav `ok` + `unknown`, takže
+ * prázdny výber by ticho znamenal „a predsa ukáž bežné produkty"; políčka by
+ * boli odškrtnuté a tabuľka plná. Tri možnosti, z ktorých vždy platí práve
+ * jedna, ten rozpor nemajú.
+ *
+ *  · `known`        — čo eshop pri poslednom načítaní poznal (predvolené),
+ *  · `withMissing`  — a navyše to, čo už nevracia,
+ *  · `onlyMissing`  — VÝHRADNE to, čo už nevracia.
+ */
+export type ShopPresence = 'known' | 'withMissing' | 'onlyMissing';
+
+export const SHOP_PRESENCES: readonly ShopPresence[] = ['known', 'withMissing', 'onlyMissing'];
+
+/**
+ * Ktoré stavy sa posielajú do API. Mená hodnôt sú tie isté ako v API, aby sa
+ * adresa obrazovky dala poslať ďalej bez prekladu.
+ */
+export const SHOP_PRESENCE_STATUSES: Readonly<Record<ShopPresence, readonly string[]>> = {
+  known: ['ok', 'unknown'],
+  withMissing: ['ok', 'not_found', 'unknown'],
+  onlyMissing: ['not_found'],
+};
+
+/**
+ * Odkiaľ je riadok, ako sa na to dá filtrovať (kontrakt produktov A3).
+ *
+ * POZOR — toto NIE JE parameter API a nesmie sa doň dostať. `origin` vzniká až
+ * v odpovedi: `mirror` je riadok zo zrkadla, `shop` je riadok, ktorý appka
+ * práve dohľadala v eshope (`lookup`). Dohľadané riadky žijú len v jednej
+ * odpovedi — nové volanie API ich nemá odkiaľ zopakovať. Keby bol tento filter
+ * súčasťou `CatalogFilterState`, jeho zmena by spustila nový dotaz, dohľadané
+ * riadky by zmizli a voľba „len dohľadané" by vrátila prázdnu tabuľku. Preto sa
+ * uplatňuje nad UŽ NAČÍTANÝMI riadkami cez `filterRowsByOrigin()` a drží sa
+ * mimo filtra.
+ */
+export type OriginFilter = 'all' | 'mirror' | 'shop';
+
+export const ORIGIN_FILTERS: readonly OriginFilter[] = ['all', 'mirror', 'shop'];
+
+/**
+ * Riadky podľa pôvodu. Je to výber nad tým, čo obrazovka práve drží — nie
+ * stránkovaný dotaz, takže neklame ani pri neúplnom zrkadle: dohľadané riadky
+ * prichádzajú v jednom celku, nie po stránkach.
+ */
+export function filterRowsByOrigin<T extends { readonly origin: 'mirror' | 'shop' }>(
+  rows: readonly T[],
+  origin: OriginFilter,
+): readonly T[] {
+  if (origin === 'all') return rows;
+  return rows.filter((row) => row.origin === origin);
+}
+
+/**
+ * Poradie riadkov. Mená sú tie isté, aké prijíma `GET /api/catalog/search`;
+ * triedenia, ktoré appka na povrchu neponúka (`id`), tu zámerne nie sú — stav,
+ * ktorý sa nedá naklikať, by bol len tichý sľub.
+ */
+export const CATALOG_SORTS = ['price_desc', 'price_asc', 'sold_desc', 'sold_asc', 'name'] as const;
+
+export type CatalogSort = (typeof CATALOG_SORTS)[number];
+
 export interface CatalogFilterState {
   /** Jedno pole nad tabuľkou: názov alebo číslo produktu. */
   readonly query: string;
@@ -53,6 +128,10 @@ export interface CatalogFilterState {
   /** Podľa VLASTNÝCH zápisov appky, nie podľa stavu shopu (I11). */
   readonly currentlyDiscounted: boolean;
   readonly neverDiscounted: boolean;
+  /** Čo eshop o produkte povedal pri poslednom načítaní (kontrakt produktov A3). */
+  readonly shopPresence: ShopPresence;
+  /** Poradie riadkov. Nie je to podmienka otázky — pozri hlavičku modulu. */
+  readonly sort: CatalogSort;
   readonly page: number;
   readonly perPage: PerPage;
 }
@@ -65,6 +144,9 @@ export const DEFAULT_CATALOG_FILTER: CatalogFilterState = {
   priceTo: '',
   currentlyDiscounted: false,
   neverDiscounted: false,
+  shopPresence: 'known',
+  /** Kontrakt UI, bod 19: najdrahšie prvé. */
+  sort: 'price_desc',
   page: 1,
   perPage: 50,
 };
@@ -79,6 +161,25 @@ const isSoldBucket = (value: string): value is SoldBucket =>
 
 const isPerPage = (value: number): value is PerPage =>
   (PER_PAGE_CHOICES as readonly number[]).includes(value);
+
+const isCatalogSort = (value: string): value is CatalogSort =>
+  (CATALOG_SORTS as readonly string[]).includes(value);
+
+/**
+ * Zoznam stavov z adresy → jedna z troch možností. Rozhoduje sa podľa toho, čo
+ * v zozname JE, nie podľa presnej zhody — adresa z uloženého filtra alebo
+ * z odkazu môže mať stavy v inom poradí a nesmie kvôli tomu spadnúť inam.
+ */
+function parseShopPresence(raw: string): ShopPresence {
+  const values = new Set(
+    raw
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== ''),
+  );
+  if (!values.has('not_found')) return 'known';
+  return values.has('ok') ? 'withMissing' : 'onlyMissing';
+}
 
 /** Cena z poľa: `12`, `12,50`, `12.50`. Čokoľvek iné sa do API neposiela. */
 const PRICE_RE = /^\d{1,8}([.,]\d{1,2})?$/;
@@ -97,6 +198,13 @@ export interface CatalogQueryOptions {
   readonly counts?: boolean;
   /** `false` vynechá stránkovanie — používa sa pri odovzdaní filtra ďalej. */
   readonly paging?: boolean;
+  /**
+   * `true` pridá triedenie. Je to VÝSLOVNÁ voľba, nie predvolené správanie:
+   * query string filtra znamená OTÁZKU (kľúč filtra, odkaz do novej zľavy,
+   * dotazy sprievodcu) a poradie riadkov otázku nemení. Posiela ho jediné
+   * miesto — tabuľka Produktov cez `catalog-api.ts`.
+   */
+  readonly sorting?: boolean;
 }
 
 /**
@@ -124,6 +232,17 @@ export function catalogSearchParams(
   if (filter.currentlyDiscounted) params.set('currentlyDiscounted', '1');
   if (filter.neverDiscounted) params.set('neverDiscounted', '1');
 
+  // Predvolená možnosť sa NEPOSIELA: je to presne to, čo repozitár urobí sám,
+  // a prázdny parameter drží adresy krátke a staršie uložené filtre platné.
+  if (filter.shopPresence !== 'known') {
+    params.set('shopStatus', SHOP_PRESENCE_STATUSES[filter.shopPresence].join(','));
+  }
+
+  // Výslovne a len na vyžiadanie — repozitár má vlastný default `name`,
+  // takže obrazovka Produktov posiela svoje poradie vždy (kontrakt UI, bod 19),
+  // kdežto otázka odovzdaná ďalej ho nenesie vôbec.
+  if (options.sorting === true) params.set('sort', filter.sort);
+
   if (options.paging !== false) {
     params.set('page', String(filter.page));
     params.set('perPage', String(filter.perPage));
@@ -141,9 +260,10 @@ export function catalogSearchQuery(
 }
 
 /**
- * Kľúč filtra bez stránkovania — dve stránky toho istého filtra sú ten istý
- * filter. Používa sa na rozoznanie uloženého filtra a na zrušenie výberu, keď
- * sa filter naozaj zmenil.
+ * Kľúč filtra bez stránkovania a bez triedenia — dve stránky toho istého
+ * filtra sú ten istý filter a preusporiadanie riadkov tiež. Používa sa na
+ * rozoznanie uloženého filtra a na zrušenie výberu, keď sa filter naozaj
+ * zmenil.
  */
 export function catalogFilterKey(filter: CatalogFilterState): string {
   return catalogSearchQuery(filter, { paging: false });
@@ -174,6 +294,7 @@ export function parseCatalogFilter(params: RawParams): CatalogFilterState {
   const window = Number(first(params, 'soldWindowDays'));
   const perPage = Number(first(params, 'perPage'));
   const page = Number(first(params, 'page'));
+  const sort = first(params, 'sort') ?? '';
 
   const bucketsRaw = first(params, 'soldBuckets') ?? '';
   const buckets = bucketsRaw
@@ -189,6 +310,8 @@ export function parseCatalogFilter(params: RawParams): CatalogFilterState {
     priceTo: first(params, 'priceTo') ?? '',
     currentlyDiscounted: flag(params, 'currentlyDiscounted'),
     neverDiscounted: flag(params, 'neverDiscounted'),
+    shopPresence: parseShopPresence(first(params, 'shopStatus') ?? ''),
+    sort: isCatalogSort(sort) ? sort : DEFAULT_CATALOG_FILTER.sort,
     page: Number.isInteger(page) && page >= 1 ? page : 1,
     perPage: isPerPage(perPage) ? perPage : DEFAULT_CATALOG_FILTER.perPage,
   };
@@ -213,6 +336,10 @@ export function parseCatalogFilterQuery(query: string): CatalogFilterState {
  * Zoznam desiatich tisícov čísel by sa do adresy nezmestil, preto sa pri
  * hromadnom výbere posiela FILTER, nie položky. Sprievodca si ho rozbalí tým
  * istým `parseCatalogFilterQuery()` a spýta sa API na tie isté riadky.
+ *
+ * Triedenie sa do odkazu NEPOSIELA: zľava sa robí na množinu, nie na poradie,
+ * a keby v odkaze bolo, prehodenie stĺpca v tabuľke by ticho zmenilo, čo sa
+ * sprievodcovi odovzdalo.
  */
 export function newDiscountHref(
   selection:

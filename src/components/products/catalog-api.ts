@@ -29,6 +29,13 @@
  *  · neskladá vety o prekážkach — `GET /api/status` ich vracia hotové
  *    z `lib/status/blockers.ts` a obrazovka ich len vykreslí.
  *
+ * JEDINÉ MIESTO, KTORÉ POSIELA PORADIE
+ * ------------------------------------
+ * `sorting: true` je tu, a inde v appke nie. Query string filtra slúži aj ako
+ * kľúč uloženého výberu a ako odkaz do novej zľavy — tam znamená OTÁZKU, a tú
+ * poradie riadkov nemení. Repozitár má vlastný default `name`, takže tabuľka
+ * svoje poradie (predvolene najdrahšie prvé) posiela vždy explicitne.
+ *
  * Vlastník: V10.
  */
 import type { CatalogFilterState } from '@/components/products/catalog-filter';
@@ -207,7 +214,10 @@ export function searchCatalog(
   filter: CatalogFilterState,
   signal?: AbortSignal,
 ): Promise<Result<CatalogSearchView>> {
-  return readJson<CatalogSearchView>(`/api/catalog/search?${catalogSearchQuery(filter)}`, signal);
+  return readJson<CatalogSearchView>(
+    `/api/catalog/search?${catalogSearchQuery(filter, { sorting: true })}`,
+    signal,
+  );
 }
 
 /**
@@ -225,7 +235,7 @@ export function lookupInShop(
   signal?: AbortSignal,
 ): Promise<Result<CatalogSearchView>> {
   return readJson<CatalogSearchView>(
-    `/api/catalog/search?${catalogSearchQuery(filter)}&lookup=1`,
+    `/api/catalog/search?${catalogSearchQuery(filter, { sorting: true })}&lookup=1`,
     signal,
   );
 }
