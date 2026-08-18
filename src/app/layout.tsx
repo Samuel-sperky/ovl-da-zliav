@@ -1,21 +1,20 @@
 /**
  * Aura Zľavy — root layout (V3, design/v3/prehlad.html a prehlad-tmava.html).
  *
- * Shell je zámerne chudobný — jeden sticky riadok 56 px a pod ním stály
- * stavový pruh:
+ * Shell je zámerne chudobný — tri riadky chrómu a pod nimi obsah:
  *
- *   [Aura Zľavy]  Prehľad · Produkty · Zľavy 🔒 · Nastavenia      Fronta 3 420/8 000  ☾
- *   ✓ Shop odpovedá │ Kľúč 41 h 12 min │ Ostrý zápis zapnutý │ Zápisy dnes 12/200 ▮▯ │ Katalóg 2 900 z 41 082
+ *   PRODUKCIA — sperky-eshop.sk · každý zápis ide do ostrého shopu
+ *   [Aura Zľavy]  Prehľad · Produkty · Zľavy 🔒 · Nastavenia   Fronta 3 420/8 000  ☾
+ *   ✓ Ostrý zápis zapnutý · ✓ Kľúč do 09.09.2026 · ○ Zápisy 21/200 dnes ·
+ *     ○ Katalóg 2 900 z 41 082                      Stav k 12:53 · [Obnoviť]
  *
- * Nad tým pruh PRODUKCIA (D6), pod tým nanajvýš dva tenké pruhy faktov:
- * „Ostrý zápis vypnutý" (I13) a read-only výzva pri chýbajúcom kľúči (D10).
- * Tie dva pruhy sú HLASNÉ oznámenie na začiatku stránky a odscrollujú;
- * stavový pruh je naopak lepkavý prístrojový panel, ktorý je vidieť stále.
- * Nič iné do hlavičky nepatrí — žiadne vyhľadávanie, žiadne notifikácie,
- * žiadne stavové badge (ARCHITEKTURA §0).
+ * Štvrtý riadok pribudne výhradne vtedy, keď kľúč chýba alebo vypršal (D10).
+ * Nič iné do chrómu nepatrí — žiadne vyhľadávanie, žiadne notifikácie, žiadne
+ * stavové badge (ARCHITEKTURA §0) a žiadny druhý nositeľ toho istého faktu.
  *
- * Hlavičku aj stavový pruh skladá `components/layout/AppHeader.tsx`, aby stav
- * appky ťahal jeden poller pre celý shell.
+ * Celý chróm skladá `components/layout/AppHeader.tsx`, aby stav appky čítal
+ * jeden dotaz pre celý shell. Čísla sa NEOBNOVUJÚ samy — obnoví ich tlačidlo
+ * v stavovom pruhu (`components/layout/refresh.ts`).
  *
  * Téma: SVETLÁ je predvolená a `<html>` sa renderuje BEZ `data-theme`, takže
  * kým si používateľ nevyberie, rozhoduje systém (`prefers-color-scheme`).
@@ -27,7 +26,6 @@ import type { Metadata } from 'next';
 
 import AppHeader from '@/components/layout/AppHeader';
 import ProductionBar from '@/components/layout/ProductionBar';
-import { HeaderReadOnlyNotice, HeaderWritesStrip } from '@/components/layout/HeaderStatus';
 import { THEME_BOOTSTRAP_SCRIPT } from '@/components/layout/theme';
 import { APP_DISPLAY_NAME, APP_VERSION } from '@/version';
 
@@ -48,8 +46,6 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
         <ProductionBar />
         <AppHeader />
-        <HeaderWritesStrip />
-        <HeaderReadOnlyNotice />
         <main className="wrap">{children}</main>
         <footer className="ovl-footer">
           Aura Zľavy v{APP_VERSION} · beží výhradne lokálne na{' '}

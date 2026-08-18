@@ -26,13 +26,20 @@
  *    Vlastná veta je preto len fallback pre stav, ktorý žiadnu prekážku nemá.
  *
  * 3. **Neznáme číslo sa nedopĺňa.** Keď sekcia v payloade chýba (server ju
- *    nevedel prečítať), menovka to prizná („nevieme"). Nula ani pomlčka
- *    s optimistickým tónom sem nepatria — appka zapisuje do produkčného shopu.
+ *    nevedel prečítať), menovka na jej mieste ukáže POMLČKU a zdvihne príznak
+ *    `unknown` — dôvod si pruh vyzdvihne do rozkliku (kontrakt UI, bod 5).
+ *    Nula sem nepatrí: nula je tvrdenie, pomlčka je priznaná medzera.
  *
- * 4. **Jeden poller pre celý chróm.** Stav ťahá zdieľaný modulový store, nie
- *    každý komponent zvlášť. `/api/status` je lacný, ale nie zadarmo a jeho
- *    doc-blok výslovne prosí, aby sa nevolal viackrát, než treba. `useStatus()`
- *    sa preto smie volať z ľubovoľného počtu komponentov — request bude jeden.
+ * 4. **Jeden dotaz na celý chróm a NIKDY sám od seba.** Stav ťahá zdieľaný
+ *    modulový store, nie každý komponent zvlášť, a spúšťa ho spoločné
+ *    obnovovanie z `layout/refresh.ts` — teda otvorenie obrazovky a tlačidlo
+ *    Obnoviť, nič iné. Časovač tu bol do 13. 8. 2026 a bol zrušený
+ *    rozhodnutím používateľa: čísla sa nesmú pohnúť pod rukami. `useStatus()`
+ *    sa smie volať z ľubovoľného počtu komponentov — dotaz bude jeden.
+ *
+ * 5. **Dátum a čas sú vždy konkrétne.** „Platí do 09.09.2026", nie „ešte 48 h";
+ *    „Stav k 12:53", nie „pred 3 minútami" (kontrakt UI, bod 10). Odpočet
+ *    a relatívny čas sa v tomto module nepoužívajú.
  *
  * Modul je server-safe len čo do typov: obsahuje `use client`, ale všetky
  * odvodzovacie funkcie sú ČISTÉ a testovateľné bez prehliadača
@@ -44,16 +51,14 @@ import { useEffect, useState } from 'react';
 
 import { classifyHealthStatus, type HealthOutcomeKind } from '@/components/layout/health';
 import { formatResumeTime } from '@/components/layout/queue';
+import { useRefreshable } from '@/components/layout/refresh';
 import type { StatusTone } from '@/components/ui/ToneBadge';
 import type { BlockerArea, BlockerId, BlockerResolution } from '@/lib/status/blockers';
 import type { BlockerWire, StatusPayload } from '@/lib/status/snapshot';
-import { formatCountdownSk, formatDateTimeSk } from '@/lib/ui/format';
+import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 
 /* ═════════════════════════ 1. Sťahovanie stavu ════════════════════════════ */
-
-/** Ako často sa stav obnovuje. Rovnaké tempo ako `useHealth()`. */
-export const STATUS_POLL_MS = 30_000;
 
 /**
  * Čo o stave práve vieme.
@@ -100,29 +105,30 @@ export async function fetchStatusOutcome(url = '/api/status'): Promise<StatusSta
   }
 }
 
-/* ── Zdieľaný store: N komponentov, jeden request (bod 4 v hlavičke). ─────── */
+/* ── Zdieľaný store: N komponentov, jeden dotaz (bod 4 v hlavičke). ──────── */
 
 type Listener = (state: StatusState) => void;
 
 let current: StatusState = LOADING;
 const listeners = new Set<Listener>();
-let timer: ReturnType<typeof setInterval> | null = null;
-let inFlight = false;
+/** Posledné kolo obnovy, ktoré sa už sťahovalo. Bráni N dotazom pri N odberoch. */
+let loadedTicket = -1;
 
-async function refreshStatus(): Promise<void> {
-  if (inFlight) return;
-  inFlight = true;
-  try {
-    current = await fetchStatusOutcome();
-    for (const listener of listeners) listener(current);
-  } finally {
-    inFlight = false;
-  }
+async function loadStatus(ticket: number): Promise<void> {
+  // Druhý (tretí, štvrtý…) odberateľ v tom istom kole si dotaz nezopakuje —
+  // výsledok mu doručí listener, keď dobehne ten prvý.
+  if (loadedTicket === ticket) return;
+  loadedTicket = ticket;
+  current = await fetchStatusOutcome();
+  for (const listener of listeners) listener(current);
 }
 
 /**
- * Živý stav appky. Prvý pripojený komponent rozbehne poller, posledný
- * odpojený ho zastaví — v odhlásenej alebo zavretej appke nič nebeží.
+ * Stav appky tak, ako sa naposledy načítal.
+ *
+ * Načíta sa pri otvorení obrazovky a potom už len na vyžiadanie (tlačidlo
+ * Obnoviť v stavovom pruhu). Sám sa NEobnovuje — pozri bod 4 v hlavičke
+ * modulu.
  */
 export function useStatus(): StatusState {
   const [state, setState] = useState<StatusState>(current);
@@ -130,19 +136,66 @@ export function useStatus(): StatusState {
   useEffect(() => {
     listeners.add(setState);
     setState(current);
-    timer ??= setInterval(() => void refreshStatus(), STATUS_POLL_MS);
-    void refreshStatus();
-
     return () => {
       listeners.delete(setState);
-      if (listeners.size === 0 && timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
     };
   }, []);
 
+  useRefreshable(loadStatus);
+
   return state;
+}
+
+/**
+ * KEDY BOLI ČÍSLA V PRUHU NAČÍTANÉ.
+ *
+ * Berie sa čas SERVERA zo snapshotu (`payload.now`), nie hodiny prehliadača:
+ * pruh hovorí o tom, ku ktorému okamihu appka svoje fakty prečítala. Keď stav
+ * nepoznáme, je tu pomlčka — nie čas, ktorý by si prehliadač domyslel.
+ */
+export interface StatusFreshness {
+  readonly label: string;
+  readonly title: string;
+  /** `true` = čas nepoznáme; pruh na to nasadí pomlčku a rozklik. */
+  readonly unknown: boolean;
+}
+
+export function statusFreshness(state: StatusState): StatusFreshness {
+  if (state.kind !== 'ok' || state.payload === null) {
+    return {
+      label: '—',
+      title: 'Kedy sa stav naposledy načítal, appka teraz nevie.',
+      unknown: true,
+    };
+  }
+  const when = new Date(state.payload.now);
+  if (!Number.isFinite(when.getTime())) {
+    return {
+      label: '—',
+      title: 'Času, ku ktorému stav platí, appka nerozumie.',
+      unknown: true,
+    };
+  }
+  const stamp = formatDateTimeSk(when);
+  const sameDay = formatDateSk(when) === formatDateSk(new Date());
+  return {
+    label: sameDay ? stamp.slice(-5) : stamp,
+    title: `Čísla v pruhu sú z ${stamp}. Novšie budú po stlačení tlačidla Obnoviť — appka ich sama neprepisuje.`,
+    unknown: false,
+  };
+}
+
+/**
+ * PREKÁŽKY: bráni niečo zápisu?
+ *
+ * Jediné miesto, kde sa táto otázka odpovedá pre celý chróm aj pre obrazovky.
+ * Kontrakt UI, bod 3: keď nič neprekáža, obrazovka NEKRESLÍ sekciu prekážok —
+ * stačí zelená značka v pruhu. Obrazovky sa preto pýtajú sem a nepočítajú si
+ * prekážky po svojom.
+ */
+export function hasBlockers(state: StatusState): boolean {
+  if (state.kind !== 'ok' || state.payload === null) return false;
+  return state.payload.blockers.length > 0;
 }
 
 /* ═══════════════════ 2. Prevod prekážok na tón a vetu ═════════════════════ */
@@ -156,7 +209,16 @@ export interface StatusChip {
   readonly label: string;
   /** Celá veta aj s ďalším krokom. Ide do `title` a do čítačky. */
   readonly title: string;
+  /**
+   * Hodnotu sa nepodarilo zistiť, takže v menovke stojí POMLČKA (kontrakt UI,
+   * bod 5). Pruh si takéto menovky pozbiera do jedného rozkliku „Prečo —",
+   * aby dôvod nebol na povrchu, ale bol dočítateľný (P6).
+   */
+  readonly unknown?: boolean;
 }
+
+/** Znak pre „toto appka nevie". Nikdy nie nula — nula je tvrdenie. */
+const NEVIEME = '—';
 
 /**
  * PREKÁŽKA → FARBA. Jediné povolené miesto tohto prevodu.
@@ -229,14 +291,15 @@ export function connectionChip(state: StatusState): StatusChip {
     return {
       tone: 'idle',
       label: 'Stav po prihlásení',
-      title: 'Nie si prihlásený — stav appky sa zobrazí po prihlásení. Nie je to porucha appky.',
+      title: 'Stav appky sa zobrazí po prihlásení. Nie je to porucha appky.',
     };
   }
   if (state.kind === 'unreachable' || state.payload === null) {
     return {
       tone: 'critical',
       label: 'Appka neodpovedá',
-      title: 'Appka neodpovedala na otázku o svojom stave — skontroluj, či beží kontajner a databáza.',
+      title:
+        'Appka neodpovedala na otázku o svojom stave. Tlačidlom Obnoviť sa to dá skúsiť znova; ak sa nič nezmení, appka nebeží.',
     };
   }
 
@@ -259,8 +322,14 @@ export function connectionChip(state: StatusState): StatusChip {
 }
 
 /**
- * KĽÚČ NA ZÁPIS. Expirovaný kľúč je jantárový, nie červený: nič sa nestratilo
- * a rieši sa to vložením nového kľúča v Nastaveniach (K2, `blockers.ts`).
+ * KĽÚČ NA ZÁPIS — DOKEDY PLATÍ.
+ *
+ * Píše sa DÁTUM, nie odpočet (kontrakt UI, bod 10). Odpočet „ešte 48 h" je
+ * pri fronte bežiacej týždne nepoužiteľný: nedá sa porovnať s dátumom štartu
+ * zľavy a mení sa pri každom pohľade. Dátum sa dá porovnať a zapamätať.
+ *
+ * Expirovaný kľúč je jantárový, nie červený: nič sa nestratilo a rieši sa to
+ * vložením nového kľúča v Nastaveniach (K2, `blockers.ts`).
  */
 export function keyChip(payload: StatusPayload | null): StatusChip {
   const blocker = blockerIn(payload, ['kluc']);
@@ -269,7 +338,8 @@ export function keyChip(payload: StatusPayload | null): StatusChip {
   if (payload === null || payload.apiKey.present === null) {
     return {
       tone: 'attention',
-      label: 'Kľúč — nevieme',
+      label: `Kľúč ${NEVIEME}`,
+      unknown: true,
       title: explain('Nepodarilo sa zistiť, či je kľúč na zápis vložený.', blocker),
     };
   }
@@ -283,7 +353,8 @@ export function keyChip(payload: StatusPayload | null): StatusChip {
   if (payload.apiKey.expiresAt === null) {
     return {
       tone,
-      label: 'Kľúč — neznáma platnosť',
+      label: `Kľúč do ${NEVIEME}`,
+      unknown: true,
       title: explain('Kľúč je vložený, ale nevieme, dokedy platí.', blocker),
     };
   }
@@ -292,17 +363,28 @@ export function keyChip(payload: StatusPayload | null): StatusChip {
   if (!Number.isFinite(expires)) {
     return {
       tone: 'attention',
-      label: 'Kľúč — neznáma platnosť',
+      label: `Kľúč do ${NEVIEME}`,
+      unknown: true,
       title: explain('Kľúč je vložený, ale jeho platnosti nerozumieme.', blocker),
     };
   }
 
-  const secondsLeft = Math.floor((expires - payloadNow(payload)) / 1000);
+  const day = formatDateSk(payload.apiKey.expiresAt);
+  if (expires <= payloadNow(payload)) {
+    return {
+      tone: 'attention',
+      label: 'Kľúč vypršal',
+      title: explain(
+        `Kľúč na zápis platil do ${day}. Nový sa vkladá v Nastaveniach.`,
+        blocker,
+      ),
+    };
+  }
   return {
     tone,
-    label: `Kľúč ${formatCountdownSk(secondsLeft)}`,
+    label: `Kľúč do ${day}`,
     title: explain(
-      `Kľúč na zápis platí ešte ${formatCountdownSk(secondsLeft)}; keď vyprší, vlož v Nastaveniach nový.`,
+      `Kľúč na zápis platí do ${day}; potom sa v Nastaveniach vkladá nový.`,
       blocker,
     ),
   };
@@ -332,7 +414,8 @@ export function writesChip(payload: StatusPayload | null): StatusChip {
   if (payload === null || payload.writes.enabled === null) {
     return {
       tone: 'attention',
-      label: 'Zápisy — nevieme',
+      label: `Zápisy ${NEVIEME}`,
+      unknown: true,
       title: explain('Nepodarilo sa zistiť, či má appka zápisy do shopu zapnuté.', blocker),
     };
   }
@@ -365,7 +448,8 @@ export function catalogChip(payload: StatusPayload | null): StatusChip {
   if (payload === null || payload.catalog === null || loaded === null) {
     return {
       tone: 'attention',
-      label: 'Katalóg — nevieme',
+      label: `Katalóg ${NEVIEME}`,
+      unknown: true,
       title: explain('Stav katalógu sa nepodarilo prečítať.', blocker),
     };
   }
@@ -377,7 +461,7 @@ export function catalogChip(payload: StatusPayload | null): StatusChip {
       tone: blocker === null ? 'attention' : resolutionTone(blocker.resolution),
       label: 'Katalóg prázdny',
       title: explain(
-        'Appka nemá načítaný ani jeden produkt zo shopu. Spusti načítanie katalógu v Produktoch.',
+        'Appka nemá načítaný ani jeden produkt zo shopu. Načítanie katalógu sa spúšťa v Produktoch.',
         blocker,
       ),
     };
@@ -412,8 +496,11 @@ export function catalogChip(payload: StatusPayload | null): StatusChip {
 /* ═══════════════════════ 4. Denný rozpočet zápisov ════════════════════════ */
 
 /**
- * Rozpočet buď MÁ čísla (a kreslí sa meracím prúžkom), alebo ich nemá — a vtedy
- * sa nedopĺňa nula, ale prizná sa medzera (hlavička, bod 3).
+ * ROZPOČET PRE OBRAZOVKU S ROZPADOM (Nastavenia → „Kľúče a rozpočet").
+ *
+ * Buď MÁ čísla — a vtedy sa kreslí meracím prúžkom `ui/BudgetMeter` — alebo ich
+ * nemá, a vtedy sa nedopĺňa nula, ale prizná sa medzera (hlavička, bod 3).
+ * Do stavového pruhu tento tvar NEIDE: tam patrí len číslo z `budgetChip()`.
  */
 export type BudgetView =
   | {
@@ -443,19 +530,53 @@ export function budgetResetPhrase(payload: StatusPayload | null): string | null 
   return `o ${formatResumeTime(blocker.clearsAt)}`;
 }
 
-export function budgetView(payload: StatusPayload | null): BudgetView {
+/**
+ * ROZPOČET DO PRUHU — LEN ČÍSLO (kontrakt UI, bod 15).
+ *
+ * V pruhu nie je merací prúžok ani rozpad na kľúče: pruh je chróm a musí ostať
+ * jeden riadok. `21/200 dnes` povie o rýchlosti presne toľko, koľko sa dá
+ * prečítať za pol sekundy; celý rozpad má svoje miesto v Nastaveniach
+ * (kotva „Kľúče a rozpočet") a kreslí ho tamojšia obrazovka cez `budgetView()`.
+ *
+ * Tón je VŽDY neutrálny, aj pri 200/200 (K2, odpoveď 59): vyčerpaný rozpočet
+ * je plánovaná rýchlosť, nie chyba. Pri vyčerpaní pribudne za číslo čas, kedy
+ * sa pokračuje — neosobne, bez „pokračujem".
+ */
+export function budgetChip(payload: StatusPayload | null): StatusChip {
   const blocker = blockerIn(payload, ['rozpocet']);
   const budget = payload?.writeBudget ?? null;
 
   if (budget === null) {
     return {
-      kind: 'unknown',
-      chip: {
-        tone: 'attention',
-        label: 'Zápisy dnes — nevieme',
-        title: explain('Koľko zápisov dnes odišlo, sa nepodarilo zistiť.', blocker),
-      },
+      tone: 'attention',
+      label: `Zápisy dnes ${NEVIEME}`,
+      unknown: true,
+      title: explain('Koľko zápisov dnes odišlo, sa nepodarilo zistiť.', blocker),
     };
+  }
+
+  const count = `${formatCountSk(budget.spent)}/${formatCountSk(budget.budget)}`;
+  const resume = budgetResetPhrase(payload);
+  const exhausted = budget.remaining <= 0;
+  return {
+    tone: 'idle',
+    label:
+      exhausted && resume !== null
+        ? `Zápisy ${count} dnes · ďalšie ${resume}`
+        : `Zápisy ${count} dnes`,
+    title: explain(
+      `Z denného rozpočtu ${formatCountSk(budget.budget)} zápisov je minutých ${formatCountSk(budget.spent)}.`,
+      blocker,
+    ),
+  };
+}
+
+export function budgetView(payload: StatusPayload | null): BudgetView {
+  const blocker = blockerIn(payload, ['rozpocet']);
+  const budget = payload?.writeBudget ?? null;
+
+  if (budget === null) {
+    return { kind: 'unknown', chip: budgetChip(payload) };
   }
 
   return {

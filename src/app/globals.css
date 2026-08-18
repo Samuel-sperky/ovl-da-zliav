@@ -1745,7 +1745,7 @@ input::placeholder {
       téma funguje aj vtedy, keď ju vyberie SYSTÉM a atribút na `<html>` vôbec
       nie je. Toto je presne tá diera, kvôli ktorej má tmavá dve deklarácie.
    3. Blok `body.mob` z mockupov sa neprenáša — bol náhrada media query pri
-      renderovaní na ploche 1440. V appke platí `@media (max-width:760px)`.
+      renderovaní na ploche 1440. V appke platí `@media (max-width:640px)`.
 
    Zvyšok (geometria, veľkosti, hustota) je 1:1 podľa `_v3.css`.
    ══════════════════════════════════════════════════════════════════════════ */
@@ -2012,23 +2012,10 @@ b.lvl-2 {
   color: var(--ink2);
   background: var(--paper3);
 }
-/* Pruh pod hlavičkou. `.calm` je pre stavy, ktoré NIE SÚ chyba — vypnuté ostré
-   zápisy sú najbezpečnejší možný stav, červená by tam klamala o závažnosti. */
-.hdr-strip {
-  background: var(--st-critical);
-  color: #fff;
-  text-align: center;
-  font-size: 11.5px;
-  font-weight: 650;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 5px 0;
-}
-.hdr-strip.calm {
-  background: var(--paper3);
-  color: var(--dim);
-  border-bottom: 1px solid var(--line);
-}
+/* Pruh „Ostrý zápis vypnutý" (`.hdr-strip`) tu bol do 13. 8. 2026. Zrušil ho
+   kontrakt UI: hovoril doslova to isté, čo menovka zápisov v stavovom pruhu
+   o riadok nižšie, a ukrajoval z výšky obrazovky, ktorú obmedzuje P4. Fakt
+   nesie `writesChip()` v `components/layout/status.ts`. */
 
 /* ---------- 14.4 Stavy: farba + GLYF + text -------------------------------
    Glyf je súčasť značky, nie dekorácia. Samotná farebná bodka sa nepoužíva.
@@ -3050,8 +3037,12 @@ details.tech.bare {
   box-shadow: inset 2px 0 0 var(--teal);
 }
 
-/* ---------- 14.18 Mobil -------------------------------------------------- */
-@media (max-width: 760px) {
+/* ---------- 14.18 Mobil --------------------------------------------------
+   Hranica je 640 px, nie 760: appka sa má dať používať na POLOVICI monitora
+   (~720 px) a tam musí zostať horná navigácia so štyrmi tabmi (kontrakt UI,
+   bod 12 — mobil sa nerieši). Zúženie pre 720 px robí blok na konci súboru.
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
   .wrap {
     padding: 12px 12px 84px;
   }
@@ -3233,34 +3224,42 @@ details.tech.bare {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Stály stavový pruh (L1) — `components/layout/StatusBar.tsx`
+   Stavový pruh (L1) — `components/layout/StatusBar.tsx`
 
    Výhradne PRÍDAVOK na konci súboru: žiadna existujúca farba, typografia ani
    rozloženie tabov sa nemení. Nová farba sa nezavádza — pruh stojí na
-   tokenoch, ktoré tu už sú (`--paper3`, `--line`, `--dim`).
+   tokenoch, ktoré tu už sú (`--paper3`, `--line`, `--dim`, `--st-*`).
 
-   TRI VECI, KTORÉ SA TU NESMÚ POKAZIŤ
-   -----------------------------------
+   ŠTYRI VECI, KTORÉ SA TU NESMÚ POKAZIŤ
+   -------------------------------------
 
-   1. **Pevná výška.** `--ovl-statusbar-h` nie je kozmetika: `--ovl-chrome-h`
-      z nej počíta, kde začínajú lepkavé prvky obrazoviek (bočný panel,
-      kotvy v Nastaveniach). Pruh, ktorý by rástol zalomením obsahu, by ich
-      prekryl — preto sa obsah nezalamuje, ale vodorovne posúva.
+   1. **JEDEN RIADOK, pevná výška.** Pruh je CHRÓM, nie sekcia (kontrakt UI,
+      bod 1) — do P4 ani P5 sa nepočíta a platí za to tým, že nesmie rásť.
+      `--ovl-statusbar-h` nie je kozmetika: `--ovl-chrome-h` z nej počíta, kde
+      začínajú lepkavé prvky obrazoviek (bočný panel, kotvy v Nastaveniach).
+      Obsah sa preto nezalamuje — keď sa nezmestí, vodorovne sa posúva, a aj
+      rozklik „Prečo —" sa otvára NAD obsah stránky, nie do výšky pruhu.
 
-   2. **Lepkavý len na širokej obrazovke.** Na mobile ide navigácia dole ako
-      lišta a lepkavý pruh navrchu by z malej obrazovky ukrojil ďalší riadok.
-      Preto je `sticky` až od 761 px — a v tom istom dychu sa posúvajú aj
-      lepkavé prvky obrazoviek, ktoré by inak zmizli pod pruhom.
+   2. **Pokojný stav je tichý.** Menovka v poriadku je značka + text v tlmenej
+      farbe; plnú pilulku (`.ovl-badge`) dostane výhradne to, čo si žiada
+      pozornosť. Štyri farebné pilulky vedľa seba by kričali aj vtedy, keď je
+      všetko v poriadku — a pruh by sa prestal čítať práve vtedy, keď na ňom
+      záleží.
 
-   3. **Zámok v tabe je len glyf.** Veľkosť ani odsadenie tabov sa nemení
+   3. **Tlačidlo Obnoviť sa nesmie stratiť.** Vodorovne sa posúvajú LEN
+      menovky (`.ovl-sbar-facts`); pätka s časom a tlačidlom stojí. Keď appka
+      neodpovedá, je toto tlačidlo jediná cesta, ako to skúsiť znova.
+
+   4. **Zámok v tabe je len glyf.** Veľkosť ani odsadenie tabov sa nemení
       (K9, KISS redizajn) — pribúda výhradne malý znak za názvom.
 
    Vlastník: L1.
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* Výška pruhu. Zmestí sa doň aj merací prúžok s riadkom o úrovni stropu. */
-  --ovl-statusbar-h: 48px;
+  /* Výška pruhu: jeden riadok textu 12 px so vzduchom. Merací prúžok, ktorý si
+     tu kedysi vypýtal 48 px, sa presunul do Nastavení (kontrakt UI, bod 15). */
+  --ovl-statusbar-h: 32px;
   /* Koľko zhora zaberá lepkavý chróm dohromady (hlavička + stavový pruh). */
   --ovl-chrome-h: calc(var(--hdr-h) + var(--ovl-statusbar-h));
 }
@@ -3271,9 +3270,8 @@ details.tech.bare {
   height: var(--ovl-statusbar-h);
   background: var(--paper3);
   border-bottom: 1px solid var(--line);
-  /* Stlačený riadkový preklad — inak sa trojriadkový merací prúžok do pruhu
-     nezmestí a pravidlo o pevnej výške padne. */
-  line-height: 1.15;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .ovl-statusbar-in {
@@ -3283,34 +3281,178 @@ details.tech.bare {
   padding: 0 24px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  /* Nezalamovať, radšej posúvať: výška pruhu musí zostať predvídateľná. */
+  gap: 12px;
   flex-wrap: nowrap;
+}
+
+/* Menovky. Posúva sa VÝHRADNE táto skupina — pätka s tlačidlom stojí (bod 3).
+   Posuvník je skrytý zámerne: v 32 px riadku by zožral tretinu výšky a pruh by
+   prestal byť jeden riadok. Namiesto neho to, že vpravo niečo ešte je, hlási
+   výblednutie posledných 18 px. Preto je skupina `flex: 1 1 auto` — keď sa
+   menovky zmestia, výblednutie padne na prázdno a nie je ho vidieť. */
+.ovl-sbar-facts {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+}
+.ovl-sbar-facts::-webkit-scrollbar {
+  display: none;
 }
 
-.ovl-statusbar-in > * {
+.ovl-sbar-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0 12px;
+  font-weight: 500;
+  color: var(--ink2);
+}
+.ovl-sbar-cell:first-child {
+  padding-left: 0;
+}
+/* Vlasová deliaca čiara namiesto bodky — štyri veci majú byť rozlíšiteľné
+   pohľadom, nie čítaním. */
+.ovl-sbar-cell + .ovl-sbar-cell {
+  border-left: 1px solid var(--line2);
 }
 
-.ovl-statusbar-meter {
-  display: block;
-  min-width: 148px;
+/* Značka stavu. Farba je až tretí kanál — pred ňou je glyf a slovo. */
+.ovl-sbar-mark {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.ovl-sbar-cell[data-tone='good'] .ovl-sbar-mark {
+  color: var(--st-good);
+}
+.ovl-sbar-cell[data-tone='idle'] .ovl-sbar-mark {
+  color: var(--st-idle);
+}
+.ovl-sbar-cell[data-tone='progress'] .ovl-sbar-mark {
+  color: var(--st-progress);
 }
 
-/* Jedna veta namiesto piatich menoviek — kým stav appky nepoznáme. */
+/* Pilulka v pruhu je menšia než v obsahu — je to chróm, nie sekcia. */
+.ovl-sbar-cell .ovl-badge {
+  font-size: 11.5px;
+  font-weight: 650;
+  padding: 1px 8px;
+}
+
+/* Jedna veta namiesto štyroch menoviek — kým stav appky nepoznáme. */
 .ovl-statusbar-note {
   font-size: var(--ovl-fs-micro);
   color: var(--dim);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Dôvod zámku sa drží vpravo, aby menovky stavu ostali pokope. */
-.ovl-statusbar-lock {
+/* ---- Pätka: čas, ku ktorému čísla platia, a jediné tlačidlo Obnoviť ------ */
+.ovl-sbar-tail {
   margin-left: auto;
-  padding-left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.ovl-sbar-fresh {
+  font-size: 11.5px;
+  color: var(--dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovl-sbar-refresh {
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 3px 10px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ovl-sbar-refresh:hover {
+  background: var(--paper2);
+  color: var(--ink);
+}
+.ovl-sbar-refresh:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- Rozklik „Prečo —" (P6): dôvody pomlčiek, nikdy na povrchu ---------- */
+.ovl-sbar-why {
+  position: relative;
+  flex: 0 0 auto;
+  padding-left: 12px;
+  border-left: 1px solid var(--line2);
+}
+.ovl-sbar-why > summary {
+  list-style: none;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--st-attention-ink);
+  border-bottom: 1px dotted currentcolor;
+}
+.ovl-sbar-why > summary::-webkit-details-marker {
+  display: none;
+}
+.ovl-sbar-why-panel {
+  position: absolute;
+  top: calc(100% + 7px);
+  /* Kotví sa VPRAVO: rozklik stojí tesne pri pätke pruhu, takže panel musí
+     rásť doľava — inak by na užšom okne vytiekol za pravý okraj. */
+  right: 0;
+  z-index: 60;
+  width: min(460px, calc(100vw - 48px));
+  padding: 11px 13px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  box-shadow: var(--ovl-shadow-raised);
+  white-space: normal;
+  line-height: 1.45;
+  color: var(--ink2);
+}
+.ovl-sbar-why-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+.ovl-sbar-why-panel li {
+  display: grid;
+  gap: 2px;
+}
+.ovl-sbar-why-panel b {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* Glyfy značiek používajú znaky mimo základnej latinky — rovnaký fallback ako
+   pilulky, aby sa nekreslil prázdny rámik. */
+.ovl-sbar-mark {
+  font-family:
+    'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols',
+    'DejaVu Sans', var(--ovl-font);
 }
 
 /* Zámok pri názve tabu (predloha `sperky-admin.html`, `.lock`). Odkaz zostáva
@@ -3322,7 +3464,7 @@ details.tech.bare {
   vertical-align: 1px;
 }
 
-@media (min-width: 761px) {
+@media (min-width: 641px) {
   .ovl-statusbar {
     position: sticky;
     top: var(--hdr-h);
@@ -3336,10 +3478,70 @@ details.tech.bare {
   }
 }
 
-@media (max-width: 760px) {
+/* ══════════════════════════════════════════════════════════════════════════
+   POLOVICA OBRAZOVKY (~720 px) — kontrakt UI, bod 12
+
+   Appka má byť použiteľná vedľa otvoreného administračného rozhrania shopu,
+   teda na polovici bežného monitora. MOBIL SA NERIEŠI: horná navigácia so
+   štyrmi tabmi zostáva až po 640 px a dole nikam neuteká.
+
+   Robia sa presne dve veci a nič viac: uberá sa vzduch (odsadenia, medzery,
+   veľkosť menoviek) a rozpadajú sa rozloženia, v ktorých by po zúžení ostal
+   nepoužiteľný zvyšok — 260 px filtrov by z tabuľky nechalo 400 px.
+   Typografia obsahu ani farby sa nemenia; zmenšené písmo obsahu by
+   z „použiteľné" spravilo „čitateľné s námahou".
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1000px) {
+  .hdr-in {
+    padding: 0 16px;
+    gap: 16px;
+  }
+  .tabs a {
+    padding: 7px 9px;
+  }
+  .hdr-r {
+    gap: 10px;
+  }
+  .wrap {
+    padding: 14px 16px 24px;
+  }
+  .ovl-statusbar-in {
+    padding: 0 16px;
+    gap: 10px;
+  }
+  .ovl-sbar-cell {
+    padding: 0 8px;
+    font-size: 11.5px;
+  }
+  .ovl-sbar-tail {
+    gap: 8px;
+  }
+  .ovl-sbar-why {
+    padding-left: 8px;
+  }
+  .ovl-readonly-notice,
+  .ovl-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  /* Bočný panel filtrov ide nad tabuľku; tabuľka je dominanta obrazovky
+     Produkty a 400 px na ňu nestačí. */
+  .layout-filters {
+    grid-template-columns: 1fr;
+  }
+  .grid3 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .drawer {
+    width: min(400px, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 640px) {
   .ovl-statusbar-in {
     padding: 0 12px;
-    gap: 10px;
   }
 }
 

@@ -19,9 +19,10 @@
  * `resumeAt` je ISO čas najbližšieho obnovenia rozpočtu (reset 02:00 miestneho
  * času). `total === 0` znamená prázdnu frontu — nie chýbajúce dáta.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { fetchJson } from '@/components/layout/health';
+import { useRefreshable } from '@/components/layout/refresh';
 
 export interface WriteBudgetView {
   /** Počet zápisov za aktuálny UTC deň — zdrojom pravdy je audit (K2). */
@@ -99,22 +100,20 @@ export function parseQueueHeader(raw: unknown): QueueHeaderData {
 }
 
 /**
- * Ťahá `/api/queue` (default každých 60 s). Kým endpoint neexistuje, vracia
- * `UNKNOWN_QUEUE_HEADER` — appka kvôli tomu nesmie nič predstierať ani padnúť.
+ * Načíta `/api/queue` pri otvorení obrazovky a potom už len na vyžiadanie
+ * (tlačidlo Obnoviť v stavovom pruhu). Časovač tu bol do 13. 8. 2026 a bol
+ * zrušený rozhodnutím používateľa — čísla sa nesmú pohnúť pod rukami.
+ *
+ * Kým endpoint neexistuje, vracia `UNKNOWN_QUEUE_HEADER` — appka kvôli tomu
+ * nesmie nič predstierať ani padnúť.
  */
-export function useQueueHeader(pollMs = 60_000): QueueHeaderData {
+export function useQueueHeader(): QueueHeaderData {
   const [data, setData] = useState<QueueHeaderData>(UNKNOWN_QUEUE_HEADER);
 
-  const load = useCallback(async () => {
+  useRefreshable(async () => {
     const body = await fetchJson<unknown>('/api/queue');
     setData(parseQueueHeader(body));
-  }, []);
-
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), pollMs);
-    return () => clearInterval(id);
-  }, [load, pollMs]);
+  });
 
   return data;
 }

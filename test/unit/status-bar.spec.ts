@@ -10,8 +10,12 @@
  *     podľa závažnosti, appka by pri úplne zdravom behu svietila na poplach.
  *  2. **Zámok bez dôvodu neexistuje.** Každý zámok navigácie nesie krátky dôvod
  *     aj celú vetu s ďalším krokom — a odkaz zostáva živý.
- *  3. **Neznáme sa nedopĺňa.** Chýbajúca sekcia payloadu skončí ako priznané
- *     „nevieme", nikdy ako nula alebo pokojný stav.
+ *  3. **Neznáme sa nedopĺňa.** Chýbajúca sekcia payloadu skončí ako POMLČKA
+ *     s príznakom `unknown` (kontrakt UI, bod 5), nikdy ako nula alebo pokojný
+ *     stav. Nula je tvrdenie, pomlčka je priznaná medzera.
+ *  4. **Dátum a čas sú konkrétne.** Kontrakt UI, bod 10: „platí do 14.08.2026",
+ *     nie „ešte 48 h"; „Stav k 12:53", nie „pred 3 minútami". Odpočet sa pri
+ *     fronte bežiacej týždne nedá s ničím porovnať.
  *
  * Testujú sa výhradne ČISTÉ funkcie z `components/layout/status.ts`; pruh sám
  * je len značkovanie nad nimi.
@@ -19,13 +23,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  budgetChip,
   budgetResetPhrase,
   budgetView,
   catalogChip,
   connectionChip,
+  hasBlockers,
   keyChip,
   navLocks,
   resolutionTone,
+  statusFreshness,
   writesChip,
   type StatusState,
 } from '@/components/layout/status';
@@ -189,11 +196,20 @@ describe('connectionChip — appka netvrdí, čo nezmerala', () => {
 
 /* ═══════════════════════════ 3. Kľúč a zápisy ═════════════════════════════ */
 
-describe('keyChip — platnosť kľúča je vidieť stále', () => {
-  it('platný kľúč ukáže, koľko mu ostáva', () => {
+describe('keyChip — dokedy kľúč platí, konkrétnym dátumom', () => {
+  it('platný kľúč ukáže DÁTUM, nie odpočet (bod 10)', () => {
     const chip = keyChip(payload());
     expect(chip.tone).toBe('good');
-    expect(chip.label).toContain('48 h');
+    expect(chip.label).toBe('Kľúč do 14.08.2026');
+    // Odpočet by sa pri fronte bežiacej týždne nedal s ničím porovnať.
+    expect(chip.label).not.toMatch(/\bh\b|\bmin\b/);
+  });
+
+  it('vypršaný kľúč to povie rovno, a stále jantárovo — nič sa nestratilo', () => {
+    const chip = keyChip(payload({ apiKey: { present: true, expiresAt: '2026-08-01T00:00:00.000Z' } }));
+    expect(chip.tone).toBe('attention');
+    expect(chip.label).toBe('Kľúč vypršal');
+    expect(chip.title).toContain('01.08.2026');
   });
 
   it('chýbajúci kľúč je jantárový a vysvetlenie berie z prekážky', () => {
@@ -202,15 +218,17 @@ describe('keyChip — platnosť kľúča je vidieť stále', () => {
     expect(chip.title).toContain('Vložte kľúč v Nastaveniach.');
   });
 
-  it('neznáma odpoveď servera skončí ako priznané „nevieme“, nie ako pokoj', () => {
+  it('neznáma odpoveď servera skončí POMLČKOU s rozklikom, nie pokojom', () => {
     const chip = keyChip(payload({ apiKey: { present: null, expiresAt: null } }));
     expect(chip.tone).toBe('attention');
-    expect(chip.label.toLowerCase()).toContain('nevieme');
+    expect(chip.label).toContain('—');
+    expect(chip.unknown).toBe(true);
   });
 
   it('rozbitý čas platnosti nevyrobí „NaN“', () => {
     const chip = keyChip(payload({ apiKey: { present: true, expiresAt: 'toto nie je čas' } }));
     expect(chip.label).not.toContain('NaN');
+    expect(chip.unknown).toBe(true);
   });
 });
 
@@ -277,10 +295,80 @@ describe('catalogChip — kde je katalóg a či sa oň treba starať', () => {
     expect(chip.title).toContain('41 082');
   });
 
-  it('neprečítaná sekcia sa prizná, nedopĺňa sa nulou', () => {
+  it('neprečítaná sekcia sa prizná POMLČKOU, nedopĺňa sa nulou', () => {
     const chip = catalogChip(payload({ catalog: null }));
-    expect(chip.label.toLowerCase()).toContain('nevieme');
+    expect(chip.label).toBe('Katalóg —');
+    expect(chip.unknown).toBe(true);
     expect(chip.label).not.toContain('0');
+  });
+});
+
+/* ═══════════ 4b. Rozpočet v pruhu je LEN číslo (kontrakt, bod 15) ═════════ */
+
+describe('budgetChip — v pruhu číslo, rozpad v Nastaveniach', () => {
+  it('bežný stav je jedno číslo a neutrálny tón', () => {
+    const chip = budgetChip(payload());
+    expect(chip.label).toBe('Zápisy 12/200 dnes');
+    expect(chip.tone).toBe('idle');
+  });
+
+  it('vyčerpaný rozpočet nie je poplach — pribudne čas, nie červená', () => {
+    const chip = budgetChip(
+      payload({
+        writeBudget: { day: '2026-08-12', budget: 200, spent: 200, remaining: 0, exhausted: true },
+        blockers: [BUDGET_EXHAUSTED],
+      }),
+    );
+    expect(chip.tone).toBe('idle');
+    expect(chip.label).toContain('200/200');
+    expect(chip.label).toContain('ďalšie o ');
+    // Neosobne, bez oslovenia aj bez „pokračujem" (bod 9).
+    expect(chip.label.toLowerCase()).not.toContain('pokračujem');
+  });
+
+  it('neznámy rozpočet je pomlčka, NIKDY 0/200', () => {
+    const chip = budgetChip(payload({ writeBudget: null }));
+    expect(chip.label).toBe('Zápisy dnes —');
+    expect(chip.unknown).toBe(true);
+    expect(chip.label).not.toContain('0');
+  });
+});
+
+/* ═════ 4c. Čas poslednej aktualizácie a „nekreslí sa sekcia" (body 3, 4) ══ */
+
+describe('statusFreshness — vidieť, ku ktorému okamihu čísla platia', () => {
+  it('bez známeho stavu je pomlčka, nie vymyslený čas', () => {
+    const fresh = statusFreshness({ kind: 'unreachable', payload: null });
+    expect(fresh.label).toBe('—');
+    expect(fresh.unknown).toBe(true);
+  });
+
+  it('čas berie zo servera a hovorí, že sa neprepisuje sám', () => {
+    const fresh = statusFreshness(ok(payload()));
+    expect(fresh.unknown).toBe(false);
+    expect(fresh.label).toMatch(/\d{2}:\d{2}/);
+    expect(fresh.title).toContain('Obnoviť');
+    // Bod 10: konkrétny čas, žiadne „pred 3 minútami".
+    expect(fresh.label).not.toContain('pred ');
+  });
+
+  it('rozbitý čas servera nevyrobí „Invalid Date“', () => {
+    const fresh = statusFreshness(ok(payload({ now: 'toto nie je čas' })));
+    expect(fresh.label).toBe('—');
+  });
+});
+
+describe('hasBlockers — keď nič neprekáža, obrazovka sekciu nekreslí (bod 3)', () => {
+  it('zdravá appka nemá čo kresliť', () => {
+    expect(hasBlockers(ok(payload()))).toBe(false);
+  });
+
+  it('prekážka ktorejkoľvek úrovne sekciu zapne', () => {
+    expect(hasBlockers(ok(payload({ blockers: [blocker({ severity: 'informuje' })] })))).toBe(true);
+  });
+
+  it('kým stav nepoznáme, netvrdí sa ani prekážka, ani pokoj', () => {
+    expect(hasBlockers({ kind: 'loading', payload: null })).toBe(false);
   });
 });
 
@@ -355,13 +443,12 @@ describe('každá menovka nesie text aj celú vetu, nielen tón', () => {
 
   for (const [index, state] of states.entries()) {
     it(`vzorka ${index + 1} — menovky majú slovo aj vetu`, () => {
-      const budget = budgetView(state.payload);
       const chips = [
         connectionChip(state),
         keyChip(state.payload),
         writesChip(state.payload),
+        budgetChip(state.payload),
         catalogChip(state.payload),
-        ...(budget.kind === 'unknown' ? [budget.chip] : []),
       ];
       for (const chip of chips) {
         expect(chip.label.trim().length, chip.label).toBeGreaterThan(0);
@@ -371,4 +458,31 @@ describe('každá menovka nesie text aj celú vetu, nielen tón', () => {
       }
     });
   }
+
+  /**
+   * Štyri veci v pruhu majú byť čitateľné na polovici obrazovky (bod 12
+   * kontraktu: ~720 px). Menovka je štítok, nie veta — dlhá menovka pruh
+   * roztlačí a jeden riadok padne.
+   */
+  it('menovka je krátka — pruh musí ostať jeden riadok aj na 720 px', () => {
+    const chips = [
+      keyChip(payload()),
+      writesChip(payload()),
+      budgetChip(payload()),
+      catalogChip(payload()),
+    ];
+    for (const chip of chips) {
+      expect(chip.label.length, chip.label).toBeLessThanOrEqual(26);
+    }
+  });
+
+  it('žiadna menovka nenahradí neznámu hodnotu nulou (bod 5)', () => {
+    const blind = payload({ writeBudget: null, catalog: null, apiKey: { present: null, expiresAt: null } });
+    const chips = [keyChip(blind), budgetChip(blind), catalogChip(blind)];
+    for (const chip of chips) {
+      expect(chip.unknown, chip.label).toBe(true);
+      expect(chip.label, chip.label).toContain('—');
+      expect(chip.label, chip.label).not.toMatch(/\d/);
+    }
+  });
 });

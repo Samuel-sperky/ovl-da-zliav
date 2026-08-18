@@ -1,42 +1,94 @@
 /**
- * Aura Zľavy — `GET /api/catalog/search` (KONTRAKT V3: K7, K8, I11).
+ * Aura Zľavy — `GET /api/catalog/search` (KONTRAKT V3: K7, K8, I11;
+ * KONTRAKT-UI-2026-08-13: body 20, 25–28).
  *
- * Jediná cesta, ktorou tab Produkty číta zrkadlo katalógu (40 483 riadkov).
- * Vracia STRÁNKU riadkov + počty do bočného panela — nikdy celý katalóg.
+ * Jediná cesta, ktorou tab Produkty hľadá. Robí DVE veci, ktoré sa nesmú zliať:
  *
- * Tri veci, na ktorých táto route stojí:
+ *  1. **Číta zrkadlo katalógu** (`catalog_cache`) — stránka riadkov a počty do
+ *     bočného panela. Nikdy celý katalóg, nikdy jediný request na shop.
+ *  2. **Na vyžiadanie dohľadá v eshope, čo zrkadlo nemá** (`?lookup=1`).
+ *     Zrkadlo má 2 900 zo 41 082 produktov, takže bez tohto kroku vyzerá
+ *     „ešte som to nenačítal" presne ako „taký produkt neexistuje". Dohľadanie
+ *     ide cez VEREJNÝ `searchIndex` + `get`, teda bez nového oprávnenia — ale
+ *     míňa anonymný rozpočet čítaní, a preto sa NIKDY nespúšťa samo.
  *
- *  1. **K8 — zamknuté filtre sa priznávajú, nie predstierajú.** Shop API dnes
- *     nevracia kategóriu, kov, typ šperku, nákupnú cenu ani sklad. Keď taký
- *     filter príde v query, route ho NEAPLIKUJE a vráti ho v `lockedFilters`
- *     spolu s `lockedRequested`. Tichá nula alebo ignorovanie filtra bez slova
- *     by bolo presne to klamstvo, ktoré K8 zakazuje — používateľ by dostal
- *     „výsledok filtra", ktorý filter nikdy nevidel.
- *  2. **I11 — „v zľave" znamená „podľa VLASTNÉHO zápisu".** Shop skutočný stav
- *     zľavy cez API nevracia (backlog B1), takže `discountedNow`
- *     a `everDiscounted` sú dopočítané z `campaign_items.status = 'ok'`.
- *     Route to nesmie prezentovať ako pravdu o shope a preto to nesie aj názov
- *     poľa `source: 'own_writes'`.
- *  3. **P7 — „Dáta k …" je meraný fakt.** `dataAsOf` je `MAX(fetched_at)`
- *     z katalógu, nie odhad; keď je katalóg prázdny, je `null` a UI to má
- *     povedať, nie dopočítať.
+ * ŠTYRI VECI, NA KTORÝCH TÁTO ROUTE STOJÍ
+ * ---------------------------------------
+ *  1. **K8 — zamknuté filtre sa priznávajú, nie predstierajú.** Zrkadlo nevie
+ *     kategóriu, kov, typ šperku, nákupnú cenu ani sklad. Keď taký filter
+ *     príde v query, route ho NEAPLIKUJE a vráti ho v `lockedFilters` spolu
+ *     s `lockedRequested`. To isté o stupeň vyššie robí `capabilities`: presné
+ *     filtre eshopu, kategórie a kód produktu čakajú na oprávnenie, ktoré
+ *     appka nemá — a odpoveď o tom hovorí vetou, nie mlčaním.
+ *  2. **I11 — o každom produkte je vidieť, ODKIAĽ je.** `origin` je `mirror`
+ *     (názov a cena z posledného prechodu synchronizácie) alebo `shop` (appka
+ *     si ich práve vypýtala z eshopu, lebo v zrkadle nie sú). Bez toho by na
+ *     jednej obrazovke stáli vedľa seba dva rôzne stupne istoty a vyzerali by
+ *     rovnako. „V zľave" je naďalej výhradne podľa VLASTNÝCH zápisov
+ *     (`discountSource`), nikdy podľa shopu.
+ *  3. **P7 — meraný fakt a odhad sa nemiešajú.** `dataAsOf` je `MAX(fetched_at)`
+ *     zrkadla, `lookup.shopTotal` je počet, ktorý eshop naozaj vrátil,
+ *     `lookup.at` je čas, kedy sa hľadalo. Ani jedno nie je odhad, takže ani
+ *     jedno sa neoznačuje `≈`. ALE: `total` je počet v ZRKADLE (`totalSource`),
+ *     a kým zrkadlo nie je úplné (`GET /api/catalog/sync` → `complete`), je to
+ *     dolná hranica — obrazovka ho vtedy musí označiť `≈` (kontrakt bod 8).
+ *  4. **Rozpočet stráži jedno počítadlo.** Dohľadanie rezervuje anonymné
+ *     čítania cez `catalogRepo` (A4), takže si so synchronizáciou katalógu
+ *     nekradnú strop. Odpoveď nesie celý stav rozpočtu po hľadaní.
  *
- * Čisto čítacie — na shop neodíde ani jeden request.
+ * KDE SA `capabilities[].note` SMIE VYKRESLIŤ
+ * -------------------------------------------
+ * VÝHRADNE v Nastaveniach → Zamknuté funkcie (`components/settings/LockedFeatures.tsx`).
+ * Kontrakt bod 18 hovorí, že vysvetlenie chýbajúcich dát žije na JEDNOM mieste
+ * a nerozširuje sa. Na obrazovke Produkty sa preto z `capabilities` používa len
+ * `state` — zámok pri filtri, sivý a neklikateľný, s tooltipom `Čaká na dáta zo
+ * shopu` (§5 architektúry). Veta by tam bola druhé vysvetlenie tej istej veci
+ * a po prvej zmene by si obe protirečili.
  *
- * Vlastník: V8.
+ * PORADIE RIADKOV V `data` (dôležité pre obrazovku)
+ * ------------------------------------------------
+ * Najprv stránka zo zrkadla v požadovanom triedení, POTOM súvislý blok toho,
+ * čo pridalo dohľadanie — v poradí RELEVANCIE, tak ako ho vrátil eshop.
+ * Blok sa nepremiešava do triedenia zámerne: pri hľadaní podľa kódu je prvý
+ * výsledok eshopu ten správny a preusporiadanie podľa ceny by to zahodilo.
+ * Koľko riadkov blok má, hovorí `lookup.addedRows`.
+ *
+ * Vlastník: V15 (hľadanie). Čítanie zrkadla a K8: V8.
  */
 import { z } from 'zod';
 
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 import {
+  LOOKUP_RESOLVE_MAX,
+  lookupProductsInShop,
+  type ProductOrigin,
+  type ShopLookupResult,
+} from '@/lib/catalog/shop-lookup';
+import {
+  recalledScopes,
+  resolveProductCodes,
+  shopCapabilities,
+  type ProductCodeResult,
+  type ShopCapabilities,
+} from '@/lib/catalog/product-codes';
+import {
+  apiKeyRepo as defaultApiKeyRepo,
+  type ApiKeyRepository,
+} from '@/lib/repo/api-key.repo';
+import {
   catalogRepo as defaultCatalogRepo,
+  type CatalogProductFacts,
   type CatalogRepoExt,
   type CatalogSearchFilter,
+  type CatalogSearchRow,
   type CatalogShopStatus,
   type CatalogSort,
   type LockedCatalogFilter,
   type SoldBucket,
 } from '@/lib/repo/catalog.repo';
+import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
+import { createShopClientFromSettings, type ShopClientV5 } from '@/lib/shop/client';
+import type { ReadBudgetStatus } from '@/lib/shop/read-budget';
 
 /* ═══════════════════════════ 1. Zod pre query ═════════════════════════════ */
 
@@ -94,20 +146,164 @@ const searchQuerySchema = z.object({
     .union([z.literal(''), z.enum(['0', '1', 'true', 'false'])])
     .optional()
     .transform((value) => value !== '0' && value !== 'false'),
+  /**
+   * `lookup=1` — dohľadaj v eshope aj to, čo zrkadlo nemá.
+   *
+   * Je to VÝSLOVNÁ akcia a nie predvolené správanie, lebo míňa anonymný
+   * rozpočet čítaní (30/min, 300/UTC deň na IP) — ten istý, z ktorého sa
+   * načítava katalóg. Hľadanie, ktoré by sa spúšťalo pri každom písmene, by
+   * denný strop minulo za pár minút a shop by zabanoval celú IP aj so
+   * synchronizáciou. Kontrakt bod 4 to hovorí aj o obrazovke: nič sa
+   * neobnovuje samo.
+   */
+  lookup: boolQuery,
+  /** Koľko neznámych ID naraz dotiahnuť. Strop drží modul, nie táto route. */
+  lookupLimit: z.coerce.number().int().min(0).max(LOOKUP_RESOLVE_MAX).optional(),
+  /**
+   * `codes=1` — dotiahni kód produktu pre `productIds` (kontrakt bod 20).
+   * Vyžaduje oprávnenie, ktoré appka zatiaľ nemá; odpoveď to povie vetou.
+   */
+  codes: boolQuery,
 });
 
 /* ═══════════════════════════ 2. Závislosti ════════════════════════════════ */
 
 export interface CatalogSearchRouteDeps {
   catalog?: Pick<CatalogRepoExt, 'search' | 'counts' | 'totalRows' | 'lastFetchedAt'>;
+  /**
+   * Časť repozitára, ktorú potrebuje LEN dohľadanie v eshope.
+   *
+   * Je to zámerne druhý parameter, a nie širší `catalog`: pôvodná štvorica
+   * metód je kontrakt, o ktorý sa opierajú existujúce testy, a rozšíriť ju by
+   * znamenalo prepísať cudzí súbor. Produkčne je to ten istý repozitár.
+   */
+  catalogLookup?: Pick<
+    CatalogRepoExt,
+    'search' | 'getMany' | 'factsFor' | 'reserveShopReads' | 'shopReadBudget'
+  >;
+  /** VÝHRADNE čítacia časť klienta shopu — zápis sa sem nedá podstrčiť. */
+  shop?: Pick<ShopClientV5, 'searchIndex' | 'getProduct' | 'getProductFull'>;
+  apiKey?: Pick<ApiKeyRepository, 'loadForUse' | 'recallScopes'>;
+  now?: () => Date;
   routeDeps?: RouteDeps;
 }
+
+/* ═══════════════════════════ 3. Tvar odpovede ═════════════════════════════ */
 
 /** Jeden zamknutý filter v odpovedi (K8). `locked` je vždy `true`. */
 export interface LockedFilterView {
   locked: true;
   /** `true` = klient tento filter poslal a route ho NEAPLIKOVALA. */
   requested: boolean;
+}
+
+/**
+ * Riadok tabuľky.
+ *
+ * `origin` je povinné pole a nesie ho KAŽDÝ riadok — aj tie, ktoré prišli zo
+ * zrkadla bez dohľadávania. Voliteľné pole by znamenalo, že obrazovka musí
+ * hádať, čo znamená jeho neprítomnosť.
+ */
+export interface CatalogRowView {
+  productId: number;
+  name: string | null;
+  price: string | null;
+  hasAttributes: boolean;
+  shopStatus: CatalogShopStatus;
+  /** Predané kusy za `soldWindowDays`. Meraný fakt z vlastných tabuliek. */
+  unitsSold: number;
+  /** I11 — z NAŠICH úspešných zápisov, nie zo shopu. */
+  everDiscounted: boolean;
+  discountedNow: boolean;
+  /** Kedy sa údaje o produkte naozaj čítali (P7). */
+  fetchedAt: string;
+  /** Odkiaľ je názov a cena: zo zrkadla, alebo z eshopu (I11). */
+  origin: ProductOrigin;
+}
+
+/** Stav rozpočtu čítaní v JSON. `null` = počítadlo sa nedalo prečítať. */
+export interface ReadBudgetView {
+  day: string;
+  limit: number;
+  used: number;
+  remaining: number;
+  exhausted: boolean;
+  resetAt: string;
+  minuteLimit: number;
+  usedThisMinute: number;
+  /** `false` = čísla sú fail-closed domnienka, nie merané (I11). */
+  known: boolean;
+}
+
+/** Ako dopadlo dohľadanie v eshope. */
+export interface LookupView {
+  /** Pýtal si klient dohľadanie? */
+  requested: boolean;
+  /**
+   * `off` · `no_query` · `not_first_page` · `done` · `budget_day` ·
+   * `budget_minute` · `budget_unknown` · `failed`.
+   */
+  outcome: ShopLookupResult['outcome'] | 'off' | 'not_first_page';
+  /** Koľko produktov eshop na túto otázku našiel. MERANÝ fakt, `null` = nevieme. */
+  shopTotal: number | null;
+  /** Koľko ID eshop poslal (strop jedného hľadania). */
+  candidates: number;
+  /** Z nich tie, ktoré zrkadlo už má. */
+  inMirror: number;
+  /** Z nich tie, ktoré zrkadlo nemá — kvôli nim sa hľadá. */
+  missingFromMirror: number;
+  /** Koľko riadkov dohľadanie do `data` pridalo (na konci, v poradí relevancie). */
+  addedRows: number;
+  /** Z toho riadky, ktorých názov a cena prišli živé z eshopu. */
+  addedFromShop: number;
+  /** Z toho riadky, ktoré appka mala v zrkadle, len ich text hľadania nenašiel. */
+  addedFromMirror: number;
+  /** ID, ktoré index pozná, ale eshop na ne odpovedal „taký produkt nemám". */
+  notInShop: number;
+  /** ID, na ktoré sa už nedostalo. */
+  notFetched: number;
+  /** Prečo: `none` · `limit` · `budget_minute` · `budget_day` · `budget_unknown` · `failed`. */
+  notFetchedReason: ShopLookupResult['notFetchedReason'];
+  /** Koľko anonymných čítaní hľadanie minulo. */
+  readsUsed: number;
+  reads: ReadBudgetView | null;
+  /** Kedy sa hľadalo — konkrétny čas (kontrakt bod 10). `null` = nehľadalo sa. */
+  at: string | null;
+  /** KÓD chyby (I1). `null` = nič nespadlo. */
+  error: string | null;
+}
+
+/** Kód produktu pre vybrané produkty (kontrakt bod 20). */
+export interface CodesView {
+  requested: boolean;
+  outcome: ProductCodeResult['outcome'] | 'off';
+  /** Kód podľa ID produktu. `null` = shop ho pri produkte nevedie. */
+  data: Record<string, { reference: string | null; variantReferences: string[] }>;
+  /** ID, na ktoré sa nedostalo (strop, chýbajúce oprávnenie, chyba). */
+  skipped: number[];
+  error: string | null;
+  at: string | null;
+}
+
+export interface CatalogSearchResponse {
+  data: CatalogRowView[];
+  page: number;
+  perPage: number;
+  /** Koľko riadkov vyhovuje filtru v ZRKADLE — viď `totalSource`. */
+  total: number;
+  /** Čoho sa `total` týka. Konštanta; je tu, aby sa to nedalo prehliadnuť. */
+  totalSource: 'mirror';
+  soldWindowDays: number;
+  soldFrom: string;
+  soldTo: string;
+  counts: Awaited<ReturnType<CatalogRepoExt['counts']>> | null;
+  catalogTotal: number;
+  dataAsOf: string | null;
+  lockedFilters: Record<string, LockedFilterView>;
+  discountSource: 'own_writes';
+  lookup: LookupView;
+  codes: CodesView;
+  capabilities: ShopCapabilities;
 }
 
 /**
@@ -126,10 +322,79 @@ export function lockedFiltersView(
   return out;
 }
 
-/* ═══════════════════════════ 3. Route ═════════════════════════════════════ */
+export function readBudgetView(status: ReadBudgetStatus | null): ReadBudgetView | null {
+  if (status === null) return null;
+  return {
+    day: status.day,
+    limit: status.limit,
+    used: status.used,
+    remaining: status.remaining,
+    exhausted: status.exhausted,
+    resetAt: status.resetAt.toISOString(),
+    minuteLimit: status.minuteLimit,
+    usedThisMinute: status.usedThisMinute,
+    known: status.known,
+  };
+}
+
+/** Dohľadanie sa nekonalo. Tvar odpovede je vždy rovnaký, len čísla sú nuly. */
+export function lookupOff(outcome: LookupView['outcome'], requested: boolean): LookupView {
+  return {
+    requested,
+    outcome,
+    shopTotal: null,
+    candidates: 0,
+    inMirror: 0,
+    missingFromMirror: 0,
+    addedRows: 0,
+    addedFromShop: 0,
+    addedFromMirror: 0,
+    notInShop: 0,
+    notFetched: 0,
+    notFetchedReason: 'none',
+    readsUsed: 0,
+    reads: null,
+    at: null,
+    error: null,
+  };
+}
+
+const CODES_OFF: CodesView = {
+  requested: false,
+  outcome: 'off',
+  data: {},
+  skipped: [],
+  error: null,
+  at: null,
+};
+
+function mirrorRowView(row: CatalogSearchRow): CatalogRowView {
+  return {
+    productId: row.productId,
+    name: row.name,
+    price: row.price,
+    hasAttributes: row.hasAttributes,
+    shopStatus: row.shopStatus,
+    unitsSold: row.unitsSold,
+    // I11 — obe polia sú z NAŠICH zápisov, nie zo shopu (backlog B1).
+    everDiscounted: row.everDiscounted,
+    discountedNow: row.discountedNow,
+    fetchedAt: row.fetchedAt.toISOString(),
+    origin: 'mirror',
+  };
+}
+
+/* ═══════════════════════════ 4. Route ═════════════════════════════════════ */
 
 export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): NextRouteHandler {
   const catalog = deps.catalog ?? defaultCatalogRepo;
+  const catalogLookup = deps.catalogLookup ?? defaultCatalogRepo;
+  const apiKey = deps.apiKey ?? defaultApiKeyRepo;
+  const now = deps.now ?? ((): Date => new Date());
+  // Klient sa zostavuje až keď je naozaj treba: `settings.shop_domain` sa číta
+  // lazy a čítanie zrkadla ho nepotrebuje vôbec (D80).
+  const shop = (): Pick<ShopClientV5, 'searchIndex' | 'getProduct' | 'getProductFull'> =>
+    deps.shop ?? createShopClientFromSettings(defaultSettingsRepo);
 
   return defineRoute(
     {
@@ -151,7 +416,8 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
           neverDiscounted: q.neverDiscounted,
           currentlyDiscounted: q.currentlyDiscounted,
         };
-        if (q.q !== undefined && q.q.trim().length > 0) filter.query = q.q.trim();
+        const term = q.q === undefined ? '' : q.q.trim();
+        if (term.length > 0) filter.query = term;
         if (q.priceFrom !== undefined) filter.priceFrom = q.priceFrom;
         if (q.priceTo !== undefined) filter.priceTo = q.priceTo;
         if (q.soldWindowDays !== undefined) filter.soldWindowDays = q.soldWindowDays;
@@ -183,30 +449,79 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
         const catalogTotal = await catalog.totalRows();
         const dataAsOf = await catalog.lastFetchedAt();
 
-        return {
-          data: result.data.map((row) => ({
-            productId: row.productId,
-            name: row.name,
-            price: row.price,
-            hasAttributes: row.hasAttributes,
-            shopStatus: row.shopStatus,
-            unitsSold: row.unitsSold,
-            // I11 — obe polia sú z NAŠICH zápisov, nie zo shopu (backlog B1).
-            everDiscounted: row.everDiscounted,
-            discountedNow: row.discountedNow,
-            fetchedAt: row.fetchedAt.toISOString(),
-          })),
+        const rows: CatalogRowView[] = result.data.map(mirrorRowView);
+        const shown = new Set<number>(rows.map((row) => row.productId));
+
+        /* ── Dohľadanie v eshope (kontrakt body 25–28) ──────────────────── */
+
+        let lookup: LookupView = lookupOff('off', q.lookup);
+        if (q.lookup) {
+          if (term.length === 0) {
+            lookup = lookupOff('no_query', true);
+          } else if (q.page !== 1) {
+            // Dohľadanie je doplnok k PRVEJ stránke, nie ďalšia stránkovaná
+            // vec. Spúšťať ho pri každom preklikaní strán by minulo rozpočet
+            // za odpoveď, ktorá by bola zakaždým tá istá.
+            lookup = lookupOff('not_first_page', true);
+          } else {
+            lookup = await runLookup({
+              term,
+              filter,
+              result,
+              rows,
+              shown,
+              catalogLookup,
+              shop: shop(),
+              logger: ctx.log,
+              now,
+              ...(q.lookupLimit !== undefined ? { resolveLimit: q.lookupLimit } : {}),
+            });
+          }
+        }
+
+        /* ── Kód produktu pre VYBRANÉ produkty (kontrakt bod 20) ────────── */
+
+        let codes: CodesView = CODES_OFF;
+        if (q.codes) {
+          const outcome = await resolveProductCodes(filter.productIds ?? [], {
+            shop: shop(),
+            apiKey,
+            logger: ctx.log,
+            now,
+          });
+          codes = {
+            requested: true,
+            outcome: outcome.outcome,
+            data: Object.fromEntries(
+              outcome.codes.map((entry) => [
+                String(entry.productId),
+                {
+                  reference: entry.reference,
+                  variantReferences: [...entry.variantReferences],
+                },
+              ]),
+            ),
+            skipped: [...outcome.skippedIds],
+            error: outcome.error,
+            at: outcome.at.toISOString(),
+          };
+        }
+
+        const response: CatalogSearchResponse = {
+          data: rows,
           page: result.page,
           perPage: result.perPage,
           total: result.total,
+          /** `total` je počet v zrkadle; koľko ich má eshop, hovorí `lookup.shopTotal`. */
+          totalSource: 'mirror',
           /** Okno, za ktoré je `unitsSold` — bez neho je číslo nečitateľné (P7). */
           soldWindowDays: result.soldWindowDays,
           soldFrom: result.soldFrom,
           soldTo: result.soldTo,
           counts,
-          /** Koľko riadkov má katalóg vôbec („z 40 483 produktov"). */
+          /** Koľko riadkov má zrkadlo vôbec („z 41 082 produktov"). */
           catalogTotal,
-          /** P7 — meraný fakt „Dáta k …", nie odhad. `null` = katalóg je prázdny. */
+          /** P7 — meraný fakt „Dáta k …", nie odhad. `null` = zrkadlo je prázdne. */
           dataAsOf: dataAsOf === null ? null : dataAsOf.toISOString(),
           /**
            * K8 — filtre bez dát. VŽDY prítomné (aj keď si o ne nikto nepýtal),
@@ -215,12 +530,153 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
            */
           lockedFilters: lockedFiltersView(result.lockedFilters, lockedRequested),
           /** Čo znamená „v zľave" — nikdy netvrdíme, že poznáme stav shopu (I11). */
-          discountSource: 'own_writes' as const,
+          discountSource: 'own_writes',
+          lookup,
+          codes,
+          /**
+           * Čo appka zatiaľ nevie a prečo. Tri stavy, nikdy dva: `available`
+           * (kľúč to má) · `locked` (shop povedal nie) · `unknown` (nevieme).
+           * `note` patrí VÝHRADNE do `LockedFeatures.tsx` (kontrakt bod 18) —
+           * na Produktoch sa z toho kreslí len zámok, nie veta.
+           */
+          capabilities: shopCapabilities(recalledScopes(apiKey)),
         };
+        return response;
       },
     },
     deps.routeDeps,
   );
+}
+
+/* ═══════════════ 5. Dohľadanie: zloženie riadkov a čísel ══════════════════ */
+
+interface RunLookupInput {
+  term: string;
+  filter: CatalogSearchFilter;
+  result: Awaited<ReturnType<CatalogRepoExt['search']>>;
+  /** Riadky zo zrkadla — dopĺňa sa do nich blok dohľadaného (mutuje sa zámerne). */
+  rows: CatalogRowView[];
+  shown: Set<number>;
+  catalogLookup: NonNullable<CatalogSearchRouteDeps['catalogLookup']>;
+  shop: Pick<ShopClientV5, 'searchIndex' | 'getProduct'>;
+  logger: Parameters<typeof lookupProductsInShop>[1]['logger'];
+  now: () => Date;
+  resolveLimit?: number;
+}
+
+/**
+ * Spustí dohľadanie a pripojí jeho výsledok NA KONIEC `rows`.
+ *
+ * Poradie pripojeného bloku je poradie relevancie z eshopu (`candidateIds`).
+ * Riadok, ktorý už v tabuľke je, sa preskočí — hľadanie nesmie vyrobiť ten istý
+ * produkt dvakrát.
+ *
+ * Dve skupiny v bloku, obe pripojené v jednom poradí:
+ *  · produkt, ktorý zrkadlo MÁ, len ho textové hľadanie nad názvom nenašlo
+ *    (eshop hľadá aj v popise, v kóde a v kategóriách) → `origin: 'mirror'`,
+ *    so všetkými číslami zo zrkadla,
+ *  · produkt, ktorý zrkadlo NEMÁ → `origin: 'shop'`, s názvom a cenou z eshopu
+ *    a s predajnosťou aj históriou vlastných zliav z vlastných tabuliek
+ *    (obe sú kľúčované produktom, nie zrkadlom — preto sa dajú spočítať aj tu).
+ */
+async function runLookup(input: RunLookupInput): Promise<LookupView> {
+  const outcome = await lookupProductsInShop(
+    { query: input.term },
+    {
+      shop: input.shop,
+      catalog: input.catalogLookup,
+      ...(input.logger !== undefined ? { logger: input.logger } : {}),
+      now: input.now,
+      ...(input.resolveLimit !== undefined ? { resolveLimit: input.resolveLimit } : {}),
+    },
+  );
+
+  const view: LookupView = {
+    requested: true,
+    outcome: outcome.outcome,
+    shopTotal: outcome.shopTotal,
+    candidates: outcome.candidateIds.length,
+    inMirror: outcome.knownIds.length,
+    missingFromMirror: outcome.missingIds.length,
+    addedRows: 0,
+    addedFromShop: 0,
+    addedFromMirror: 0,
+    notInShop: outcome.notInShopIds.length,
+    notFetched: outcome.notFetchedIds.length,
+    notFetchedReason: outcome.notFetchedReason,
+    readsUsed: outcome.readsUsed,
+    reads: readBudgetView(outcome.reads),
+    at: outcome.at.toISOString(),
+    error: outcome.error,
+  };
+  if (outcome.outcome !== 'done') return view;
+
+  /* ── a) riadky zo zrkadla, ktoré textové hľadanie nenašlo ──────────────── */
+
+  const fromMirrorIds = outcome.knownIds.filter((id) => !input.shown.has(id));
+  const mirrorRows = new Map<number, CatalogSearchRow>();
+  if (fromMirrorIds.length > 0) {
+    // Zámerne BEZ `query`: tie ID už našiel eshop a opakovať nad nimi hľadanie
+    // podľa názvu by ich zase vyhodilo. Stavy shopu sú tu všetky tri — ide
+    // o konkrétne produkty, nie o ponuku na zlacnenie.
+    const extra = await input.catalogLookup.search({
+      productIds: [...fromMirrorIds],
+      shopStatus: ['ok', 'not_found', 'unknown'],
+      soldWindowDays: input.result.soldWindowDays,
+      today: input.result.soldTo,
+      page: 1,
+      perPage: fromMirrorIds.length,
+    });
+    for (const row of extra.data) mirrorRows.set(row.productId, row);
+  }
+
+  /* ── b) predajnosť a vlastné zľavy pre to, čo prišlo živé z eshopu ─────── */
+
+  let facts = new Map<number, CatalogProductFacts>();
+  if (outcome.fetched.length > 0) {
+    const resolved = await input.catalogLookup.factsFor(
+      outcome.fetched.map((product) => product.productId),
+      { soldWindowDays: input.result.soldWindowDays, today: input.result.soldTo },
+    );
+    facts = resolved.facts;
+  }
+  const fetchedById = new Map(outcome.fetched.map((product) => [product.productId, product]));
+
+  /* ── c) pripojenie v poradí relevancie ─────────────────────────────────── */
+
+  for (const productId of outcome.candidateIds) {
+    if (input.shown.has(productId)) continue;
+
+    const fromMirror = mirrorRows.get(productId);
+    if (fromMirror !== undefined) {
+      input.rows.push(mirrorRowView(fromMirror));
+      input.shown.add(productId);
+      view.addedFromMirror += 1;
+      continue;
+    }
+
+    const fromShop = fetchedById.get(productId);
+    if (fromShop === undefined) continue;
+    const fact = facts.get(productId);
+    input.rows.push({
+      productId: fromShop.productId,
+      name: fromShop.name,
+      price: fromShop.price,
+      hasAttributes: fromShop.hasAttributes,
+      // Eshop na produkt práve odpovedal, takže v ňom existuje — meraný fakt.
+      shopStatus: 'ok',
+      unitsSold: fact?.unitsSold ?? 0,
+      everDiscounted: fact?.everDiscounted ?? false,
+      discountedNow: fact?.discountedNow ?? false,
+      fetchedAt: fromShop.fetchedAt.toISOString(),
+      origin: 'shop',
+    });
+    input.shown.add(productId);
+    view.addedFromShop += 1;
+  }
+
+  view.addedRows = view.addedFromMirror + view.addedFromShop;
+  return view;
 }
 
 export const GET = createCatalogSearchRoute();

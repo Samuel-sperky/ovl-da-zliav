@@ -700,13 +700,19 @@ describe('invarianty v zdrojoch modulu (I7, I8)', () => {
     // aby sa na ňu pozrel človek. K v5 pribudli dve a obe sú ČÍTACIE:
     //   · `getFull`  — skutočný stav zľavy, marža, sklad, kategórie (product:read)
     //   · `whoami`   — overenie kľúča; nahradilo sondu na zápisovom endpointe
+    //   · `searchIndex` — fuzzy hľadanie, VEREJNÉ (kľúč sa preň nezostavuje)
+    //   · `search`      — presné filtre, scope `product:read`
+    //   · `categories`  — strom kategórií, scope `product:read`
     // Objednávkové cesty tu nesmú byť NIKDY — tie pozná výhradne orders-client (I8').
     expect(Object.values(SHOP_PATHS).sort()).toEqual(
       [
         '/api/batch',
+        '/api/categories',
         '/api/products',
         '/api/products/get',
         '/api/products/getFull',
+        '/api/products/search',
+        '/api/products/searchIndex',
         '/api/products/setReduction',
         '/api/whoami',
       ].sort(),

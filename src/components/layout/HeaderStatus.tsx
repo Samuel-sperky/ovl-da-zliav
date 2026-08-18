@@ -1,100 +1,44 @@
 'use client';
 
 /**
- * Aura Zľavy — pravá strana hlavičky (ARCHITEKTURA §0, K2).
+ * Aura Zľavy — pravá strana hlavičky a read-only výzva (ARCHITEKTURA §0, K2).
  *
- * Presne dve veci a nič viac: **stav fronty** a **prepínač témy**. Žiadne
- * vyhľadávanie, žiadne notifikácie, žiadne stavové badge — platnosť kľúčov
- * a detail rozpočtu majú svoje miesto v Nastaveniach (ARCHITEKTURA §3.6,
- * kotva „Kľúče a rozpočet"), nie v každom riadku hlavičky.
+ * V hlavičke sú presne dve veci a nič viac: **stav fronty** a **prepínač témy**.
+ * Žiadne vyhľadávanie, žiadne notifikácie, žiadne stavové badge — či sú zápisy
+ * zapnuté, dokedy platí kľúč, koľko zápisov dnes ostáva a kde je katalóg, to
+ * všetko nesie stavový pruh o riadok nižšie (`layout/StatusBar.tsx`).
  *
- * KAM SA PODEL ROZPOČET ZÁPISOV
- * -----------------------------
- * Do stáleho stavového pruhu pod hlavičkou (`layout/StatusBar.tsx`), a to
- * zámerne: tunajší prúžok bol ručne dorobená kópia primitíva `ui/BudgetMeter`
- * — tá istá vec nakreslená druhýkrát, bez slova o úrovni („blíži sa strop")
- * a bez času obnovy. Dve kópie meradla rozpočtu sa skôr či neskôr rozídu, tak
- * zostala tá, ktorá je otestovaná (`ui-primitives.spec.ts`). Rozpočet je preto
- * VIDNO ROVNAKO STÁLE ako predtým, len o riadok nižšie a pravdivejšie.
+ * ČO ODTIAĽTO ZMIZLO A PREČO
+ * --------------------------
+ * Pruh „Ostrý zápis vypnutý" pod hlavičkou (`HeaderWritesStrip`) hovoril
+ * DOSLOVA to isté, čo menovka zápisov v stavovom pruhu — tá istá veta, o riadok
+ * vyššie, v celej šírke okna. Dva nositelia jedného faktu sa raz rozídu a do
+ * tej doby ukrajujú z výšky obrazovky, ktorú P4 obmedzuje. Fakt zostal, nosič
+ * je jeden: `writesChip()` v `layout/status.ts`.
+ *
+ * Read-only výzva (D10) zostáva, lebo NIE JE ten istý fakt: pruh hovorí, že
+ * kľúč chýba alebo vypršal, výzva ponúka odkaz, ktorým sa to opraví. A objaví
+ * sa len vtedy, keď je čo opravovať — keď nič nebráni zápisu, chróm je tri
+ * riadky a nič viac (kontrakt UI, bod 3).
  *
  * DVE VECI, KTORÉ SA TU NESMÚ POKAZIŤ:
  *
- * 1. **Vyčerpaný rozpočet nie je chyba.** Pri 200/200 sa nič nerozbilo — appka
- *    len počká na obnovu stropu (K2, odpoveď 59). Červená je vyhradená pre
- *    stratu dát a zastavený zápis.
- * 2. **Neznáme číslo sa nedopĺňa.** Kým `/api/queue` nedodá čísla (alebo keď
+ * 1. **Neznáme číslo sa nedopĺňa.** Kým `/api/queue` nedodá čísla (alebo keď
  *    appka neodpovedá), hlavička píše, že je fronta prázdna, len keď to naozaj
  *    vie. Appka zapisuje do produkčného shopu — vymyslené číslo by tu bolo
  *    tvrdenie, nie medzera.
+ * 2. **Stav sa sem POSIELA, neťahá.** Hlavička aj pruh stoja na jednom čítaní
+ *    `/api/status`, ktoré robí `AppHeader`. Vlastné čítanie by znamenalo druhý
+ *    dotaz na tú istú vec — a druhú predstavu o tom, čo je pravda.
+ *
+ * Vlastník: L1.
  */
 import Link from 'next/link';
 
-import { useHealth, type HealthData } from '@/components/layout/health';
 import { formatCount, useQueueHeader } from '@/components/layout/queue';
 import ReadOnlyNotice from '@/components/layout/ReadOnlyNotice';
+import type { StatusState } from '@/components/layout/status';
 import ThemeToggle from '@/components/layout/ThemeToggle';
-import type { StatusTone } from '@/components/ui/ToneBadge';
-
-/** Vstup čistého rozhodovania — presne to, čo `useHealth()` vie. */
-export interface HeaderStatusInput {
-  loading: boolean;
-  unauthenticated: boolean;
-  unreachable: boolean;
-  health: HealthData | null;
-}
-
-export type HeaderStatusView =
-  | { kind: 'loading' }
-  | { kind: 'ok' }
-  | {
-      kind: 'unauthenticated' | 'unreachable';
-      tone: StatusTone;
-      glyph: string;
-      label: string;
-      title: string;
-    };
-
-export const HEALTH_UNAUTHENTICATED_LABEL = 'stav appky · po prihlásení';
-export const HEALTH_UNREACHABLE_LABEL = 'stav appky nedostupný';
-
-/**
- * Čisté rozhodnutie, čo hlavička o stave appky TVRDÍ. Štyri kombinácie
- * (prihlásený/neprihlásený × beží/nebeží):
- *
- *  - neprihlásený + beží → 401 → `unauthenticated`, neutrál (žiadna porucha),
- *  - neprihlásený + nebeží → sieťová chyba → `unreachable`, critical,
- *  - prihlásený + beží → `ok`,
- *  - prihlásený + nebeží → `unreachable`, critical.
- *
- * `unauthenticated` má prednosť: keď vieme, že stav nepoznáme len pre chýbajúcu
- * session, NESMIEME hlásiť poruchu. Neznámy dôvod bez dát je fail-closed
- * `unreachable` — radšej priznaná nevedomosť než predstieraná pohoda.
- *
- * Funkcia zostáva aj po prechode na V3: hlavička už nekreslí stavový badge,
- * ale podľa nej sa rozhoduje, či sa čísla rozpočtu a fronty dajú tvrdiť.
- */
-export function headerStatusView(input: HeaderStatusInput): HeaderStatusView {
-  if (input.loading) return { kind: 'loading' };
-  if (input.unauthenticated) {
-    return {
-      kind: 'unauthenticated',
-      tone: 'idle',
-      glyph: '○',
-      label: HEALTH_UNAUTHENTICATED_LABEL,
-      title: 'Nie si prihlásený — stav appky sa zobrazí po prihlásení. Nie je to porucha appky.',
-    };
-  }
-  if (input.unreachable || input.health === null) {
-    return {
-      kind: 'unreachable',
-      tone: 'critical',
-      glyph: '✕',
-      label: HEALTH_UNREACHABLE_LABEL,
-      title: 'Appka neodpovedá na kontrolu stavu — skontroluj, či beží kontajner a databáza.',
-    };
-  }
-  return { kind: 'ok' };
-}
 
 /** Súhrn všetkých bežiacich front. Klik vedie na tab Zľavy. */
 function QueueLink({ done, total }: { done: number | null; total: number | null }) {
@@ -121,18 +65,21 @@ function QueueLink({ done, total }: { done: number | null; total: number | null 
   );
 }
 
+export interface HeaderRightProps {
+  /** Stav appky z jediného čítania, ktoré robí `AppHeader`. */
+  state: StatusState;
+}
+
 /**
  * Pravá strana hlavičky. Vykresľuje sa aj na prihlasovacej obrazovke — vtedy
  * sú čísla neznáme a hlavička to prizná namiesto toho, aby mlčala alebo
  * hádala.
  */
-export function HeaderRight() {
-  const { health, loading, unreachable, unauthenticated } = useHealth();
-  const view = headerStatusView({ loading, unauthenticated, unreachable, health });
+export function HeaderRight({ state }: HeaderRightProps) {
   const { queue } = useQueueHeader();
 
   // Kým sa nevie, či appka odpovedá, čísla sa netvrdia.
-  const trusted = view.kind === 'ok';
+  const trusted = state.kind === 'ok' && state.payload !== null;
 
   return (
     <div className="hdr-r">
@@ -146,37 +93,23 @@ export function HeaderRight() {
 }
 
 /**
- * Pruh pod hlavičkou pri vypnutých ostrých zápisoch (I13, ARCHITEKTURA §1).
- * `WRITES_ENABLED` sa v UI NEZOBRAZUJE ako prepínač — len ako tento fakt.
+ * Full-bleed výzva pod stavovým pruhom pri chýbajúcom alebo expirovanom kľúči
+ * (D10). Nie je to opakovanie menovky v pruhu — pruh hlási fakt, táto výzva
+ * nesie odkaz, ktorým sa fakt zmení.
  *
- * Pruh je NEUTRÁLNY, nie červený: vypnuté zápisy sú najbezpečnejší možný stav
- * appky, ktorá inak píše do produkčného shopu. Červená by klamala o závažnosti.
+ * Platnosť sa porovnáva s časom SERVERA zo snapshotu, nie s hodinami
+ * prehliadača: rozdiel by sa prejavil presne v hodine, keď kľúč expiruje.
  */
-export function HeaderWritesStrip() {
-  const { health, loading } = useHealth(60_000);
-  if (loading || health === null) return null;
-  if (health.writesLocked) {
-    return (
-      <div className="hdr-strip" role="status" data-testid="writes-strip" data-state="locked">
-        Zápisy sú zamknuté poistkou
-      </div>
-    );
-  }
-  if (!health.writesEnabled) {
-    return (
-      <div className="hdr-strip calm" role="status" data-testid="writes-strip" data-state="disabled">
-        Ostrý zápis vypnutý
-      </div>
-    );
-  }
-  return null;
-}
+export function HeaderReadOnlyNotice({ state }: HeaderRightProps) {
+  if (state.kind !== 'ok' || state.payload === null) return null;
 
-/** Samostatný full-bleed pruh pod hlavičkou — read-only výzva (D10). */
-export function HeaderReadOnlyNotice() {
-  const { health, loading } = useHealth(60_000);
-  if (loading || health === null) return null;
+  const key = state.payload.apiKey;
+  if (key.present !== true) return <ReadOnlyNotice keyPresent={false} />;
+
+  const expires = key.expiresAt === null ? null : new Date(key.expiresAt).getTime();
+  const now = new Date(state.payload.now).getTime();
   const expired =
-    health.key.expiresAt != null && new Date(health.key.expiresAt).getTime() <= Date.now();
-  return <ReadOnlyNotice keyPresent={health.key.present && !expired} />;
+    expires !== null && Number.isFinite(expires) && Number.isFinite(now) && expires <= now;
+
+  return <ReadOnlyNotice keyPresent={!expired} />;
 }

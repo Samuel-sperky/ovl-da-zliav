@@ -23,7 +23,8 @@
  *     identický resend; druhá odpoveď je konečná.
  *   - **I7** — neexistuje funkcia, ktorá zľavu ruší. Zápis s `to` v minulosti
  *     klient ODMIETNE ešte pred odoslaním (`local_to_in_past`).
- *   - **I8** — klient pozná výhradne cesty pod `/api/products` a `/api/batch`;
+ *   - **I8** — klient pozná výhradne cesty pod `/api/products`, `/api/batch`,
+ *     `/api/whoami` a `/api/categories` (celý zoznam je `SHOP_PATHS`);
  *     objednávkové endpointy a ich scope sa v module nevyskytujú.
  *   - **I9** — percento 1–30, `to ≥ from`, okno ≤ 3 mesiace sa kontroluje aj tu
  *     (druhá obrana; prvá je `lib/engine/guards.ts`).
@@ -113,10 +114,19 @@ export const SHOP_PATHS = {
   productGet: '/api/products/get',
   /** `GET /api/products/getFull` (v5, bod A1) — čítanie so scope `product:read`. */
   productGetFull: '/api/products/getFull',
+  /**
+   * `GET /api/products/searchIndex` (v5) — fuzzy hľadanie cez Meilisearch.
+   * VEREJNÉ, rovnako ako `productGet`: kľúč sa preň nezostavuje (D48, I1).
+   */
+  productSearchIndex: '/api/products/searchIndex',
+  /** `GET /api/products/search` (v5) — presné filtre, so scope `product:read`. */
+  productSearch: '/api/products/search',
   setReduction: '/api/products/setReduction',
   batch: '/api/batch',
   /** `GET /api/whoami` (v5) — introspekcia kľúča, nevyžaduje žiadny scope. */
   whoami: '/api/whoami',
+  /** `GET /api/categories` (v5) — strom kategórií, so scope `product:read`. */
+  categories: '/api/categories',
 } as const;
 
 /** `POST /api/batch` — max 25 položiek (D56). */
@@ -442,6 +452,125 @@ export function missingScopeSentence(scope: ShopScope, known: boolean): string {
   return `Kľúč nemá oprávnenie ${scope}, takže ${co} zatiaľ nefunguje. Vypýtaj si od správcu shopu kľúč s týmto oprávnením (alebo rozšírenie toho súčasného).`;
 }
 
+/* ═════════════ 3c. Hľadanie produktov (v5, kontrakt UI body 25–28) ════════ */
+
+/**
+ * Celé číslo zo shopu, tolerantne.
+ *
+ * ZÁMERNE sa nepreberá `numberLike` zo `schemas.ts`: ten je stavaný na PENIAZE
+ * (`'1 234,50'` aj `'1,234.50'` je to isté číslo) a tá tolerancia pri ID a pri
+ * stránkovaní nie je cnosť, ale diera — `'1,234'` je ako cena nejednoznačné,
+ * ako ID je to nezmysel a má sa priznať ako `schema_drift` (D54). Tu preto
+ * prejde len číslo alebo číslica v stringu, nič iné.
+ */
+const shopIntLike = z
+  .union([z.number(), z.string().regex(/^\s*-?\d+\s*$/)])
+  .transform((value) => (typeof value === 'number' ? value : Number(value.trim())))
+  .refine((n) => Number.isInteger(n), 'nie je celé číslo');
+
+/**
+ * Odpoveď oboch hľadacích endpointov (`search`, `searchIndex`).
+ *
+ * Obidva vracajú **LEN ID** — `{ok, data: [id, id, …], page, per_page, total}`.
+ * Nie je to zabudnutá polovica odpovede: shop tým hovorí „názov si vypýtaj
+ * zvlášť", a práve preto je hľadanie v tejto appke dvojkrokové a rozpočtované.
+ *
+ * `ok` je nepovinné z rovnakého dôvodu ako v `productDetailSchema` — keď
+ * príde, `readErrorBody()` už `ok:false` odchytil skôr (§6).
+ */
+export const productIdPageSchema = z.looseObject({
+  ok: z.literal(true).optional(),
+  data: z.array(shopIntLike),
+  page: shopIntLike,
+  per_page: shopIntLike,
+  total: shopIntLike,
+});
+
+/** Stránka ID-čiek z hľadania. Názvy a ceny sa dopĺňajú samostatne. */
+export interface ShopIdPage {
+  /** ID v poradí, v akom ich shop poslal. Pri `searchIndex` je to RELEVANCIA. */
+  readonly ids: readonly number[];
+  readonly page: number;
+  readonly perPage: number;
+  /** Koľko produktov shop na túto otázku našiel celkovo — MERANÝ fakt, nie odhad. */
+  readonly total: number;
+}
+
+/** Tvrdý strop `per_page` na oboch hľadacích endpointoch (v5). */
+export const SHOP_SEARCH_MAX_PER_PAGE = 100;
+
+/**
+ * Parametre verejného `searchIndex`. Index vie filtrovať VÝHRADNE `active`
+ * a `price` — kategórie, výrobcovia ani vlastné triedenie sa doň poslať nedajú
+ * a nikdy sa sem nesmú prepašovať, lebo shop ich ticho ignoruje (a používateľ
+ * by dostal „výsledok filtra", ktorý filter nikdy nevidel — presne to, čo
+ * zakazuje K8).
+ */
+export interface ShopSearchIndexParams {
+  /** Voľný text: názov, popis, **kód produktu** aj kategórie; znáša preklepy. */
+  search?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  page?: number;
+  perPage?: number;
+}
+
+/** Podľa čoho vie triediť `search` (verejný `searchIndex` triediť nevie). */
+export type ShopSearchSortBy = 'id' | 'name' | 'price' | 'date_add';
+export type ShopSearchSortDir = 'asc' | 'desc';
+
+/**
+ * Parametre `search` — presné filtre za scope `product:read`.
+ *
+ * Nadmnožina `searchIndex`: čo je tu navyše, to je presne to, čo appka
+ * bez `product:read` NEVIE, a čo preto musí vedieť pomenovať ako zamknuté.
+ */
+export interface ShopSearchParams extends ShopSearchIndexParams {
+  categories?: readonly number[];
+  manufacturers?: readonly number[];
+  suppliers?: readonly number[];
+  /** Len produkty, ktoré v shope práve majú zľavu. */
+  onlyDiscounted?: boolean;
+  sortBy?: ShopSearchSortBy;
+  sortDir?: ShopSearchSortDir;
+}
+
+/** Jedna kategória z `GET /api/categories` (scope `product:read`). */
+export interface ShopCategory {
+  readonly id: number;
+  readonly name: string;
+  /** `0` = koreň stromu. */
+  readonly parentId: number;
+  readonly depth: number;
+}
+
+export const categoryListSchema = z.looseObject({
+  ok: z.literal(true).optional(),
+  data: z.array(
+    z.looseObject({
+      id: shopIntLike,
+      name: z.string(),
+      id_parent: shopIntLike,
+      level_depth: shopIntLike,
+    }),
+  ),
+});
+
+/** Spoločná časť query pre obe hľadania — jediné miesto, kde sa skladá. */
+function searchIndexQuery(params: ShopSearchIndexParams): RequestSpec['query'] {
+  const perPage =
+    params.perPage === undefined
+      ? undefined
+      : Math.min(SHOP_SEARCH_MAX_PER_PAGE, Math.max(1, Math.trunc(params.perPage)));
+  return {
+    ...(params.search !== undefined ? { search: params.search } : {}),
+    ...(params.minPrice !== undefined ? { minPrice: params.minPrice } : {}),
+    ...(params.maxPrice !== undefined ? { maxPrice: params.maxPrice } : {}),
+    ...(params.page !== undefined ? { page: Math.max(1, Math.trunc(params.page)) } : {}),
+    ...(perPage !== undefined ? { per_page: perPage } : {}),
+  };
+}
+
 /* ═══════════════════════════ 4. Závislosti klienta ════════════════════════ */
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
@@ -472,7 +601,11 @@ export interface ShopClientDeps {
 interface RequestSpec {
   method: 'GET' | 'POST';
   path: string;
-  query?: Record<string, string | number | undefined>;
+  /**
+   * Query. Pole sa serializuje ako opakovaný kľúč (`categories[]=1&categories[]=2`),
+   * pretože tak ho PHP číta ako pole — `set()` by z dvoch kategórií nechal jednu.
+   */
+  query?: Record<string, string | number | readonly (string | number)[] | undefined>;
   form?: Record<string, string>;
   phase: RequestPhase;
   /** Kľúč sa zostaví do hlavičky VÝHRADNE keď je tu uvedený (D48). */
@@ -500,6 +633,12 @@ interface SuccessEnvelope {
 export interface ShopClientV5 extends ShopClient {
   /** Introspekcia kľúča: scopes a živý zostatok rozpočtu (v5). */
   whoami(key: SecretRef, ctx: ShopCtx): Promise<WhoamiOutcome>;
+  /** VEREJNÉ fuzzy hľadanie cez celý katalóg. Vracia len ID (v5). */
+  searchIndex(params: ShopSearchIndexParams, ctx: ShopCtx): Promise<ShopIdPage>;
+  /** Presné filtre za scope `product:read`. Vracia len ID (v5). */
+  searchProducts(params: ShopSearchParams, key: SecretRef, ctx: ShopCtx): Promise<ShopIdPage>;
+  /** Strom kategórií za scope `product:read` (v5). */
+  listCategories(key: SecretRef, ctx: ShopCtx): Promise<readonly ShopCategory[]>;
 }
 
 export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
@@ -534,7 +673,15 @@ export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
     if (query) {
       for (const [key, value] of Object.entries(query)) {
         if (value === undefined) continue;
-        url.searchParams.set(key, String(value));
+        if (Array.isArray(value)) {
+          // Prázdne pole = filter sa neposiela vôbec. `categories[]=` (prázdna
+          // hodnota) by shop mohol prečítať ako „kategória 0" a vrátiť nič.
+          for (const item of value as readonly (string | number)[]) {
+            url.searchParams.append(key, String(item));
+          }
+          continue;
+        }
+        url.searchParams.set(key, String(value as string | number));
       }
     }
     return url.toString();
@@ -901,6 +1048,172 @@ export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
       throw new ShopRequestError(error);
     }
     return toProductFull(parsed.value);
+  }
+
+  /* ────────── 5.3b hľadanie: `searchIndex`, `search`, `categories` ──────── */
+
+  /** Spoločné rozbalenie odpovede oboch hľadaní — vracajú ten istý tvar. */
+  function readIdPage(
+    path: string,
+    value: SuccessEnvelope,
+    ctx: ShopCtx,
+  ): ShopIdPage {
+    const parsed = parseShopPayload(productIdPageSchema, unwrapShopResult(value.body));
+    if (!parsed.ok) {
+      const error = schemaDriftError({
+        requestId: value.requestId,
+        httpStatus: value.httpStatus,
+        issues: parsed.issues,
+        raw: value.body,
+      });
+      reportDrift(path, ctx, error);
+      throw new ShopRequestError(error);
+    }
+    return {
+      ids: parsed.value.data,
+      page: parsed.value.page,
+      perPage: parsed.value.per_page,
+      total: parsed.value.total,
+    };
+  }
+
+  /**
+   * `GET /api/products/searchIndex` — fuzzy hľadanie cez celý katalóg. VEREJNÉ.
+   *
+   * PREČO JE TO NAJDÔLEŽITEJŠIE ČÍTANIE V CELEJ APPKE
+   * -------------------------------------------------
+   * Zrkadlo katalógu má 2 900 zo 41 082 produktov, lebo anonymný denný strop
+   * dovolí prečítať 240 stránok za UTC deň a celý prechod trvá dva dni. Až
+   * dovtedy platilo, že produkt, ktorý zrkadlo ešte nemá, sa v appke NEDAL
+   * nájsť — a prázdna tabuľka vyzerá rovnako ako „taký produkt neexistuje".
+   *
+   * Tento endpoint to obchádza bez jediného nového oprávnenia: hľadá vo VŠETKÝCH
+   * 41 082 produktoch, v názve, popise, **kóde produktu** aj v kategóriách,
+   * znáša preklepy a poradie slov. Kľúč nepotrebuje (rovnako ako `get`), takže
+   * `spec.key` tu ZÁMERNE nie je a byť nesmie — anonymná čítacia cesta zostáva
+   * anonymná (D48, I1).
+   *
+   * ČO ZA TO PLATÍME
+   * ----------------
+   *  1. **Vracia LEN ID.** Názov a cena sa doťahujú `getProduct()` po jednom,
+   *     každý za jedno anonymné čítanie. Rozpočet preto MUSÍ strážiť volajúci
+   *     (`@/lib/shop/read-budget`, dráha `anon`) — tento modul počítadlo nemá
+   *     a mať nesmie, inak by vznikli dve.
+   *  2. **Nie je batchable** (`/api/batch` ho neprijme), takže dávka na
+   *     zrýchlenie neexistuje. Kto potrebuje menej volaní, musí sa menej pýtať.
+   *  3. **Poradie je RELEVANCIA a nedá sa zmeniť.** Vlastné triedenie vie len
+   *     `search` za `product:read`. Preusporiadať výsledok na strane appky by
+   *     znamenalo zahodiť jedinú vec, kvôli ktorej sa fuzzy hľadanie volá —
+   *     pri hľadaní podľa kódu je prvý výsledok ten správny.
+   */
+  async function searchIndex(params: ShopSearchIndexParams, ctx: ShopCtx): Promise<ShopIdPage> {
+    const result = await send({
+      method: 'GET',
+      path: SHOP_PATHS.productSearchIndex,
+      query: searchIndexQuery(params),
+      phase: 'read',
+      ctx,
+    });
+    if (result.outcome === 'error') throw new ShopRequestError(result.error);
+    return readIdPage(SHOP_PATHS.productSearchIndex, result.value, ctx);
+  }
+
+  /**
+   * `GET /api/products/search` — presné filtre za scope `product:read`.
+   *
+   * Appka tento scope zatiaľ NEMÁ, takže volanie dnes skončí na `forbidden`.
+   * Metóda napriek tomu existuje celá a hotová: keď kľúč s oprávnením pribudne,
+   * zapne sa filter podľa kategórie, výrobcu, dodávateľa a `onlyDiscounted`
+   * bez toho, aby sa čokoľvek dopisovalo. Dovtedy je úlohou volajúceho povedať,
+   * že to nefunguje a prečo (`missingScopeSentence`) — nie mlčať.
+   *
+   * Kľúč je VÝSLOVNÝ parameter z rovnakého dôvodu ako pri `getProductFull`:
+   * na prvý pohľad má byť vidieť, ktoré volanie kľúč minie. Zaobchádzanie
+   * s ním je identické (dešifrovanie tesne pred odoslaním, hlavička sa vo
+   * `finally` maže, `redirect: 'error'`, nikdy do logu — I1, D64).
+   *
+   * `deps.onKeyRejected` sa ZÁMERNE nevolá: ten callback wipuje ZÁPISOVÝ kľúč
+   * (D51/D52) a odmietnuté čítanie nie je dôvod zmazať kľúč, ktorý shop pri
+   * zápise nikdy neodmietol.
+   */
+  async function searchProducts(
+    params: ShopSearchParams,
+    key: SecretRef,
+    ctx: ShopCtx,
+  ): Promise<ShopIdPage> {
+    const query: RequestSpec['query'] = {
+      ...searchIndexQuery(params),
+      ...(params.categories !== undefined && params.categories.length > 0
+        ? { 'categories[]': [...params.categories] }
+        : {}),
+      ...(params.manufacturers !== undefined && params.manufacturers.length > 0
+        ? { 'manufacturers[]': [...params.manufacturers] }
+        : {}),
+      ...(params.suppliers !== undefined && params.suppliers.length > 0
+        ? { 'suppliers[]': [...params.suppliers] }
+        : {}),
+      // `false` sa NEPOSIELA: „nechcem len zlacnené" a „je mi to jedno" je pre
+      // shop tá istá otázka a `onlyDiscounted=0` by PHP mohlo prečítať ako `true`.
+      ...(params.onlyDiscounted === true ? { onlyDiscounted: '1' } : {}),
+      ...(params.sortBy !== undefined ? { sortBy: params.sortBy } : {}),
+      ...(params.sortDir !== undefined ? { sortDir: params.sortDir } : {}),
+    };
+
+    const result = await send({
+      method: 'GET',
+      path: SHOP_PATHS.productSearch,
+      query,
+      phase: 'read',
+      key,
+      ctx,
+    });
+    if (result.outcome === 'error') {
+      if (result.error.kind === 'unauthorized' || result.error.kind === 'forbidden') {
+        log.warn('shop_search_key_rejected', {
+          ...correlationLogFields(ctx, result.error.requestId),
+          kind: result.error.kind,
+          httpStatus: result.error.httpStatus ?? undefined,
+        });
+      }
+      throw new ShopRequestError(result.error);
+    }
+    return readIdPage(SHOP_PATHS.productSearch, result.value, ctx);
+  }
+
+  /**
+   * `GET /api/categories` — plochý zoznam aktívnych kategórií (scope `product:read`).
+   *
+   * Je to druhá polovica zamknutého filtra podľa kategórie: bez tohto zoznamu
+   * by sa `search(categories[])` nedalo ani ponúknuť, lebo appka nemá odkiaľ
+   * vziať ID kategórií. Rovnako ako `searchProducts` je hotové a dnes nedostupné.
+   */
+  async function listCategories(key: SecretRef, ctx: ShopCtx): Promise<readonly ShopCategory[]> {
+    const result = await send({
+      method: 'GET',
+      path: SHOP_PATHS.categories,
+      phase: 'read',
+      key,
+      ctx,
+    });
+    if (result.outcome === 'error') throw new ShopRequestError(result.error);
+
+    const parsed = parseShopPayload(categoryListSchema, unwrapShopResult(result.value.body));
+    if (!parsed.ok) {
+      const error = schemaDriftError({
+        requestId: result.value.requestId,
+        httpStatus: result.value.httpStatus,
+        issues: parsed.issues,
+        raw: result.value.body,
+      });
+      reportDrift(SHOP_PATHS.categories, ctx, error);
+      throw new ShopRequestError(error);
+    }
+    return parsed.value.data.map((row) => ({
+      id: row.id,
+      name: row.name,
+      parentId: row.id_parent,
+      depth: row.level_depth,
+    }));
   }
 
   /* ─────────────────── 5.4 dávkové čítanie s fallbackom (D56) ───────────── */
@@ -1323,6 +1636,9 @@ export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
     probeKey,
     canary,
     whoami,
+    searchIndex,
+    searchProducts,
+    listCategories,
   };
 }
 

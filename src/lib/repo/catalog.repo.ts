@@ -94,6 +94,34 @@ export interface CatalogSearchRow extends CatalogCacheRecordV3 {
   discountedNow: boolean;
 }
 
+/**
+ * Čísla, ktoré appka o produkte vie z VLASTNÝCH tabuliek — bez ohľadu na to,
+ * či ten produkt zrkadlo katalógu má (kontrakt UI, bod 26).
+ *
+ * Existuje to preto, že hľadanie cez `searchIndex` nájde produkt aj vtedy, keď
+ * `catalog_cache` má 2 900 zo 41 082 riadkov. Taký produkt by inak prišiel na
+ * obrazovku s prázdnymi číslami, hoci predajnosť (`product_sales_daily`) aj
+ * vlastné zápisy zliav (`campaign_items`) sú kľúčované PRODUKTOM, nie zrkadlom
+ * — a teda o ňom vieme presne to isté, čo o ktoromkoľvek riadku zrkadla.
+ * Vracať tam nulu bez merania by bolo tvrdenie, nie údaj.
+ */
+export interface CatalogProductFacts {
+  /** Predané kusy za okno. `0` znamená „za okno sa nepredal", nie „nevieme". */
+  unitsSold: number;
+  /** `true` = appka na produkt už niekedy úspešne zapísala zľavu (I11). */
+  everDiscounted: boolean;
+  /** `true` = podľa VLASTNÉHO zápisu je dnes v okne zľavy (I11). */
+  discountedNow: boolean;
+}
+
+export interface CatalogFactsResult {
+  /** Kľúč je `product_id`; chýbajúce ID znamená „bez predaja a bez zľavy". */
+  facts: Map<number, CatalogProductFacts>;
+  soldWindowDays: number;
+  soldFrom: DateOnly;
+  soldTo: DateOnly;
+}
+
 /** Vedrá predajnosti podľa bočného panela (`design/v3/produkty.html`). */
 export type SoldBucket = 'none' | 'low' | 'mid' | 'high';
 
@@ -393,6 +421,25 @@ const JOIN_OWN_DISCOUNTS =
   'FROM campaign_items i JOIN campaigns cm ON cm.id = i.campaign_id ' +
   "WHERE i.status = 'ok' GROUP BY i.product_id) d ON d.product_id = c.product_id ";
 
+/*
+ * Tie isté dva výpočty pre ĽUBOVOĽNÉ ID — bez `catalog_cache` v `FROM`
+ * (`factsFor()`). Sú to zámerne DVA dotazy a nie jeden JOIN: obe tabuľky sa
+ * kľúčujú produktom, ale ani jedna nemusí mať riadok, takže by driving table
+ * musela byť `catalog_cache` — a práve o produkty, ktoré v nej NIE SÚ, tu ide.
+ */
+
+const SQL_FACTS_SALES_PREFIX =
+  'SELECT product_id, SUM(units_sold) AS units FROM product_sales_daily ' +
+  'WHERE sale_day >= ? AND sale_day <= ? AND product_id IN ';
+const SQL_FACTS_SALES_SUFFIX = ' GROUP BY product_id';
+
+const SQL_FACTS_DISCOUNTS_PREFIX =
+  'SELECT i.product_id, ' +
+  'MAX(CASE WHEN cm.date_from <= ? AND cm.date_to >= ? THEN 1 ELSE 0 END) AS now_on ' +
+  'FROM campaign_items i JOIN campaigns cm ON cm.id = i.campaign_id ' +
+  "WHERE i.status = 'ok' AND i.product_id IN ";
+const SQL_FACTS_DISCOUNTS_SUFFIX = ' GROUP BY i.product_id';
+
 /* ═══════════════════════════ 4. Pomocníci ═════════════════════════════════ */
 
 interface CatalogRow {
@@ -675,6 +722,14 @@ export interface CatalogRepoExt extends CatalogRepo {
   ): Promise<void>;
   search(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogSearchResult>;
   counts(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogCounts>;
+  /**
+   * Predajnosť a vlastné zľavy pre konkrétne ID — aj pre produkty, ktoré
+   * zrkadlo katalógu ešte nemá (kontrakt UI, bod 26). Čisto čítacie.
+   */
+  factsFor(
+    productIds: readonly number[],
+    opts?: { soldWindowDays?: number; today?: DateOnly; conn?: Queryable },
+  ): Promise<CatalogFactsResult>;
   /** Koľko riadkov katalóg vôbec má (hlavička „z 40 483 produktov"). */
   totalRows(conn?: Queryable): Promise<number>;
   /** K7: „Dáta k …" — meraný fakt, nie odhad (P7). `null` = katalóg je prázdny. */
@@ -880,6 +935,78 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         soldTo: window.to,
         lockedFilters: [...LOCKED_FILTERS],
       };
+    },
+
+    /**
+     * Čísla z vlastných tabuliek pre zoznam ID. Dva dotazy PO SEBE, nie
+     * `Promise.all`: rovnaký dôvod ako v `syncStatus()` — dve súbežné spojenia
+     * z poolu (default 8) na požiadavku, ktorú vyvolá každé hľadanie, sú horší
+     * obchod než jednotky milisekúnd navyše.
+     */
+    async factsFor(
+      productIds: readonly number[],
+      opts: { soldWindowDays?: number; today?: DateOnly; conn?: Queryable } = {},
+    ): Promise<CatalogFactsResult> {
+      const window = resolveWindow({
+        ...(opts.soldWindowDays !== undefined ? { soldWindowDays: opts.soldWindowDays } : {}),
+        ...(opts.today !== undefined ? { today: opts.today } : {}),
+      });
+      const empty: CatalogFactsResult = {
+        facts: new Map<number, CatalogProductFacts>(),
+        soldWindowDays: window.windowDays,
+        soldFrom: window.from,
+        soldTo: window.to,
+      };
+
+      const unique = [...new Set(productIds.filter(isValidProductId))];
+      if (unique.length === 0) return empty;
+
+      const facts = empty.facts;
+      const touch = (productId: number): CatalogProductFacts => {
+        const existing = facts.get(productId);
+        if (existing !== undefined) return existing;
+        const created: CatalogProductFacts = {
+          unitsSold: 0,
+          everDiscounted: false,
+          discountedNow: false,
+        };
+        facts.set(productId, created);
+        return created;
+      };
+
+      // Dávkovanie z rovnakého dôvodu ako v `getMany()`: `IN (…)` s tisíckami
+      // `?` narazí na limit parametrov. Volajúci sem posiela desiatky ID, nie
+      // tisíce — dávka je poistka, nie očakávaný stav.
+      for (let start = 0; start < unique.length; start += UPSERT_CHUNK_ROWS) {
+        const chunk = unique.slice(start, start + UPSERT_CHUNK_ROWS);
+        const placeholders = `(${chunk.map(() => '?').join(', ')})`;
+
+        const salesRows = await run<Array<{ product_id: number; units: number | string | null }>>(
+          opts.conn,
+          SQL_FACTS_SALES_PREFIX + placeholders + SQL_FACTS_SALES_SUFFIX,
+          [window.from, window.to, ...chunk],
+        );
+        for (const row of Array.isArray(salesRows) ? salesRows : []) {
+          touch(Number(row.product_id)).unitsSold = Number(row.units ?? 0);
+        }
+
+        const discountRows = await run<
+          Array<{ product_id: number; now_on: number | string | null }>
+        >(
+          opts.conn,
+          SQL_FACTS_DISCOUNTS_PREFIX + placeholders + SQL_FACTS_DISCOUNTS_SUFFIX,
+          [window.to, window.to, ...chunk],
+        );
+        for (const row of Array.isArray(discountRows) ? discountRows : []) {
+          const entry = touch(Number(row.product_id));
+          // Riadok v `campaign_items` so stavom `ok` JE ten úspešný zápis —
+          // preto `everDiscounted` bez ohľadu na to, či okno práve beží.
+          entry.everDiscounted = true;
+          entry.discountedNow = Number(row.now_on ?? 0) === 1;
+        }
+      }
+
+      return { ...empty, facts };
     },
 
     async totalRows(conn?: Queryable): Promise<number> {

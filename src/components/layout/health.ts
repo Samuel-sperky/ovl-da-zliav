@@ -1,25 +1,20 @@
 'use client';
 
 /**
- * Aura Zľavy — klientske čítanie `/api/health` a `/api/settings` (§5).
+ * Aura Zľavy — klientske čítanie API pre chróm (§5).
  *
- * Typy zodpovedajú NORMATÍVNEMU API kontraktu z BUILD-SPEC §5 — route-y
- * dodávajú A11/A12, tento modul proti kontraktu len číta. `/api/health`
- * nikdy nevracia `last4` ani detaily kľúča (I1); UI si vystačí s
- * `present` + `expiresAt`.
+ * Zostali tu tri veci, ktoré chróm naozaj potrebuje: tenký `fetchJson()` cez
+ * obálku `{ ok, data }`, typ nastavení pre pruh PRODUKCIA a klasifikácia
+ * HTTP odpovede na „nie si prihlásený" vs. „appka neodpovedá".
+ *
+ * ČO ODTIAĽTO ZMIZLO A PREČO
+ * --------------------------
+ * Hook `useHealth()` ťahal `/api/health` každých 30 s a bol druhým zdrojom
+ * tých istých faktov, ktoré dodáva `/api/status` (stav kľúča, zápisy). Dve
+ * predstavy o jednej pravde a k tomu časovač, ktorý kontrakt UI (bod 4) ruší —
+ * chróm preto stojí výhradne na `layout/status.ts` a jednom čítaní stavu.
+ * Endpoint `/api/health` žije ďalej, je to kontrola pre dohľad, nie pre UI.
  */
-import { useCallback, useEffect, useState } from 'react';
-
-/** Odpoveď `GET /api/health` podľa §5. */
-export interface HealthData {
-  status: 'ok' | 'degraded';
-  db: boolean;
-  key: { present: boolean; expiresAt: string | null };
-  scheduler: { lastTickAt: string | null; ageSec: number | null };
-  writesEnabled: boolean;
-  writesLocked: boolean;
-  version: string;
-}
 
 /** Odpoveď `GET /api/settings` podľa §5 (len polia potrebné pre shell). */
 export interface SettingsData {
@@ -56,7 +51,7 @@ export async function fetchJson<T>(url: string): Promise<T | null> {
 export type HealthOutcomeKind = 'ok' | 'unauthenticated' | 'unreachable';
 
 /**
- * Čistá klasifikácia HTTP statusu odpovede `/api/health`.
+ * Čistá klasifikácia HTTP statusu odpovede stavového endpointu.
  *
  * 401/403 = chýbajúca session alebo oprávnenie → o stave appky to nevypovedá
  * NIČ. Všetko ostatné mimo 2xx je skutočne degradovaný / nedostupný stav.
@@ -65,71 +60,4 @@ export function classifyHealthStatus(status: number): HealthOutcomeKind {
   if (status === 401 || status === 403) return 'unauthenticated';
   if (status >= 200 && status < 300) return 'ok';
   return 'unreachable';
-}
-
-export type HealthOutcome =
-  | { kind: 'ok'; data: HealthData }
-  | { kind: 'unauthenticated' }
-  | { kind: 'unreachable' };
-
-/**
- * Načíta `/api/health` a rozlíši „nie si prihlásený" od „appka nedostupná".
- * Sieťová chyba (fetch throw) = appka je naozaj nedostupná.
- */
-export async function fetchHealthOutcome(url = '/api/health'): Promise<HealthOutcome> {
-  let res: Response;
-  try {
-    res = await fetch(url, { headers: { Accept: 'application/json' } });
-  } catch {
-    return { kind: 'unreachable' };
-  }
-
-  const kind = classifyHealthStatus(res.status);
-  if (kind !== 'ok') return { kind };
-
-  try {
-    const body = (await res.json()) as ApiEnvelope<HealthData> | HealthData;
-    if (body && typeof body === 'object' && 'ok' in (body as object)) {
-      const env = body as ApiEnvelope<HealthData>;
-      return env.ok ? { kind: 'ok', data: env.data } : { kind: 'unreachable' };
-    }
-    return { kind: 'ok', data: body as HealthData };
-  } catch {
-    return { kind: 'unreachable' };
-  }
-}
-
-export interface HealthState {
-  health: HealthData | null;
-  /** `true` kým prebieha prvé načítanie. */
-  loading: boolean;
-  /** `true` keď health endpoint naozaj neodpovedá (degradovaný shell). */
-  unreachable: boolean;
-  /** `true` keď stav nie je známy LEN pre chýbajúcu session (401/403). */
-  unauthenticated: boolean;
-  refresh: () => void;
-}
-
-/** Polluje `/api/health` (default každých 30 s). */
-export function useHealth(pollMs = 30_000): HealthState {
-  const [health, setHealth] = useState<HealthData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [unreachable, setUnreachable] = useState(false);
-  const [unauthenticated, setUnauthenticated] = useState(false);
-
-  const load = useCallback(async () => {
-    const outcome = await fetchHealthOutcome();
-    setHealth(outcome.kind === 'ok' ? outcome.data : null);
-    setUnreachable(outcome.kind === 'unreachable');
-    setUnauthenticated(outcome.kind === 'unauthenticated');
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), pollMs);
-    return () => clearInterval(id);
-  }, [load, pollMs]);
-
-  return { health, loading, unreachable, unauthenticated, refresh: () => void load() };
 }

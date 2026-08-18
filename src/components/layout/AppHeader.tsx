@@ -1,25 +1,29 @@
 'use client';
 
 /**
- * Aura Zľavy — SPOLOČNÝ CHRÓM: hlavička + stály stavový pruh.
+ * Aura Zľavy — SPOLOČNÝ CHRÓM: hlavička, stavový pruh a read-only výzva.
  *
- * Existuje z jediného dôvodu: **jeden poller pre celý shell**. Navigácia
- * potrebuje vedieť, čo je zamknuté, a stavový pruh potrebuje tie isté fakty.
- * Keby si každý z nich volal `/api/status` sám, appka by pri každom obnovení
- * poslala dve rovnaké požiadavky na endpoint, ktorého doc-blok výslovne žiada
- * opak. `useStatus()` sa tu volá RAZ a výsledok sa posunie do oboch.
+ * Existuje z jediného dôvodu: **jedno čítanie stavu pre celý shell**. Navigácia
+ * potrebuje vedieť, čo je zamknuté, stavový pruh potrebuje tie isté fakty
+ * a read-only výzva takisto. Keby si každý z nich volal `/api/status` sám,
+ * appka by pri každom obnovení poslala tri rovnaké požiadavky na endpoint,
+ * ktorého doc-blok výslovne žiada opak. `useStatus()` sa tu volá RAZ a výsledok
+ * sa posunie všetkým.
  *
- * ROZLOŽENIE SA TU NEMENÍ. Hlavička zostáva jeden sticky riadok 56 px
- * (`.hdr`) so štyrmi tabmi; pod ňou pribudol pruh so stavom. Bočný panel sa
- * nezavádza a piaty tab nepribúda (K9).
+ * KOĽKO RIADKOV MÁ CHRÓM
+ * ----------------------
+ * Pokojný stav sú TRI: pruh PRODUKCIA (D6), hlavička so štyrmi tabmi (56 px)
+ * a stavový pruh (jeden riadok). Štvrtý riadok pribudne výhradne vtedy, keď
+ * kľúč chýba alebo vypršal — vtedy je pod pruhom výzva s odkazom na opravu.
+ * Bočný panel sa nezavádza a piaty tab nepribúda (K9).
  *
- * Prečo je celý shell client komponent: `Nav` už ním bol (`usePathname`) a
- * značkovanie hlavičky je statické, takže sa nič nestráca — server ho aj tak
+ * Prečo je celý shell client komponent: `Nav` už ním bol (`usePathname`)
+ * a značkovanie hlavičky je statické, takže sa nič nestráca — server ho aj tak
  * vykreslí dopredu.
  *
  * Vlastník: L1.
  */
-import { HeaderRight } from '@/components/layout/HeaderStatus';
+import { HeaderReadOnlyNotice, HeaderRight } from '@/components/layout/HeaderStatus';
 import Nav from '@/components/layout/Nav';
 import { navLocks, useStatus } from '@/components/layout/status';
 import StatusBar from '@/components/layout/StatusBar';
@@ -36,10 +40,11 @@ export function AppHeader() {
             Aura <b>Zľavy</b>
           </span>
           <Nav locks={locks} />
-          <HeaderRight />
+          <HeaderRight state={state} />
         </div>
       </header>
-      <StatusBar state={state} locks={locks} />
+      <StatusBar state={state} />
+      <HeaderReadOnlyNotice state={state} />
     </>
   );
 }

@@ -28,6 +28,16 @@ Vychádzajú zo štyroch zákazov (odpoveď 100). Sú testovateľné, nie dekora
 | P7 | **Odhady sú označené.** Znak `≈` + tlmenejší odtieň. Nikdy nie v rovnakom štýle ako merané číslo. | — |
 | P8 | **Appka nehodnotí kauzalitu.** Žiadne „zľava priniesla +18 %". Len čísla vedľa seba. | — |
 
+### Zápisník ohnutí pravidiel
+
+P3, P7 a P8 sú nedotknuteľné a v tejto tabuľke sa neobjavia nikdy. P1, P4 a P5
+sa ohnúť smú — ale nie ticho. Kto ich ohne, dopíše sem riadok.
+
+| Dátum | Pravidlo | Obrazovka | Dôvod |
+|---|---|---|---|
+| 13. 8. 2026 | **P4, P5** | chróm — stavový pruh | Pruh je chróm, nie sekcia: do výšky obrazovky ani do počtu sekcií sa nepočíta (kontrakt UI, bod 1). Cena za výnimku je tvrdá a merateľná — **jeden riadok, 32 px, najviac štyri veci**. Keby pruh potreboval piatu vec alebo druhý riadok, výnimka padá a stáva sa z neho sekcia so všetkými dôsledkami. |
+| 13. 8. 2026 | **P4** | chróm — výzva „len na čítanie" | Pri chýbajúcom alebo expirovanom kľúči pribúda pod pruh štvrtý riadok chrómu s odkazom na opravu (D10). Nie je to opakovanie menovky v pruhu: pruh hlási fakt, výzva ponúka akciu, ktorou sa fakt zmení. Kým kľúč platí, chróm sú tri riadky. |
+
 ### Spoločná hlavička (na každej stránke identická)
 
 Jeden riadok, výška 56 px, sticky:
@@ -45,11 +55,44 @@ Jeden riadok, výška 56 px, sticky:
 - Hlavička **neobsahuje** nič iné: žiadne vyhľadávanie, žiadne notifikácie
   (odpoveď 43: upozornenia mimo appky žiadne).
 
-### Čerstvosť dát
+> Rozpočet zápisov sa z hlavičky presunul o riadok nižšie, do stavového pruhu
+> (kontrakt UI, bod 2). V hlavičke ostáva fronta a téma.
 
-Jeden riadok šedým 12 px **pod skupinou čísel**, ktorých sa týka, nie v hlavičke:
-`Dáta k 10. 8. 03:00`. Objaví sa v Prehľade (raz), v Produktoch (raz nad
-tabuľkou) a v detaile zľavy (raz). Nikde inde.
+### Stavový pruh (chróm, kontrakt UI 13. 8. 2026, body 1–5)
+
+Jeden riadok, 32 px, pod hlavičkou. Nesie **presne štyri veci** a v tomto
+poradí, vľavo:
+
+```
+✓ Ostrý zápis zapnutý · ✓ Kľúč do 09.09.2026 · ○ Zápisy 21/200 dnes ·
+○ Katalóg 2 900 z 41 082                          Stav k 12:53 · [Obnoviť]
+```
+
+- **Pokojné je tiché.** Menovka v poriadku je značka a text; farebnú pilulku
+  dostane výhradne to, čo si žiada pozornosť. Zelená značka pri zápisoch je
+  celá odpoveď na bod 3: keď nič nebráni zápisu, **obrazovka nekreslí sekciu
+  prekážok**. Či prekážka existuje, sa zisťuje jedinou funkciou
+  `hasBlockers()` v `components/layout/status.ts` — nie počítaním po svojom.
+- **Čo appka nevie, je pomlčka, nikdy nula.** Dôvody pomlčiek sú pozbierané do
+  jedného rozkliku „Prečo —" (P6), nie na povrchu.
+- **Piata vec doň nepatrí** — ani stav fronty (ten je v hlavičke), ani dôvod
+  zámku tabu (ten visí pri tabe), ani rozpad rozpočtu (ten je v Nastaveniach).
+
+### Čerstvosť dát a obnovovanie
+
+**Nič sa neobnovuje samo** (kontrakt UI, bod 4). Čísla sa načítajú pri otvorení
+obrazovky a potom až na vyžiadanie. Mechanizmus je jeden pre celú appku —
+`components/layout/refresh.ts`; obrazovka si zaregistruje svoje načítanie cez
+`useRefreshable()` a **vlastné tlačidlo Obnoviť nekreslí.** Jediné tlačidlo je
+v stavovom pruhu a obnoví všetko naraz.
+
+Čas sa píše vždy konkrétne (`12:53`, `14.08.2026`), nikdy relatívne
+(„pred 3 minútami").
+
+- V pruhu: `Stav k 12:53` — čerstvosť **čísel v pruhu**, čas servera.
+- Na obrazovke: jeden riadok šedým 12 px **pod skupinou čísel**, ktorých sa
+  týka: `Dáta k 10. 8. 03:00`. Objaví sa v Prehľade (raz), v Produktoch (raz
+  nad tabuľkou) a v detaile zľavy (raz). Nikde inde.
 
 ---
 
