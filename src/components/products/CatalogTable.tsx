@@ -223,6 +223,16 @@ export function CatalogTable({
                           {reason.short}
                         </div>
                       )}
+                      {/* I11 — riadok dohľadaný v eshope stojí na inej istote
+                          než riadok zo zrkadla: zrkadlo je posledný prechod
+                          synchronizácie, eshop je odpoveď z tejto chvíle.
+                          Bez tohto by na obrazovke stáli vedľa seba dva rôzne
+                          stupne istoty a vyzerali by rovnako. */}
+                      {row.origin === 'shop' ? (
+                        <div className="flag neutral" data-testid="row-origin-shop">
+                          dohľadané v eshope
+                        </div>
+                      ) : null}
                     </td>
                     <td className="n" data-l="Predané">
                       {row.unitsSold === 0 ? <b>0</b> : formatCountSk(row.unitsSold)}
