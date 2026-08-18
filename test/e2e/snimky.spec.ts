@@ -27,10 +27,11 @@ test.describe('snímky obrazoviek', () => {
     await login(page);
     await storeApiKey(page);
 
-    /* 1. Prehľad bez jedinej zľavy — poučný prázdny stav a živý stav. */
+    /* 1. Prehľad bez jedinej zľavy — verdikt, prázdny stav a riadok kontrol. */
     await page.goto('/');
     await expect(page.getByTestId('overview')).toBeVisible();
-    await expect(page.getByTestId('overview-live-status')).toBeVisible();
+    await expect(page.getByTestId('verdict-headline')).toBeVisible();
+    await expect(page.getByTestId('overview-checks')).toBeVisible();
     await page.screenshot({ path: 'screenshots/aktualne-1-prehlad-prazdny.png', fullPage: true });
 
     /* 2. Produkty — stav katalógu a strop výberu. */

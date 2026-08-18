@@ -22,9 +22,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import AttentionSection from '@/components/dashboard/AttentionSection';
-import LiveDiscountsSection from '@/components/dashboard/LiveDiscountsSection';
-import QueueSection from '@/components/dashboard/QueueSection';
+import CampaignsSection from '@/components/dashboard/CampaignsSection';
 import SalesSection from '@/components/dashboard/SalesSection';
 
 import {
@@ -33,6 +31,7 @@ import {
   parseQueueSnapshot,
   parseSalesSnapshot,
   type CampaignRow,
+  type InsightRow,
   type QueueSnapshot,
 } from '@/components/dashboard/api';
 import {
@@ -422,7 +421,7 @@ describe('Prehľad — hranica voči Produktom', () => {
   it('sanity — skener naozaj číta komponenty Prehľadu', () => {
     const files = sources();
     expect(files.length).toBeGreaterThanOrEqual(5);
-    expect(files.some((file) => file.path === 'QueueSection.tsx')).toBe(true);
+    expect(files.some((file) => file.path === 'StatusSection.tsx')).toBe(true);
   });
 });
 
@@ -430,24 +429,9 @@ describe('Prehľad — hranica voči Produktom', () => {
 
 /**
  * Report agenta nie je dôkaz — pasca, ktorá tu už raz prežila do produkcie.
- * Preto sa štyri sekcie naozaj vykreslia a kontroluje sa VÝSTUP, nie zámer.
+ * Preto sa sekcie naozaj vykreslia a kontroluje sa VÝSTUP, nie zámer.
  */
-describe('Prehľad — štyri sekcie sa vykreslia', () => {
-  const CALM = { live: 1, ready: 1, discounted: 2380 };
-  const BUDGET = { spent: 100, budget: 200, remaining: 100 };
-  const noop = (): void => {};
-
-  function renderQueue(snapshot: QueueSnapshot | null, campaigns: CampaignRow[] | null): string {
-    return renderToStaticMarkup(
-      createElement(QueueSection, {
-        progress: queueProgress({ snapshot, campaigns, today: TODAY }),
-        budget: BUDGET,
-        calm: CALM,
-        onChanged: noop,
-      }),
-    );
-  }
-
+describe('Prehľad — sekcie sa vykreslia', () => {
   /** Text medzi značkami — na kontrolu dĺžky viet (P2). */
   function textNodes(html: string): string[] {
     return html
@@ -456,84 +440,72 @@ describe('Prehľad — štyri sekcie sa vykreslia', () => {
       .filter((chunk) => chunk !== '');
   }
 
-  it('bežiaca fronta ukáže číslo, pruh, odhad so značkou a obe tlačidlá', () => {
-    const html = renderQueue(queueSnapshot(), [campaign()]);
-    expect(html).toContain('3 420');
-    expect(html).toContain('/ 8 000');
-    expect(html).toContain('Ležiaky striebro — jeseň');
-    expect(html).toContain('12 sa nepodarilo');
-    // Odhad má triedu `est`, ktorá pred číslo kreslí `≈` (P7).
-    expect(html).toContain('class="est"');
-    expect(html).toContain('Detail zľavy');
-    expect(html).toContain('Zastaviť frontu');
-    expect(html).toContain('width:42.75%');
-  });
-
-  it('zastavená fronta ponúkne „Pokračovať" a pruh je tlmený', () => {
-    const html = renderQueue(
-      queueSnapshot({ gate: { paused: true, since: '2026-08-09T21:04:00.000Z' } }),
-      [campaign()],
-    );
-    expect(html).toContain('Pokračovať');
-    expect(html).toContain('bar paused');
-    expect(html).toContain('pozastavené');
-    expect(html).not.toContain('Zastaviť frontu');
-  });
-
-  it('pokojný stav povie „Všetko beží", nie nulu vo fronte', () => {
-    const html = renderQueue(
-      queueSnapshot({ queue: { pending: 0, total: 8000, done: 8000, campaigns: 0 }, current: null }),
-      [campaign()],
-    );
-    expect(html).toContain('Všetko beží');
-    expect(html).toContain('2 380');
-    expect(html).not.toContain('/ 8 000');
-  });
-
-  it('bez zliav je prázdny stav s odkazmi, bez odpovede appky sa netvrdí nič', () => {
-    const empty = renderQueue(
-      queueSnapshot({ queue: { pending: 0, total: 0, done: 0, campaigns: 0 }, current: null }),
-      [],
-    );
-    expect(empty).toContain('Žiadna zľava');
-    expect(empty).toContain('Nová zľava');
-
-    const unknown = renderQueue(null, null);
-    expect(unknown).toContain('Stav fronty nevieme');
-    expect(unknown).not.toContain('0 / 0');
-  });
-
-  it('„Čaká na vás" má primárne tlačidlo, návrhy ako riadky a zamknuté funkcie', () => {
-    const html = renderToStaticMarkup(
-      createElement(AttentionSection, {
-        insights: [
-          {
-            id: 'a',
-            tone: 'info' as const,
-            text: '11 640 produktov sa 180 dní nepredalo',
-            href: '/produkty',
-            action: { label: 'Použiť', href: '/zlavy/nova' },
-          },
-          {
-            id: 'b',
-            tone: 'attention' as const,
-            text: '12 sa nepodarilo',
-            href: '/zlavy/1',
-            action: null,
-          },
-        ],
+  function renderCampaigns(
+    campaigns: CampaignRow[] | null,
+    insights: InsightRow[] | null,
+  ): string {
+    return renderToStaticMarkup(
+      createElement(CampaignsSection, {
+        campaigns: campaigns === null ? null : liveCampaigns(campaigns, TODAY),
+        insights,
       }),
     );
-    expect(html).toContain('Nová zľava');
+  }
+
+  const INSIGHTS: InsightRow[] = [
+    {
+      id: 'a',
+      tone: 'info',
+      text: '11 640 produktov sa 180 dní nepredalo',
+      href: '/produkty',
+      action: { label: 'Použiť', href: '/zlavy/nova' },
+    },
+    {
+      id: 'b',
+      tone: 'attention',
+      text: '12 sa nepodarilo',
+      href: '/zlavy/1',
+      action: null,
+    },
+  ];
+
+  it('„Zľavy" sú dva stĺpce: čo beží a čo sa ponúka', () => {
+    const rows = [
+      campaign({ id: 3, name: 'Prstene', status: 'done', dateFrom: '2026-08-01', dateTo: '2026-08-31' }),
+      campaign({ id: 4, name: 'Ležiaky', status: 'queued' }),
+      campaign({ id: 2, name: 'Náušnice', status: 'scheduled', dateFrom: '2026-10-01', dateTo: '2026-10-15' }),
+    ];
+    const html = renderCampaigns(rows, INSIGHTS);
+
+    expect(html).toContain('Beží teraz');
+    expect(html).toContain('Návrhy');
+    expect(html.match(/data-testid="live-row"/g)).toHaveLength(3);
     expect(html).toContain('11 640 produktov sa 180 dní nepredalo');
     expect(html).toContain('Použiť');
-    expect(html).toContain('Vyžaduje pozornosť');
+    // Pozornosť stojí pred návrhom — zlyhanie je fakt, návrh je len ponuka.
+    expect(html.indexOf('12 sa nepodarilo')).toBeLessThan(html.indexOf('11 640 produktov'));
     // K8 — zamknuté funkcie sa nesmú ani skryť, ani predstierať.
     expect(html).toContain('Marža a obrátkovosť zamknuté');
     expect(html).not.toContain('<table');
   });
 
-  it('tržby kreslia graf z kusov a nikde neuvedú euro, ktoré appka nepozná', () => {
+  /**
+   * Prázdne pole = „appka nemá ani jednu zľavu"; `null` = „nepodarilo sa
+   * prečítať". Splynúť nesmú a druhé „Žiadna zľava" na jednej obrazovke by
+   * bolo len opakovanie dominanty.
+   */
+  it('bez jedinej zľavy sa ľavý stĺpec nekreslí, návrhy zostávajú', () => {
+    const html = renderCampaigns([], INSIGHTS);
+    expect(html).not.toContain('Beží teraz');
+    expect(html).toContain('Návrhy');
+    expect(html).toContain('11 640 produktov');
+
+    const unreadable = renderCampaigns(null, null);
+    expect(unreadable).toContain('Zoznam zliav sa nepodarilo načítať');
+    expect(unreadable).toContain('Návrhy sa nepodarilo načítať');
+  });
+
+  it('predaj kreslí graf z kusov a nikde neuvedie euro, ktoré appka nepozná', () => {
     const html = renderToStaticMarkup(
       createElement(SalesSection, {
         sales: {
@@ -567,38 +539,23 @@ describe('Prehľad — štyri sekcie sa vykreslia', () => {
     expect(html).toContain('Priemer za deň');
     expect(html).toContain('Dáta k');
     expect(html).not.toContain('€');
+    // Nadpis hovorí to, čo sekcia meria: kusy, nie tržbu v eurách.
+    expect(html).toContain('<h2>Predaj</h2>');
+    expect(html).not.toContain('<h2>Tržby</h2>');
   });
 
-  it('bez pokrytia predaja sa nekreslia nuly, ale prázdny stav', () => {
+  it('bez pokrytia predaja je jedna veta a jedno tlačidlo, nie nuly', () => {
     const html = renderToStaticMarkup(createElement(SalesSection, { sales: null }));
-    expect(html).toContain('Predaj zatiaľ nesledujeme');
+    expect(html).toContain('Údaje o predaji sa nepodarilo načítať.');
+    expect(html).toContain('Otvoriť Nastavenia');
     expect(html).not.toContain('<svg');
-  });
-
-  it('„Zľavy naživo" sú tri riadky bez tabuľky a bez akcií', () => {
-    const rows = [
-      campaign({ id: 3, name: 'Prstene', status: 'done', dateFrom: '2026-08-01', dateTo: '2026-08-31' }),
-      campaign({ id: 4, name: 'Ležiaky', status: 'queued' }),
-      campaign({ id: 2, name: 'Náušnice', status: 'scheduled', dateFrom: '2026-10-01', dateTo: '2026-10-15' }),
-    ];
-    const html = renderToStaticMarkup(
-      createElement(LiveDiscountsSection, { campaigns: liveCampaigns(rows, TODAY) }),
-    );
-    expect(html).toContain('Zľavy naživo');
-    expect(html.match(/data-testid="live-row"/g)).toHaveLength(3);
-    expect(html).not.toContain('<table');
-    expect(html).not.toContain('<button');
   });
 
   it('žiadny odstavec dlhší ako 90 znakov a žiadny `<p>` (P2)', () => {
     const html = [
-      renderQueue(queueSnapshot(), [campaign()]),
-      renderQueue(null, null),
-      renderToStaticMarkup(createElement(AttentionSection, { insights: [] })),
+      renderCampaigns([campaign()], INSIGHTS),
+      renderCampaigns([], null),
       renderToStaticMarkup(createElement(SalesSection, { sales: null })),
-      renderToStaticMarkup(
-        createElement(LiveDiscountsSection, { campaigns: liveCampaigns([campaign()], TODAY) }),
-      ),
     ].join('\n');
 
     expect(html).not.toContain('<p>');

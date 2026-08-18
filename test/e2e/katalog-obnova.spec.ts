@@ -68,12 +68,12 @@ test.describe('katalóg — obnova nad celým katalógom', () => {
 
       await page.screenshot({ path: 'screenshots/katalog-obnova-produkty.png', fullPage: true });
 
-      /* 4. Prehľad — riadok „čo appka práve robí" hovorí to isté. */
+      /* 4. Prehľad — kontrola katalógu hovorí to isté. */
       await page.goto('/');
-      const live = page.getByTestId('overview-live-status');
-      await expect(live).toBeVisible();
-      await expect(live).toContainText('načítaný celý');
-      await expect(live).toContainText('obnovuje');
+      const checks = page.getByTestId('overview-checks');
+      await expect(checks).toBeVisible();
+      await expect(checks).toContainText('načítaný celý');
+      await expect(checks).toContainText('obnovuje');
 
       await page.screenshot({ path: 'screenshots/katalog-obnova-prehlad.png', fullPage: true });
     } finally {

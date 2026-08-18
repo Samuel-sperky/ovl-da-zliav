@@ -1,46 +1,46 @@
 'use client';
 
 /**
- * Aura Zľavy — TAB ZĽAVY, zoznam (V11; predloha `design/v3/zlavy.html`,
- * architektúra §1 TAB 3, kontrakt V3 K2, K3, K5, K10).
+ * Aura Zľavy — TAB ZĽAVY, ZOZNAM (V11; kontrakt UI 13. 8. 2026 body 4, 9–12,
+ * 21; architektúra §0 P1–P8, §1 TAB 3, §4).
  *
- * Dominanta obrazovky (P1) je zľava, ktorá sa PRÁVE ZAPISUJE — nie najnovšia
- * a nie najväčšia. Pod ňou riadky ostatných v poradí naliehavosti
- * `zapisuje sa` → `beží` → `pripravená`; hotové sú v tlmenej zbaliteľnej
- * sekcii „Skončené".
+ * Obrazovka odpovedá na jedinú otázku: **o koľko percent sa zlacňuje a ako
+ * ďaleko je zápis.**
  *
- * Čo obrazovka NEROBÍ:
+ * DOMINANTA JE PERCENTO (kontrakt UI, bod 21)
+ * -------------------------------------------
+ * Do 13. 8. bola dominantou obrazovky priebehová číslica `3 420 / 8 000`.
+ * Zľava sa však nezakladá kvôli počtu položiek vo fronte — zakladá sa kvôli
+ * tomu, o koľko sa zlacní. Preto je najväčším prvkom obrazovky percento
+ * zľavy, ktorá je na čele (`.lvl-1 .big`, 64 px), a druhým najväčším je
+ * percento v riadku zoznamu (`.pct`, 26 px = 41 % dominanty, P1 drží).
+ * Priebeh fronty tým nezmizol — je pod percentom ako pruh a jeden riadok
+ * čísel. Kto potrebuje priebeh ako dominantu, má na to Prehľad.
  *
- *  · nevymýšľa čísla — keď sa zoznam nedá prečítať, povie to vetou; nula
- *    v appke, ktorá zapisuje do produkčného eshopu, je tvrdenie (P7),
- *  · netvrdí, že pozná stav zľavy v shope — všetko je „podľa vlastných
- *    zápisov" (I11),
- *  · nepoužíva žargón: stav je jedno zo štyroch slov zo slovníka, zlyhanie je
- *    príznak za bodkou, nikdy stav a nikdy červená (K10, architektúra §4).
+ * Pri pásmach sa v dominante kreslí ROZSAH (`15–30 %`), nie najvyššie
+ * percento. Najvyššie percento by tvrdilo, že toľko dostali všetky produkty.
  *
- * ČO SA SEM DOPLNILO A PREČO (kontrakt dokončenia B5, C1, C2, C4)
- * --------------------------------------------------------------
- *  1. **Stav zľavy je čitateľný bez rozkliku.** Okrem stavu a zlyhaní nesie
- *     riadok aj počet položiek, o ktorých NEVIEME, či sa zapísali. Je to iná
- *     vec než zlyhanie a žiada si iný ďalší krok (D45), takže sa s ním nesmie
- *     sčítať ani skryť do rozkliku.
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
  *
- *     POZNÁMKA PRE VLASTNÍKA SLOVNÍKA: `campaignSentence()` dnes pozná
- *     `failedCount`, ale nie počet neistých položiek, takže tento príznak
- *     skladá obrazovka. Keď slovník dostane vstup pre neisté, patrí to tam
- *     a tento riadok sa má zrušiť.
+ *  1. **Nula sa nekreslí z neznalosti.** Keď sa zoznam nedá prečítať, povie sa
+ *     to vetou; prázdny zoznam je tvrdenie, že žiadna zľava neexistuje (P7).
+ *  2. **Nič sa neobnovuje samo** (kontrakt UI, bod 4). Načítanie je
+ *     zaregistrované v spoločnom mechanizme `layout/refresh.ts`; obrazovka si
+ *     vlastné tlačidlo Obnoviť NEKRESLÍ — jediné je v stavovom pruhu.
+ *  3. **Neisté nie je zlyhané** (D45). Príznak „nevieme, či sa zapísalo" sa
+ *     nikdy nesčíta so zlyhaniami ani sa neschová.
+ *  4. **Rozpočet zápisov na túto obrazovku nepatrí.** Číslo je v stavovom
+ *     pruhu, rozpad v Nastaveniach (kontrakt UI, bod 15). Tretia kópia by
+ *     bola tretie miesto, kde sa dá rozísť.
+ *  5. **Texty sú neosobné a časy konkrétne** (kontrakt UI, body 9, 10).
  *
- *  2. **Prázdno učí.** Prázdny zoznam nie je „žiadne dáta" — povie, čo tu má
- *     byť a ako sa to sem dostane (`EmptyState`).
- *
- *  3. **Vidieť, čo appka práve robí.** V pätke je merací prúžok denného
- *     rozpočtu a nad zoznamom veta o tom, prečo fronta prípadne nezapisuje.
- *     Bez toho vyzerá stojaca fronta rovnako ako pokazená appka.
+ * SEKCIE (P5): dve — zľava na čele a zoznam. Skončené sú pod rozklikom.
  *
  * Vlastník: V11.
  */
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import BlockerList from '@/components/campaigns/BlockerList';
 import DiscountState from '@/components/campaigns/DiscountState';
@@ -53,17 +53,15 @@ import {
 import {
   alarmingCards,
   queueStandSentence,
-  resetPhrase,
   type QueueSnapshotView,
 } from '@/components/campaigns/queue-model';
 import {
   fetchQueue,
   listDiscounts,
   stopDiscountQueue,
-  type BudgetView,
   type DiscountRow,
 } from '@/components/campaigns/zlavy-api';
-import BudgetMeter from '@/components/ui/BudgetMeter';
+import { useRefreshable } from '@/components/layout/refresh';
 import EmptyState from '@/components/ui/EmptyState';
 import Note from '@/components/ui/Note';
 import { dayMonthSk, formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
@@ -86,17 +84,43 @@ function Bar({ percent }: { percent: number }) {
   );
 }
 
-/** Zľava má buď jedno percento, alebo pásma — nikdy oboje naraz (K3). */
-function percentLabel(row: DiscountRow): string {
-  if (row.tiers.length > 1) {
-    return `${formatCountSk(row.tiers.length)} ${pluralSk(row.tiers.length, 'pásmo', 'pásma', 'pásiem')}`;
-  }
-  return `${row.percent} %`;
+/** Percento zľavy pre dominantu aj pre riadok zoznamu. */
+export interface PercentHeadline {
+  /** Veľké číslo — jedno percento alebo rozsah pásiem. */
+  readonly big: string;
+  /** Doplnok pod ním („3 pásma"); `null` = zľava má jedno percento. */
+  readonly sub: string | null;
 }
 
 /**
- * Zastavenie fronty. Dva kroky, nikdy jeden klik — zapísané zľavy v shope
- * ZOSTÁVAJÚ a appka ich zrušiť nevie ani nesmie (I7, D35).
+ * Zľava má buď jedno percento, alebo pásma — nikdy oboje naraz (K3).
+ *
+ * Pri pásmach sa kreslí ROZSAH od najnižšieho po najvyššie. Najvyššie percento
+ * samo by tvrdilo, že toľko dostal celý výber, a to je pri troch pásmach
+ * nepravda o tisíckach produktov.
+ */
+export function percentHeadline(
+  percent: number,
+  tiers: readonly { readonly percent: number }[],
+): PercentHeadline {
+  if (tiers.length <= 1) return { big: `${percent} %`, sub: null };
+
+  let min = tiers[0]!.percent;
+  let max = tiers[0]!.percent;
+  for (const tier of tiers) {
+    if (tier.percent < min) min = tier.percent;
+    if (tier.percent > max) max = tier.percent;
+  }
+  const sub = `${formatCountSk(tiers.length)} ${pluralSk(tiers.length, 'pásmo', 'pásma', 'pásiem')}`;
+  return { big: min === max ? `${max} %` : `${min}–${max} %`, sub };
+}
+
+/**
+ * Zastavenie fronty. Dva kroky, nikdy jeden klik.
+ *
+ * Zastavenie sa týka VÝHRADNE toho, čo ešte nebolo zapísané. Už zapísané zľavy
+ * v eshope zostávajú — odstrániť ich vie iba akcia „Zrušiť zľavu" na detaile,
+ * a to je iné rozhodnutie s vlastným potvrdením.
  */
 function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
   const [note, setNote] = useState<string | null>(null);
@@ -118,7 +142,7 @@ function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
     <details className="stopq" data-testid="discount-stop">
       <summary className="btn">Zastaviť frontu</summary>
       <div className="stopq-b">
-        <span>Zapísané zostanú. Zrušiť sa nedajú.</span>
+        <span>Zastaví sa len to, čo ešte nebolo zapísané. Zapísané v eshope zostanú.</span>
         <button
           type="button"
           className="btn sm danger"
@@ -139,13 +163,24 @@ function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
 function DiscountRowView({ row, today }: { row: DiscountRow; today?: string }) {
   const sentence = sentenceOf(row, today);
   const finished = sentence.state === 'skončila';
+  const head = percentHeadline(row.percent, row.tiers);
 
   return (
-    <div className={finished ? 'zrow dim' : 'zrow'} data-testid="discount-row">
-      <div className={`nm ${styles.rowName}`}>
+    <div
+      className={finished ? `${styles.drow} ${styles.drowDim}` : styles.drow}
+      data-testid="discount-row"
+    >
+      {/* Percento je najsilnejšia bunka riadku (kontrakt UI, bod 21). */}
+      <div className={styles.cPct}>
+        <span className={styles.pct}>{head.big}</span>
+        {head.sub === null ? null : <span className={styles.pctSub}>{head.sub}</span>}
+      </div>
+
+      <div className={styles.cName}>
         <Link href={`/zlavy/${row.id}`}>{row.name}</Link>
       </div>
-      <div className="row wrapx">
+
+      <div className={styles.cState}>
         <DiscountState sentence={sentence} />
         {/* D45 — neisté nie je zlyhané a slovník preň zatiaľ vetu nemá. */}
         {row.itemsUncertain === 0 ? null : (
@@ -159,14 +194,15 @@ function DiscountRowView({ row, today }: { row: DiscountRow; today?: string }) {
           </span>
         )}
       </div>
-      <div className="num lvl-2">{formatCountSk(row.itemsTotal)}</div>
-      <div className="num lvl-2">{percentLabel(row)}</div>
-      <div className="lvl-3">
+
+      <div className={`${styles.cCount} num lvl-2`}>{formatCountSk(row.itemsTotal)}</div>
+
+      <div className={`${styles.cWindow} lvl-3`}>
         {dayMonthSk(row.dateFrom)} – {dayMonthSk(row.dateTo)}
       </div>
-      <div className="lvl-3">
-        {formatCountSk(row.itemsOk)} zapísaných z {formatCountSk(row.itemsTotal)}
-        {row.itemsPending === 0 ? null : <> · {formatCountSk(row.itemsPending)} čaká</>}
+
+      <div className={`${styles.cWritten} lvl-3`}>
+        {formatCountSk(row.itemsOk)} z {formatCountSk(row.itemsTotal)}
         {row.estimate === null ? null : (
           <>
             {' · '}
@@ -182,9 +218,9 @@ function ListHeader() {
   return (
     <div className={`zlist-h ${styles.cols}`}>
       <span>Zľava</span>
+      <span>Názov</span>
       <span>Stav</span>
       <span>Produktov</span>
-      <span>Zľava</span>
       <span>Okno</span>
       <span>Zapísané</span>
     </div>
@@ -195,87 +231,90 @@ function ListHeader() {
 
 export function DiscountsList() {
   const [rows, setRows] = useState<readonly DiscountRow[] | null>(null);
-  const [budget, setBudget] = useState<BudgetView | null>(null);
   const [queue, setQueue] = useState<QueueSnapshotView | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await listDiscounts(50);
-    setLoading(false);
-    if (res.ok) {
-      setRows(res.data.data);
-      setBudget(res.data.budget);
-      setFailed(null);
-      return;
-    }
-    // Zlyhanie čítania NIE JE prázdny zoznam — prázdny zoznam je tvrdenie,
-    // že žiadna zľava neexistuje, a to tu nikto nevie (P7).
-    setRows(null);
-    setFailed(res.error.message);
-  }, []);
 
   /**
-   * Živý stav fronty je samostatné čítanie: zoznam zliav hovorí, ČO existuje,
-   * `/api/queue` hovorí, ČO SA PRÁVE DEJE a prečo prípadne nič. Keď sa nedá
-   * prečítať, zoznam sa kreslí ďalej — len bez vety o fronte.
+   * Jedno registrované načítanie pre obe čítania naraz. Zoznam hovorí, ČO
+   * existuje; `/api/queue` hovorí, ČO SA PRÁVE DEJE a prečo prípadne nič.
+   * Keď sa nedá prečítať fronta, zoznam sa kreslí ďalej — len bez vety o nej.
    */
-  const loadQueue = useCallback(async () => {
-    const res = await fetchQueue();
-    setQueue(res.ok ? res.data : null);
+  const load = useCallback(async () => {
+    const [list, snapshot] = await Promise.all([listDiscounts(50), fetchQueue()]);
+    if (list.ok) {
+      setRows(list.data.data);
+      setFailed(null);
+    } else {
+      // Zlyhanie čítania NIE JE prázdny zoznam — prázdny zoznam je tvrdenie,
+      // že žiadna zľava neexistuje, a to tu nikto nevie (P7).
+      setRows(null);
+      setFailed(list.error.message);
+    }
+    setQueue(snapshot.ok ? snapshot.data : null);
   }, []);
 
-  useEffect(() => {
-    void load();
-    void loadQueue();
-  }, [load, loadQueue]);
+  // Obnovuje sa VÝHRADNE na vyžiadanie — tlačidlo je v stavovom pruhu.
+  const { pending } = useRefreshable(load);
 
   const ordered =
     rows === null
-      ? { leading: null, active: [] as readonly DiscountRow[], finished: [] as readonly DiscountRow[] }
+      ? {
+          leading: null,
+          active: [] as readonly DiscountRow[],
+          finished: [] as readonly DiscountRow[],
+        }
       : orderDiscounts(rows);
+
+  /*
+   * Na čele stojí zľava, ktorá sa práve zapisuje. Keď žiadna nezapisuje,
+   * postúpi prvá v poradí naliehavosti — obrazovka bez dominanty by porušila
+   * P1 a percento by sa nemalo kde ukázať.
+   */
+  const featured = ordered.leading ?? ordered.active[0] ?? null;
+  const rest = ordered.leading === null ? ordered.active.slice(1) : ordered.active;
 
   const stand = queue === null ? null : queueStandSentence(queue.standing.reason);
   const writing = queue !== null && queue.standing.writing;
   const alarming = queue === null ? [] : alarmingCards(queue.standing.blockers);
   /*
-   * Prázdna fronta nie je problém a nemá o sebe hovoriť nad zoznamom — bola by
-   * to veta, ktorá stojí na obrazovke stále a nič nehlási.
+   * Prázdna fronta nie je problém a nemá o sebe hovoriť — bola by to veta,
+   * ktorá stojí na obrazovke stále a nič nehlási (kontrakt UI, bod 3).
    */
   const showStand =
     stand !== null && !writing && queue !== null && queue.standing.reason !== 'queue_empty';
-  const meterBudget = queue !== null && queue.budget !== null ? queue.budget : budget;
+
+  const empty = rows !== null && rows.length === 0;
+  const head = featured === null ? null : percentHeadline(featured.percent, featured.tiers);
+  const featuredDone =
+    featured === null ? 0 : featured.itemsOk + featured.itemsFailed + featured.itemsUncertain;
 
   return (
     <div className={styles.page} data-testid="discounts-list">
       <div className={styles.head}>
         <h1>Zľavy</h1>
-        <Link className="btn primary" href="/zlavy/nova" data-testid="new-discount-link">
-          Nová zľava
-        </Link>
+        {/* Pri prázdnej obrazovke nesie jedinú akciu prázdny stav (bod 11). */}
+        {empty ? null : (
+          <Link className="btn primary" href="/zlavy/nova" data-testid="new-discount-link">
+            Nová zľava
+          </Link>
+        )}
       </div>
 
       {failed === null ? null : (
-        <section className="sec" data-testid="discounts-error">
-          <Note variant="err">Zoznam zliav sa nepodarilo načítať: {failed}</Note>
-          <div className="row gap-t">
-            <button type="button" className="btn" onClick={() => void load()}>
-              Skúsiť znova
-            </button>
-          </div>
-        </section>
+        <Note variant="err" testId="discounts-error">
+          Zoznam zliav sa nepodarilo načítať: {failed} Ďalší pokus: tlačidlo Obnoviť v stavovom
+          pruhu.
+        </Note>
       )}
 
-      {loading && rows === null && failed === null ? (
-        <section className="sec">
-          <div className={styles.busy}>Načítavam zľavy…</div>
-        </section>
+      {pending && rows === null && failed === null ? (
+        <div className={styles.busy}>Načítavam zľavy…</div>
       ) : null}
 
-      {/* Prečo sa práve teraz nezapisuje — hneď nad zoznamom, nie v logu (C2). */}
+      {/* Prečo sa práve teraz nezapisuje — nad zoznamom, nie v logu.
+          Nie je to sekcia: kreslí sa len vtedy, keď niečo naozaj stojí. */}
       {showStand && stand !== null ? (
-        <section className="sec" data-testid="discounts-standing">
+        <div data-testid="discounts-standing">
           <Note
             variant={stand.tone === 'critical' ? 'err' : stand.tone === 'idle' ? 'info' : 'warn'}
           >
@@ -292,93 +331,94 @@ export function DiscountsList() {
               <BlockerList cards={alarming} title="Čo bráni zápisu" />
             </div>
           )}
-        </section>
+        </div>
       ) : null}
 
-      {rows !== null && rows.length === 0 ? (
+      {empty ? (
         <section className="sec" data-testid="discounts-empty">
           <EmptyState
             title="Zatiaľ tu nie je ani jedna zľava"
-            description={
-              <>
-                Zľava je sada produktov, ktorým appka postupne zapíše do eshopu nižšiu cenu na
-                zvolené obdobie. Začnite tým, čo sa nepredáva: v Produktoch si vyfiltrujte
-                ležiakov, označte ich a stlačte Zlacniť — alebo rovno založte novú zľavu a výber
-                spravte v nej.
-              </>
-            }
+            description="Zľava je sada produktov, ktorým appka zapíše nižšiu cenu na zvolené obdobie."
             action={
-              <div className="row wrapx">
-                <Link className="btn primary" href="/zlavy/nova">
-                  Nová zľava
-                </Link>
-                <Link className="btn" href="/produkty">
-                  Nájsť ležiaky
-                </Link>
-              </div>
+              <Link className="btn primary" href="/zlavy/nova">
+                Nová zľava
+              </Link>
             }
           />
         </section>
       ) : null}
 
-      {/* 1 · DOMINANTA — zľava, ktorá sa práve zapisuje */}
-      {ordered.leading === null ? null : (
+      {/* 1 · DOMINANTA — percento zľavy, ktorá je na čele (kontrakt UI, 21) */}
+      {featured === null || head === null ? null : (
         <section className="sec" data-testid="discounts-leading">
-          <div className="sec-h">
-            <h2>Zapisuje sa</h2>
-            <div className="act">
-              <DiscountState sentence={sentenceOf(ordered.leading)} />
-            </div>
-          </div>
-
-          <div className={styles.top}>
+          {/*
+           * Karta na čele JE riadkom zoznamu, len nakresleným veľkým — preto
+           * nesie aj `discount-row`. Kto hľadá „prvú zľavu v zozname", ju musí
+           * nájsť bez ohľadu na to, či práve zapisuje.
+           */}
+          <div className={styles.top} data-testid="discount-row">
             <div>
-              <div className="prog-lg">
-                <div className="n num" data-testid="leading-number">
-                  {formatCountSk(
-                    ordered.leading.itemsOk +
-                      ordered.leading.itemsFailed +
-                      ordered.leading.itemsUncertain,
-                  )}{' '}
-                  <span className="of">/ {formatCountSk(ordered.leading.itemsTotal)}</span>
+              <div className={styles.feature}>
+                <div className="lvl-1" data-testid="leading-percent">
+                  <span className="big">{head.big}</span>
                 </div>
-                <div className="side lvl-3">
-                  <Link href={`/zlavy/${ordered.leading.id}`}>{ordered.leading.name}</Link> ·{' '}
-                  {formatCountSk(ordered.leading.itemsTotal)}{' '}
-                  {pluralSk(ordered.leading.itemsTotal, 'produkt', 'produkty', 'produktov')} ·{' '}
-                  {percentLabel(ordered.leading)}
+                <div className={styles.featureMeta}>
+                  <div className={styles.featureName}>
+                    <Link href={`/zlavy/${featured.id}`}>{featured.name}</Link>
+                  </div>
+                  <div className="row wrapx">
+                    <DiscountState sentence={sentenceOf(featured)} testId="leading-state" />
+                  </div>
+                  <div className="lvl-3">
+                    {head.sub === null ? null : (
+                      <>
+                        {head.sub}
+                        <Dot />
+                      </>
+                    )}
+                    {formatCountSk(featured.itemsTotal)}{' '}
+                    {pluralSk(featured.itemsTotal, 'produkt', 'produkty', 'produktov')}
+                    <Dot />
+                    zľava svieti {dayMonthSk(featured.dateFrom)} – {dayMonthSk(featured.dateTo)}
+                  </div>
                 </div>
               </div>
 
-              <Bar
-                percent={progressPercent(
-                  ordered.leading.itemsOk +
-                    ordered.leading.itemsFailed +
-                    ordered.leading.itemsUncertain,
-                  ordered.leading.itemsTotal,
-                )}
-              />
+              <Bar percent={progressPercent(featuredDone, featured.itemsTotal)} />
 
-              <div className="prog-meta">
-                {ordered.leading.estimate === null ? (
-                  <span className="lvl-3">Odhad dokončenia zatiaľ nevieme</span>
-                ) : (
-                  <span>
-                    Hotové{' '}
-                    <b className="est">{dayMonthSk(ordered.leading.estimate.date)}</b>
-                  </span>
-                )}
-                <Dot />
+              <div className="prog-meta" data-testid="leading-progress">
                 <span>
-                  štart zľavy <b>{dayMonthSk(ordered.leading.dateFrom)}</b> — koniec{' '}
-                  <b>{dayMonthSk(ordered.leading.dateTo)}</b>
+                  zapísaných <b>{formatCountSk(featured.itemsOk)}</b> z{' '}
+                  {formatCountSk(featured.itemsTotal)}
                 </span>
-                {budget === null ? null : (
+                {featured.itemsPending === 0 ? null : (
                   <>
                     <Dot />
                     <span>
-                      dnes zapísaných <b>{formatCountSk(budget.spent)}</b> z{' '}
-                      {formatCountSk(budget.budget)}
+                      ostáva zapísať <b>{formatCountSk(featured.itemsPending)}</b>
+                    </span>
+                  </>
+                )}
+                {featured.estimate === null ? (
+                  featured.itemsPending === 0 ? null : (
+                    <>
+                      <Dot />
+                      <span>odhad dokončenia zatiaľ nevieme</span>
+                    </>
+                  )
+                ) : (
+                  <>
+                    <Dot />
+                    <span>
+                      hotové <b className="est">{dayMonthSk(featured.estimate.date)}</b>
+                    </span>
+                  </>
+                )}
+                {featured.itemsUncertain === 0 ? null : (
+                  <>
+                    <Dot />
+                    <span className="flag">
+                      {formatCountSk(featured.itemsUncertain)} nevieme, či sa zapísalo
                     </span>
                   </>
                 )}
@@ -386,59 +426,48 @@ export function DiscountsList() {
             </div>
 
             <div className={styles.side}>
-              <Link className="btn lg primary" href={`/zlavy/${ordered.leading.id}`}>
+              <Link className="btn lg primary" href={`/zlavy/${featured.id}`}>
                 Detail
               </Link>
-              <StopQueue id={ordered.leading.id} onChanged={() => void load()} />
+              {featured.itemsPending === 0 ? null : (
+                <StopQueue id={featured.id} onChanged={() => void load()} />
+              )}
             </div>
           </div>
         </section>
       )}
 
-      {/* 2 · Ostatné bežiace a rozpísané */}
-      {ordered.active.length === 0 ? null : (
+      {/* 2 · Zoznam ostatných — dátová tabuľka vo vlastnom ráme (P4) */}
+      {rest.length === 0 ? null : (
         <section className="zlist" data-testid="discounts-active">
           <ListHeader />
-          {ordered.active.map((row) => (
-            <DiscountRowView key={row.id} row={row} />
-          ))}
-        </section>
-      )}
-
-      {/* 3 · Skončené — tlmené a zbalené */}
-      {ordered.finished.length === 0 ? null : (
-        <details data-testid="discounts-finished">
-          <summary className="lvl-3" style={{ cursor: 'pointer', padding: '6px 0' }}>
-            Skončené ({formatCountSk(ordered.finished.length)})
-          </summary>
-          <section className="zlist">
-            <ListHeader />
-            {ordered.finished.map((row) => (
+          <div className={styles.listScroll}>
+            {rest.map((row) => (
               <DiscountRowView key={row.id} row={row} />
             ))}
-          </section>
-        </details>
-      )}
-
-      {meterBudget === null ? null : (
-        <section className="sec" data-testid="discounts-budget">
-          <div className={styles.listFoot}>
-            <BudgetMeter
-              label="Zápisy dnes"
-              spent={meterBudget.spent}
-              limit={meterBudget.budget}
-              resetsAt={queue === null ? null : resetPhrase(queue.limits.nextResetAt)}
-              testId="list-budget-meter"
-            />
-            <div className={styles.listFootText}>
-              Denný rozpočet {formatCountSk(meterBudget.budget)}{' '}
-              {pluralSk(meterBudget.budget, 'zápisu', 'zápisov', 'zápisov')} sa delí medzi všetky
-              zľavy vo fronte — dnes ostáva {formatCountSk(meterBudget.remaining)}. Väčšia zľava
-              preto beží aj niekoľko dní a appka po obnove rozpočtu pokračuje sama.{' '}
-              <Link href="/nastavenia">Rozdelenie v Nastaveniach</Link>
-            </div>
           </div>
         </section>
+      )}
+
+      {/* Skončené — pod rozklikom, teda mimo počtu sekcií (P5). */}
+      {ordered.finished.length === 0 ? null : (
+        <details
+          className={styles.fold}
+          open={featured === null && rest.length === 0}
+          data-testid="discounts-finished"
+        >
+          <summary>Skončené ({formatCountSk(ordered.finished.length)})</summary>
+          <div className={styles.foldBody}>
+            <div className="zlist">
+              <ListHeader />
+              <div className={styles.listScroll}>
+                {ordered.finished.map((row) => (
+                  <DiscountRowView key={row.id} row={row} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </details>
       )}
     </div>
   );

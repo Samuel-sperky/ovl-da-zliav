@@ -1,11 +1,17 @@
 'use client';
 
 /**
- * Aura Zľavy — SEKCIA 3 PREHĽADU: tržby (V9, architektúra §1 TAB 1).
+ * Aura Zľavy — SEKCIA PREHĽADU: predaj (V9, architektúra §1 TAB 1).
  *
  * Vľavo tri čísla, vpravo čiarový graf s trendovou čiarou, pod tým jeden
  * riadok o čerstvosti dát. Žiadna veta o príčine — čísla stoja vedľa seba
  * a záver si robí človek (P8).
+ *
+ * ── Prečo sa sekcia volá „Predaj" a nie „Tržby" ─────────────────────────────
+ *
+ * Tržba je suma v eurách a tú appka nemá odkiaľ vziať (viď nižšie). Nadpis
+ * „Tržby" nad grafom kusov je tvrdenie, ktoré obsah nepodloží — a to je presne
+ * to, čomu sa táto obrazovka vyhýba. Nadpis preto hovorí to, čo sekcia meria.
  *
  * ── Prečo tu nie sú eurá ─────────────────────────────────────────────────────
  *
@@ -18,6 +24,8 @@
  *
  * Vlastník: V9.
  */
+import Link from 'next/link';
+
 import SalesChart from '@/components/dashboard/SalesChart';
 import styles from '@/components/dashboard/overview.module.css';
 import type { SalesSnapshot } from '@/components/dashboard/api';
@@ -39,15 +47,24 @@ function signedPercent(value: number): string {
   return value > 0 ? `+${value} %` : `−${Math.abs(value)} %`;
 }
 
+/**
+ * Prázdny stav = JEDNA VETA a JEDNO TLAČIDLO (kontrakt UI, bod 11). Veta je
+ * dôvod, nie „žiadne dáta": prázdny graf môže znamenať vypnuté sťahovanie
+ * objednávok alebo prvý beh, a to sú dve rôzne veci.
+ */
 function Empty({ reason }: { reason: string }) {
   return (
     <section className="sec" data-testid="overview-sales" data-mode="empty">
       <div className="sec-h">
-        <h2>Tržby</h2>
+        <h2>Predaj</h2>
       </div>
       <div className="empty">
-        <div className="t">Predaj zatiaľ nesledujeme</div>
-        <div>{reason}</div>
+        <div className="t">{reason}</div>
+        <div className="a">
+          <Link className="btn" href="/nastavenia">
+            Otvoriť Nastavenia
+          </Link>
+        </div>
       </div>
     </section>
   );
@@ -78,7 +95,7 @@ export function SalesSection({ sales }: SalesSectionProps) {
   return (
     <section className="sec" data-testid="overview-sales" data-mode="data">
       <div className="sec-h">
-        <h2>Tržby</h2>
+        <h2>Predaj</h2>
         <div className="act">
           <span className="lvl-3">
             {formatCountSk(sales.coverage.daysCovered)}{' '}

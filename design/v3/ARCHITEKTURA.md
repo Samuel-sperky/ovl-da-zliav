@@ -112,8 +112,9 @@ Obe ukazujú čísla, preto tvrdé pravidlo:
 | Zrnitosť | agregát celého eshopu | riadok = produkt |
 | Čas | dnes / 14 dní / trend | stav a história jedného produktu |
 | Tabuľka produktov | **NIKDY** | vždy |
-| Tržby eshopu | **áno, dominanta grafu** | **NIKDY** |
-| Stav fronty | áno, dominanta stránky | len v hlavičke |
+| Predaj eshopu | **áno, graf** | **NIKDY** |
+| Stav fronty | áno, hneď pod verdiktom | len v hlavičke |
+| Verdikt „je všetko v poriadku?" | **áno, dominanta stránky** | **NIKDY** |
 | Cieľ kliku | „pusti ma do práce" | „vyber mi tie správne kusy" |
 
 Duplicita, ktorá je povolená a zámerná: **jedno číslo** — počet ležiakov
@@ -124,28 +125,64 @@ istý filter, klik z Prehľadu vedie presne naň.
 
 ### TAB 1 — Prehľad (`prehlad.html`)
 
-**Dominanta:** priebeh bežiacej fronty (odpoveď 41: prvé číslo v Prehľade).
-Veľký blok cez celú šírku, číslo `3 420 / 8 000` v ~64 px.
+**Otázka, na ktorú obrazovka odpovedá do troch sekúnd: „je všetko v poriadku?"**
+Nie „aké mám čísla". Podľa toho je vybraná dominanta.
+
+**Dominanta:** VERDIKT — jedna veta v 44 px (`Všetko v poriadku` · `Zápis
+stojí` · `Zápis čaká` · `Zapisuje sa pomalšie` · `Stav appky nevieme`).
+
+> **Zmena z 18. 8. 2026.** Do tohto dátumu bolo dominantou číslo fronty
+> `3 420 / 8 000` v 64 px (odpoveď 41). Číslo je pekné, ale odpovedá na inú
+> otázku: `3 420 / 8 000` vyzerá rovnako, keď fronta beží, aj keď stojí od
+> včera, takže odpoveď na „je všetko v poriadku?" sa z neho musela odvodiť
+> prečítaním piatich sekcií. Dominantou je preto veta, ktorá JE odpoveďou.
+> Fronta zostáva hneď pod ňou v 22 px, teda na 50 % veľkosti dominanty —
+> P1 povoľuje 55 %, takže sa pravidlo neohýba, len sa mení, čo je dominantou.
+> Verdikt počíta `dashboard/overview-verdict.ts` z prekážok, poistiek zápisu
+> a posledného kroku fronty; „Všetko v poriadku" padne LEN vtedy, keď sa stav
+> dal prečítať celý.
 
 Sekcie (4, zhora):
 
-1. **Fronta** — dominanta. Názov zľavy, pruh, `3 420 / 8 000`, pod tým jedným
-   riadkom: `Hotové ≈ 2. 9. · štart zľavy 4. 9.` a príznak `12 sa nepodarilo`.
-   Vpravo dve tlačidlá: **Zastaviť frontu** (sekundárne), **Detail**.
-   Keď fronta nebeží → blok sa zmení na `Všetko beží` + počet bežiacich zliav
-   (odpoveď 42, pokojný stav).
-2. **Nová zľava** — jedno primárne tlačidlo, vizuálne druhé najsilnejšie na
-   stránke. Je to prvý klik používateľa (odpoveď 25). Vedľa neho **návrhy**
-   (rozpustený agent, odpoveď 27): 2–3 riadky typu
-   `11 640 produktov sa 180 dní nepredalo → zlacniť` s tlačidlom `Použiť`.
-   Návrh nie je karta ani chatbot — je to riadok s číslom a slovesom.
-3. **Tržby** — čiarový graf 14 dní s trendovou čiarou (odpoveď 85), nad ním
-   `Dnes 1 180 €` a `Včera do 11:40 ≈ 1 040 €` (odpoveď 88: dnes + porovnanie
-   s včerajškom).
-4. **Zľavy naživo** — 3 riadky: bežiace zľavy, počet produktov, koniec. Bez
-   tabuľky, bez akcií okrem prekliku.
+1. **Stav** — dominanta. Verdikt, pod ním fronta (`3 420 / 8 000`, pruh, jeden
+   riadok faktov `Hotové ≈ 2. 9. · Okno 4. 9. – 18. 9. · Dnes zapísaných
+   21 z 200`) a **riadok kontrol**: posledný krok fronty, spojenie so shopom,
+   čo robí katalóg, strop rozsahu. Riadok kontrol nesie VÝHRADNE to, čo nie je
+   v stavovom pruhu — pruh má ostrý zápis, kľúč, rozpočet a počty katalógu.
+   Vpravo stĺpec akcií: **Nová zľava** (primárne, prvý klik používateľa,
+   odpoveď 25), **Detail zľavy** / **Zoznam zliav**, **Zastaviť frontu**. Po
+   odstávke je primárnym tlačidlom **Pokračovať**.
+   Keď fronta nebeží → namiesto čísla riadok `2 zľavy bežia · 1 pripravená ·
+   2 380 zlacnených` (odpoveď 42, pokojný stav). Keď v appke nie je ani jedna
+   zľava → JEDNA VETA a JEDNO TLAČIDLO (kontrakt UI, bod 11).
+2. **Prečo sa nezapisuje** / **Čo appku brzdí** — prekážky zo `/api/status`,
+   všetky tri úrovne (kontrakt UI, bod 6). Kreslí sa LEN vtedy, keď aspoň
+   jedna prekážka zastavuje alebo brzdí; inak sa nekreslí vôbec a celou
+   odpoveďou je zelená značka v stavovom pruhu (bod 3). Farbu volí spôsob
+   riešenia, závažnosť nesie SLOVO (`zastavuje zápis` · `spomaľuje zápis` ·
+   `nezastavuje nič`).
+3. **Zľavy** — dva stĺpce. Vľavo **Beží teraz**: 3 riadky bežiacich zliav, bez
+   tabuľky, bez akcií okrem prekliku. Vpravo **Návrhy** (rozpustený agent,
+   odpoveď 27): riadky typu `11 640 produktov sa 180 dní nepredalo` s tlačidlom
+   `Použiť`, hore to, čo si pýta pozornosť. Návrh nie je karta ani chatbot — je
+   to riadok s číslom a slovesom. Posledný riadok je zamknutá funkcia so
+   zámkom a odkazom do Nastavení (vysvetlenie sa tu NEROZŠIRUJE).
+4. **Predaj** — čiarový graf 14 dní s trendovou čiarou (odpoveď 85) a tri čísla
+   vľavo. Nadpis hovorí `Predaj`, nie `Tržby`: appka pozná predané KUSY, sumu
+   v eurách nemá odkiaľ vziať (`order/get` viaže sumu na objednávku, nie na
+   položku), a nadpis nesmie tvrdiť viac než obsah.
 
-Pod rozklik: nič. Prehľad rozkliky nemá — je to prístrojová doska.
+Pod rozklik: len pomlčka. Keď sa stav fronty nedá prečítať, je na mieste čísla
+`—` a dôvod je pod rozklikom `Prečo —` — rovnaký tvar, aký má stavový pruh
+(kontrakt UI, bod 5). Inak Prehľad rozkliky nemá; je to prístrojová doska.
+
+**Čo z Prehľadu 18. 8. zmizlo a prečo:** sekcia **Živý stav** (opakovala štyri
+veci, ktoré od 13. 8. nesie stavový pruh — dve kópie toho istého faktu sa raz
+rozídu o minútu a nedá sa povedať, ktorá klame) a sekcia **Čaká na vás**
+(splynula so *Zľavami*: „čo beží" a „čo by mohlo bežať" sú dva pohľady na tú
+istú vec). Prázdny stav *Prvá zľava* prestal byť sekciou a tri očíslované kroky
+v ňom sa zrušili — návod patrí do rozcestníka „Čo appka vie" v Nastaveniach.
+Zo šiestich sekcií sú tak štyri a v pokojnom stave tri.
 
 ---
 

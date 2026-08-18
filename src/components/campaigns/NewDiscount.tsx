@@ -2,17 +2,27 @@
 
 /**
  * Aura Zľavy — NOVÁ ZĽAVA (V11; predloha `design/v3/nova-zlava.html`,
- * architektúra §2, kontrakt V3 K1–K8, invarianty I3, I9, I11).
+ * architektúra §2, kontrakt V3 K1–K8, invarianty I3, I9, I11; kontrakt UI,
+ * bod 24).
  *
- * Jedna obrazovka, štyri sekcie, dva stĺpce:
+ * Jedna obrazovka, TRI sekcie, dva stĺpce:
  *
- *   VÝBER PRODUKTOV      ·  ŠTART        (kedy fronta dobehne, kedy zľava nabehne)
- *   PÁSMA A OKNO         ·  POTVRDENIE   (dominanta: koľko produktov zlacnie)
+ *   VÝBER PRODUKTOV      ·  ZÁPIS A POTVRDENIE
+ *   PÁSMA A OKNO         ·  (dominanta: koľko produktov zlacnie)
  *
  * Prečo je to jedna obrazovka a nie sprievodca: rozhodnutie „zlacniť 8 000
  * ležiakov" nemá tri nezávislé kroky. Počet produktov, percentá a dátum štartu
  * na sebe visia — zmena stropu mení odhad dobehnutia a ten mení navrhovaný
  * štart. V sprievodcovi by sa to dalo vidieť až na konci.
+ *
+ * PREČO SÚ TRI SEKCIE A NIE ŠTYRI (18. 8. 2026, P4)
+ * ------------------------------------------------
+ * Do 18. 8. boli ŠTART a POTVRDENIE dve karty nad sebou a obrazovka sa
+ * nezmestila do 1,5 obrazovky pri 1440×900. Zlúčili sa do jednej karty
+ * rozhodnutia: dominanta (počet produktov) je hore, dva dátumy pod ňou a
+ * medzikroky výpočtu — rozpočet, fronta pred nami, dĺžka behu — sú v rozkliku
+ * „Ako to počítam" (P6). Nič sa nezmazalo, len sa to prestalo pýtať pozornosť
+ * skôr než dominanta (P1).
  *
  * Na čom obrazovka stojí:
  *
@@ -34,8 +44,12 @@
  *     použiť na viac než desať produktov.
  *  6. **Čas hovorí jedno číslo.** Koľko je vo fronte pred nami vie povedať
  *     `/api/queue` (presne, z položiek) aj zoznam zliav (odhadom, z počítadiel).
- *     Zmieruje ich `resolveAhead()` a panel štartu prizná, ktorý zdroj to bol.
+ *     Zmieruje ich `resolveAhead()` a rozklik prizná, ktorý zdroj to bol.
  *     Keď sa nedá prečítať ani jeden, dátum dobehnutia sa NEDOPOČÍTA (P7).
+ *  7. **Nič sa neobnovuje samo** (kontrakt UI, bod 4). Čísla sa načítajú pri
+ *     otvorení a potom vždy, keď o to požiada tlačidlo Obnoviť v stavovom
+ *     pruhu — obrazovka je registrovaná cez `useRefreshable()` a vlastné
+ *     tlačidlo nekreslí.
  *
  * PREČO SA PREKÁŽKY POČÍTAJU LOKÁLNE
  * ----------------------------------
@@ -47,6 +61,13 @@
  * v katalógu nie sú" je overene prázdna množina, nie domnienka. Označené
  * produkty, ktoré katalóg nevrátil, sa do výberu vôbec nedostanú a hlási ich
  * samostatný riadok v sekcii výberu.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ * **`selectionVersion` je poistka I3.** Rastie vždy, keď sa načítané riadky
+ * naozaj zmenia — a práve preto sa porovnáva odtlačok riadkov, nie čas
+ * načítania: obnova, ktorá vráti tú istú sadu, nesmie zahodiť hotovú skúšku,
+ * ale akákoľvek zmena produktov, ich predajnosti či ceny ju zahodiť MUSÍ.
  *
  * Vlastník: V11.
  */
@@ -102,6 +123,8 @@ import {
   type ScopeView,
   type StatusPayload,
 } from '@/components/campaigns/zlavy-api';
+import { useRefreshable } from '@/components/layout/refresh';
+import EmptyState from '@/components/ui/EmptyState';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import {
   SOLD_WINDOWS,
@@ -167,6 +190,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
    */
   const [notInCatalog, setNotInCatalog] = useState(0);
   const [dataAsOf, setDataAsOf] = useState<string | null>(null);
+  /** Koľko riadkov má zrkadlo katalógu vôbec; `0` = ešte sa nesynchronizovalo. */
+  const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -213,43 +238,55 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
   /** Generácia načítania — odpoveď starého výberu sa nesmie zapísať do nového. */
   const gen = useRef(0);
-  /** Verzia výberu — mení sa len vtedy, keď sa naozaj zmenili riadky. */
+  /** To isté pre kontext (strop, kľúč, fronta, stav) pri obnove. */
+  const ctxGen = useRef(0);
+  /** Verzia výberu — mení sa len vtedy, keď sa naozaj zmenili riadky (I3). */
   const [selectionVersion, setSelectionVersion] = useState(0);
+  /** Odtlačok posledných načítaných riadkov; prázdny = ešte nič neprišlo. */
+  const selectionPrint = useRef<string | null>(null);
+  /** Poradové číslo vyžiadanej obnovy; `null` = prvé načítanie ešte nezačalo. */
+  const [refreshTicket, setRefreshTicket] = useState<number | null>(null);
 
   /* ── 1. Kontext: strop, rozpočet, fronta pred nami, kľúč ─────────────── */
 
-  useEffect(() => {
-    let alive = true;
-    void scopeLimits().then((res) => {
-      if (!alive) return;
-      if (res.ok) setScope(res.data);
-      // Výber sa načítava až po tejto odpovedi: v režime `pilot` je strop 10
-      // a bez neho by prvé načítanie zbytočne prelistovalo celý katalóg (K1).
-      setScopeReady(true);
-    });
-    void keyMeta().then((res) => {
-      if (alive && res.ok) setKey(res.data);
-    });
-    void listDiscounts(50).then((res) => {
-      if (!alive || !res.ok) return;
-      setBudget(res.data.budget);
-      setAhead(queueAhead(res.data.data));
-    });
-    // Presný stav fronty a rozpočtu. Keď sa nedá prečítať, ostáva `null` a
-    // obrazovka sa vráti k odhadu zo zoznamu zliav — nikdy k nule (P7).
-    void fetchQueue().then((res) => {
-      if (alive && res.ok) setQueue(res.data);
-    });
-    void fetchStatus().then((res) => {
-      if (alive && res.ok) setStatus(res.data);
-    });
-    void fetchSession().then((session) => {
-      if (alive) setSudoUntil(session?.sudoUntil ?? null);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Registrácia do spoločného obnovovania (kontrakt UI, bod 4): raz pri
+  // otvorení a potom vždy, keď to vypýta tlačidlo Obnoviť v stavovom pruhu.
+  useRefreshable(async (token) => {
+    const mine = ctxGen.current + 1;
+    ctxGen.current = mine;
+    const fresh = (): boolean => ctxGen.current === mine;
+    // Znovunačítanie výberu visí na tomto čísle — ide o tie isté dáta.
+    setRefreshTicket(token);
+
+    await Promise.all([
+      scopeLimits().then((res) => {
+        if (!fresh()) return;
+        if (res.ok) setScope(res.data);
+        // Výber sa načítava až po tejto odpovedi: v režime `pilot` je strop 10
+        // a bez neho by prvé načítanie zbytočne prelistovalo celý katalóg (K1).
+        setScopeReady(true);
+      }),
+      keyMeta().then((res) => {
+        if (fresh() && res.ok) setKey(res.data);
+      }),
+      listDiscounts(50).then((res) => {
+        if (!fresh() || !res.ok) return;
+        setBudget(res.data.budget);
+        setAhead(queueAhead(res.data.data));
+      }),
+      // Presný stav fronty a rozpočtu. Keď sa nedá prečítať, ostáva `null` a
+      // obrazovka sa vráti k odhadu zo zoznamu zliav — nikdy k nule (P7).
+      fetchQueue().then((res) => {
+        if (fresh() && res.ok) setQueue(res.data);
+      }),
+      fetchStatus().then((res) => {
+        if (fresh() && res.ok) setStatus(res.data);
+      }),
+      fetchSession().then((session) => {
+        if (fresh()) setSudoUntil(session?.sudoUntil ?? null);
+      }),
+    ]);
+  });
 
   /*
    * Efektívny strop jednej zľavy. Keď sa nastavenia nedajú prečítať, siahne sa
@@ -286,6 +323,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     let dropped = 0;
     let total: number | null = null;
     let asOf: string | null = null;
+    let mirrorRows: number | null = null;
     let failure: string | null = null;
 
     const take = (
@@ -332,6 +370,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
           break;
         }
         asOf = res.data.dataAsOf;
+        mirrorRows = res.data.catalogTotal;
         take(res.data.data);
         setLoaded(collected.length);
         if (collected.length >= cap) break;
@@ -353,6 +392,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         if (page === 1) {
           total = res.data.total;
           asOf = res.data.dataAsOf;
+          mirrorRows = res.data.catalogTotal;
         }
         take(res.data.data);
         setLoaded(collected.length);
@@ -381,19 +421,31 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         : 0,
     );
     setDataAsOf(asOf);
+    setCatalogTotal(mirrorRows);
     setLoadError(failure);
-    setSelectionVersion((value) => value + 1);
+
+    /*
+     * I3 — skúška naprázdno platí pre PRÁVE ZOBRAZENÝ výber. Verzia preto rastie
+     * pri každej skutočnej zmene riadkov (iné produkty, iná predajnosť, iná
+     * cena), ale NIE pri obnove, ktorá vrátila tú istú sadu. Odtlačok je jediné
+     * miesto, kde sa to rozhoduje.
+     */
+    const print = selectionPrintOf(collected);
+    if (print !== selectionPrint.current) {
+      selectionPrint.current = print;
+      setSelectionVersion((value) => value + 1);
+    }
   }, [cap, filter, initial.productIds, source]);
 
   useEffect(() => {
-    if (!scopeReady) return;
+    if (!scopeReady || refreshTicket === null) return;
     const timer = setTimeout(() => {
       void loadSelection();
     }, 300);
     return () => clearTimeout(timer);
     // Závislosťami sú TEXTOVÉ ODTLAČKY vstupov (`filterKey`, `pickedKey`), nie
     // objekty — inak by sa výber načítaval znova pri každom prekreslení.
-  }, [filterKey, pickedKey, source, cap, scopeReady, loadSelection]);
+  }, [filterKey, pickedKey, source, cap, scopeReady, refreshTicket, loadSelection]);
 
   /* ── 3. Pásma, vzorka, priemerná cena ────────────────────────────────── */
 
@@ -521,7 +573,12 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     return null;
   })();
 
-  const signature = `${selectionVersion}|${itemsCount}|${from}|${to}|${tiers
+  /*
+   * I3 — čo všetko robí zo skúšky naprázdno „inú" skúšku: iné riadky
+   * (`selectionVersion`), iný počet, iné okno, iné pásmo, iné percento a iné
+   * obdobie predajnosti (mení pravidlo pásma, teda aj to, čo človek videl).
+   */
+  const signature = `${selectionVersion}|${itemsCount}|${from}|${to}|${filter.soldWindowDays}|${tiers
     .map((tier) => `${tier.ord}:${tier.percent}`)
     .join(',')}`;
   const previewFresh =
@@ -619,6 +676,12 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
   const lockedChips = ['kategória', 'kov', 'typ šperku', 'marža', 'obrátkovosť'];
 
+  /** Prázdne zrkadlo katalógu — z neho sa počet vyhovujúcich NEDÁ prečítať. */
+  const catalogEmpty = catalogTotal === 0;
+  /** Z koľkých sa vyberá. Neznáme je pomlčka, nikdy nula (kontrakt UI, bod 5). */
+  const matchingUnknown = matching === null || (source === 'filter' && catalogEmpty);
+  const emptySelection = rows !== null && itemsCount === 0 && busy !== 'loading';
+
   return (
     <div data-testid="new-discount">
       <div className={styles.nzHead}>
@@ -658,7 +721,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                     className={source === 'products' ? 'chip on' : 'chip'}
                     onClick={() => setSource('products')}
                   >
-                    Z označených <span className="c">{formatCountSk((initial.productIds ?? []).length)}</span>
+                    Z označených{' '}
+                    <span className="c">{formatCountSk((initial.productIds ?? []).length)}</span>
                   </button>
                 ) : null}
               </div>
@@ -693,20 +757,25 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               </span>
             </div>
 
+            {/*
+             * Jeden riadok namiesto dvoch: koľko sa vyberá, z koľkých, a strop.
+             * Strop režimu sa tu neopakuje — je v tichých pravidlách pod
+             * rozklikom a keď výber oreže, hlási ho `ScopeRelease` (P6).
+             */}
             <div className="spread gap-t">
               <div className="lvl-2">
-                {matching === null ? (
-                  <span className="lvl-3">Počet produktov zatiaľ nevieme</span>
-                ) : source === 'products' ? (
-                  <>
-                    Označených <b>{formatCountSk(matching)}</b>{' '}
-                    {pluralSk(matching, 'produkt', 'produkty', 'produktov')}
-                  </>
+                Vyberá sa{' '}
+                <b data-testid="selected-count">
+                  {/* Prázdne zrkadlo katalógu = nevieme, nie nula (kontrakt UI, bod 5). */}
+                  {matchingUnknown && itemsCount === 0 ? '—' : formatCountSk(itemsCount)}
+                </b>{' '}
+                {matchingUnknown ? (
+                  <span className="lvl-3">z —</span>
                 ) : (
-                  <>
-                    Filtru vyhovuje <b>{formatCountSk(matching)}</b>{' '}
-                    {pluralSk(matching, 'produkt', 'produkty', 'produktov')}
-                  </>
+                  <span className="lvl-3">
+                    z {formatCountSk(matching ?? 0)}{' '}
+                    {source === 'products' ? 'označených' : 'vo filtri'}
+                  </span>
                 )}
               </div>
               <div className="row">
@@ -727,7 +796,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               <i
                 style={{
                   width: `${
-                    matching === null || matching === 0
+                    matchingUnknown || matching === null || matching === 0
                       ? 0
                       : Math.min(100, (itemsCount / matching) * 100)
                   }%`,
@@ -735,44 +804,21 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               />
             </div>
 
-            <div className="prog-meta">
-              <span>
-                Vyberá sa <b data-testid="selected-count">{formatCountSk(itemsCount)}</b>
-                {matching === null ? null : <> z {formatCountSk(matching)}</>}
-              </span>
-              <span className="sep-dot" aria-hidden="true">
-                ·
-              </span>
-              <span>
-                Strop na jednu zľavu{' '}
-                {maxProducts === null ? (
-                  <span className="lvl-3">nevieme</span>
-                ) : (
-                  <b>{formatCountSk(maxProducts)}</b>
-                )}
-              </span>
-              {skipped === 0 ? null : (
-                <>
-                  <span className="sep-dot" aria-hidden="true">
-                    ·
-                  </span>
+            {skipped === 0 && notInCatalog === 0 ? null : (
+              <div className="prog-meta">
+                {skipped === 0 ? null : (
                   <span className="flag neutral" data-testid="skipped-discounted">
                     {formatCountSk(skipped)} už má zľavu podľa vlastných zápisov — vynechané
                   </span>
-                </>
-              )}
-              {notInCatalog === 0 ? null : (
-                <>
-                  <span className="sep-dot" aria-hidden="true">
-                    ·
-                  </span>
+                )}
+                {notInCatalog === 0 ? null : (
                   <span className="flag" data-testid="missing-in-catalog">
                     {formatCountSk(notInCatalog)} označených appka v katalógu nevidí — zľavu
                     nedostanú
                   </span>
-                </>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {scopeTrims ? (
               <ScopeRelease
@@ -795,7 +841,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
             <div className="fresh">
               {dataAsOf === null
-                ? 'Katalóg zatiaľ nemáme načítaný'
+                ? 'Katalóg zatiaľ nie je načítaný'
                 : `Dáta k ${formatDateTimeSk(dataAsOf)}`}
             </div>
           </section>
@@ -804,181 +850,195 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
           <section className="sec" data-testid="new-discount-tiers">
             <div className="sec-h">
               <h2>Pásma a okno platnosti</h2>
-              <div className="act">
-                <Link className="lvl-3" href={`/produkty?${catalogSearchQuery(filter)}`}>
-                  Upraviť výber v Produktoch
-                </Link>
-              </div>
+              {/* Pri prázdnom výbere vedie von JEDNO tlačidlo prázdneho stavu. */}
+              {emptySelection ? null : (
+                <div className="act">
+                  <Link className="lvl-3" href={`/produkty?${catalogSearchQuery(filter)}`}>
+                    Upraviť výber v Produktoch
+                  </Link>
+                </div>
+              )}
             </div>
 
-            <table className={styles.tiers}>
-              <thead>
-                <tr>
-                  <th>Pásmo</th>
-                  <th>Pravidlo</th>
-                  <th className="n">Produktov</th>
-                  <th className="n">Zľava</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tiers.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="lvl-3">
-                      Zatiaľ nie je z čoho pásma zostaviť.
-                    </td>
-                  </tr>
-                ) : (
-                  tiers.map((tier) => (
-                    <tr key={tier.bucket} data-testid={`tier-${tier.bucket}`}>
-                      <td>
-                        <span className={styles.band} data-ord={tier.ord}>
-                          <i />
-                          {tier.letter}
-                        </span>
-                      </td>
-                      <td>{tier.label}</td>
-                      <td className="n">{formatCountSk(tier.productIds.length)}</td>
-                      <td className="n">
-                        <input
-                          className={`inp ${styles.pctInput}`}
-                          inputMode="numeric"
-                          value={String(tier.percent)}
-                          aria-label={`Zľava pásma ${tier.letter} v percentách`}
-                          onChange={(event) => {
-                            const value = Number(event.target.value.replace(/[^\d]/g, ''));
-                            setPercents((current) => ({
-                              ...current,
-                              [tier.bucket]: Number.isFinite(value) ? value : 0,
-                            }));
-                          }}
-                          data-testid={`tier-percent-${tier.bucket}`}
-                        />{' '}
-                        %
-                      </td>
-                    </tr>
-                  ))
-                )}
-                {tiers.length === 0 ? null : (
-                  <tr className="sum">
-                    <td colSpan={2}>Spolu — najhoršie ležiaky prvé, po strop</td>
-                    <td className="n">{formatCountSk(itemsCount)}</td>
-                    <td className="n">
-                      <span className="lvl-3">
-                        {formatCountSk(tiers.length)}{' '}
-                        {pluralSk(tiers.length, 'pásmo', 'pásma', 'pásiem')}
-                      </span>
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            {percentError === undefined || percentError === null ? null : (
-              <div className={styles.note} role="alert" data-testid="tier-percent-error">
-                {percentError}
-              </div>
-            )}
-
-            <div
-              className="spread gap-t"
-              style={{ borderTop: '1px solid var(--line)', paddingTop: '11px' }}
-            >
-              <div className={styles.win}>
-                <span className="lvl-3">Platí od</span>
-                <input
-                  type="date"
-                  className="inp"
-                  value={from}
-                  onChange={(event) => {
-                    setWindowTouched(true);
-                    setFrom(event.target.value);
-                  }}
-                  aria-label="Zľava platí od"
-                  data-testid="date-from"
-                />
-                <span className="lvl-3">do</span>
-                <input
-                  type="date"
-                  className="inp"
-                  value={to}
-                  onChange={(event) => {
-                    setWindowTouched(true);
-                    setTo(event.target.value);
-                  }}
-                  aria-label="Zľava platí do"
-                  data-testid="date-to"
-                />
-                <span className="lvl-3">
-                  {windowDays > 0
-                    ? `${formatCountSk(windowDays)} ${pluralSk(windowDays, 'deň', 'dni', 'dní')}`
-                    : ''}
-                </span>
-              </div>
-              <span className="lvl-3">Rovnaké okno pre všetkých {formatCountSk(itemsCount)}</span>
-            </div>
-            {windowError === null ? (
-              <div className="hint">
-                Platí od 00:00 dňa {formatDateSk(from)} do 23:59 dňa {formatDateSk(to)}, čas shopu.
-              </div>
+            {emptySelection ? (
+              <EmptyState
+                title="Zatiaľ nie je čo zlacniť"
+                description={
+                  catalogEmpty
+                    ? 'Katalóg ešte nie je načítaný.'
+                    : 'Filtru nevyhovuje ani jeden produkt.'
+                }
+                action={
+                  <Link className="btn primary sm" href={`/produkty?${catalogSearchQuery(filter)}`}>
+                    Otvoriť Produkty
+                  </Link>
+                }
+                testId="new-discount-empty"
+              />
             ) : (
-              <div className={styles.note} role="alert" data-testid="window-error">
-                {windowError}
-              </div>
-            )}
-
-            <div className={`tbl-frame gap-t`}>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Vzorka — {formatCountSk(sample.length)} z {formatCountSk(itemsCount)}</th>
-                    <th className="n">Cena</th>
-                    <th className="n">Predané {filter.soldWindowDays} d</th>
-                    <th className="n">Pásmo</th>
-                    <th className="n">Nová cena</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sample.length === 0 ? (
+              <>
+                <table className={styles.tiers}>
+                  <thead>
                     <tr>
-                      <td className="name lvl-3">Vzorka bude, keď bude výber.</td>
-                      <td className="n">—</td>
-                      <td className="n">—</td>
-                      <td className="n">—</td>
-                      <td className="n">—</td>
+                      <th>Pásmo</th>
+                      <th>Pravidlo</th>
+                      <th className="n">Produktov</th>
+                      <th className="n">Zľava</th>
                     </tr>
-                  ) : (
-                    sample.map((row) => {
-                      const tier = tierOfProduct.get(row.productId);
-                      const newPrice = discountedPriceOf(row.price, tier?.percent ?? 0);
-                      return (
-                        <tr key={row.productId}>
-                          <td className="name">{row.name ?? 'bez názvu'}</td>
-                          <td className="n" data-l="Cena">
-                            {formatEur(row.price)}
+                  </thead>
+                  <tbody>
+                    {tiers.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="lvl-3">
+                          Načítavam výber…
+                        </td>
+                      </tr>
+                    ) : (
+                      tiers.map((tier) => (
+                        <tr key={tier.bucket} data-testid={`tier-${tier.bucket}`}>
+                          <td>
+                            <span className={styles.band} data-ord={tier.ord}>
+                              <i />
+                              {tier.letter}
+                            </span>
                           </td>
-                          <td className="n" data-l="Predané">
-                            {formatCountSk(row.unitsSold)}
-                          </td>
-                          <td className="n" data-l="Pásmo">
-                            {tier === undefined ? '—' : `${tier.letter} · ${tier.percent} %`}
-                          </td>
-                          <td className="n" data-l="Nová cena">
-                            <b>{newPrice === null ? '—' : formatEur(newPrice)}</b>
+                          <td>{tier.label}</td>
+                          <td className="n">{formatCountSk(tier.productIds.length)}</td>
+                          <td className="n">
+                            <input
+                              className={`inp ${styles.pctInput}`}
+                              inputMode="numeric"
+                              value={String(tier.percent)}
+                              aria-label={`Zľava pásma ${tier.letter} v percentách`}
+                              onChange={(event) => {
+                                const value = Number(event.target.value.replace(/[^\d]/g, ''));
+                                setPercents((current) => ({
+                                  ...current,
+                                  [tier.bucket]: Number.isFinite(value) ? value : 0,
+                                }));
+                              }}
+                              data-testid={`tier-percent-${tier.bucket}`}
+                            />{' '}
+                            %
                           </td>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-              <div className="tbl-foot">
-                <span>
-                  {avgPrice === null
-                    ? 'Priemernú cenu vo výbere zatiaľ nevieme'
-                    : `Priemerná cena vo výbere ${formatEur(avgPrice)}`}
-                </span>
-                <span className="lvl-3">Orientačný prepočet, zaokrúhlenie shopu sa môže líšiť</span>
-              </div>
-            </div>
+                      ))
+                    )}
+                    {tiers.length === 0 ? null : (
+                      <tr className="sum">
+                        <td colSpan={2}>Spolu — najhoršie ležiaky prvé, po strop</td>
+                        <td className="n">{formatCountSk(itemsCount)}</td>
+                        <td className="n">
+                          <span className="lvl-3">
+                            {formatCountSk(tiers.length)}{' '}
+                            {pluralSk(tiers.length, 'pásmo', 'pásma', 'pásiem')}
+                          </span>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+                {percentError === undefined || percentError === null ? null : (
+                  <div className={styles.note} role="alert" data-testid="tier-percent-error">
+                    {percentError}
+                  </div>
+                )}
+
+                <div className={`spread ${styles.winline}`}>
+                  <div className={styles.win}>
+                    <span className="lvl-3">Platí od</span>
+                    <input
+                      type="date"
+                      className="inp"
+                      value={from}
+                      onChange={(event) => {
+                        setWindowTouched(true);
+                        setFrom(event.target.value);
+                      }}
+                      aria-label="Zľava platí od"
+                      data-testid="date-from"
+                    />
+                    <span className="lvl-3">do</span>
+                    <input
+                      type="date"
+                      className="inp"
+                      value={to}
+                      onChange={(event) => {
+                        setWindowTouched(true);
+                        setTo(event.target.value);
+                      }}
+                      aria-label="Zľava platí do"
+                      data-testid="date-to"
+                    />
+                    <span className="lvl-3">
+                      {windowDays > 0
+                        ? `${formatCountSk(windowDays)} ${pluralSk(windowDays, 'deň', 'dni', 'dní')}`
+                        : ''}
+                    </span>
+                  </div>
+                  <span className="lvl-3">
+                    Rovnaké okno pre všetkých {formatCountSk(itemsCount)}
+                  </span>
+                </div>
+                {windowError === null ? (
+                  <div className="hint">
+                    Platí od 00:00 dňa {formatDateSk(from)} do 23:59 dňa {formatDateSk(to)}, čas
+                    shopu.
+                  </div>
+                ) : (
+                  <div className={styles.note} role="alert" data-testid="window-error">
+                    {windowError}
+                  </div>
+                )}
+
+                {/* Vzorka sa kreslí, až keď je z čoho — prázdna tabuľka nie je stav. */}
+                {sample.length === 0 ? null : (
+                <div className="tbl-frame gap-t">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>
+                          Vzorka — {formatCountSk(sample.length)} z {formatCountSk(itemsCount)}
+                        </th>
+                        <th className="n">Cena</th>
+                        <th className="n">Predané {filter.soldWindowDays} d</th>
+                        <th className="n">Pásmo</th>
+                        <th className="n">Nová cena</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sample.map((row) => {
+                        const tier = tierOfProduct.get(row.productId);
+                        const newPrice = discountedPriceOf(row.price, tier?.percent ?? 0);
+                        return (
+                          <tr key={row.productId}>
+                            <td className="name">{row.name ?? 'bez názvu'}</td>
+                            <td className="n" data-l="Cena">
+                              {formatEur(row.price)}
+                            </td>
+                            <td className="n" data-l="Predané">
+                              {formatCountSk(row.unitsSold)}
+                            </td>
+                            <td className="n" data-l="Pásmo">
+                              {tier === undefined ? '—' : `${tier.letter} · ${tier.percent} %`}
+                            </td>
+                            <td className="n" data-l="Nová cena">
+                              <b>{newPrice === null ? '—' : formatEur(newPrice)}</b>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <div className="tbl-foot">
+                    <span className="lvl-3">
+                      Orientačný prepočet, zaokrúhlenie shopu sa môže líšiť
+                    </span>
+                  </div>
+                </div>
+                )}
+              </>
+            )}
           </section>
         </div>
 
@@ -993,32 +1053,38 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
             </section>
           )}
 
-          <NewDiscountStart
-            itemsCount={itemsCount}
-            perDay={perDay}
-            aheadPending={aheadPending}
-            aheadNames={ahead === null ? [] : ahead.names}
-            ahead={aheadView}
-            finishDay={finishDay}
-            queueDays={queueDays}
-            budget={startBudget}
-            proposedStart={proposedStart}
-            from={from}
-            onUseProposal={() => {
-              if (proposedStart === null) return;
-              const length = windowDays > 0 ? windowDays : DEFAULT_WINDOW_DAYS;
-              setWindowTouched(true);
-              setFrom(proposedStart);
-              setTo(addDays(proposedStart, length - 1));
-            }}
-            keyExpiresAt={key === null ? null : key.expiresAt}
-            keyPresent={key === null ? true : key.present}
-          />
-
+          {/*
+           * SEKCIA 3 — ROZHODNUTIE. Dominanta (počet produktov) a pod ňou dva
+           * dátumy zo `NewDiscountStart`; medzikroky výpočtu sú v jeho rozkliku.
+           */}
           <NewDiscountConfirm
             itemsCount={itemsCount}
+            countKnown={!(catalogEmpty && itemsCount === 0)}
             tiers={tiers}
             averagePrice={avgPrice}
+            plan={
+              <NewDiscountStart
+                itemsCount={itemsCount}
+                perDay={perDay}
+                aheadPending={aheadPending}
+                aheadNames={ahead === null ? [] : ahead.names}
+                ahead={aheadView}
+                finishDay={finishDay}
+                queueDays={queueDays}
+                budget={startBudget}
+                proposedStart={proposedStart}
+                from={from}
+                onUseProposal={() => {
+                  if (proposedStart === null) return;
+                  const length = windowDays > 0 ? windowDays : DEFAULT_WINDOW_DAYS;
+                  setWindowTouched(true);
+                  setFrom(proposedStart);
+                  setTo(addDays(proposedStart, length - 1));
+                }}
+                keyExpiresAt={key === null ? null : key.expiresAt}
+                keyPresent={key === null ? true : key.present}
+              />
+            }
             typed={typed}
             onTyped={setTyped}
             previewFresh={previewFresh}
@@ -1052,6 +1118,19 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 }
 
 /* ═══════════════════════════ pomocníci ════════════════════════════════════ */
+
+/**
+ * Odtlačok načítaného výberu — poistka I3 (viď hlavička súboru).
+ *
+ * Nesie presne to, čo rozhoduje o zápise a o tom, čo mal človek pred očami:
+ * ktoré produkty, do akého pásma padnú (`unitsSold`) a za akú cenu ich videl.
+ * Keď sa čokoľvek z toho zmení, hotová skúška naprázdno prestáva platiť; keď
+ * obnova vráti tú istú sadu, skúška platí ďalej. Poradie riadkov je súčasťou
+ * odtlačku zámerne — mení sa s triedením a s ním aj vzorka, ktorú človek videl.
+ */
+export function selectionPrintOf(rows: readonly SelectableRow[]): string {
+  return rows.map((row) => `${row.productId}:${row.unitsSold}:${row.price ?? ''}`).join(',');
+}
 
 /** Dĺžka okna v dňoch. Nedopočítaný ani rozpísaný dátum nesmie zhodiť render. */
 function safeWindowDays(from: string, to: string): number {

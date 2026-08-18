@@ -1,11 +1,20 @@
 'use client';
 
 /**
- * Aura Zľavy — NOVÁ ZĽAVA, panel POTVRDENIE (V11; predloha
- * `design/v3/nova-zlava.html`, kontrakt V3 K4, K8, K10, invariant I3).
+ * Aura Zľavy — NOVÁ ZĽAVA, karta ROZHODNUTIA (V11; predloha
+ * `design/v3/nova-zlava.html`, kontrakt V3 K4, K8, K10, invariant I3,
+ * kontrakt UI, bod 24).
  *
- * Toto je miesto, kde sa rozhoduje o zápise do PRODUKČNÉHO eshopu, takže je
- * postavené na dvoch poistkách, ktoré sa nedajú preklikať:
+ * Jedna karta, v ktorej sa rozhoduje o zápise do PRODUKČNÉHO eshopu. Nesie
+ * dominantu celej obrazovky — **počet produktov, ktoré zlacnejú** — a pod ňou
+ * v jednom slede: čím sú, kedy budú zapísané (slot `plan`), čo o marži appka
+ * nevie, ručne vpísaný počet a dve tlačidlá. Do 18. 8. 2026 boli čas a
+ * potvrdenie dve samostatné sekcie nad sebou; obrazovka sa preto nezmestila do
+ * 1,5 obrazovky a dominanta stála až pod dvojicou dátumov, teda pod menej
+ * dôležitým číslom.
+ *
+ * DVE POISTKY, KTORÉ SA NEDAJÚ PREKLIKAŤ
+ * --------------------------------------
  *
  *  1. **Skúška naprázdno musí prebehnúť** a musí sedieť na PRÁVE ZOBRAZENÝ
  *     výber. Keď sa čokoľvek zmení (produkty, pásma, okno), potvrdenie sa
@@ -15,13 +24,22 @@
  *     8 000 sa omylom nenapíše. Je to povrchová podoba I3 a zámerne to
  *     spomaľuje (odpoveď 38).
  *
- * A jedna vec, ktorá tu NIKDY nebude: **dopad na maržu ako číslo.** Shop
- * nákupné ceny nevracia, takže každý taký odhad by bol vymyslený (K8).
- * Namiesto neho je veta o tom, čo chýba.
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *
+ * 1. **Dopad na maržu nikdy nebude číslo.** Shop nákupné ceny nevracia, takže
+ *    každý taký odhad by bol vymyslený (K8). Na jeho mieste je veta o tom, čo
+ *    chýba — a v tom bloku nesmie byť ani cifra, ani euro. Stráži to test.
+ * 2. **Dominanta je počet produktov** (P1). Nič v tejto karte nesmie byť
+ *    väčšie než `.big` — ani tlačidlo, ani dátum. Keď sa pridá nové číslo,
+ *    patrí do riadku pod dominantu, nie vedľa nej.
+ * 3. **Zamknuté tlačidlo hovorí dôvod.** `blockedReason` je jediná veta, ktorá
+ *    vysvetlí, prečo sa nedá zaradiť; bez nej je zašedené tlačidlo hádanka.
  *
  * Vlastník: V11.
  */
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 
 import styles from '@/components/campaigns/zlavy.module.css';
 import type { TierPlan } from '@/components/campaigns/discounts-model';
@@ -29,14 +47,26 @@ import type { TierPlan } from '@/components/campaigns/discounts-model';
 // panel opakovania a dve kópie toho istého prekladu by sa časom rozišli (K10).
 import { previewBlockerText } from '@/components/campaigns/queue-model';
 import type { CreateResult, PreviewData } from '@/components/campaigns/zlavy-api';
-import { formatDateTimeSk, formatEur } from '@/lib/ui/format';
+import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 export interface NewDiscountConfirmProps {
   itemsCount: number;
+  /**
+   * Vieme vôbec, koľko produktov to je? `false` = zrkadlo katalógu je prázdne,
+   * takže nula by bola tvrdenie o niečom, čo sa nemeralo — dominanta je vtedy
+   * pomlčka (kontrakt UI, bod 5). Predvolene `true`.
+   */
+  countKnown?: boolean;
   tiers: readonly TierPlan[];
   /** Priemer cien, ktoré naozaj prišli; `null` = ani jednu cenu nepoznáme. */
   averagePrice: number | null;
+  /**
+   * Kedy bude zapísané a kedy zľava nabehne (`NewDiscountStart`). Je to slot,
+   * nie vlastná sekcia: oba dátumy patria k rozhodnutiu a samostatná karta ich
+   * od neho odtrhla.
+   */
+  plan?: ReactNode;
   typed: string;
   onTyped: (value: string) => void;
   /** Skúška naprázdno sedí na aktuálny výber a nemá blokátory. */
@@ -54,8 +84,10 @@ export interface NewDiscountConfirmProps {
 
 export function NewDiscountConfirm({
   itemsCount,
+  countKnown = true,
   tiers,
   averagePrice,
+  plan,
   typed,
   onTyped,
   previewFresh,
@@ -89,7 +121,7 @@ export function NewDiscountConfirm({
             <span className="lvl-3">Odhad dobehnutia zatiaľ nevieme</span>
           ) : (
             <span>
-              Hotové <b className="est">{created.estimate.date}</b>
+              Hotové <b className="est">{formatDateSk(created.estimate.date)}</b>
             </span>
           )}
           {created.keyExpiresBeforeFinish === true ? (
@@ -116,12 +148,12 @@ export function NewDiscountConfirm({
   return (
     <section className="sec" data-testid="new-discount-confirm">
       <div className="sec-h">
-        <h2>Potvrdenie</h2>
+        <h2>Zápis a potvrdenie</h2>
       </div>
 
       <div className={`${styles.confirm} lvl-1`}>
         <span className="big" data-testid="confirm-count">
-          {formatCountSk(itemsCount)}
+          {countKnown ? formatCountSk(itemsCount) : '—'}
         </span>
         <span className={styles.cap}>produktov dostane zľavu</span>
       </div>
@@ -140,6 +172,8 @@ export function NewDiscountConfirm({
           </span>
         )}
       </div>
+
+      {plan}
 
       {/* K8 — dopad na maržu sa NIKDY neukáže ako číslo, ani odhadom. */}
       <div className={styles.margin}>

@@ -1,19 +1,22 @@
 /**
- * Aura Zľavy — PREHĽAD: živý stav a „prečo sa nič nedeje" (V9).
+ * Aura Zľavy — PREHĽAD: verdikt a „prečo sa nič nedeje" (V9).
  *
- * Kontrakt dokončenia (C1–C4) žiada, aby používateľ videl bez logov a bez
- * databázy dve veci: čo appka práve robí a prečo sa niečo NESTALO. Obe sú
- * tvrdenia o produkčnom eshope, takže sa musia dať overiť bez klikania.
+ * Kontrakt UI (13. 8. 2026) žiada, aby Prehľad odpovedal na JEDNU otázku —
+ * „je všetko v poriadku?" — do troch sekúnd, a aby nikdy netvrdil nič, čo
+ * nevie. Sú to tvrdenia o produkčnom eshope, takže sa musia dať overiť bez
+ * klikania.
  *
  * Testuje sa preto to, čo o obrazovke rozhoduje:
  *
  *   A. čítanie `/api/status` a `/api/catalog/sync` — čo sa nedá prečítať, je
  *      `null` alebo fail-closed, nikdy upokojujúca nula,
- *   B. rozhodovanie živého stavu — pilulky, prúžky a riadky „čo sa deje",
- *   C. prekážky — farbu volí SPÔSOB RIEŠENIA, nie závažnosť, a poradie zo
- *      servera sa nemení,
- *   D. zhoda zoznamov kódov s ich originálmi (kontrola typom, nie vierou),
- *   E. obrazovka sa naozaj vykreslí a hovorí to, čo model rozhodol.
+ *   B. riadok kontrol — nesie len to, čo stavový pruh NEHOVORÍ,
+ *   C. VERDIKT — „Všetko v poriadku" padne len vtedy, keď sa naozaj všetko
+ *      prečítalo a nič nezastavuje ani nebrzdí,
+ *   D. prekážky — farbu volí SPÔSOB RIEŠENIA, nie závažnosť; kreslia sa všetky
+ *      tri úrovne, ale sekcia sa otvorí len keď niečo naozaj stojí v ceste,
+ *   E. zhoda zoznamov kódov s ich originálmi (kontrola typom, nie vierou),
+ *   F. obrazovka sa naozaj vykreslí a hovorí to, čo model rozhodol.
  *
  * Vlastník: V9.
  */
@@ -22,8 +25,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import BlockersSection from '@/components/dashboard/BlockersSection';
-import FirstDiscountSection from '@/components/dashboard/FirstDiscountSection';
-import LiveStatusSection from '@/components/dashboard/LiveStatusSection';
+import StatusSection from '@/components/dashboard/StatusSection';
 
 import {
   parseCatalogSync,
@@ -36,25 +38,29 @@ import {
 } from '@/components/dashboard/status-api';
 import {
   RESOLUTION_LOOK,
-  budgetResetPhrase,
-  catalogActivity,
-  catalogMeter,
+  hasObstacles,
   heartbeatSummary,
-  keyPill,
-  liveStatusView,
   resolutionLook,
-  scopeActivity,
   screenBlockers,
   shopPill,
   unreadableSentence,
-  writesActivity,
 } from '@/components/dashboard/live-status-model';
+import {
+  catalogCheck,
+  overviewChecks,
+  overviewVerdict,
+  queueCheck,
+  scopeCheck,
+  shopCheck,
+  type VerdictInput,
+} from '@/components/dashboard/overview-verdict';
+import { queueProgress, type QueueProgress } from '@/components/dashboard/overview-model';
 
 import type { CatalogWaitingReason } from '@/lib/repo/catalog.repo';
 import type { BlockerResolution, BlockerSeverity } from '@/lib/status/blockers';
-import type { StatusSection } from '@/lib/status/snapshot';
+import type { StatusSection as StatusSectionName } from '@/lib/status/snapshot';
 
-const NOW = new Date('2026-08-12T09:00:00.000Z');
+const TODAY = '2026-08-12';
 
 /* ═════════════════════════════ pomocné snímky ═════════════════════════════ */
 
@@ -96,6 +102,71 @@ function status(patch: Partial<StatusView> = {}): StatusView {
     blockers: [],
     blocked: false,
     unreadable: [],
+    ...patch,
+  };
+}
+
+/** Fronta, ktorá pokojne zapisuje. Základ, ktorý si testy ohýbajú po svojom. */
+function running(): QueueProgress {
+  return queueProgress({
+    snapshot: {
+      budget: { day: TODAY, budget: 200, spent: 100, remaining: 100, exhausted: false },
+      queue: { pending: 4580, total: 8000, done: 3420, campaigns: 1 },
+      current: {
+        campaignId: 1,
+        name: 'Ležiaky striebro — jeseň',
+        status: 'queued',
+        dateFrom: '2026-09-04',
+        dateTo: '2026-09-18',
+        itemsTotal: 8000,
+        itemsOk: 3408,
+        itemsFailed: 12,
+        itemsUncertain: 0,
+        itemsPending: 4580,
+        late: false,
+      },
+      estimate: { pending: 4580, perDay: 200, days: 23, date: '2026-09-02' },
+      heartbeat: { lastTickAt: '2026-08-12T08:59:00.000Z', stale: false },
+      gate: { paused: false, since: null },
+    },
+    campaigns: [],
+    today: TODAY,
+  });
+}
+
+/** Fronta, ktorá stojí po odstávke počítača. */
+function paused(): QueueProgress {
+  return { ...running(), mode: 'paused', pausedSince: '2026-08-11T21:04:00.000Z' };
+}
+
+/** Appka na otázku o fronte neodpovedala. */
+function unknownQueue(): QueueProgress {
+  return queueProgress({ snapshot: null, campaigns: null, today: TODAY });
+}
+
+/** V appke ešte nie je ani jedna zľava. */
+function firstRun(): QueueProgress {
+  return queueProgress({
+    snapshot: {
+      budget: null,
+      queue: { pending: 0, total: 0, done: 0, campaigns: 0 },
+      current: null,
+      estimate: null,
+      heartbeat: { lastTickAt: '2026-08-12T08:59:00.000Z', stale: false },
+      gate: { paused: false, since: null },
+    },
+    campaigns: [],
+    today: TODAY,
+  });
+}
+
+/** Vstup verdiktu s pokojnými faktami; test si prepíše len to, čo skúša. */
+function input(patch: Partial<VerdictInput> = {}): VerdictInput {
+  return {
+    status: status(),
+    sync: sync(),
+    heartbeat: { lastTickAt: '2026-08-12T08:59:00.000Z', stale: false },
+    progress: running(),
     ...patch,
   };
 }
@@ -165,156 +236,200 @@ describe('Prehľad — čítanie živého stavu', () => {
   });
 });
 
-/* ═════════════════ B. Rozhodovanie živého stavu ═══════════════════════════ */
+/* ═════════════════ B. Riadok kontrol nesie len to, čo pruh nehovorí ═══════ */
 
-describe('Prehľad — pilulky a prúžky hovoria len to, čo appka vie', () => {
-  it('kľúč: chýbajúci nie je červený, končiaci sa ozve včas', () => {
-    expect(keyPill({ present: null, expiresAt: null }, NOW).tone).toBe('idle');
-
-    const missing = keyPill({ present: false, expiresAt: null }, NOW);
-    expect(missing.tone).toBe('attention');
-    expect(missing.tone).not.toBe('critical');
-
-    expect(keyPill({ present: true, expiresAt: '2026-08-14T09:00:00.000Z' }, NOW).tone).toBe('good');
-    expect(keyPill({ present: true, expiresAt: '2026-08-12T15:00:00.000Z' }, NOW).tone).toBe(
-      'attention',
-    );
-    expect(keyPill({ present: true, expiresAt: '2026-08-12T08:00:00.000Z' }, NOW).label).toContain(
-      'skončil',
-    );
-    // Vložený kľúč bez známej platnosti sa NEBERIE ako platný.
-    expect(keyPill({ present: true, expiresAt: null }, NOW).tone).toBe('attention');
+describe('Prehľad — kontroly pri dominante', () => {
+  it('sú štyri a v pevnom poradí: fronta, shop, katalóg, rozsah', () => {
+    expect(overviewChecks(input()).map((check) => check.id)).toEqual([
+      'fronta',
+      'shop',
+      'katalog',
+      'rozsah',
+    ]);
   });
 
-  it('kľúč: pilulka nikdy nenesie nič zo samotného kľúča', () => {
-    const pill = keyPill({ present: true, expiresAt: '2026-08-14T09:00:00.000Z' }, NOW);
-    expect(pill.label).toContain('platí ešte');
-    expect(pill.detail).not.toBeNull();
-    expect(pill.label).not.toMatch(/[A-Za-z0-9]{16,}/);
+  /**
+   * Stavový pruh (chróm) nesie ostrý zápis, kľúč, rozpočet zápisov a počty
+   * katalógu. Keby ich niesli aj kontroly, tie dve kópie sa raz rozídu a nedá
+   * sa povedať, ktorá klame. Test stráži presne to.
+   */
+  it('neopakujú stavový pruh — žiadny kľúč, žiadny rozpočet, žiadne počty', () => {
+    const text = overviewChecks(input())
+      .map((check) => check.text)
+      .join(' | ');
+    expect(text).not.toContain('Kľúč');
+    expect(text).not.toContain('Zápisy');
+    expect(text).not.toContain('2 900');
+    expect(text).not.toContain('41 082');
+  });
+
+  it('chýbajúci krok fronty znamená „nekontroluje", nie pokoj', () => {
+    expect(heartbeatSummary(null).tone).toBe('warn');
+    expect(queueCheck(null).tone).toBe('warn');
+    expect(queueCheck(null).text).toBe('Fronta sa nekontroluje');
+    expect(queueCheck({ lastTickAt: '2026-08-12T08:59:00.000Z', stale: false }).tone).toBe('ok');
   });
 
   it('spojenie so shopom stojí na poslednom úspešnom čítaní, nie na domnienke', () => {
     expect(shopPill(null).tone).toBe('idle');
-    expect(shopPill(sync({ lastReadAt: null })).tone).toBe('idle');
-    expect(shopPill(sync()).tone).toBe('good');
-    expect(shopPill(sync({ failedLastTime: true })).tone).toBe('attention');
-    expect(shopPill(sync({ waiting: 'error' })).tone).toBe('attention');
+    expect(shopCheck(null).tone).toBe('idle');
+    expect(shopCheck(sync({ lastReadAt: null })).tone).toBe('idle');
+    expect(shopCheck(sync()).tone).toBe('ok');
+    expect(shopCheck(sync({ failedLastTime: true })).tone).toBe('warn');
+    expect(shopCheck(sync({ waiting: 'error' })).tone).toBe('warn');
   });
 
-  /**
-   * Najdôležitejšie tvrdenie sekcie: pri dočítanom katalógu by `BudgetMeter`
-   * napísal „strop vyčerpaný", čo je presný opak toho, čo sa stalo.
-   */
-  it('prúžok katalógu zmizne, keď je katalóg celý alebo keď čísla nevieme', () => {
-    expect(catalogMeter(sync(), null)).toEqual({ spent: 2900, limit: 41082 });
-    expect(catalogMeter(sync({ complete: true }), null)).toBeNull();
-    expect(catalogMeter(sync({ loadedProducts: 41082 }), null)).toBeNull();
-    expect(catalogMeter(sync({ shopTotalProducts: null }), null)).toBeNull();
-    expect(catalogMeter(null, null)).toBeNull();
-  });
+  it('katalóg hovorí, čo robí — nie koľko ho je (to je v pruhu)', () => {
+    expect(catalogCheck(sync(), null).text).toBe('Katalóg sa dočítava');
+    expect(catalogCheck(sync({ waiting: 'daily_budget' }), null).text).toContain('rozpočet');
+    expect(catalogCheck(sync({ waiting: 'rate_limited' }), null).text).toContain('prestávku');
+    expect(catalogCheck(sync({ waiting: 'error' }), null).tone).toBe('warn');
+    expect(catalogCheck(null, null).text).toBe('Stav katalógu nevieme');
 
-  it('rozpočet sa obnovuje o polnoci UTC, ale hovorí sa v miestnom čase', () => {
-    expect(budgetResetPhrase(NOW)).toBe('o 02:00');
-    expect(budgetResetPhrase(new Date('2026-01-12T09:00:00.000Z'))).toBe('o 01:00');
-  });
-});
-
-describe('Prehľad — riadky „čo appka práve robí"', () => {
-  it('zamknuté zápisy sú jediný kritický stav, vypnuté sú pokojné', () => {
-    expect(writesActivity({ enabled: true, locked: true }).tone).toBe('bad');
-    expect(writesActivity({ enabled: false, locked: false }).tone).toBe('idle');
-    expect(writesActivity({ enabled: null, locked: null }).word).toBe('nevieme');
-    expect(writesActivity({ enabled: true, locked: false }).tone).toBe('ok');
-  });
-
-  it('pilotný rozsah nesie zámok a cestu, kde sa dá zdvihnúť', () => {
-    const pilot = scopeActivity({ pilot: true, maxProducts: 10 });
-    expect(pilot.tone).toBe('lock');
-    expect(pilot.text).toContain('10 produktov');
-    expect(pilot.path).toBe('/nastavenia');
-
-    const full = scopeActivity({ pilot: false, maxProducts: 150 });
-    expect(full.tone).toBe('ok');
-    expect(full.text).toContain('150 produktov');
-
-    expect(scopeActivity({ pilot: null, maxProducts: null }).tone).toBe('idle');
-  });
-
-  it('katalóg povie, kde je, prečo stojí a dokedy to potrvá', () => {
-    const running = catalogActivity(sync(), null);
-    expect(running.text).toContain('2 900 z 41 082');
-    expect(running.text).toContain('≈ 14. 8.');
-
-    expect(catalogActivity(sync({ waiting: 'daily_budget' }), null).text).toContain('po polnoci');
-    expect(catalogActivity(sync({ waiting: 'rate_limited' }), null).text).toContain('11:15');
-    expect(catalogActivity(sync({ waiting: 'error' }), null).tone).toBe('warn');
-
-    const done = catalogActivity(sync({ complete: true, loadedProducts: 41082 }), null);
+    const done = catalogCheck(sync({ complete: true, loadedProducts: 41082 }), null);
     expect(done.tone).toBe('ok');
-    expect(done.word).toBe('načítaný celý');
-    expect(done.text).toContain('41 082');
-
-    expect(catalogActivity(null, null).word).toBe('nevieme');
+    expect(done.text).toBe('Katalóg načítaný celý');
   });
 
   it('prázdny katalóg NIE JE načítaný celý — nula nie je hotovo', () => {
     // Nájdené na snímke z prehliadača 12. 8.: hore svietilo „Katalóg prázdny"
-    // a o kúsok nižšie „✓ načítaný celý — Načítaných je všetkých 0".
-    // Príčinou bolo holé `loaded >= total`, kde 0 >= 0 vyjde ako pravda,
-    // takže appka o prázdnej tabuľke tvrdila, že má celý katalóg.
-    const prazdny = catalogActivity(
+    // a o kúsok nižšie „✓ načítaný celý". Príčinou bolo holé `loaded >= total`,
+    // kde 0 >= 0 vyjde ako pravda.
+    const prazdny = catalogCheck(
       sync({ loadedProducts: 0, shopTotalProducts: 0, complete: false }),
       null,
     );
-    expect(prazdny.word).not.toBe('načítaný celý');
+    expect(prazdny.text).toBe('Katalóg prázdny');
     expect(prazdny.tone).not.toBe('ok');
 
     // Ani meraný príznak z `catalog_sync_state` neplatí nad prázdnou tabuľkou.
-    const klamlivyPriznak = catalogActivity(
-      sync({ loadedProducts: 0, shopTotalProducts: 41_082, complete: true }),
-      null,
-    );
-    expect(klamlivyPriznak.word).not.toBe('načítaný celý');
+    expect(
+      catalogCheck(sync({ loadedProducts: 0, shopTotalProducts: 41_082, complete: true }), null)
+        .text,
+    ).toBe('Katalóg prázdny');
   });
 
   /**
-   * Po KAŽDOM dokončenom prechode beží nový (obnovovací) a ten začína od
-   * stránky 0. Prehľad vtedy hlásil „načítaný celý", kým karta v Produktoch
-   * vedľa toho tvrdila „382 stránok ostáva, ešte 2 dni". Katalóg je celý — a
-   * Prehľad má povedať aj to, že sa práve obnovuje, inak je čítanie shopu
-   * pri „hotovom" katalógu záhada.
+   * Po KAŽDOM dokončenom prechode beží nový a ten začína od stránky 0. Kým to
+   * kontrola nepovedala, javilo sa čítanie shopu pri „hotovom" katalógu ako
+   * záhada.
    */
-  it('obnova nad celým katalógom je „načítaný celý", a je vidieť, že beží', () => {
-    const obnova = catalogActivity(
+  it('obnova nad celým katalógom je vidieť, a nie je to odhad', () => {
+    const obnova = catalogCheck(
       sync({ loadedProducts: 41_082, complete: false, refreshing: true }),
       null,
     );
-
     expect(obnova.tone).toBe('ok');
-    expect(obnova.word).toBe('načítaný celý');
+    expect(obnova.text).toContain('načítaný celý');
     expect(obnova.text).toContain('obnovuje');
-    // Žiadny odhad dokončenia — nie je čo dokončovať.
     expect(obnova.text).not.toContain('≈');
   });
 
-  it('chýbajúci krok fronty znamená „appka nekontroluje", nie pokoj', () => {
-    expect(heartbeatSummary(null).tone).toBe('warn');
-    expect(heartbeatSummary({ lastTickAt: null, stale: true }).detail).toContain('nepoznáme');
-    expect(heartbeatSummary({ lastTickAt: '2026-08-12T08:59:00.000Z', stale: false }).tone).toBe(
-      'ok',
-    );
-  });
+  it('rozsah nesie číslo stropu a pilotný má zámok s cestou k odomknutiu', () => {
+    const pilot = scopeCheck({ pilot: true, maxProducts: 10 });
+    expect(pilot.tone).toBe('lock');
+    expect(pilot.text).toContain('10 produktov');
+    expect(pilot.path).toBe('/nastavenia');
 
-  it('nečitateľná sekcia sa prizná slovom, nikdy vnútorným kódom', () => {
-    const sentence = unreadableSentence(['apiKey', 'writeBudget']);
-    expect(sentence).toContain('kľúč na zápis');
-    expect(sentence).toContain('rozpočet zápisov');
-    expect(sentence).not.toContain('apiKey');
-    expect(unreadableSentence([])).toBeNull();
+    const full = scopeCheck({ pilot: false, maxProducts: 150 });
+    expect(full.tone).toBe('ok');
+    expect(full.text).toContain('150 produktov');
+
+    expect(scopeCheck({ pilot: null, maxProducts: null }).tone).toBe('idle');
   });
 });
 
-/* ═════════════════ C. Prekážky — farbu volí spôsob riešenia ═══════════════ */
+/* ═════════════════ C. Verdikt — najsilnejšie tvrdenie appky ═══════════════ */
+
+describe('Prehľad — verdikt', () => {
+  it('„Všetko v poriadku" padne, len keď naozaj nič nestojí v ceste', () => {
+    const verdict = overviewVerdict(input());
+    expect(verdict.kind).toBe('ok');
+    expect(verdict.headline).toBe('Všetko v poriadku');
+    expect(verdict.tone).toBe('ok');
+  });
+
+  it('bez odpovede stavu sa netvrdí nič — a už vôbec nie, že je dobre', () => {
+    const verdict = overviewVerdict(input({ status: null }));
+    expect(verdict.kind).toBe('unknown');
+    expect(verdict.headline).not.toContain('poriadku');
+  });
+
+  /** Nedočítaný stav sa nesmie vydávať za dobrú správu (P7). */
+  it('nečitateľná sekcia stavu zhodí „v poriadku" na „nevieme"', () => {
+    const verdict = overviewVerdict(input({ status: status({ unreadable: ['writeBudget'] }) }));
+    expect(verdict.kind).toBe('unknown');
+    expect(verdict.headline).toBe('Časť stavu nevieme');
+  });
+
+  it('zastavujúca prekážka zastaví verdikt a povie ich počet, nie dôvod', () => {
+    const verdict = overviewVerdict(
+      input({ status: status({ blockers: [blocker(), blocker({ id: 'writes_disabled' })] }) }),
+    );
+    expect(verdict.kind).toBe('stopped');
+    expect(verdict.headline).toBe('Zápis stojí');
+    expect(verdict.tone).toBe('warn');
+    expect(verdict.detail).toBe('2 prekážky zastavujú zápis.');
+    // Dôvod je veta zo servera a patrí do sekcie prekážok, nie do verdiktu.
+    expect(verdict.detail).not.toContain('Kľúč');
+  });
+
+  /**
+   * Bod 7 kontraktu: farbu volí SPÔSOB RIEŠENIA, nie závažnosť. Vyčerpaný
+   * denný rozpočet zastavuje všetko, a predsa je to pokojný stav (K2).
+   */
+  it('keď sa na zastavenie len čaká, verdikt je pokojný a sivý', () => {
+    const verdict = overviewVerdict(
+      input({
+        status: status({
+          blockers: [blocker({ id: 'write_budget_exhausted', resolution: 'cakanie' })],
+        }),
+      }),
+    );
+    expect(verdict.kind).toBe('stopped');
+    expect(verdict.headline).toBe('Zápis čaká');
+    expect(verdict.tone).toBe('idle');
+    expect(verdict.tone).not.toBe('bad');
+  });
+
+  it('runaway zámok je jediný červený verdikt Prehľadu', () => {
+    const verdict = overviewVerdict(
+      input({ status: status({ writes: { enabled: true, locked: true } }) }),
+    );
+    expect(verdict.tone).toBe('bad');
+    expect(verdict.headline).toContain('poistka');
+  });
+
+  it('brzdiaca prekážka nezastavuje, ale verdikt sa ňou nedá prehlušiť', () => {
+    const verdict = overviewVerdict(
+      input({
+        status: status({ blockers: [blocker({ severity: 'obmedzuje', resolution: 'sam' })] }),
+      }),
+    );
+    expect(verdict.kind).toBe('slowed');
+    expect(verdict.headline).toBe('Zapisuje sa pomalšie');
+    expect(verdict.detail).toBe('1 prekážka spomaľuje zápis.');
+  });
+
+  /**
+   * Mŕtvy scheduler je fakt z databázy a Prehľad ho nesmie prehliadnuť ani
+   * vtedy, keď zoznam prekážok mlčí — prekážky o fronte nevedia nič.
+   */
+  it('stojaca fronta zhodí verdikt aj bez jedinej prekážky', () => {
+    const verdict = overviewVerdict(input({ progress: paused() }));
+    expect(verdict.kind).toBe('stopped');
+    expect(verdict.headline).toBe('Fronta stojí');
+    expect(verdict.detail).toContain('11.08.2026');
+  });
+
+  it('nečitateľná fronta je „nevieme", nikdy nula', () => {
+    const verdict = overviewVerdict(input({ progress: unknownQueue() }));
+    expect(verdict.kind).toBe('unknown');
+    expect(verdict.headline).toBe('Stav fronty nevieme');
+  });
+});
+
+/* ═════════════════ D. Prekážky — farbu volí spôsob riešenia ═══════════════ */
 
 describe('Prehľad — prečo sa nič nedeje', () => {
   /**
@@ -335,7 +450,12 @@ describe('Prehľad — prečo sa nič nedeje', () => {
     expect(resolutionLook(null).word.length).toBeGreaterThan(0);
   });
 
-  it('informatívne riadky nie sú dôvod, prečo sa nič nedeje', () => {
+  /**
+   * Bod 6 kontraktu UI: keď sa sekcia kreslí, sú v nej VŠETKY tri úrovne.
+   * Do 18. 8. sa `informuje` zahadzovalo, lebo malo vlastnú sekciu „Živý
+   * stav"; tá zanikla a s ňou aj dôvod filtrovať.
+   */
+  it('zo zoznamu nevypadne ani jedna úroveň a poradie zo servera drží', () => {
     const rows = [
       blocker({ id: 'writes_disabled', severity: 'blokuje' }),
       blocker({ id: 'catalog_incomplete', severity: 'obmedzuje' }),
@@ -344,20 +464,24 @@ describe('Prehľad — prečo sa nič nedeje', () => {
     expect(screenBlockers(rows).map((row) => row.id)).toEqual([
       'writes_disabled',
       'catalog_incomplete',
+      'scope_pilot_cap',
     ]);
   });
 
-  it('poradie zo servera sa na obrazovke nemení', () => {
-    const rows = [
-      blocker({ id: 'prva' }),
-      blocker({ id: 'druha', severity: 'obmedzuje' }),
-      blocker({ id: 'tretia' }),
-    ];
-    expect(screenBlockers(rows).map((row) => row.id)).toEqual(['prva', 'druha', 'tretia']);
+  /**
+   * Bod 3 kontraktu UI: keď zápisu nič nebráni, sekcia sa NEKRESLÍ VÔBEC.
+   * Samotné `informuje` (platný pilotný strop) nie je dôvod, prečo sa niečo
+   * nedeje — to je trvalé pravidlo a jeho miesto je v riadku kontrol.
+   */
+  it('sekciu otvorí len to, čo naozaj zastavuje alebo brzdí', () => {
+    expect(hasObstacles([])).toBe(false);
+    expect(hasObstacles([blocker({ severity: 'informuje' })])).toBe(false);
+    expect(hasObstacles([blocker({ severity: 'obmedzuje' })])).toBe(true);
+    expect(hasObstacles([blocker({ severity: 'blokuje' })])).toBe(true);
   });
 });
 
-/* ═════════════════ D. Zoznamy kódov sa nesmú rozísť s originálom ══════════ */
+/* ═════════════════ E. Zoznamy kódov sa nesmú rozísť s originálom ══════════ */
 
 describe('Prehľad — kódy sedia s originálmi (kontroluje typ, nie viera)', () => {
   /**
@@ -377,7 +501,7 @@ describe('Prehľad — kódy sedia s originálmi (kontroluje typ, nie viera)', (
       cakanie: 'cakanie',
       mimo_appky: 'mimo_appky',
     };
-    const sections: Record<StatusSection, StatusSectionCode> = {
+    const sections: Record<StatusSectionName, StatusSectionCode> = {
       writes: 'writes',
       apiKey: 'apiKey',
       writeBudget: 'writeBudget',
@@ -399,59 +523,104 @@ describe('Prehľad — kódy sedia s originálmi (kontroluje typ, nie viera)', (
   });
 });
 
-/* ═════════════════ E. Obrazovka sa naozaj vykreslí ════════════════════════ */
+/* ══════════════════ F. Obrazovka sa naozaj vykreslí ══════════════════════ */
 
-describe('Prehľad — nové sekcie sa vykreslia', () => {
-  function renderLive(view: Parameters<typeof liveStatusView>[0]): string {
+describe('Prehľad — dominanta a prekážky sa vykreslia', () => {
+  const CALM = { live: 1, ready: 1, discounted: 2380 };
+  const BUDGET = { spent: 100, budget: 200, remaining: 100 };
+  const noop = (): void => {};
+
+  function renderStatus(patch: Partial<VerdictInput> = {}, gap: string | null = null): string {
+    const view = input(patch);
     return renderToStaticMarkup(
-      createElement(LiveStatusSection, { view: liveStatusView(view) }),
+      createElement(StatusSection, {
+        verdict: overviewVerdict(view),
+        checks: overviewChecks(view),
+        progress: view.progress,
+        budget: BUDGET,
+        calm: CALM,
+        gap,
+        onChanged: noop,
+      }),
     );
   }
 
-  it('živý stav ukáže rozpočet, katalóg, kľúč, spojenie aj tri riadky', () => {
-    const html = renderLive({
-      status: status(),
-      sync: sync(),
-      heartbeat: { lastTickAt: '2026-08-12T08:59:00.000Z', stale: false },
-      now: NOW,
-    });
-
-    expect(html).toContain('Živý stav');
-    expect(html).toContain('100/200');
-    expect(html).toContain('2 900/41 082');
-    expect(html).toContain('Spojené so shopom');
-    expect(html).toContain('Kľúč platí ešte');
-    expect(html).toContain('appka kontroluje frontu');
-    expect(html.match(/data-testid="live-line"/g)).toHaveLength(3);
+  /**
+   * Najdôležitejšie tvrdenie tohto súboru. Dominantou Prehľadu je VETA, ktorá
+   * je odpoveďou na „je všetko v poriadku?" — nie číslo fronty, z ktorého sa
+   * odpoveď musí odvodiť. Číslo zostáva, ale na polovičnej veľkosti (P1).
+   */
+  it('dominantou je veta, nie číslo fronty', () => {
+    const html = renderStatus();
+    expect(html).toContain('Všetko v poriadku');
+    expect(html).toContain('class="big sm"');
+    expect(html).toContain('3 420');
+    expect(html).toContain('/ 8 000');
+    // Staré 64 px číslo fronty sa nesmie vrátiť — zhodilo by P1.
+    expect(html).not.toContain('prog-lg');
     expect(html).not.toContain('<table');
   });
 
-  it('neznámy rozpočet sa nekreslí ako nula, ale ako priznaná medzera', () => {
-    const html = renderLive({
-      status: status({ writeBudget: null, unreadable: ['writeBudget'] }),
-      sync: null,
-      heartbeat: null,
-      now: NOW,
-    });
-
-    expect(html).toContain('nepodarilo zistiť');
-    expect(html).toContain('rozpočet zápisov');
-    expect(html).not.toContain('0/200');
-    expect(html).toContain('appka frontu nekontroluje');
+  it('riadok kontrol je na obrazovke vždy, aj keď je všetko v poriadku', () => {
+    const html = renderStatus();
+    expect(html).toContain('data-testid="overview-checks"');
+    expect(html).toContain('Fronta sa kontroluje');
+    expect(html).toContain('Spojené so shopom');
+    expect(html).toContain('Katalóg sa dočítava');
+    expect(html).toContain('Rozsah pilotný');
   });
 
-  it('bez odpovede stavu sa netvrdí nič a obrazovka to povie', () => {
-    const html = renderLive({ status: null, sync: null, heartbeat: null, now: NOW });
-    expect(html).toContain('Stav appky sa nepodarilo prečítať');
+  it('odhad dokončenia je označený ako odhad (P7)', () => {
+    // Trieda `est` kreslí pred číslo `≈` a stlmí ho.
+    expect(renderStatus()).toContain('class="est"');
+  });
+
+  it('bez odpovede appky je pomlčka a dôvod pod rozklikom, nikdy nula', () => {
+    const html = renderStatus({
+      status: null,
+      sync: null,
+      heartbeat: null,
+      progress: unknownQueue(),
+    });
+    expect(html).toContain('Stav appky nevieme');
+    expect(html).toContain('—');
+    expect(html).toContain('Prečo —');
+    expect(html).not.toContain('0 / 0');
+  });
+
+  it('zastavená fronta ponúkne „Pokračovať" a pruh je tlmený', () => {
+    const html = renderStatus({ progress: paused() });
+    expect(html).toContain('Pokračovať');
+    expect(html).toContain('bar paused');
+    expect(html).not.toContain('Zastaviť frontu');
+  });
+
+  it('pokojný stav nekreslí pruh na nule, len čísla, ktoré appka má', () => {
+    const html = renderStatus({
+      progress: { ...running(), mode: 'calm', campaignId: null, campaignName: null },
+    });
+    expect(html).toContain('2 380');
+    expect(html).toContain('Zoznam zliav');
+    expect(html).not.toContain('/ 8 000');
+  });
+
+  it('prázdny stav je JEDNA VETA a JEDNO tlačidlo, žiadne očíslované kroky', () => {
+    const html = renderStatus({ progress: firstRun() });
+    expect(html).toContain('Zatiaľ nie je žiadna zľava');
+    expect(html.match(/Nová zľava/g)).toHaveLength(1);
+    expect(html).not.toContain('<li>');
+    expect(html).not.toContain('<ol');
+  });
+
+  it('priznaná medzera sa kreslí ako vysvetlivka, nie ako číslo', () => {
+    const html = renderStatus({}, unreadableSentence(['writeBudget']));
+    expect(html).toContain('rozpočet zápisov');
+    expect(html).not.toContain('0/200');
   });
 
   it('prekážky sa nekreslia, keď nič nezastavuje ani nebrzdí', () => {
-    expect(
-      renderToStaticMarkup(createElement(BlockersSection, { blockers: [] })),
-    ).toBe('');
-    expect(
-      renderToStaticMarkup(createElement(BlockersSection, { blockers: null })),
-    ).toBe('');
+    expect(renderToStaticMarkup(createElement(BlockersSection, { blockers: [] }))).toBe('');
+    expect(renderToStaticMarkup(createElement(BlockersSection, { blockers: null }))).toBe('');
     expect(
       renderToStaticMarkup(
         createElement(BlockersSection, { blockers: [blocker({ severity: 'informuje' })] }),
@@ -459,7 +628,7 @@ describe('Prehľad — nové sekcie sa vykreslia', () => {
     ).toBe('');
   });
 
-  it('každá prekážka ukáže čo sa deje, čo s tým a kam ísť', () => {
+  it('každá prekážka ukáže čo sa deje, ako je to vážne, čo s tým a kam ísť', () => {
     const html = renderToStaticMarkup(
       createElement(BlockersSection, {
         blockers: [
@@ -475,7 +644,7 @@ describe('Prehľad — nové sekcie sa vykreslia', () => {
           }),
           blocker({
             id: 'scope_pilot_cap',
-            severity: 'obmedzuje',
+            severity: 'informuje',
             resolution: 'sudo',
             what: 'V pilotnom režime prejde 10 produktov.',
             nextStep: 'Prepnite rozsah v Nastaveniach.',
@@ -487,12 +656,15 @@ describe('Prehľad — nové sekcie sa vykreslia', () => {
     expect(html).toContain('Prečo sa nezapisuje');
     expect(html).toContain('Kľúč na zápis do shopu nie je vložený.');
     expect(html).toContain('Vložte kľúč v Nastaveniach.');
-    expect(html).toContain('Nastavenia');
     expect(html).toContain('Netreba robiť nič');
     // Domnienka sa prizná, nezamlčí.
     expect(html).toContain('nevie overiť');
     // Zámok pri kroku, ktorý si vypýta heslo.
     expect(html).toContain('Vyžiada si heslo');
+    // Závažnosť nesie SLOVO, nie farba — inak sa tri úrovne nedajú rozlíšiť.
+    expect(html).toContain('zastavuje zápis');
+    expect(html).toContain('nezastavuje nič');
+    // Informatívny riadok sa v otvorenej sekcii kreslí tiež (bod 6).
     expect(html.match(/data-testid="blocker-row"/g)).toHaveLength(3);
   });
 
@@ -504,20 +676,5 @@ describe('Prehľad — nové sekcie sa vykreslia', () => {
     );
     expect(html).toContain('Čo appku brzdí');
     expect(html).not.toContain('Prečo sa nezapisuje');
-  });
-
-  it('prázdny stav učí, čo sa dá spraviť a čo appka ešte vie', () => {
-    const html = renderToStaticMarkup(createElement(FirstDiscountSection, {}));
-    expect(html).toContain('Zatiaľ žiadna zľava');
-    expect(html).toContain('Nová zľava');
-    expect(html).toContain('Nájsť ležiaky');
-    // Tri kroky v poradí, v akom sa naozaj robia.
-    expect(html.match(/<li>/g)).toHaveLength(3);
-    // Zľavu appka zapíše, ale nikdy neruší — veta to nesmie sľubovať.
-    expect(html).toContain('skončí sama');
-    expect(html).not.toContain('zruší');
-    // Objaviteľnosť: funkcie, ktoré appka MÁ a nikto ich nenájde.
-    expect(html).toContain('predajnosť');
-    expect(html).toContain('zastaviť všetky zápisy');
   });
 });

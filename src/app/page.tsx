@@ -1,8 +1,10 @@
 /**
  * Aura Zľavy — TAB 1: Prehľad (V9, architektúra §1).
  *
- * Prístrojová doska: čo sa práve zapisuje, čo čaká na rozhodnutie, ako sa
- * predáva a ktoré zľavy bežia. Štyri sekcie, jedna dominanta, žiadny rozklik.
+ * Prístrojová doska. Odpovedá na JEDNU otázku — „je všetko v poriadku?" — a
+ * podľa nej je vybraná dominanta: verdikt jednou vetou, nie číslo fronty.
+ * Najviac štyri sekcie (Stav · prekážky · Zľavy · Predaj), v pokojnom stave
+ * tri. Jediný rozklik je dôvod pomlčky, keď sa stav fronty nedá prečítať.
  *
  * Stránka je zámerne chudobná — všetko vykresľuje klientský `Overview`, ktorý
  * číta štyri čítacie endpointy. `next build` tak nezávisí od bežiacej

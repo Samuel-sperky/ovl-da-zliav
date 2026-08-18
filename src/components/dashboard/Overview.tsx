@@ -1,27 +1,37 @@
 'use client';
 
 /**
- * Aura Zľavy — PREHĽAD (V9, architektúra §1 TAB 1, mockupy `design/v3/prehlad*.html`,
- * kontrakt dokončenia C1–C5).
+ * Aura Zľavy — PREHĽAD (V9, architektúra §1 TAB 1, kontrakt UI 13. 8. 2026).
  *
- * PORADIE SEKCIÍ JE OBSAH, NIE ROZLOŽENIE. Zhora nadol podľa naliehavosti:
+ * OTÁZKA, NA KTORÚ TÁTO OBRAZOVKA ODPOVEDÁ: „je všetko v poriadku?" Nie „aké
+ * mám čísla". Podľa toho je vybraná dominanta aj poradie sekcií.
  *
- *   1. PREČO SA NEZAPISUJE — prekážky zo `/api/status`. Sekcia sa kreslí LEN
- *      vtedy, keď niečo naozaj zastavuje alebo brzdí; inak mlčí a dominanta
- *      zostáva prvá. Trvalý panel „všetko v poriadku" by nikto nečítal.
- *   2. ČO SA PRÁVE ZAPISUJE — dominanta (`QueueSection`), alebo prázdny stav,
- *      ktorý učí (`FirstDiscountSection`), keď v appke ešte nie je zľava.
- *   3. ŽIVÝ STAV — čo appka robí a čím je obmedzená (rozpočet, katalóg, kľúč,
- *      spojenie, rozsah). Odpoveď na „je všetko v poriadku?" do troch sekúnd.
- *   4. ČAKÁ NA VÁS — návrhy a to, čo si pýta pozornosť.
- *   5. TRŽBY — čo sa predáva.
- *   6. ZĽAVY NAŽIVO — tri riadky; pri nule zliav sa nekreslí vôbec, lebo o tom
- *      už hovorí sekcia 2 a druhé „Žiadna zľava" na jednej obrazovke je šum.
+ * ŠTYRI SEKCIE, ZHORA PODĽA NALIEHAVOSTI (P5):
+ *
+ *   1. STAV — dominanta. Verdikt jednou vetou v 44 px, pod ním fronta v 22 px
+ *      a riadok kontrol, ktoré nenesie stavový pruh. `StatusSection`.
+ *   2. PREČO SA NEZAPISUJE — prekážky zo `/api/status`, všetky tri úrovne.
+ *      Kreslí sa LEN vtedy, keď niečo zastavuje alebo brzdí; inak mlčí a celou
+ *      odpoveďou je zelená značka v stavovom pruhu (kontrakt, bod 3).
+ *   3. ZĽAVY — vľavo čo beží, vpravo čo sa ponúka. `CampaignsSection`.
+ *   4. PREDAJ — čo sa predáva. `SalesSection`.
+ *
+ * Z pôvodných šiestich sekcií zmizli dve: „Živý stav" (opakoval štyri veci zo
+ * stavového pruhu) a „Čaká na vás" (splynula so „Zľavami"). Prázdny stav
+ * „Prvá zľava" už nie je sekcia — je to jedna veta a jedno tlačidlo vnútri
+ * dominanty (bod 11).
  *
  * TVRDÁ HRANICA: Prehľad NIKDY neukazuje tabuľku produktov. Prehľad odpovedá
  * na „čo sa práve deje a ako sa darí"; „ktoré konkrétne kusy" patrí do
  * Produktov. Jediná zámerná duplicita je počet ležiakov — v Prehľade ako
  * návrh, v Produktoch ako výsledok toho istého filtra.
+ *
+ * NIČ SA NEOBNOVUJE SAMO (kontrakt, bod 4). Do 18. 8. tu bol `setInterval`
+ * každých 60 s — čísla sa prepisovali pod rukami človeku, ktorý sa práve
+ * rozhodoval, či zastaviť zápis do ostrého eshopu. Načítanie je preto
+ * registrované v spoločnom mechanizme `layout/refresh.ts`: zbehne pri otvorení
+ * obrazovky a potom až po stlačení tlačidla Obnoviť v stavovom pruhu. Vlastné
+ * tlačidlo si obrazovka NEKRESLÍ.
  *
  * Dáta sa ťahajú zo šiestich ČÍTACÍCH endpointov naraz. `Promise.all` je tu
  * v poriadku a nemá NIČ spoločné so zákazom paralelných ZÁPISOV — na shop
@@ -32,15 +42,12 @@
  *
  * Vlastník: V9.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
-import AttentionSection from '@/components/dashboard/AttentionSection';
 import BlockersSection from '@/components/dashboard/BlockersSection';
-import FirstDiscountSection from '@/components/dashboard/FirstDiscountSection';
-import LiveDiscountsSection from '@/components/dashboard/LiveDiscountsSection';
-import LiveStatusSection from '@/components/dashboard/LiveStatusSection';
-import QueueSection from '@/components/dashboard/QueueSection';
+import CampaignsSection from '@/components/dashboard/CampaignsSection';
 import SalesSection from '@/components/dashboard/SalesSection';
+import StatusSection from '@/components/dashboard/StatusSection';
 import styles from '@/components/dashboard/overview.module.css';
 import {
   getCampaigns,
@@ -58,17 +65,16 @@ import {
   type CatalogSyncView,
   type StatusView,
 } from '@/components/dashboard/status-api';
-import { liveStatusView } from '@/components/dashboard/live-status-model';
+import { unreadableSentence } from '@/components/dashboard/live-status-model';
 import {
   calmNumbers,
   liveCampaigns,
   queueProgress,
   type LiveCampaign,
 } from '@/components/dashboard/overview-model';
+import { overviewChecks, overviewVerdict } from '@/components/dashboard/overview-verdict';
+import { useRefreshable } from '@/components/layout/refresh';
 import { todayHere } from '@/lib/ui/vocabulary';
-
-/** Ako často sa prístrojová doska obnovuje. Fronta sa hýbe v dávkach, nie v sekundách. */
-const REFRESH_MS = 60_000;
 
 interface OverviewData {
   queue: QueueSnapshot | null;
@@ -94,19 +100,18 @@ export function Overview() {
     setData({ queue, campaigns, sales, insights, status, catalog });
   }, []);
 
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), REFRESH_MS);
-    return () => clearInterval(id);
-  }, [load]);
+  // Registrácia do spoločného obnovovania. Hook si zámerne NESLEDUJE identitu
+  // `load` — sledovať ju by znamenalo načítanie pri každom prekreslení, teda
+  // automatické obnovovanie zadnými dverami.
+  useRefreshable(load);
 
   // Prvé načítanie: kostra v rozmeroch hotovej obrazovky, aby sa rozloženie
   // pod rukami nepreskladalo. Žiadne čísla — kým sa nič nevie, nič sa netvrdí.
   if (data === null) {
     return (
       <div className={styles.page} aria-busy="true">
-        <div className="sec ovl-skeleton" style={{ minHeight: '168px' }} />
-        <div className="sec ovl-skeleton" style={{ minHeight: '150px' }} />
+        <div className="sec ovl-skeleton" style={{ minHeight: '212px' }} />
+        <div className="sec ovl-skeleton" style={{ minHeight: '160px' }} />
         <div className="sec ovl-skeleton" style={{ minHeight: '190px' }} />
       </div>
     );
@@ -119,49 +124,42 @@ export function Overview() {
   const progress = queueProgress({ snapshot, campaigns: rows, today });
   const live: LiveCampaign[] | null = rows === null ? null : liveCampaigns(rows, today);
   const calm = calmNumbers(rows ?? [], today);
+  const heartbeat = snapshot === null ? null : snapshot.heartbeat;
 
-  const liveStatus = liveStatusView({
+  const verdictInput = {
     status: data.status,
     sync: data.catalog,
-    heartbeat: snapshot === null ? null : snapshot.heartbeat,
-    now: new Date(),
-  });
-
-  // „Ešte nie je žiadna zľava" je jediný stav, v ktorom má dominanta učiť, čo
-  // sa dá spraviť — vo zvyšných štyroch má ukázať, kde je fronta.
-  //
-  // `rows !== null` je tu podstatné: keď sa zoznam zliav NEPODARILO prečítať,
-  // appka nesmie tvrdiť, že žiadna neexistuje. Vtedy zostáva pôvodná dominanta
-  // a sekcia „Zľavy naživo" prizná, že sa nenačítala.
-  const firstRun = progress.mode === 'empty' && rows !== null;
+    heartbeat,
+    progress,
+  };
 
   return (
     <div className={styles.page} data-testid="overview">
+      <StatusSection
+        verdict={overviewVerdict(verdictInput)}
+        checks={overviewChecks(verdictInput)}
+        progress={progress}
+        budget={
+          snapshot === null || snapshot.budget === null
+            ? null
+            : {
+                spent: snapshot.budget.spent,
+                budget: snapshot.budget.budget,
+                remaining: snapshot.budget.remaining,
+              }
+        }
+        calm={calm}
+        gap={
+          data.status === null
+            ? 'Stav appky sa nepodarilo prečítať. Čísla preto nedopĺňame.'
+            : unreadableSentence(data.status.unreadable)
+        }
+        onChanged={() => void load()}
+      />
+
       <BlockersSection blockers={data.status === null ? null : data.status.blockers} />
-
-      {firstRun ? (
-        <FirstDiscountSection />
-      ) : (
-        <QueueSection
-          progress={progress}
-          budget={
-            snapshot === null || snapshot.budget === null
-              ? null
-              : {
-                  spent: snapshot.budget.spent,
-                  budget: snapshot.budget.budget,
-                  remaining: snapshot.budget.remaining,
-                }
-          }
-          calm={calm}
-          onChanged={() => void load()}
-        />
-      )}
-
-      <LiveStatusSection view={liveStatus} />
-      <AttentionSection insights={data.insights} />
+      <CampaignsSection campaigns={live} insights={data.insights} />
       <SalesSection sales={data.sales} />
-      {firstRun ? null : <LiveDiscountsSection campaigns={live} />}
     </div>
   );
 }

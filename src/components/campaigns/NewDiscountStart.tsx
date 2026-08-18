@@ -1,40 +1,44 @@
 'use client';
 
 /**
- * Aura Zľavy — NOVÁ ZĽAVA, panel ŠTART (V11; predloha `design/v3/nova-zlava.html`,
- * kontrakt V3 K2, K5, K6; kontrakt dokončenia B3, B5).
+ * Aura Zľavy — NOVÁ ZĽAVA, blok ČASU ZÁPISU (V11; predloha
+ * `design/v3/nova-zlava.html`, kontrakt V3 K2, K5, K6; kontrakt UI, bod 24).
  *
  * Odpovedá na jedinú otázku: **kedy to bude zapísané a kedy má zľava nabehnúť.**
  * Zápis nie je akcia, je to fronta bežiaca dni — 150 produktov pri 200 zápisoch
  * na deň je jeden deň, 8 000 je štyridsať. Preto sa zľava zadáva s budúcim
  * štartom a appka ho navrhne tak, aby fronta stihla dobehnúť + 2 dni rezerva (K5).
  *
- * ŠTYRI ČÍSLA, KTORÉ SEM PATRIA (a bez ktorých je panel len ozdoba)
- * ----------------------------------------------------------------
- *  1. koľko produktov ide na zápis,
- *  2. koľko sa ich zmestí za jeden deň a koľko rozpočtu z dneška ostáva,
- *  3. koľko DNÍ bude fronta bežať a v ktorý deň dobehne,
- *  4. v ktorý deň zľava reálne nabehne zákazníkom — a či to je PO dobehnutí.
+ * DVA DNI NA POVRCHU, VÝPOČET POD ROZKLIK (P6, kontrakt UI bod 24)
+ * ---------------------------------------------------------------
+ * Blok nie je vlastná sekcia — je to vnútro karty potvrdenia, a preto nesie len
+ * dva dni: **kedy bude všetko zapísané** a **kedy zľava nabehne zákazníkom**.
+ * Denný rozpočet, počet položiek pred nami a dĺžka fronty sú medzikroky toho
+ * istého výpočtu; v šiestich riadkoch nad sebou tie dva dôležité dni zanikali,
+ * tak sú medzikroky v rozkliku „Ako to počítam".
  *
- * Štvrtý bod je ten, ktorý sa najľahšie prehliadne a najviac bolí: keď zľava
+ * Rozdiel medzi tými dvoma dňami je jediné, čo tu naozaj bolí: keď zľava
  * nabehne skôr, než sa všetko zapíše, produkty zlacnejú po častiach a na eshope
  * to vyzerá ako chyba. `judgeStart()` to preto povie vetou PRED potvrdením.
  *
- * Dve veci, ktoré tento panel robí inak, než by bolo pohodlné:
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
  *
- *  · **Bez rozpočtu žiadny odhad.** Keď sa denný rozpočet ani počet položiek
- *    pred nami nedá prečítať, panel povie „nevieme" a nedopočíta dátum (P7).
- *    Vymyslený dátum štartu je horší než priznaná medzera — plánuje sa podľa
+ * 1. **Bez rozpočtu žiadny dátum.** Keď sa denný rozpočet ani počet položiek
+ *    pred nami nedá prečítať, na povrchu je pomlčka a dôvod je v rozkliku (P7).
+ *    Vymyslený deň dobehnutia je horší než priznaná medzera — plánuje sa podľa
  *    neho produkcia.
- *  · **Varovanie o kľúči nebráni zaradeniu** (K6). Keď kľúč vyprší skôr, než
+ * 2. **Deň dobehnutia je odhad a musí to byť vidieť** — nesie triedu `est`,
+ *    teda `≈` a tlmenejší odtieň. Deň nábehu zľavy je voľba človeka, nie
+ *    odhad, a `≈` mať NESMIE; keby ho mal, prestal by byť rozoznateľný od
+ *    dopočítaného čísla.
+ * 3. **Varovanie o kľúči nebráni zaradeniu** (K6). Keď kľúč vyprší skôr, než
  *    fronta dobehne, je to príznak a ponuka obnovy — nie brzda. Fronta po
  *    vložení nového kľúča pokračuje presne tam, kde skončila.
- *
- * ČO SA TU NESMIE POKAZIŤ: `aheadPending` je počet položiek vo fronte PRED touto
- * zľavou a smie prísť z dvoch zdrojov (presne z fronty, alebo odhadom z počítadiel
- * zliav). Panel MUSÍ povedať, ktorý to je — inak sa dve obrazovky rozídu o stovky
- * položiek a nikto nebude vedieť, ktorej veriť. Rozhoduje o tom `resolveAhead()`
- * v `queue-model.ts`, nie tento súbor.
+ * 4. **`aheadPending` má dva zdroje** (presne z fronty, alebo odhadom z
+ *    počítadiel zliav) a rozklik MUSÍ povedať, ktorý to je — inak sa dve
+ *    obrazovky rozídu o stovky položiek a nikto nebude vedieť, ktorej veriť.
+ *    Rozhoduje o tom `resolveAhead()` v `queue-model.ts`, nie tento súbor.
  *
  * Vlastník: V11.
  */
@@ -115,106 +119,37 @@ export function NewDiscountStart({
   const aheadCount = ahead === undefined ? aheadPending : ahead.pending;
   const verdict = judgeStart(from, finishDay);
   const totalToWrite = aheadCount + itemsCount;
+  const proposalOffered = proposedStart !== null && proposedStart !== from;
 
   return (
-    <section className="sec" data-testid="new-discount-start">
-      <div className="sec-h">
-        <h2>Štart</h2>
-        <div className="act">
-          <span className="state zapisuje">
-            <span className="g" aria-hidden="true" />
-            zapisuje sa dopredu
+    <div className={styles.when} data-testid="new-discount-start">
+      <div className={styles.whenRow}>
+        <span className={styles.whenLabel}>Zapísané budú</span>
+        {finishDay === null ? (
+          <span className="lvl-3" data-testid="start-finish">
+            —
           </span>
-        </div>
+        ) : (
+          <b className="est" data-testid="start-finish">
+            {formatDateSk(finishDay)}
+          </b>
+        )}
       </div>
 
-      {budget === undefined || budget === null ? null : (
-        <div className={styles.startMeter}>
-          <BudgetMeter
-            label="Zápisy dnes"
-            spent={budget.spent}
-            limit={budget.limit}
-            resetsAt={budget.resetsAt}
-            testId="start-budget-meter"
-          />
-        </div>
-      )}
-
-      <dl className={styles.plan}>
-        <dt>Na zápis</dt>
-        <dd data-testid="start-items">
-          {formatCountSk(itemsCount)} {pluralSk(itemsCount, 'produkt', 'produkty', 'produktov')}
-        </dd>
-
-        <dt>Denne stihnem</dt>
-        <dd>{perDay === null ? 'nevieme' : `${formatCountSk(perDay)} zápisov`}</dd>
-
-        <dt>Pred tebou vo fronte</dt>
-        <dd data-testid="start-ahead">
-          {aheadKnown ? formatCountSk(aheadCount) : <span className="lvl-3">nevieme</span>}
-          {aheadNames.length === 0 ? null : (
-            <>
-              {' '}
-              <span className="lvl-3">
-                {aheadNames
-                  .slice(0, 2)
-                  .map((entry) => `${entry.name} ${formatCountSk(entry.pending)}`)
-                  .join(' · ')}
-              </span>
-            </>
-          )}
-        </dd>
-
-        <dt>Fronta pobeží</dt>
-        <dd data-testid="start-days">
-          {queueDays === undefined || queueDays === null ? (
-            <span className="lvl-3">nevieme</span>
-          ) : queueDays === 0 ? (
-            'dobehne ešte dnes'
-          ) : (
-            `${formatCountSk(queueDays)} ${pluralSk(queueDays, 'deň', 'dni', 'dní')}`
-          )}
-        </dd>
-
-        <dt>Zapísané budú</dt>
-        <dd>
-          {finishDay === null ? (
-            <span className="lvl-3">nevieme — chýba denný rozpočet</span>
-          ) : (
-            <span className="est" data-testid="start-finish">
-              {formatDateSk(finishDay)}
-            </span>
-          )}
-        </dd>
-
-        <dt>Zľava nabehne</dt>
-        <dd data-testid="start-live-from">
-          {from === '' ? <span className="lvl-3">doplňte okno</span> : formatDateSk(from)}
-        </dd>
-      </dl>
-
-      <div className={styles.startline}>
-        <div>
-          <div className="lvl-3">Navrhujem štart</div>
-          <div className={styles.day} data-testid="start-proposal">
-            {proposedStart === null ? '—' : formatDateSk(proposedStart)}
-          </div>
-        </div>
-        <div className="lvl-3" style={{ paddingBottom: '3px' }}>
-          2 dni rezerva
-          <br />
-          Všetky produkty zlacnejú naraz
-        </div>
-        <button
-          type="button"
-          className="btn sm ghost"
-          style={{ marginLeft: 'auto' }}
-          disabled={proposedStart === null || proposedStart === from}
-          onClick={onUseProposal}
-          data-testid="start-use-proposal"
-        >
-          Posunúť
-        </button>
+      <div className={styles.whenRow}>
+        <span className={styles.whenLabel}>Zľava nabehne</span>
+        <b data-testid="start-live-from">{from === '' ? '—' : formatDateSk(from)}</b>
+        {proposalOffered ? (
+          <button
+            type="button"
+            className={`btn sm ghost ${styles.whenPush}`}
+            onClick={onUseProposal}
+            data-testid="start-use-proposal"
+          >
+            Posunúť na{' '}
+            <span data-testid="start-proposal">{formatDateSk(proposedStart ?? '')}</span>
+          </button>
+        ) : null}
       </div>
 
       {verdict.code === 'late' || verdict.code === 'tight' ? (
@@ -226,7 +161,7 @@ export function NewDiscountStart({
       ) : null}
 
       {keyTooShort ? (
-        <div className={`row wrapx gap-t ${styles.keyline}`} data-testid="key-warning">
+        <div className="row wrapx" data-testid="key-warning">
           <span className="flag">
             {keyDay === null
               ? `Kľúč na zápis chýba — fronta dobehne ${dayMonthSk(finishDay ?? '')}`
@@ -241,24 +176,42 @@ export function NewDiscountStart({
       <details className="tech">
         <summary>Ako to počítam</summary>
         <div className="body">
+          {budget === undefined || budget === null ? null : (
+            <div className={styles.techMeter}>
+              <BudgetMeter
+                label="Zápisy dnes"
+                spent={budget.spent}
+                limit={budget.limit}
+                resetsAt={budget.resetsAt}
+                testId="start-budget-meter"
+              />
+            </div>
+          )}
           <table>
             <tbody>
               <tr>
+                <td>Na zápis</td>
+                <td data-testid="start-items">
+                  {formatCountSk(itemsCount)}{' '}
+                  {pluralSk(itemsCount, 'produkt', 'produkty', 'produktov')}
+                </td>
+              </tr>
+              <tr>
                 <td>Denný rozpočet</td>
-                <td>{perDay === null ? 'neznámy' : `${formatCountSk(perDay)} zápisov na deň`}</td>
+                <td>{perDay === null ? 'nevieme' : `${formatCountSk(perDay)} zápisov na deň`}</td>
               </tr>
               <tr>
                 <td>Dnes už minuté</td>
                 <td>
                   {budget === undefined || budget === null
-                    ? 'neznáme'
+                    ? 'nevieme'
                     : `${formatCountSk(budget.spent)} z ${formatCountSk(budget.limit)}`}
                 </td>
               </tr>
               <tr>
                 <td>Pred touto zľavou</td>
-                <td>
-                  {aheadKnown ? `${formatCountSk(aheadCount)} položiek` : 'neznáme'}
+                <td data-testid="start-ahead">
+                  {aheadKnown ? `${formatCountSk(aheadCount)} položiek` : 'nevieme'}
                   {aheadKnown ? (
                     <span className="lvl-3">
                       {aheadExact
@@ -266,17 +219,41 @@ export function NewDiscountStart({
                         : ' — odhad z počítadiel zliav, presný počet sa nedal prečítať'}
                     </span>
                   ) : null}
+                  {aheadNames.length === 0 ? null : (
+                    <div className="lvl-3">
+                      {aheadNames
+                        .slice(0, 2)
+                        .map((entry) => `${entry.name} ${formatCountSk(entry.pending)}`)
+                        .join(' · ')}
+                    </div>
+                  )}
                 </td>
               </tr>
               <tr>
                 <td>Spolu</td>
                 <td>
-                  {aheadKnown ? `${formatCountSk(totalToWrite)} zápisov` : 'aspoň ' + formatCountSk(itemsCount)}
+                  {aheadKnown
+                    ? `${formatCountSk(totalToWrite)} zápisov`
+                    : `aspoň ${formatCountSk(itemsCount)}`}
+                </td>
+              </tr>
+              <tr>
+                <td>Fronta pobeží</td>
+                <td data-testid="start-days">
+                  {queueDays === undefined || queueDays === null
+                    ? 'nevieme'
+                    : queueDays === 0
+                      ? 'dobehne ešte dnes'
+                      : `${formatCountSk(queueDays)} ${pluralSk(queueDays, 'deň', 'dni', 'dní')}`}
                 </td>
               </tr>
               <tr>
                 <td>Odhad dobehnutia</td>
                 <td>{finishDay === null ? 'nevieme' : formatDateSk(finishDay)}</td>
+              </tr>
+              <tr>
+                <td>Zľava nabehne</td>
+                <td>{from === '' ? 'nevieme' : formatDateSk(from)}</td>
               </tr>
               <tr>
                 <td>Rezerva pred štartom</td>
@@ -306,7 +283,7 @@ export function NewDiscountStart({
           </table>
         </div>
       </details>
-    </section>
+    </div>
   );
 }
 

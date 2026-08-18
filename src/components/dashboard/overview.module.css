@@ -2,9 +2,19 @@
  * Aura Zľavy — geometria Prehľadu (V9).
  *
  * Zámerne LEN rozloženie, žiadne nové komponenty ani farby. Všetky vizuálne
- * prvky (.sec, .prog-lg, .bar, .suggest, .zrow, .kpi, .chart …) žijú
+ * prvky (.sec, .bar, .suggest, .kpi, .chart, .sig, .empty …) žijú
  * v `globals.css` a vlastní ich V2 — tento súbor je presne to, čo mali
  * mockupy `design/v3/prehlad*.html` vo svojom `<style>` bloku.
+ *
+ * HIERARCHIA VEĽKOSTÍ (P1) — jediné dve čísla, na ktorých obrazovka stojí:
+ *
+ *   dominanta  `.lvl-1 .big.sm` z globals ....... 44 px
+ *   druhá vec  `.queueNum` (číslo fronty) ....... 22 px  =  50 % dominanty
+ *
+ * P1 povoľuje 55 %, takže je tu rezerva. Tretia najväčšia vec na obrazovke je
+ * `.kpi .v` v Predaji (22 px, z globals) — zhodou okolností rovnaká, čo je
+ * v poriadku: dominanta je stále jediná. Kto sem vráti `.prog-lg` (64 px)
+ * alebo `.calm` (32 px), zhodí P1 a nebude to vidieť inak než meraním.
  *
  * Vlastník: V9.
  */
@@ -19,20 +29,25 @@
   gap: 14px;
 }
 
-/* Dominanta: číslo vľavo, dve tlačidlá vpravo (prehlad.html). */
+/* Dominanta: verdikt a fronta vľavo, stĺpec akcií vpravo. */
 .top {
   display: grid;
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: 1fr 260px;
   gap: 20px;
-  align-items: end;
+  align-items: start;
 }
 
-/* „Čaká na vás": návrhy vľavo, pozornosť vpravo. */
+/* „Zľavy": vľavo čo beží, vpravo čo sa ponúka. */
 .mid {
   display: grid;
-  grid-template-columns: 1fr 500px;
-  gap: 12px;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 20px;
   align-items: start;
+}
+
+/* Bez jedinej zľavy sa ľavý stĺpec nekreslí a návrhy dostanú celú šírku. */
+.midSingle {
+  display: block;
 }
 
 .actions {
@@ -46,7 +61,7 @@
   justify-content: center;
 }
 
-/* Nadpis stĺpca nad riadkami návrhov. */
+/* Nadpis stĺpca nad riadkami. */
 .colh {
   text-transform: uppercase;
   letter-spacing: 0.13em;
@@ -56,7 +71,140 @@
   border-bottom: 1px solid var(--line);
 }
 
-/* Tržby: tri čísla vľavo, graf vpravo. */
+/* ───────────────────────────── Fronta pod verdiktom ─────────────────────── */
+
+.queueBody {
+  margin-top: 4px;
+}
+
+.queueHead {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/*
+ * Číslo fronty. 22 px je POLOVICA dominanty — nie odhad oka, ale číslo, ktoré
+ * drží P1 merateľné. Meniť ho bez zmeny dominanty znamená meniť hierarchiu.
+ */
+.queueNum {
+  font-size: 22px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.queueOf {
+  color: var(--dim);
+  font-weight: 550;
+}
+
+.queueName {
+  min-width: 0;
+}
+
+/* Rozklik k pomlčke — rovnaký tvar ako „Prečo —" v stavovom pruhu. */
+.why {
+  margin-top: 8px;
+}
+
+.why > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dim);
+  list-style: none;
+}
+
+.why > summary::-webkit-details-marker {
+  display: none;
+}
+
+.why > div {
+  margin-top: 6px;
+  max-width: 62ch;
+}
+
+/* ───────────────────────────── Riadok kontrol ───────────────────────────── */
+
+/*
+ * Jeden riadok značiek pod dominantou. Nesie VÝHRADNE to, čo stavový pruh
+ * nehovorí (posledný krok fronty, spojenie, katalóg, strop rozsahu) — druhá
+ * kópia toho istého faktu by sa s pruhom raz rozišla o minútu.
+ */
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.checkLink {
+  color: inherit;
+}
+
+.checkLink:hover {
+  text-decoration: underline;
+}
+
+/* ───────────────────────────── Riadok zľavy ─────────────────────────────── */
+
+/*
+ * Vlastná dvojriadková geometria namiesto širokej `.zrow` zo zoznamu zliav:
+ * `.zrow` má šesť pevných stĺpcov (spolu vyše 800 px) a v polovičnom okne by
+ * vyrobila vodorovný skrol (kontrakt UI, bod 12).
+ */
+.campRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  align-items: baseline;
+  padding: 9px 8px;
+  margin: 0 -8px;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 13.5px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.campRow:last-child {
+  border-bottom: 0;
+}
+
+.campRow:hover {
+  background: var(--paper3);
+}
+
+.campName {
+  font-weight: 620;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campMeta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+}
+
+.campDone {
+  opacity: 0.62;
+}
+
+/* ───────────────────────────── Predaj ───────────────────────────────────── */
+
 .salesGrid {
   display: grid;
   grid-template-columns: 300px 1fr;
@@ -75,83 +223,7 @@
   padding: 0 0 0 8px;
 }
 
-/* Pokojný stav: „Všetko beží" je dominanta, ale menšia než číslo fronty. */
-.calmBig {
-  font-size: 46px;
-  line-height: 1.02;
-}
-
-/* Zoznam zliav naživo sedí v sekcii bez dvojitého rámu. */
-.flush {
-  padding: 0;
-}
-
-.flushList {
-  border: 0;
-  border-radius: 0;
-}
-
-/*
- * Riadok zľavy je celý preklikom. `.wrap a` farbí odkazy akcentom, čo by
- * z každého riadku urobilo modrý pruh — farbu si preto riadok berie z okolia
- * a odkaz zostáva len tvarom kurzora a fokusom.
- */
-.rowLink {
-  color: inherit;
-  cursor: pointer;
-}
-
-.rowLink:hover {
-  background: var(--paper3);
-}
-
-/* Jeden riadok pod akciou — chyba akcie, nikdy nie vymyslené číslo. */
-.actionNote {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--st-attention);
-}
-
-/*
- * Červený príznak. `globals.css` má `.flag` (jantár) a `.flag.neutral` (sivá);
- * kritický tón vlastnú variantu nemá, takže sa tu prefarbí existujúcim
- * tokenom — nová farba sa nevymýšľa. Použije sa VÝHRADNE na stratu dát
- * a zastavený zápis (architektúra §4).
- */
-.flagCritical {
-  color: var(--st-critical);
-}
-
-/*
- * ŽIVÝ STAV — štyri merateľné veci vedľa seba: dve stavové pilulky a dva
- * meracie prúžky. Rovnaké stĺpce zámerne: sú to štyri odpovede na jednu
- * otázku („čím je appka práve obmedzená"), nie hlavná vec a tri doplnky.
- */
-.liveTop {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  align-items: start;
-  margin-bottom: 10px;
-}
-
-/* Riadky „čo sa deje" pod prúžkami. Rovnaká geometria ako `.suggest`. */
-.stateList {
-  border-top: 1px solid var(--line);
-}
-
-.stateRow {
-  display: grid;
-  grid-template-columns: 190px 1fr auto;
-  gap: 12px;
-  align-items: center;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.stateRow:last-child {
-  border-bottom: 0;
-}
+/* ───────────────────────────── Prekážky ─────────────────────────────────── */
 
 /*
  * PREKÁŽKA — dva riadky textu vľavo (čo sa deje, čo s tým) a cesta ďalej
@@ -182,20 +254,23 @@
   font-style: italic;
 }
 
-/* Tri kroky prvej zľavy. Číslo je obsah, nie ozdoba, preto `<ol>`. */
-.steps {
-  margin: 10px 0 12px;
-  padding-left: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13.5px;
-  color: var(--ink2);
+/* ───────────────────────────── Drobnosti ────────────────────────────────── */
+
+/* Jeden riadok pod akciou — chyba akcie, nikdy nie vymyslené číslo. */
+.actionNote {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--st-attention);
 }
 
-.steps li::marker {
-  color: var(--dim);
-  font-weight: 650;
+/*
+ * Červený príznak. `globals.css` má `.flag` (jantár) a `.flag.neutral` (sivá);
+ * kritický tón vlastnú variantu nemá, takže sa tu prefarbí existujúcim
+ * tokenom — nová farba sa nevymýšľa. Použije sa VÝHRADNE na stratu dát
+ * a zastavený zápis (architektúra §4).
+ */
+.flagCritical {
+  color: var(--st-critical);
 }
 
 /* Priznaná medzera v stave — vysvetlivka pod riadkami, nie cez celú stránku. */
@@ -205,31 +280,13 @@
 
 /*
  * Pod 1100 px sa stĺpce skladajú pod seba. Appka beží na jednom počítači
- * v 1440, ale zúžené okno nesmie vyrobiť vodorovný skrol (P4).
+ * v 1440, ale polovica monitora (~720 px) nesmie vyrobiť vodorovný skrol
+ * (kontrakt UI, bod 12).
  */
 @media (max-width: 1100px) {
   .top,
   .mid,
   .salesGrid {
     grid-template-columns: 1fr;
-  }
-
-  .liveTop {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .stateRow {
-    grid-template-columns: 150px 1fr auto;
-  }
-}
-
-@media (max-width: 720px) {
-  .liveTop {
-    grid-template-columns: 1fr;
-  }
-
-  .stateRow {
-    grid-template-columns: 1fr;
-    gap: 4px;
   }
 }

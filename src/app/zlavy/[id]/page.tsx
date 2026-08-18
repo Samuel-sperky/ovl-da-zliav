@@ -25,5 +25,10 @@ export default async function DiscountDetailPage({
   const { id } = await params;
   const discountId = Number(id);
   if (!Number.isInteger(discountId) || discountId <= 0) notFound();
-  return <DiscountDetail id={discountId} />;
+  /*
+   * `key` je nutné: detail sa načítava cez spoločné obnovovanie
+   * (`layout/refresh.ts`), ktoré beží na vyžiadanie, nie pri zmene vstupu.
+   * Bez remountu by prechod na inú zľavu ukázal čísla tej predchádzajúcej.
+   */
+  return <DiscountDetail key={discountId} id={discountId} />;
 }
