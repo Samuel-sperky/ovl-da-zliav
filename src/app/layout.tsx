@@ -24,6 +24,24 @@
  */
 import type { Metadata } from 'next';
 
+/*
+ * PÍSMO SA DODÁVA S APPKOU (19. 8. 2026). Predtým `--ovl-font` deklaroval
+ * 'Inter', ale v repozitári nebol ani jeden súbor písma, žiadny `@font-face`
+ * ani `next/font` — appka teda reálne bežala v systémovom Segoe UI a celá
+ * typografia sa ladila proti písmu, ktoré nikto nevidel.
+ *
+ * Variant je VARIABILNÝ zámerne: `globals.css` používa rezy 550, 620, 640,
+ * 650, 660 a 680. Statický Inter (400/500/600/700) by ich zaokrúhlil a jemná
+ * gradácia hierarchie by zanikla.
+ *
+ * Súbory idú z `node_modules`, bundluje ich Next — appka po sieti nesiaha
+ * (I6). Kurzíva je tu preto, že ju appka naozaj používa (napr. „Appka to teraz
+ * nevie overiť."), a latin-ext preto, že bez neho by slovenská diakritika
+ * (č, š, ž, ť, ľ, ô) vypadla do náhradného písma uprostred slova.
+ */
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/inter/wght-italic.css';
+
 import AppHeader from '@/components/layout/AppHeader';
 import ProductionBar from '@/components/layout/ProductionBar';
 import { THEME_BOOTSTRAP_SCRIPT } from '@/components/layout/theme';

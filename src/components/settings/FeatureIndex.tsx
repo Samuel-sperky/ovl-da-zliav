@@ -29,6 +29,8 @@
  */
 import Link from 'next/link';
 
+import { hrefForAnchor } from '@/components/settings/sub-pages';
+
 /** Jedna schopnosť appky a miesto, kde sa používa. */
 export interface AppCapability {
   /** Čo appka vie — veta, ktorá začína činnosťou. */
@@ -96,7 +98,14 @@ export const APP_CAPABILITIES: readonly AppCapability[] = [
   },
 ];
 
-/** Kotva na tej istej stránke, alebo odkaz na iný tab? */
+/**
+ * Kotva na sekciu Nastavení, alebo odkaz na iný tab?
+ *
+ * V zozname zostáva zapísaná KOTVA (`#rozsah`), nie hotová cesta. Preklad na
+ * podstránku robí `hrefForAnchor()` až pri kreslení — vďaka tomu sa presun
+ * sekcie na inú podstránku opraví na jednom mieste a nie v dvanástich riadkoch
+ * tejto tabuľky.
+ */
 export function isAnchor(href: string): boolean {
   return href.startsWith('#');
 }
@@ -122,15 +131,9 @@ export function FeatureIndex() {
               <tr key={row.href}>
                 <td className="name">{row.what}</td>
                 <td data-l="Nájdeš to tu">
-                  {isAnchor(row.href) ? (
-                    <a className="set-jump" href={row.href}>
-                      {row.where}
-                    </a>
-                  ) : (
-                    <Link className="set-jump" href={row.href}>
-                      {row.where}
-                    </Link>
-                  )}
+                  <Link className="set-jump" href={hrefForAnchor(row.href)}>
+                    {row.where}
+                  </Link>
                 </td>
               </tr>
             ))}
@@ -138,8 +141,9 @@ export function FeatureIndex() {
         </table>
         <div className="tbl-foot">
           <span>
-            Čo appke z eshopu chýba, je vysvetlené na jednom mieste — v Zamknutých funkciách
-            nižšie. Inde v appke sú na tých miestach len tlmené pomlčky.
+            Čo appke z eshopu chýba, je vysvetlené na jednom mieste — v Zamknutých
+            funkciách na podstránke „Čo sa už stalo". Inde v appke sú na tých miestach len
+            tlmené pomlčky.
           </span>
         </div>
       </div>

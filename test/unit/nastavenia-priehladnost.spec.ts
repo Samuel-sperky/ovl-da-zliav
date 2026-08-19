@@ -35,7 +35,7 @@ import WritesSection, { writeConditions } from '@/components/settings/WritesSect
 import {
   SETTINGS_ANCHORS,
   SETTINGS_GROUPS,
-} from '@/components/settings/SettingsPanel';
+} from '@/components/settings/sub-pages';
 import { SETTINGS_CSS } from '@/components/settings/styles';
 import {
   RESOLUTION_TONE,

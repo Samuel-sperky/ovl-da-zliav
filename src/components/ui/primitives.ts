@@ -14,10 +14,11 @@
  * -----------------------
  *
  * 1. **Stav nikdy nie je len farba.** Každá úroveň meracieho prúžku má okrem
- *    tónu aj GLYF a SLOVO (`BUDGET_LEVEL_GLYPH`, `BUDGET_LEVEL_WORD`). V darku
- *    sa `--st-critical` (#e5534b) a `--st-attention` (#d9a441) pod deuteranopiou
- *    zlievajú; kto by kreslil len prúžok, ktorý „sčervenie", povie polovici
- *    používateľov presne nič. Glyf `▲` (blíži sa) a `■` (vyčerpané) sa preto
+ *    tónu aj GLYF a SLOVO (`BUDGET_LEVEL_GLYPH`, `BUDGET_LEVEL_WORD`). Škála
+ *    stavov je od 19. 8. 2026 optimalizovaná na odstup ΔE ≥ 8 aj pod
+ *    deuteranopiou, protanopiou a tritanopiou (`scripts/palette-check.mjs`),
+ *    ale odstup farieb pravidlo NERUŠÍ: prúžok, ktorý len „sčervenie", povie
+ *    nevidiacemu a čítačke obrazovky stále presne nič. Glyf `▲` (blíži sa) a `■` (vyčerpané) sa preto
  *    líšia aj vtedy, keď majú rovnaký tón — pozri bod 2.
  *
  * 2. **Vyčerpaný rozpočet NIE JE chyba** (K2, `HeaderStatus.tsx`). Pri 200/200

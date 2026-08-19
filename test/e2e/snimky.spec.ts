@@ -45,10 +45,40 @@ test.describe('snímky obrazoviek', () => {
     await page.waitForLoadState('networkidle');
     await page.screenshot({ path: 'screenshots/aktualne-3-nova-zlava.png', fullPage: true });
 
-    /* 4. Nastavenia — „čo appka vie", režim rozsahu, rozpočty, brzdy. */
+    /* 4. Nastavenia — rozcestník: štyri karty, každá so svojím stavom. */
     await page.goto('/nastavenia');
+    await expect(page.getByTestId('settings-cards')).toBeVisible();
     await page.waitForLoadState('networkidle');
-    await page.screenshot({ path: 'screenshots/aktualne-4-nastavenia.png', fullPage: true });
+    await page.screenshot({
+      path: 'screenshots/aktualne-4-nastavenia-rozcestnik.png',
+      fullPage: true,
+    });
+
+    /* 5. Podstránka „Čo smie robiť" — rozsah, zápisy, rozpočty. Práve tu je
+     *    prepínač stropu, ktorý používateľ mesiace nenašiel. */
+    await page.goto('/nastavenia/co-smie');
+    await expect(page.getByTestId('settings-sub-co-smie')).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    await page.screenshot({ path: 'screenshots/aktualne-5-nastavenia-co-smie.png', fullPage: true });
+
+    /* 6. Podstránka „Čo appka vie" — zoznam schopností s odkazmi na miesta. */
+    await page.goto('/nastavenia/co-vie');
+    await expect(page.getByTestId('feature-index')).toBeVisible();
+    await page.screenshot({ path: 'screenshots/aktualne-6-nastavenia-co-vie.png', fullPage: true });
+
+    /* 7. Podstránka „Čo sa už stalo" — história, diagnostika, medzery, brzdy. */
+    await page.goto('/nastavenia/historia');
+    await expect(page.getByTestId('danger-zone-link')).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    await page.screenshot({ path: 'screenshots/aktualne-7-nastavenia-historia.png', fullPage: true });
+
+    /* 8. Červená zóna — vlastná stránka a ešte za rozklikom (bod 14). */
+    await page.goto('/nastavenia/cervena-zona');
+    await expect(page.getByTestId('danger-zone-disclosure')).toBeVisible();
+    await page.screenshot({
+      path: 'screenshots/aktualne-8-nastavenia-cervena-zona.png',
+      fullPage: true,
+    });
 
     /* ── teraz do appky nasadíme dokončenú zľavu ── */
     const campaignId = await db.seedCampaign({
@@ -60,20 +90,20 @@ test.describe('snímky obrazoviek', () => {
       items: PRODUKTY.map((productId) => ({ productId, status: 'ok', percent: 10 })),
     });
 
-    /* 5. Prehľad so zľavou — na mieste prázdneho stavu je fronta. */
+    /* 9. Prehľad so zľavou — na mieste prázdneho stavu je fronta. */
     await page.goto('/');
     await expect(page.getByTestId('overview')).toBeVisible();
     await page.waitForLoadState('networkidle');
-    await page.screenshot({ path: 'screenshots/aktualne-5-prehlad-so-zlavou.png', fullPage: true });
+    await page.screenshot({ path: 'screenshots/aktualne-9-prehlad-so-zlavou.png', fullPage: true });
 
-    /* 6. Zoznam zliav. */
+    /* 10. Zoznam zliav. */
     await page.goto('/zlavy');
     await page.waitForLoadState('networkidle');
-    await page.screenshot({ path: 'screenshots/aktualne-6-zlavy-zoznam.png', fullPage: true });
+    await page.screenshot({ path: 'screenshots/aktualne-10-zlavy-zoznam.png', fullPage: true });
 
-    /* 7. Detail zľavy — fronta naživo, rozpočet, položky. */
+    /* 11. Detail zľavy — fronta naživo, rozpočet, položky. */
     await page.goto(`/zlavy/${campaignId}`);
     await page.waitForLoadState('networkidle');
-    await page.screenshot({ path: 'screenshots/aktualne-7-zlava-detail.png', fullPage: true });
+    await page.screenshot({ path: 'screenshots/aktualne-11-zlava-detail.png', fullPage: true });
   });
 });

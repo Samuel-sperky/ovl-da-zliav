@@ -48,13 +48,26 @@
   --aura-gold-800: #8a6417;
 
   /* Typografia — Inter s tabulárnymi číslicami (§2 bod 3).
-     Fonty sa neinštalujú z siete (package.json je zamknutý, žiadny
-     next/font/google); ak Inter v systéme nie je, padá sa na system-ui. */
+     'Inter Variable' je rodina z balíka @fontsource-variable/inter, ktorý sa
+     načítava v src/app/layout.tsx. Písmo sa DODÁVA S APPKOU, nie sťahuje zo
+     siete (I6). Názov rodiny musí sedieť presne — predtým tu stálo 'Inter var',
+     čo nie je názov žiadnej rodiny, takže sa mlčky padalo na Segoe UI.
+     Zvyšok zásobníka je poistka pre prípad, že sa písmo nestihne načítať. */
   --ovl-font:
-    'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   --ovl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
+  /* TRI ROLY POPISKOV (D2, 19. 8. 2026). Popisok sekcie, popisok dlaždice a
+     hlavička stĺpca sú tri RÔZNE veci a musia sa dať rozoznať bez čítania:
+       · sekcia   — pomenúva oblasť obrazovky. Najsilnejšia, tmavšia, širšie
+                    preložená. Je jej na obrazovke málo.
+       · dlaždica — pomenúva JEDNO číslo. Bez verzálok, aby číslo nad ňou
+                    zostalo dominantou; verzálky pri čísle súperia.
+       · stĺpec   — pomenúva zvislý rad. Verzálky áno (radia sa pod sebou),
+                    ale najtlmenejšia zo všetkých troch.
+     Kto pridá štvrtú veľkosť popisku, hierarchiu zase zruší. */
   --ovl-fs-eyebrow: 0.6875rem;
+  --ovl-fs-label-tile: 0.75rem;
   --ovl-fs-micro: 0.75rem;
   --ovl-fs-small: 0.8125rem;
   --ovl-fs-table: 0.875rem;
@@ -126,22 +139,25 @@
   --accent: var(--deep);
   --accent-on: #ffffff;
 
-  --paper: #f7f5f7;
+  /* Základňa je NEUTRÁLNA (R5, 19. 8. 2026). Predtým bola tónovaná doružova
+     (--paper: #f7f5f7, --line: #e3dde4) a jediný akcent na nej pôsobil
+     špinavo. Hodnoty sú zmerané, nie odhadnuté — scripts/palette-check.mjs. */
+  --paper: #f5f6f7;
   --paper2: #ffffff;
-  --paper3: #f1eef2;
-  --ink: #141b1a;
-  --ink2: #3d4b49;
-  --dim: #6b7877;
-  --line: #e3dde4;
-  --line2: #cfc7d1;
-  --track: #e9e4ea;
+  --paper3: #edeef1;
+  --ink: #16181c;
+  --ink2: #3f444c;
+  --dim: #63696f;
+  --line: #dfe1e6;
+  --line2: #c7c9cd;
+  --track: #e7e9ed;
   --sel: #eef9f9;
   --barfill: var(--deep);
-  --shadow: 0 1px 2px rgb(19 27 26 / 0.07);
+  --shadow: 0 1px 2px rgb(22 24 28 / 0.07);
   /* Spodná lišta výberu je tmavá aj vo svetlej téme — je to plávajúca akcia,
      nie plocha stránky. */
-  --selbar-bg: #141b1a;
-  --selbar-fg: #f2f7f6;
+  --selbar-bg: #16181c;
+  --selbar-fg: #f2f3f5;
 
   /* Geometria V3. `--r-sm` definuje KISS vrstva (§13) — jedna hodnota (8 px)
      pre obe vrstvy je lepšia než dve skoro rovnaké. */
@@ -160,13 +176,13 @@
   --brand-tint: #e3f1f1;
   --gold: var(--aura-gold-800);
 
-  --st-critical: #c62f26;
-  --st-attention: #9a6c00;
-  --st-progress: #4a3aa7;
-  --st-good: #2e7d32;
-  --st-idle: #667574;
+  --st-critical: #d13228;
+  --st-attention: #6b4300;
+  --st-progress: #2f2585;
+  --st-good: #1a5e33;
+  --st-idle: #4f555c;
 
-  --production-bg: #c62f26;
+  --production-bg: #b3261e;
   --production-fg: #ffffff;
 
   /* Sekvenčná teal rampa (hĺbka zľavy) — monotónna vo svetlosti. Nekóduje
@@ -187,8 +203,8 @@
   --st-good-ink: color-mix(in oklab, var(--st-good) 70%, var(--ink));
   --st-idle-ink: color-mix(in oklab, var(--st-idle) 70%, var(--ink));
 
-  --ovl-shadow: 0 1px 2px rgb(19 27 26 / 0.05), 0 1px 3px rgb(19 27 26 / 0.07);
-  --ovl-shadow-raised: 0 10px 30px -16px rgb(19 27 26 / 0.22);
+  --ovl-shadow: 0 1px 2px rgb(22 24 28 / 0.05), 0 1px 3px rgb(22 24 28 / 0.07);
+  --ovl-shadow-raised: 0 10px 30px -16px rgb(22 24 28 / 0.22);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -204,24 +220,24 @@
     --accent: var(--teal);
     --accent-on: #08201f;
 
-    --paper: #0e1413;
-    --paper2: #131b1a;
-    --paper3: #182220;
-    --ink: #e8f0ef;
-    --ink2: #b9c9c7;
-    --dim: #849694;
-    --line: #22302e;
-    --line2: #31423f;
-    --track: #1b2523;
+    --paper:#101114;
+    --paper2:#17181c;
+    --paper3:#1e2026;
+    --ink:#eceef2;
+    --ink2:#bfc4cd;
+    --dim:#8b919b;
+    --line:#282a31;
+    --line2:#3c3e43;
+    --track:#212329;
     --sel: #152a2a;
     --barfill: var(--teal);
     --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
-    --selbar-bg: #1d2927;
-    --selbar-fg: #f2f7f6;
+    --selbar-bg:#22242a;
+    --selbar-fg:#f2f3f5;
 
-    --surface: color-mix(in srgb, #131b1a 62%, transparent);
+    --surface:color-mix(in srgb, #17181c 62%, transparent);
     --surface-solid: var(--paper2);
-    --surface-raised: #1b2624;
+    --surface-raised:#22242a;
     --line-strong: var(--line2);
     --brand: var(--teal);
     --brand-fill: var(--aura-teal-700);
@@ -229,13 +245,13 @@
     --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
     --gold: var(--aura-gold-500);
 
-    --st-critical: #e5534b;
-    --st-attention: #d9a441;
-    --st-progress: #8b80e8;
-    --st-good: #3fa045;
-    --st-idle: #8a9895;
+    --st-critical:#fa8076;
+    --st-attention:#eab254;
+    --st-progress:#8e83e8;
+    --st-good:#3d9448;
+    --st-idle:#7b818a;
 
-    --production-bg: #c62f26;
+    --production-bg:#b3261e;
     --production-fg: #fff4f2;
 
     --seq-teal-1: #12312f;
@@ -265,24 +281,24 @@
   --accent: var(--teal);
   --accent-on: #08201f;
 
-  --paper: #0e1413;
-  --paper2: #131b1a;
-  --paper3: #182220;
-  --ink: #e8f0ef;
-  --ink2: #b9c9c7;
-  --dim: #849694;
-  --line: #22302e;
-  --line2: #31423f;
-  --track: #1b2523;
+  --paper:#101114;
+  --paper2:#17181c;
+  --paper3:#1e2026;
+  --ink:#eceef2;
+  --ink2:#bfc4cd;
+  --dim:#8b919b;
+  --line:#282a31;
+  --line2:#3c3e43;
+  --track:#212329;
   --sel: #152a2a;
   --barfill: var(--teal);
   --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
-  --selbar-bg: #1d2927;
-  --selbar-fg: #f2f7f6;
+  --selbar-bg:#22242a;
+  --selbar-fg:#f2f3f5;
 
-  --surface: color-mix(in srgb, #131b1a 62%, transparent);
+  --surface:color-mix(in srgb, #17181c 62%, transparent);
   --surface-solid: var(--paper2);
-  --surface-raised: #1b2624;
+  --surface-raised:#22242a;
   --line-strong: var(--line2);
   --brand: var(--teal);
   --brand-fill: var(--aura-teal-700);
@@ -290,13 +306,13 @@
   --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
   --gold: var(--aura-gold-500);
 
-  --st-critical: #e5534b;
-  --st-attention: #d9a441;
-  --st-progress: #8b80e8;
-  --st-good: #3fa045;
-  --st-idle: #8a9895;
+  --st-critical:#fa8076;
+  --st-attention:#eab254;
+  --st-progress:#8e83e8;
+  --st-good:#3d9448;
+  --st-idle:#7b818a;
 
-  --production-bg: #c62f26;
+  --production-bg:#b3261e;
   --production-fg: #fff4f2;
 
   --seq-teal-1: #12312f;
@@ -426,8 +442,8 @@ h6 {
   font-size: var(--ovl-fs-eyebrow);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--gold);
+  letter-spacing: 0.14em;
+  color: var(--ink2);
 }
 
 a {
@@ -547,11 +563,10 @@ hr {
 }
 .ovl-card h2 {
   margin: 0 0 var(--ovl-s3);
-  font-size: var(--ovl-fs-eyebrow);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--gold);
+  font-size: var(--ovl-fs-label-tile);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--dim);
 }
 .ovl-card--danger {
   border-color: var(--st-critical-edge);
@@ -998,7 +1013,8 @@ input::placeholder {
   z-index: 1;
   background: var(--surface-solid);
   font-size: var(--ovl-fs-eyebrow);
-  font-weight: 700;
+  /* 600, nie 700: stĺpec je najtlmenejší z troch popiskov (D2). */
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--dim);
@@ -1844,11 +1860,12 @@ b.lvl-2 {
   margin-bottom: 10px;
 }
 .sec-h h2 {
-  font-size: 10.5px;
-  letter-spacing: 0.15em;
+  font-size: var(--ovl-fs-eyebrow);
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--dim);
-  font-weight: 650;
+  /* --ink2, nie --dim: popisok sekcie je najsilnejší z troch (D2). */
+  color: var(--ink2);
+  font-weight: 700;
 }
 .sec-h .act {
   display: flex;
@@ -2125,7 +2142,23 @@ b.lvl-2 {
   font-weight: 500;
 }
 .sig.lock::before {
-  content: '–';
+  /*
+   * Zámok, NIE pomlčka (D21, nález agenta O1 pri oprave D6).
+   *
+   * Predtým tu stálo '–'. V stĺpci značiek prekážok stojí vedľa ✕ ▲ ○, kde je
+   * najslabším glyfom práve pri riadku, ktorý ako jediný má cestu von (heslo).
+   * Horšie: '–' je na oko nerozoznateľné od '—', ktorým appka všade inde hovorí
+   * „toto nevieme" (pravidlo „pomlčka, nikdy nula"). Jeden znak niesol dva
+   * úplne rozdielne významy.
+   *
+   * 🔒 je zavedený zámok tejto appky — Nav.tsx aj queue-model.ts ho už
+   * používajú, takže sa tým slovník zjednocuje, nie rozširuje.
+   */
+  content: '🔒';
+  /* Emoji je širšie než 10 px vyhradených pre ✓ ▲ ✕ ○ — bez toho by značku
+     orezalo. Veľkosť sa mierne sťahuje, aby riadok nenarástol. */
+  width: 12px;
+  font-size: 10px;
 }
 
 /* Odhad — znak ≈ + tlmenejší odtieň (P7). Meraný fakt ho NIKDY nemá. */
@@ -2223,7 +2256,10 @@ b.lvl-2 {
 }
 .tbl-scroll {
   overflow: auto;
-  max-height: calc(100vh - 300px);
+  /* 280, nie 300: po zhustení pása dlaždíc (D8) je nad tabuľkou ~55 px
+     navyše. Krok je zámerne opatrný — vracia dva riadky, nie celých 55 px,
+     aby sa pätka so stránkovaním nedostala pod hranu obrazovky. */
+  max-height: calc(100vh - 280px);
 }
 table.tbl {
   width: 100%;
@@ -2880,12 +2916,42 @@ details.tech.bare {
   padding: 11px 13px;
 }
 .kpi .k {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  /* Popisok DLAŽDICE — tá istá rola ako .ovl-card h2 (D2). Bez verzálok
+     zámerne: dlaždica má nad sebou číslo a verzálkový popisok s ním súperí.
+     Predtým tu bolo 10 px / 0.12em / 650 verzálkami, teda štvrtá varianta
+     popisku, ktorá tri roly z D2 rušila. */
+  font-size: var(--ovl-fs-label-tile);
+  letter-spacing: 0;
   color: var(--dim);
-  font-weight: 650;
+  font-weight: 600;
   margin-bottom: 5px;
+}
+
+/* HUSTÁ DLAŽDICA — pás stavu katalógu na Produktoch (D8).
+   Nie je to nový vzhľad, len menej vzduchu a menšie číslo: dlaždice sú
+   kontrola pred výberom, dominantou obrazovky je tabuľka (P1). Žije to tu
+   a nie ako inline štýl v komponente, aby sa geometria dala nájsť na tom
+   istom mieste ako .kpi. */
+.kpi.dense {
+  padding: 8px 12px;
+}
+.kpi.dense .k {
+  margin-bottom: 3px;
+}
+.kpi.dense .v {
+  font-size: 18px;
+}
+/* Hodnota, ktorú appka nepozná — tlmená, ale nie neviditeľná. */
+.kpi.dense .v[data-unknown='ano'] {
+  color: var(--dim);
+  font-weight: 520;
+}
+/* Jeden riadok. Zalomená vysvetlivka predlžuje všetky štyri bunky naraz,
+   lebo v mriežke sú rovnako vysoké. */
+.kpi.dense .s {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kpi .v {
   font-size: 22px;

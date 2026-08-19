@@ -45,7 +45,7 @@ import LockedFeatures, {
 import SafeguardsSection from '@/components/settings/SafeguardsSection';
 import SignOut from '@/components/settings/SignOut';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
-import { SETTINGS_ANCHORS } from '@/components/settings/SettingsPanel';
+import { SETTINGS_ANCHORS } from '@/components/settings/sub-pages';
 import { SETTINGS_CSS } from '@/components/settings/styles';
 import { LOGIN_CSS } from '@/app/login/styles';
 import type { KeyMetaView, QueueView, SettingsView } from '@/components/settings/api';

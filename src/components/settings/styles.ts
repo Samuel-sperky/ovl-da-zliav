@@ -78,9 +78,50 @@ export const SETTINGS_CSS = `
 .set-page .ovl-drawer .kv{grid-template-columns:110px 1fr auto;gap:4px 10px}
 .set-page .ovl-drawer pre.mono{white-space:pre-wrap;overflow-wrap:anywhere}
 
+/* ─────────────────── Rozcestník: štyri karty (bod 13) ──────────────────── */
+/* Dve v rade pri plnej šírke, jedna pod druhou na polovici obrazovky. Karta je
+   celá klikateľná — nie odkaz v rohu, ktorý sa musí trafiť. */
+.set-page .set-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;
+  margin-top:14px}
+.set-page .set-card{display:flex;flex-direction:column;gap:8px;
+  background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px;box-shadow:var(--shadow);text-decoration:none;color:inherit;
+  transition:border-color .12s ease,transform .12s ease}
+.set-page .set-card:hover{border-color:var(--teal);transform:translateY(-1px)}
+.set-page .set-card:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.set-page .set-card h2{font-size:13.5px;font-weight:640;color:var(--ink);
+  letter-spacing:0;text-transform:none;line-height:1.35}
+.set-page .set-card .card-lead{font-size:12px;color:var(--dim);line-height:1.5}
+/* Stav karty. Sedí na spodku, aby boli všetky štyri stavy v jednej línii a
+   dali sa prečítať jedným pohybom oka, nie štyrmi. */
+.set-page .set-card .card-state{margin-top:auto;padding-top:8px;
+  border-top:1px solid var(--line);display:flex;flex-direction:column;gap:3px}
+.set-page .set-card .card-state .sig{align-items:flex-start;line-height:1.45;
+  text-align:left}
+.set-page .set-card .card-word{font-size:11px;color:var(--dim);
+  padding-left:15px}
+.set-page .set-card .card-in{font-size:11px;color:var(--dim);
+  display:flex;flex-wrap:wrap;gap:4px 8px}
+
+/* ─────────────────── Podstránka: návrat a hlavička ─────────────────────── */
+.set-page .sub-back{font-size:12px;color:var(--dim);text-decoration:none;
+  display:inline-block;margin-bottom:8px}
+.set-page .sub-back:hover{color:var(--teal)}
+/* Odkaz do červenej zóny stojí sám na spodku brzdovej podstránky — nie je to
+   karta a nesmie tak ani vyzerať. */
+.set-page .dz-link{margin-top:12px;font-size:12px;color:var(--dim)}
+.set-page .dz-link a{color:var(--st-critical);text-decoration:none;
+  border-bottom:1px solid transparent}
+.set-page .dz-link a:hover{border-bottom-color:currentColor}
+/* Rozklik pred červenou zónou (bod 14). Zatvorený je to jeden riadok. */
+.set-page .dz-open>summary{cursor:pointer;font-size:12.5px;font-weight:600;
+  color:var(--st-critical);padding:4px 0}
+.set-page .dz-open[open]>summary{margin-bottom:10px}
+
 @media (max-width:760px){
   .set-page .split{grid-template-columns:1fr}
   .set-page .set-meters{grid-template-columns:1fr}
+  .set-page .set-cards{grid-template-columns:1fr}
   .set-page .kv{grid-template-columns:1fr;gap:2px}
   .set-page .kv .k{margin-top:8px}
   .set-page .dz-row .dz-a{margin-left:0}

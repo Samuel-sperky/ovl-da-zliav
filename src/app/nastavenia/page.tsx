@@ -1,17 +1,14 @@
 /**
- * Aura Zľavy — `/nastavenia` (V12; kontrakt V3, bod K-deväť).
+ * Aura Zľavy — `/nastavenia` (V12; kontrakt UI 13. 8. 2026, bod 13).
  *
- * Štvrtý a posledný tab. Skladajú sa doň veci, ktoré predtým žili samostatne:
- * adresa eshopu, oba kľúče, denný rozpočet zápisov, rozsah zliav, poistky,
- * zoznam zamknutých funkcií, celá história (predtým samostatný tab „Audit")
- * a červená zóna.
- *
- * Nadpis stránky aj kotvy dodáva `SettingsPanel` — je to jedna stránka
- * s kotvami, nie zoznam kariet, takže hlavička a obsah patria k sebe.
+ * Štvrtý tab. Do 18. 8. to bola jedna stránka s dvanástimi sekciami a mierou
+ * 4,7 obrazovky; teraz je to rozcestník so štyrmi kartami a obsah žije na
+ * podstránkach. Nič sa nezmazalo — každá sekcia má svoju kotvu ďalej a staré
+ * odkazy `/nastavenia#…` sem prídu a presmerujú sa (`sub-pages.ts`).
  */
 import type { Metadata } from 'next';
 
-import SettingsPanel from '@/components/settings/SettingsPanel';
+import SettingsIndex from '@/components/settings/SettingsIndex';
 import { APP_DISPLAY_NAME } from '@/version';
 
 export const metadata: Metadata = {
@@ -19,5 +16,5 @@ export const metadata: Metadata = {
 };
 
 export default function SettingsPage() {
-  return <SettingsPanel />;
+  return <SettingsIndex />;
 }
