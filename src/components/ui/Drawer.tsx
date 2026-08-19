@@ -15,6 +15,8 @@
  */
 import { useEffect, useRef, type ReactNode } from 'react';
 
+import Icon from '@/components/ui/Icon';
+
 export interface DrawerProps {
   open: boolean;
   onClose: () => void;
@@ -122,7 +124,9 @@ export function Drawer({ open, onClose, title, subtitle, footer, children, testI
             aria-label="Zavrieť"
             onClick={onClose}
           >
-            ✕
+            {/* Meno nesie `aria-label` TLAČIDLA — ikona zostáva `aria-hidden`,
+                inak by čítačka prečítala „zavrieť" dvakrát. */}
+            <Icon name="x" />
           </button>
         </div>
         <div className="ovl-drawer-body">{children}</div>

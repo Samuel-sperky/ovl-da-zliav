@@ -89,6 +89,41 @@ export function salesNumbers(snapshot: SalesSnapshot): SalesNumbers {
 
 /* ══════════════════════════ 2. Geometria grafu ════════════════════════════ */
 
+/*
+ * ČO SA V TEJTO SEKCII SMIE TICHO POKAZIŤ — a aké tvrdenie tým graf začne robiť
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ *  1. **Os x podľa poradia namiesto podľa dátumu.** Do 19. 8. 2026 sa bod
+ *     kreslil na `left + index * step`, teda dva dni vzdialené od seba dva
+ *     týždne vyzerali ako dva susedné dni. Graf tým tvrdil, že sťahovanie beží
+ *     každý deň. Odteraz nesie vodorovnú polohu KALENDÁRNY DEŇ a diera
+ *     v pokrytí je v grafe naozaj diera.
+ *
+ *  2. **Spojnica vedená cez nesťahovaný deň.** Čiara cez deň, ktorý sa nikdy
+ *     nesťahoval, tvrdí, že sa v ten deň predalo niečo medzi susednými
+ *     hodnotami. Nevieme to. Čiara sa preto na diere PRETRHNE (`segments`) a
+ *     diera dostane vlastný pás (`gaps`). Nulu za chýbajúci deň nedopĺňa nikto
+ *     a nikdy: „predalo sa 0 kusov" a „ten deň sme nesťahovali" sú dve rôzne
+ *     vety a appka zapisuje do ostrého eshopu.
+ *
+ *  3. **Trendová čiara cez dva body.** Priamka najmenších štvorcov cez dva
+ *     body JE tá spojnica — nakresliť ju druhýkrát a povedať jej „trend"
+ *     znamená tvrdiť, že dve merania sú smerovanie. Trend sa preto kreslí až
+ *     od `MIN_TREND_POINTS` uzavretých dní. Hranica je zámerne rovnaká ako
+ *     `MIN_DAYS_FOR_TREND` v `src/lib/sales/insights.ts`; kopíruje sa preto,
+ *     že ten modul ťahá `@/db/pool` a do prehliadača nesmie.
+ *
+ *  4. **Plocha pod čiarou pri dvoch bodoch.** Výplň číta oko ako spojitú
+ *     veličinu v čase. Pri dvoch meraniach žiadna spojitá veličina nie je,
+ *     takže `mode` je `pair`, plocha sa nekreslí a obe hodnoty sa napíšu
+ *     priamo k bodom. Priamy popisok pri KAŽDOM bode je inak zakázaný; pri
+ *     dvoch bodoch je to výber, nie hluk.
+ *
+ *  5. **Os natiahnutá po dnešok.** Zámerne NIE. Os pokrýva prvý až posledný
+ *     zmeraný deň; že sú dáta staré, hovorí riadok o čerstvosti pod grafom.
+ *     Prázdna púšť dvoch týždňov by z grafu spravila prevažne prázdny rám.
+ */
+
 /** Súradnicová sústava presne ako v predlohe — `viewBox="0 0 880 150"`. */
 export const CHART = {
   width: 880,
@@ -99,11 +134,37 @@ export const CHART = {
   top: 10,
 } as const;
 
+/**
+ * Od koľkých uzavretých dní má trendová čiara zmysel. Pod touto hranicou je
+ * „trend" len prekreslená spojnica dvoch bodov.
+ */
+export const MIN_TREND_POINTS = 4;
+
+/**
+ * Ako graf vyzerá.
+ *  · `pair` — dve merania: dva body, spojnica, obe čísla priamo pri bodoch,
+ *    žiadna plocha, žiadny trend,
+ *  · `line` — tri a viac meraní: čiara, plocha, prípadne trend.
+ */
+export type SalesChartMode = 'pair' | 'line';
+
 export interface ChartPoint {
   day: string;
   units: number;
   x: number;
   y: number;
+}
+
+/** Nesťahované obdobie medzi dvoma meraniami — v grafe diera, nikdy nula. */
+export interface CoverageGap {
+  /** Posledný deň, ktorý dáta majú, pred dierou. */
+  afterDay: string;
+  /** Prvý deň, ktorý dáta majú, za dierou. */
+  beforeDay: string;
+  /** Koľko kalendárnych dní medzi nimi chýba. */
+  missingDays: number;
+  x1: number;
+  x2: number;
 }
 
 export interface ChartGeometry {
@@ -112,13 +173,25 @@ export interface ChartGeometry {
   /** Dnešok, ak ho máme — kreslí sa prerušovane, lebo deň ešte beží. */
   todayPoint: ChartPoint | null;
   linePoints: string;
+  /**
+   * Spojnica rozdelená na súvislé úseky. Kreslí sa TOTO, nie `linePoints` —
+   * cez nesťahovaný deň sa čiara neťahá.
+   */
+  segments: string[];
   areaPath: string;
-  /** Priamka najmenších štvorcov cez uzavreté dni. `null` pri < 2 dňoch. */
+  /** Priamka najmenších štvorcov. `null` pod `MIN_TREND_POINTS` dňami. */
   trendLine: { x1: number; y1: number; x2: number; y2: number } | null;
   gridLines: Array<{ y: number; label: string }>;
   xLabels: Array<{ x: number; label: string }>;
   /** Horná hranica osi — „pekné" číslo nad maximom. */
   scaleMax: number;
+  mode: SalesChartMode;
+  /** Diery v pokrytí. Prázdne pole = os je súvislá deň po dni. */
+  gaps: CoverageGap[];
+  /** Koľko kalendárnych dní os pokrýva (prvý až posledný meraný deň). */
+  spanDays: number;
+  /** Body pre nitkový kríž — jeden na každý meraný deň, aj na dnešok. */
+  hover: Array<{ day: string; units: number; x: number; y: number; isToday: boolean }>;
 }
 
 /** Najbližšie okrúhle číslo nad `value` (1, 2, 5 × mocnina desiatich). */
@@ -137,6 +210,74 @@ export function axisDay(day: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (match === null) return day;
   return `${Number(match[3])}. ${Number(match[2])}.`;
+}
+
+/**
+ * Deň → poradové číslo dňa od epochy. `null` pri nečitateľnom vstupe.
+ *
+ * Zámerne sa NEPOUŽÍVA `@/lib/domain/dates` — jeho `parseDateOnly()` na
+ * nezmysle vyhodí `DomainError` a zhodilo by to celú sekciu Prehľadu kvôli
+ * jednému pokazenému riadku z API. Tu stačí vedieť, či sa deň dá prečítať.
+ */
+export function dayNumber(day: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (match === null) return null;
+  const stamp = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (!Number.isFinite(stamp)) return null;
+  return Math.round(stamp / 86_400_000);
+}
+
+/**
+ * Diery v rade dní. Vstup musí byť zoradený vzostupne (API aj `parseDays()`
+ * to robia). Nečitateľný deň dieru nevyrobí — to by bolo tvrdenie z neznalosti.
+ */
+export function coverageGaps(days: readonly SalesDay[]): Array<Omit<CoverageGap, 'x1' | 'x2'>> {
+  const out: Array<Omit<CoverageGap, 'x1' | 'x2'>> = [];
+  for (let i = 1; i < days.length; i += 1) {
+    const previous = days[i - 1] as SalesDay;
+    const current = days[i] as SalesDay;
+    const a = dayNumber(previous.day);
+    const b = dayNumber(current.day);
+    if (a === null || b === null) continue;
+    const missing = b - a - 1;
+    if (missing > 0) {
+      out.push({ afterDay: previous.day, beforeDay: current.day, missingDays: missing });
+    }
+  }
+  return out;
+}
+
+const round1 = (value: number): number => Number(value.toFixed(1));
+
+/**
+ * Vodorovné polohy dní. Prvý deň sedí na ľavom okraji, posledný na pravom;
+ * medzi nimi rozhoduje KALENDÁR, nie poradie v poli.
+ *
+ * Keď je čo i len jeden deň nečitateľný, celý rad sa rozostupuje rovnomerne po
+ * poradí. Miešať obe mierky v jednom ráme by vyrobilo os, ktorá je zľava
+ * kalendárna a sprava poradová — a to by nikto nezistil.
+ */
+function positions(days: readonly SalesDay[]): { xs: number[]; spanDays: number; byDate: boolean } {
+  const span = CHART.right - CHART.left;
+  const numbers = days.map((day) => dayNumber(day.day));
+  const readable = numbers.every((value): value is number => value !== null);
+  const first = readable ? (numbers[0] as number) : 0;
+  const last = readable ? (numbers[numbers.length - 1] as number) : days.length - 1;
+  const total = last - first;
+
+  if (!readable || total <= 0) {
+    const step = span / Math.max(1, days.length - 1);
+    return {
+      xs: days.map((_, index) => round1(CHART.left + index * step)),
+      spanDays: days.length,
+      byDate: false,
+    };
+  }
+  return {
+    xs: numbers.map((value) => round1(CHART.left + ((value as number) - first) * (span / total))),
+    spanDays: total + 1,
+    byDate: true,
+  };
 }
 
 function fit(points: readonly ChartPoint[]): { slope: number; intercept: number } | null {
@@ -167,15 +308,14 @@ export function chartGeometry(days: readonly SalesDay[], today: string): ChartGe
   if (days.length < 2) return null;
 
   const scaleMax = niceCeiling(Math.max(...days.map((day) => day.units)));
-  const span = CHART.right - CHART.left;
   const height = CHART.baseline - CHART.top;
-  const step = span / (days.length - 1);
+  const placed = positions(days);
 
   const all: ChartPoint[] = days.map((day, index) => ({
     day: day.day,
     units: day.units,
-    x: Number((CHART.left + index * step).toFixed(1)),
-    y: Number((CHART.baseline - (day.units / scaleMax) * height).toFixed(1)),
+    x: placed.xs[index] as number,
+    y: round1(CHART.baseline - (day.units / scaleMax) * height),
   }));
 
   const last = all[all.length - 1] as ChartPoint;
@@ -188,28 +328,64 @@ export function chartGeometry(days: readonly SalesDay[], today: string): ChartGe
   const linePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
   const first = points[0] as ChartPoint;
   const end = points[points.length - 1] as ChartPoint;
-  const areaPath = `M${linePoints} ${end.x},${CHART.baseline} ${first.x},${CHART.baseline} Z`;
 
-  const line = fit(points);
+  /* Súvislé úseky uzavretých dní — čiara sa na diere pretrhne. */
+  const gapList = placed.byDate ? coverageGaps(days) : [];
+  const gapAfter = new Set(gapList.map((gap) => gap.afterDay));
+
+  const runs: ChartPoint[][] = [];
+  let run: ChartPoint[] = [];
+  for (const point of points) {
+    run.push(point);
+    if (gapAfter.has(point.day)) {
+      runs.push(run);
+      run = [];
+    }
+  }
+  if (run.length > 0) runs.push(run);
+  const drawable = runs.filter((chunk) => chunk.length >= 2);
+
+  const segments = drawable.map((chunk) => chunk.map((point) => `${point.x},${point.y}`).join(' '));
+
+  const measured = points.length + (todayPoint === null ? 0 : 1);
+  const mode: SalesChartMode = measured <= 2 ? 'pair' : 'line';
+
+  /* Plocha sa skladá z tých istých úsekov — cez dieru sa nerozlieva. */
+  const areaPath =
+    mode === 'pair'
+      ? ''
+      : drawable
+          .map((chunk) => {
+            const head = chunk[0] as ChartPoint;
+            const tail = chunk[chunk.length - 1] as ChartPoint;
+            const body = chunk.map((point) => `${point.x},${point.y}`).join(' ');
+            return `M${body} ${tail.x},${CHART.baseline} ${head.x},${CHART.baseline} Z`;
+          })
+          .join(' ');
+
+  const line = points.length >= MIN_TREND_POINTS ? fit(points) : null;
   const trendLine =
     line === null
       ? null
       : {
           x1: first.x,
-          y1: Number(
-            (CHART.baseline - (Math.max(0, line.intercept) / scaleMax) * height).toFixed(1),
-          ),
+          y1: round1(CHART.baseline - (Math.max(0, line.intercept) / scaleMax) * height),
           x2: end.x,
-          y2: Number(
-            (
-              CHART.baseline -
-              (Math.max(0, line.intercept + line.slope * (points.length - 1)) / scaleMax) * height
-            ).toFixed(1),
+          y2: round1(
+            CHART.baseline -
+              (Math.max(0, line.intercept + line.slope * (points.length - 1)) / scaleMax) * height,
           ),
         };
 
+  const xByDay = new Map(all.map((point) => [point.day, point.x]));
+  const gaps: CoverageGap[] = gapList.map((gap) => ({
+    ...gap,
+    x1: xByDay.get(gap.afterDay) ?? CHART.left,
+    x2: xByDay.get(gap.beforeDay) ?? CHART.right,
+  }));
+
   const gridLines = [0, scaleMax / 2, scaleMax].map((value) => ({
-    y: Number((CHART.baseline - (value / scaleMax) * height).toFixed(1)),
+    y: round1(CHART.baseline - (value / scaleMax) * height),
     label: String(Math.round(value)),
   }));
 
@@ -226,5 +402,27 @@ export function chartGeometry(days: readonly SalesDay[], today: string): ChartGe
     xLabels.push({ x: point.x, label: axisDay(point.day) });
   }
 
-  return { points, todayPoint, linePoints, areaPath, trendLine, gridLines, xLabels, scaleMax };
+  const hover = all.map((point) => ({
+    day: point.day,
+    units: point.units,
+    x: point.x,
+    y: point.y,
+    isToday: point.day === today,
+  }));
+
+  return {
+    points,
+    todayPoint,
+    linePoints,
+    segments,
+    areaPath,
+    trendLine,
+    gridLines,
+    xLabels,
+    scaleMax,
+    mode,
+    gaps,
+    spanDays: placed.spanDays,
+    hover,
+  };
 }

@@ -197,9 +197,17 @@ describe('stav karty', () => {
     const state = cardState('co-smie', { ...EMPTY_FACTS, settings: SETTINGS, blockers: [blocker()] });
     expect(state.fromBlocker).toBe(true);
     expect(state.sentence).toBe('Ostrý zápis je vypnutý.');
-    // `mimo_appky` → tón poruchy a slovo o tom, že appka s tým nespraví nič.
+    /*
+     * `mimo_appky` → tón poruchy a slovo o tom, že sa to rieši mimo appky.
+     *
+     * Znenie prepísané 19. 8. 2026 pri zjednotení slovníkov. Nastavenia mali
+     * dovtedy vlastné slová v druhej osobe („appka s tým nespraví nič",
+     * „vyriešiš to tu v appke"), Prehľad neosobné a tab Zľavy tretie. Slovník
+     * je odteraz jeden (`ui/blocker-look.ts`) a je neosobný, ako káže štýl
+     * textov appky — teda znenie Prehľadu.
+     */
     expect(state.tone).toBe('critical');
-    expect(state.word).toBe('appka s tým nespraví nič');
+    expect(state.word).toBe('rieši sa mimo appky');
   });
 
   it('berie sa PRVÁ prekážka z oblastí karty — poradie servera sa neprehadzuje', () => {

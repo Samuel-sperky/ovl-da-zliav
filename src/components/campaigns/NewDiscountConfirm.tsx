@@ -40,6 +40,14 @@
  *    em pomlčka v rezoch dominanty prestáva byť interpunkciou a je z nej plný
  *    čierny obdĺžnik. Neznáme sa preto píše pomlčkou SO SLOVOM a v čitateľnej
  *    veľkosti. Nikdy nedávaj `'—'` do `.big`.
+ * 5. **Dominanta zostáva dominantou aj vtedy, keď je hodnota neznáma**
+ *    (P1, 19. 8. 2026). Pomlčka so slovom má 26 px, ručne vpísaný počet 28 px
+ *    v ráme — v stave `catalogEmpty && itemsCount === 0` bolo teda najťažším
+ *    prvkom karty pole, nie dominanta. Nespravilo sa to väčšou pomlčkou (to je
+ *    presne defekt D11) ani ľahším poľom (to je presne defekt D12), ale tým, že
+ *    krok bez obsahu prestal vyzerať ako krok, ktorý sa dá urobiť: pri
+ *    `itemsCount === 0` je z poľa zamknutý riadok s dôvodom. Pri každom
+ *    `itemsCount > 0` má pole plnú váhu z D12.
  *
  * PORADIE KROKOV = PORADIE ZÁVAŽNOSTI (D12, 19. 8. 2026)
  * ------------------------------------------------------
@@ -248,22 +256,39 @@ export function NewDiscountConfirm({
       {/*
        * Krok 2 — ručne vpísaný počet. Povrchová podoba I3 a najťažší prvok
        * spodku karty: pred ním sa nedá prekliknúť ďalej.
+       *
+       * P1, 19. 8. 2026 — keď vo výbere nie je ani jeden produkt, nie je čo
+       * potvrdzovať: skúška naprázdno je z toho istého dôvodu vypnutá a
+       * `blockedReason` hlási „Vyberte aspoň jeden produkt". Pole by v tom
+       * stave bolo najťažším prvkom karty (28 px v ráme) nad dominantou, ktorá
+       * je vtedy pomlčka so slovom v 26 px — dominanta by sa neohla, prevrátila
+       * by sa. Krok preto z obrazovky nemizne, len sa kreslí ako zamknutý
+       * riadok, ktorý povie dôvod. Mení sa vzhľad, NIE mechanika: `typed`
+       * ostáva prázdny a `typedCountMatches` ani `previewToken` sa toho
+       * netýkajú (I3).
        */}
-      <div className={styles.gate}>
-        <label className={styles.gateLabel} htmlFor="confirm-count-input">
-          Napíšte počet produktov
-        </label>
-        <input
-          id="confirm-count-input"
-          className={`inp ${styles.gateInput}`}
-          inputMode="numeric"
-          autoComplete="off"
-          placeholder={countKnown ? String(itemsCount) : ''}
-          value={typed}
-          onChange={(event) => onTyped(event.target.value)}
-          data-testid="confirm-count-input"
-        />
-      </div>
+      {itemsCount === 0 ? (
+        <div className={`${styles.gate} ${styles.gateLocked}`} data-testid="confirm-count-locked">
+          <span className={styles.gateLabel}>Napíšte počet produktov</span>
+          <span className="lockline">odomkne sa, keď bude vo výbere aspoň jeden produkt</span>
+        </div>
+      ) : (
+        <div className={styles.gate}>
+          <label className={styles.gateLabel} htmlFor="confirm-count-input">
+            Napíšte počet produktov
+          </label>
+          <input
+            id="confirm-count-input"
+            className={`inp ${styles.gateInput}`}
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder={countKnown ? String(itemsCount) : ''}
+            value={typed}
+            onChange={(event) => onTyped(event.target.value)}
+            data-testid="confirm-count-input"
+          />
+        </div>
+      )}
 
       {/* Krok 3 — zápis do ostrého eshopu. */}
       <div className={styles.acts}>

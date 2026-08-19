@@ -12,6 +12,9 @@
  */
 import Link from 'next/link';
 
+import Icon from '@/components/ui/Icon';
+import { TONE_ICON } from '@/components/ui/ToneBadge';
+
 export interface ReadOnlyNoticeProps {
   keyPresent: boolean;
 }
@@ -24,9 +27,7 @@ export function ReadOnlyNotice({ keyPresent }: ReadOnlyNoticeProps) {
   return (
     <div className="ovl-readonly-strip">
       <div className="ovl-readonly-notice" role="status" data-testid="readonly-notice">
-        <span className="ovl-note-glyph" aria-hidden="true">
-          ▲
-        </span>
+        <Icon className="ovl-note-glyph" name={TONE_ICON.attention} size={0.9} />
         Režim len na čítanie — API kľúč chýba alebo expiroval.{' '}
         <Link href="/nastavenia">Vložiť nový kľúč</Link>
       </div>

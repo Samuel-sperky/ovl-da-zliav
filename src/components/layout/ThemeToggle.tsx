@@ -4,7 +4,12 @@
  * Aura Zľavy — prepínač témy v hlavičke (V3, ARCHITEKTURA §0).
  *
  * Jedno okrúhle tlačidlo `.tglt` úplne vpravo. Svetlá téma je predvolená,
- * takže v nej ponúka mesiac (☾ = prepni na tmavú) a v tmavej slnko.
+ * takže v nej ponúka mesiac (= prepni na tmavú) a v tmavej slnko.
+ *
+ * `aria-label` hovorí CIEĽ, nie stav („Prepnúť na tmavú tému"). Stav by
+ * čítačke nepovedal, čo klik urobí, a používateľ by musel hádať — presne to
+ * bola chyba do 19. 8. 2026, keď tu stálo len „Prepnúť tému". Meno nesie
+ * TLAČIDLO, ikona zostáva `aria-hidden`; inak by sa prečítalo dvakrát.
  *
  * Prepínač píše explicitnú voľbu do `localStorage` aj na `<html>`; kým žiadna
  * voľba nie je, atribút na `<html>` chýba a tému určuje systém. Na serveri sa
@@ -17,6 +22,8 @@
  * voľba jedného prehliadača.
  */
 import { useEffect, useState } from 'react';
+
+import Icon from '@/components/ui/Icon';
 
 import {
   THEME_STORAGE_KEY,
@@ -54,18 +61,21 @@ export function ThemeToggle() {
     }
   }
 
+  /* Cieľ, nie stav: tlačidlo v tmavej téme prepína na svetlú. */
+  const target = `Prepnúť na ${theme === 'dark' ? 'svetlú' : 'tmavú'} tému`;
+
   return (
     <button
       type="button"
       className="tglt"
       onClick={toggle}
-      aria-label="Prepnúť tému"
-      title={`Prepnúť na ${theme === 'dark' ? 'svetlú' : 'tmavú'} tému`}
+      aria-label={target}
+      title={target}
       data-testid="theme-toggle"
       data-theme-state={theme}
       suppressHydrationWarning
     >
-      <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={0.95} />
     </button>
   );
 }

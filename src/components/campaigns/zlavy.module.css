@@ -442,11 +442,12 @@
 }
 
 .cap {
-  font-size: 13px;
+  /* Popisok DLAZDICE pod 64 px dominantou — bez verzalok (D2). S verzalkami
+     superil s cislom nad sebou, co je presne to, co rola dlazdice zakazuje. */
+  font-size: var(--ovl-fs-label-tile);
   color: var(--dim);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
   margin-top: 4px;
   display: block;
 }
@@ -457,6 +458,18 @@
  * potvrdenia potom vyzerá ako chyba vykreslenia. Preto tu `.big` NIE JE — je
  * to vlastný, čitateľný stupeň, v ktorom pomlčka ešte vyzerá ako pomlčka a
  * stojí pri nej slovo. Nikdy sem nedávaj 64 px.
+ *
+ * TENTO TVAR JE SPOLOČNÝ (19. 8. 2026). Ten istý defekt mal aj bočný panel
+ * detailu produktu, kde pomlčka stála v `.lvl-1 .big.sm` (44 px) — menší rez,
+ * ten istý obdĺžnik. `ProductDetailPanel.tsx` preto importuje práve túto
+ * triedu; druhá kópia by sa po prvej úprave rozišla. Správne miesto tejto
+ * triedy je `ui/primitives.module.css` a presun patrí integrátorovi.
+ *
+ * P1 — kým je dominanta pomlčka, má 26 px, teda MENEJ než 28 px potvrdzovacieho
+ * poľa (`.gateInput`). Neohýba sa preto dominanta, ale karta: keď appka počet
+ * nevie, nie je čo potvrdzovať a pole sa kreslí tichým zamknutým riadkom
+ * (`.gateLocked`). Zväčšiť `.unknown` nad `.gateInput` sa nedá bez toho, aby sa
+ * pomlčka vrátila do displejového rezu — a to je práve defekt, ktorý D11 opravil.
  */
 .unknown {
   display: block;
@@ -514,12 +527,40 @@
   text-align: center;
 }
 
+/*
+ * P1 — potvrdzovacie pole, ktoré nemá čo potvrdzovať (19. 8. 2026).
+ *
+ * Pri prázdnom zrkadle katalógu (`catalogEmpty && itemsCount === 0`) je
+ * dominanta karty pomlčka so slovom v 26 px, kým `.gateInput` má 28 px v ráme
+ * a v plnej farbe. Dominanta sa tým neohýbala — prevracala sa: najťažším
+ * prvkom karty bolo pole, do ktorého sa nedá napísať nič užitočné, lebo zápis
+ * je aj tak zamknutý na „Vyberte aspoň jeden produkt".
+ *
+ * Riešenie NIE JE zľahčiť poistku. Krok zostáva na obrazovke aj s popiskom —
+ * z vynechaného riadku by sa nedalo zistiť, že vôbec existuje — len sa kreslí
+ * tichým zamknutým riadkom a povie dôvod, presne ako zamknuté riadky inde
+ * v appke. Váhu, ktorú pole dostalo pri oprave D12, si drží v každom stave,
+ * v ktorom sa zápis naozaj dá spustiť, teda vždy pri `itemsCount > 0`.
+ */
+.gateLocked {
+  border-color: var(--line);
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .gateLabel {
   display: block;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink2);
   margin-bottom: 7px;
+}
+
+/* V zamknutom riadku popisok nič neuvádza, takže pod ním medzera nie je. */
+.gateLocked .gateLabel {
+  margin-bottom: 0;
 }
 
 .gate :global(.inp).gateInput {
@@ -1055,7 +1096,12 @@
 
 /* Porovnávacie (staršie) okno je tlmenejšie — dominanta je aktuálne číslo. */
 .perfStrong i {
-  background: var(--ink3);
+  /* --ink3 NEEXISTUJE. Deklaracia bola neplatna, takze pruh spadol na
+     priesvitny a porovnavacie obdobie sa kreslilo ako prazdny zlab — teda
+     nezname vykreslene ako nula, co je presne to, co appka inde zakazuje.
+     --ink2 je definovany neutral: odlisi sa od tealoveho pruhu aktualneho
+     obdobia a pritom nekoduje stav. */
+  background: var(--ink2);
 }
 
 .perfValue {

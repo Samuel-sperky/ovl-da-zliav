@@ -12,7 +12,7 @@
  * `Názov · Predané za okno · Cena · Zľava teraz`. Číslo produktu hlavný stĺpec
  * NIE JE (P3) — žije v „Technickom detaile" bočného panela. Sklad, kategória,
  * kov ani marža sa nekreslia vôbec: appka na ne nemá dáta (K8) a stĺpec plný
- * pomlčiek cez 40 483 riadkov je šum, nie priznanie. Priznanie je v paneli
+ * pomlčiek cez 41 220 riadkov je šum, nie priznanie. Priznanie je v paneli
  * filtrov, kde sú tie isté veci viditeľné a sivé.
  *
  * `Zľava teraz` je VŽDY podľa vlastného zápisu appky, nikdy podľa shopu (I11).
@@ -35,18 +35,18 @@
  * ────────────────────────────────────────
  * Riadok, na ktorý sa zľava nezapíše, dostane pod menom krátky príznak
  * („shop ho nenašiel"). Zámerne to NIE JE nový stĺpec: stĺpec by musel byť
- * vyplnený pri všetkých 40 483 riadkoch a 40 480 pomlčiek je šum, nie
+ * vyplnený pri všetkých 41 220 riadkoch a 41 217 pomlčiek je šum, nie
  * informácia. Príznak sa objaví len tam, kde je čo povedať, a celá veta aj
  * s ďalším krokom čaká v bočnom paneli. Text príznaku sa TU nevyrába —
  * prichádza z `catalog-status.ts`, aby ho tabuľka a panel nemohli povedať inak.
  *
  * PRÁZDNA TABUĽKA NIE JE JEDEN PRÍBEH
  * ───────────────────────────────────
- * „Filtru nevyhovuje ani jeden produkt" je pravda len nad ÚPLNÝM katalógom.
- * Kým appka pozná 2 900 zo 41 082 produktov, hľadaný kus môže pokojne existovať
- * a len ešte nebyť načítaný — a to je úplne iná rada. Tabuľka preto o prázdnom
- * stave nerozhoduje: dostane hotový `emptyState` od obrazovky, ktorá stav
- * katalógu pozná.
+ * „Filtru nevyhovuje ani jeden produkt" je pravda len nad ÚPLNÝM katalógom,
+ * a ani tam nie celá: zrkadlo pozná z produktu len názov a číslo, takže hľadaný
+ * kus môže existovať a len mať hľadané slovo v kóde či popise — a to je úplne
+ * iná rada než „uvoľnite filter". Tabuľka preto o prázdnom stave nerozhoduje:
+ * dostane hotový `emptyState` od obrazovky, ktorá stav katalógu pozná.
  *
  * HUSTOTA PRE 41 220 RIADKOV (D10, 19. 8. 2026)
  * ─────────────────────────────────────────────
@@ -88,6 +88,7 @@ import type { ProductReason } from '@/components/products/catalog-status';
 import type { CatalogSort, PerPage } from '@/components/products/catalog-filter';
 import { DEFAULT_CATALOG_FILTER, PER_PAGE_CHOICES } from '@/components/products/catalog-filter';
 import { formatEur } from '@/lib/ui/format';
+import Icon from '@/components/ui/Icon';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Pomôcky ═══════════════════════════════════ */
@@ -280,7 +281,6 @@ export function CatalogTable({
    */
   function columnHead(column: SortColumn, label: string): ReactNode {
     const direction = sortDirection(column, sort);
-    const glyph = direction === 'none' ? '' : direction === 'ascending' ? '↑' : '↓';
     if (onSort === undefined) return label;
     const next = nextSort(column, sort);
     return (
@@ -292,7 +292,11 @@ export function CatalogTable({
         data-testid={`sort-${column}`}
       >
         {label}
-        {glyph === '' ? null : <span aria-hidden="true">{glyph}</span>}
+        {/* Smer je pre čítačku na `<th aria-sort>`, nie tu — ikona by ho
+            prečítala druhýkrát. Slovami ho hovorí `title` (SORT_TITLES). */}
+        {direction === 'none' ? null : (
+          <Icon name={direction === 'ascending' ? 'chevronUp' : 'chevronDown'} size={0.85} />
+        )}
       </button>
     );
   }

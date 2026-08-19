@@ -19,14 +19,16 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { ICON_NAMES } from '@/components/ui/Icon';
+
 import {
-  BUDGET_LEVEL_GLYPH,
+  BUDGET_LEVEL_ICON,
   BUDGET_LEVEL_WORD,
   BUDGET_WARN_RATIO,
   NOTE_CLASS,
-  NOTE_GLYPH,
+  NOTE_ICON,
   NOTE_TONE,
-  TREND_GLYPH,
+  TREND_ICON,
   TREND_WORD,
   budgetAriaText,
   budgetCountLabel,
@@ -128,16 +130,16 @@ describe('K2 — vyčerpaný rozpočet nie je chyba', () => {
 describe('stav nikdy nie je len farba', () => {
   it('každá úroveň má glyf aj slovo', () => {
     for (const level of LEVELS) {
-      expect(BUDGET_LEVEL_GLYPH[level].length, `glyf ${level}`).toBeGreaterThan(0);
+      expect(ICON_NAMES, `ikona ${level}`).toContain(BUDGET_LEVEL_ICON[level]);
       expect(BUDGET_LEVEL_WORD[level].length, `slovo ${level}`).toBeGreaterThan(0);
     }
   });
 
   it('glyfy sú navzájom rôzne — aj `warn` verzus `full`, ktoré zdieľajú tón', () => {
-    const glyphs = LEVELS.map((level) => BUDGET_LEVEL_GLYPH[level]);
+    const glyphs = LEVELS.map((level) => BUDGET_LEVEL_ICON[level]);
     expect(new Set(glyphs).size).toBe(LEVELS.length);
     expect(budgetLevelTone('warn')).toBe(budgetLevelTone('full'));
-    expect(BUDGET_LEVEL_GLYPH.warn).not.toBe(BUDGET_LEVEL_GLYPH.full);
+    expect(BUDGET_LEVEL_ICON.warn).not.toBe(BUDGET_LEVEL_ICON.full);
   });
 
   it('slová sú navzájom rôzne a po slovensky', () => {
@@ -211,7 +213,7 @@ describe('Note — varianty vysvetlivky', () => {
   it('každý variant má triedu, glyf aj tón', () => {
     for (const variant of VARIANTS) {
       expect(NOTE_CLASS[variant], `trieda ${variant}`).toContain('ovl-note');
-      expect(NOTE_GLYPH[variant].length, `glyf ${variant}`).toBeGreaterThan(0);
+      expect(ICON_NAMES, `ikona ${variant}`).toContain(NOTE_ICON[variant]);
       expect(NOTE_TONE[variant], `tón ${variant}`).toBeTruthy();
     }
   });
@@ -223,7 +225,7 @@ describe('Note — varianty vysvetlivky', () => {
   });
 
   it('glyfy sú navzájom rôzne', () => {
-    expect(new Set(VARIANTS.map((v) => NOTE_GLYPH[v])).size).toBe(VARIANTS.length);
+    expect(new Set(VARIANTS.map((v) => NOTE_ICON[v])).size).toBe(VARIANTS.length);
   });
 
   it('len chyba preruší čítačku', () => {
@@ -244,10 +246,10 @@ describe('Note — varianty vysvetlivky', () => {
 describe('StatTile — smer zmeny', () => {
   it('každý smer má glyf aj slovo a sú navzájom rôzne', () => {
     for (const direction of DIRECTIONS) {
-      expect(TREND_GLYPH[direction].length, `glyf ${direction}`).toBeGreaterThan(0);
+      expect(ICON_NAMES, `ikona ${direction}`).toContain(TREND_ICON[direction]);
       expect(TREND_WORD[direction].length, `slovo ${direction}`).toBeGreaterThan(0);
     }
-    expect(new Set(DIRECTIONS.map((d) => TREND_GLYPH[d])).size).toBe(DIRECTIONS.length);
+    expect(new Set(DIRECTIONS.map((d) => TREND_ICON[d])).size).toBe(DIRECTIONS.length);
     expect(new Set(DIRECTIONS.map((d) => TREND_WORD[d])).size).toBe(DIRECTIONS.length);
   });
 

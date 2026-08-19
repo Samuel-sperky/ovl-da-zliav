@@ -63,22 +63,26 @@ function LockedAngle({ name, reason }: { name: string; reason: string }) {
   );
 }
 
-export function DiscountPerformance({ id }: { id: number }) {
-  const [view, setView] = useState<PerformanceView | null>(null);
-  const [failed, setFailed] = useState(false);
+export interface PerformanceCardProps {
+  /** Načítané čísla; `null` = ešte sa načítavajú. */
+  view: PerformanceView | null;
+  /** Načítanie zlyhalo — vtedy sa nepredstiera ani pomlčka, povie sa to vetou. */
+  failed: boolean;
+}
 
-  useEffect(() => {
-    let alive = true;
-    void discountPerformance(id).then((res) => {
-      if (!alive) return;
-      if (res.ok) setView(res.data);
-      else setFailed(true);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [id]);
-
+/**
+ * Sekcia bez načítavania — všetko, čo sa naozaj vykreslí.
+ *
+ * Oddelené od `DiscountPerformance` zámerne a kvôli testom (19. 8. 2026):
+ * dovtedy sa sekcia testovala cez `renderToStaticMarkup(<DiscountPerformance/>)`,
+ * lenže `renderToStaticMarkup` efekty nespúšťa, takže `view` ostávalo `null`
+ * a všetky tvrdenia — „appka nikde nepredstiera eurá", „žiadny záver o príčine"
+ * — merali stav „Načítavam…". Práve preto v nich prežil nález, že
+ * `.perfStrong i` mal `background: var(--ink3)`, čiže neexistujúci token, a
+ * porovnávací pruh sa kreslil ako prázdny žľab. Nad touto funkciou sa dá
+ * vykresliť KTORÝKOĽVEK stav bez prehliadača a bez siete.
+ */
+export function PerformanceCard({ view, failed }: PerformanceCardProps) {
   const recent = view?.recent.units ?? null;
   const prior = view?.prior.units ?? null;
   const max = Math.max(recent ?? 0, prior ?? 0);
@@ -139,6 +143,26 @@ export function DiscountPerformance({ id }: { id: number }) {
       </div>
     </section>
   );
+}
+
+/** Sekcia aj s načítaním — to, čo do detailu zľavy naozaj vstupuje. */
+export function DiscountPerformance({ id }: { id: number }) {
+  const [view, setView] = useState<PerformanceView | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void discountPerformance(id).then((res) => {
+      if (!alive) return;
+      if (res.ok) setView(res.data);
+      else setFailed(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  return <PerformanceCard view={view} failed={failed} />;
 }
 
 export default DiscountPerformance;

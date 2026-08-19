@@ -32,9 +32,10 @@
  */
 import type { ReactNode } from 'react';
 
+import Icon from '@/components/ui/Icon';
 import styles from '@/components/ui/primitives.module.css';
 import {
-  TREND_GLYPH,
+  TREND_ICON,
   TREND_WORD,
   trendTone,
   type TrendDirection,
@@ -82,9 +83,7 @@ export function StatTile({
       {trend ? (
         <div className={styles.tileTrend}>
           <span className={styles.trend} data-tone={tone} data-trend={trend}>
-            <span className={styles.trendGlyph} aria-hidden="true">
-              {TREND_GLYPH[trend]}
-            </span>
+            <Icon className={styles.trendGlyph} name={TREND_ICON[trend]} size={0.9} />
             <span>
               {TREND_WORD[trend]}
               {trendDetail ? <> {trendDetail}</> : null}

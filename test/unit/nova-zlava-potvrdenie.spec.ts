@@ -22,6 +22,23 @@
  * Renderuje sa `renderToStaticMarkup` — žiadny prehliadač, žiadna DB, žiadna
  * sieť.
  *
+ * ČO SA 19. 8. 2026 DOPLNILO A PREČO
+ * ----------------------------------
+ * Skupina E merala poistku pred zápisom len zvonku a jeden jej prípad merala
+ * naprázdno: „samotná čerstvá skúška bez vpísaného počtu nič neodomkne"
+ * renderovala kartu s `previewFresh: true`, ale `blockedReason` si nechala
+ * neprázdny z `PROPS`. Tlačidlo bolo vypnuté VÝHRADNE kvôli tomu propu, takže
+ * o vpísanom počte test nezistil nič — a samotné pravidlo `typed === itemsCount`
+ * žilo v `NewDiscount.tsx` bez akéhokoľvek pokrytia. Skupina **F** ho teraz
+ * meria priamo nad `queueBlockedReason()`, teda nad tou istou funkciou, ktorú
+ * volá obrazovka, a skupina E si výsledok od nej berie namiesto vymysleného
+ * propu.
+ *
+ * Skupina **G** meria P1 v stave, ktorý dominantu prevracal: pri prázdnom
+ * zrkadle katalógu je dominanta pomlčka so slovom (26 px), zatiaľ čo ručný
+ * počet má 28 px v ráme. Najťažší prvok karty tak bol krok, ktorý sa nedal
+ * urobiť.
+ *
  * Vlastník: O2, kontrakt UX/dizajn 19. 8. 2026.
  */
 import { readFileSync } from 'node:fs';
@@ -32,6 +49,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
+import { queueBlockedReason, type QueueGateState } from '@/components/campaigns/NewDiscount';
 import { buildTiers, type SelectableRow } from '@/components/campaigns/discounts-model';
 import type { BlockerCard } from '@/components/campaigns/queue-model';
 
@@ -79,6 +97,37 @@ function openingTagOf(html: string, testId: string): string {
   expect(at).toBeGreaterThan(-1);
   return html.slice(html.lastIndexOf('<', at), html.indexOf('>', at) + 1);
 }
+
+const MODULE_CSS = read('../../src/components/campaigns/zlavy.module.css');
+const GLOBAL_CSS = read('../../src/app/globals.css');
+
+/** Veľkosť písma prvého pravidla daného selektora, v px. */
+function fontSizeOf(css: string, selector: string): number {
+  const at = css.indexOf(`${selector} {`);
+  expect(at, selector).toBeGreaterThan(-1);
+  const block = css.slice(at, css.indexOf('}', at));
+  const size = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(block);
+  expect(size, selector).not.toBeNull();
+  return Number(size![1]);
+}
+
+/**
+ * Poistka pred zápisom tak, ako ju počíta obrazovka. Predvolený stav je ten,
+ * v ktorom je všetko hotové — každý test si pokazí práve jednu vec, aby bolo
+ * vidieť, ktorá podmienka zámok drží.
+ */
+const GATE: QueueGateState = {
+  itemsCount: 8000,
+  writesLocked: false,
+  percentError: undefined,
+  windowError: null,
+  previewFresh: true,
+  previewBlockers: 0,
+  typed: '8000',
+};
+
+const blockedFor = (extra: Partial<QueueGateState> = {}): string | null =>
+  queueBlockedReason({ ...GATE, ...extra });
 
 /* ═════════════ A. D11 — dominanta, ktorú appka nevie ═════════════════════ */
 
@@ -137,12 +186,17 @@ describe('B — kroky idú v poradí, v akom sa robia (D12)', () => {
     expect(openingTagOf(html, 'confirm-count-input')).not.toMatch(/class="inp big/);
   });
 
-  it('CSS drží ručný počet väčší než text tlačidla', () => {
-    const css = read('../../src/components/campaigns/zlavy.module.css');
-    const gate = css.slice(css.indexOf('.gate :global(.inp).gateInput'));
-    const size = /font-size:\s*(\d+)px/.exec(gate);
-    expect(size).not.toBeNull();
-    expect(Number(size![1])).toBeGreaterThanOrEqual(24);
+  it('CSS drží ručný počet väčší než text tlačidla, ale menší než dominanta', () => {
+    const gatePx = fontSizeOf(MODULE_CSS, '.gate :global(.inp).gateInput');
+    expect(gatePx).toBeGreaterThanOrEqual(24);
+
+    /*
+     * Druhá polovica merania, ktorá tu do 19. 8. 2026 chýbala. „Väčší než text
+     * tlačidla" sa dá splniť aj tak, že pole prerastie dominantu — a presne to
+     * sa stalo pri neznámom počte. Dominanta karty pri známom počte je
+     * `.lvl-1 .big` z `globals.css`; poistka nesmie byť ťažšia než ona.
+     */
+    expect(gatePx).toBeLessThan(fontSizeOf(GLOBAL_CSS, '.lvl-1 .big'));
   });
 
   it('tlačidlá už nestoja vedľa seba — zaradenie je samo v riadku akcií', () => {
@@ -218,8 +272,132 @@ describe('E — obe poistky I3 sú stále na obrazovke', () => {
     expect(openingTagOf(html, 'queue-discount')).not.toContain('disabled');
   });
 
+  /*
+   * Tento prípad sa do 19. 8. 2026 meral naprázdno: karta sa renderovala
+   * s `previewFresh: true`, ale `blockedReason` si nechala neprázdny
+   * z `PROPS`, takže vypnuté tlačidlo nedokazovalo nič o vpísanom počte.
+   * Dôvod si teraz berieme z tej istej funkcie, ktorú volá obrazovka.
+   */
   it('samotná čerstvá skúška bez vpísaného počtu nič neodomkne', () => {
-    const html = render({ previewFresh: true });
+    const reason = blockedFor({ previewFresh: true, typed: '' });
+    expect(reason).not.toBeNull();
+    const html = render({ previewFresh: true, typed: '', blockedReason: reason });
     expect(openingTagOf(html, 'queue-discount')).toContain('disabled');
+    expect(html).toContain(reason!);
+  });
+
+  it('a keď počet sedí, odomkne sa — cez tú istú funkciu, nie cez vymyslený prop', () => {
+    const reason = blockedFor({ previewFresh: true, typed: '8000' });
+    expect(reason).toBeNull();
+    const html = render({ previewFresh: true, typed: '8000', blockedReason: reason });
+    expect(openingTagOf(html, 'queue-discount')).not.toContain('disabled');
+    expect(html).not.toContain('data-testid="queue-blocked-reason"');
+  });
+});
+
+/* ═════════════ F. I3 — samotná poistka, nie jej odraz v HTML ════════════ */
+
+describe('F — ručne vpísaný počet je posledná brzda pred zápisom (I3)', () => {
+  it('so všetkým hotovým je zaradenie povolené', () => {
+    expect(blockedFor()).toBeNull();
+  });
+
+  it('prázdne pole zamkne aj po čerstvej skúške a povie, čo napísať', () => {
+    expect(blockedFor({ typed: '' })).toBe('Do poľa napíšte 8 000.');
+  });
+
+  it('iné číslo než výber zamkne — v oboch smeroch a aj o jednotku', () => {
+    for (const typed of ['800', '80000', '7999', '8001', '0', '-8000', '8e3', 'osemtisíc']) {
+      expect(blockedFor({ typed }), typed).not.toBeNull();
+    }
+  });
+
+  it('to isté číslo napísané inak odomkne — medzery a nuly navyše sa tolerujú', () => {
+    for (const typed of ['8000', '8 000', ' 8000 ', '08000']) {
+      expect(blockedFor({ typed }), typed).toBeNull();
+    }
+  });
+
+  it('zastaraná skúška zamkne aj správne vpísaný počet', () => {
+    expect(blockedFor({ previewFresh: false })).toBe(
+      'Najprv spustite skúšku naprázdno pre tento výber.',
+    );
+  });
+
+  it('prekážka nájdená skúškou zamkne aj správne vpísaný počet', () => {
+    expect(blockedFor({ previewBlockers: 1 })).toBe(
+      'Skúška našla prekážku — kým trvá, zaradiť sa nedá.',
+    );
+  });
+
+  it('zamknuté zápisy prebijú aj hotovú skúšku aj správny počet', () => {
+    const reason = blockedFor({ writesLocked: true });
+    expect(reason).not.toBeNull();
+    expect(reason).not.toBe('Do poľa napíšte 8 000.');
+  });
+
+  it('chyba percenta a chyba okna sú vlastné dôvody, nie „napíšte počet"', () => {
+    expect(blockedFor({ percentError: 'Percento musí byť od 1 do 90.' })).toBe(
+      'Percento musí byť od 1 do 90.',
+    );
+    expect(blockedFor({ windowError: 'Zľava môže trvať najviac tri mesiace.' })).toBe(
+      'Zľava môže trvať najviac tri mesiace.',
+    );
+  });
+
+  it('poradie dôvodov je poradie závažnosti — bez produktov sa o skúške nehovorí', () => {
+    expect(blockedFor({ itemsCount: 0, previewFresh: false, typed: '' })).toBe(
+      'Vyberte aspoň jeden produkt.',
+    );
+  });
+
+  it('prázdny výber neodomkne ani prázdne pole — nula nie je „sedí to"', () => {
+    expect(blockedFor({ itemsCount: 0, typed: '0' })).not.toBeNull();
+  });
+});
+
+/* ═════════════ G. P1 — dominanta sa neprevracia (19. 8. 2026) ═══════════ */
+
+describe('G — pri neznámom počte zostáva dominanta dominantou (P1)', () => {
+  it('pomlčka so slovom je menšia než ručný počet — číslami sa to vyriešiť nedá', () => {
+    /*
+     * Meranie, ktoré defekt odhalilo: `.unknown` má 26 px, `.gateInput` 28 px.
+     * Zväčšiť pomlčku znamená vrátiť D11, zľahčiť pole znamená vrátiť D12 —
+     * preto sa v tomto stave nekreslí pole, nie preto, že by sa čísla zmenili.
+     * Keby raz `.unknown` `.gateInput` prerástla, tento test spadne a je to
+     * signál prehodnotiť riešenie, nie ho ticho obísť.
+     */
+    expect(fontSizeOf(MODULE_CSS, '.unknown')).toBeLessThan(
+      fontSizeOf(MODULE_CSS, '.gate :global(.inp).gateInput'),
+    );
+  });
+
+  it('preto pri prázdnom výbere nestojí na karte pole, ale zamknutý riadok', () => {
+    const html = render({ itemsCount: 0, countKnown: false });
+    expect(html).not.toContain('data-testid="confirm-count-input"');
+    expect(html).toContain('data-testid="confirm-count-locked"');
+  });
+
+  it('krok nezmizol — povie svoj názov aj dôvod, prečo je zamknutý', () => {
+    const html = render({ itemsCount: 0, countKnown: false });
+    expect(html).toContain('Napíšte počet produktov');
+    expect(html).toContain('odomkne sa, keď bude vo výbere aspoň jeden produkt');
+  });
+
+  it('zámok nie je len farba — je to veta, a zaradenie je vypnuté dôvodom', () => {
+    const html = render({
+      itemsCount: 0,
+      countKnown: false,
+      blockedReason: blockedFor({ itemsCount: 0, previewFresh: false, typed: '' }),
+    });
+    expect(openingTagOf(html, 'queue-discount')).toContain('disabled');
+    expect(html).toContain('Vyberte aspoň jeden produkt.');
+  });
+
+  it('hneď ako je čo potvrdzovať, pole má späť plnú váhu z D12', () => {
+    const html = render({ itemsCount: 1, countKnown: true });
+    expect(html).toContain('data-testid="confirm-count-input"');
+    expect(html).not.toContain('data-testid="confirm-count-locked"');
+    expect(openingTagOf(html, 'confirm-count-input')).toContain('gateInput');
   });
 });

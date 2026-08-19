@@ -66,8 +66,9 @@ import {
   type StatusChip,
   type StatusState,
 } from '@/components/layout/status';
+import Icon from '@/components/ui/Icon';
 import StatusPill from '@/components/ui/StatusPill';
-import ToneBadge, { TONE_GLYPH } from '@/components/ui/ToneBadge';
+import ToneBadge, { TONE_ICON } from '@/components/ui/ToneBadge';
 
 /**
  * Jedna zo štyroch vecí v pruhu. Pozornosť si pýta tvarom, nie veľkosťou:
@@ -83,14 +84,12 @@ function Fact({ chip, testId }: { chip: StatusChip; testId: string }) {
       title={chip.title}
     >
       {loud ? (
-        <ToneBadge tone={chip.tone} glyph={chip.glyph}>
+        <ToneBadge tone={chip.tone} icon={chip.icon}>
           {chip.label}
         </ToneBadge>
       ) : (
         <>
-          <span className="ovl-sbar-mark" aria-hidden="true">
-            {chip.glyph ?? TONE_GLYPH[chip.tone]}
-          </span>
+          <Icon className="ovl-sbar-mark" name={chip.icon ?? TONE_ICON[chip.tone]} size={0.9} />
           {chip.label}
         </>
       )}

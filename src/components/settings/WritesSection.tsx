@@ -30,7 +30,8 @@
  */
 import Note from '@/components/ui/Note';
 import StatusPill from '@/components/ui/StatusPill';
-import { TONE_GLYPH, type StatusTone } from '@/components/ui/ToneBadge';
+import Icon from '@/components/ui/Icon';
+import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import {
   ASSUMED_NOTE,
@@ -250,7 +251,7 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
                       )}
                       {condition.assumed ? (
                         <div className="lvl-3">
-                          <span aria-hidden="true">{TONE_GLYPH.attention}</span> {ASSUMED_NOTE}
+                          <Icon name={TONE_ICON.attention} size={0.85} /> {ASSUMED_NOTE}
                         </div>
                       ) : null}
                     </>

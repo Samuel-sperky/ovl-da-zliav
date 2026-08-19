@@ -230,6 +230,84 @@ describe('základňa je neutrálna (R5)', () => {
   }
 });
 
+/*
+ * ════════════════════════════════════════════════════════════════════════
+ * Kto kóduje stav, musí byť zmeraný (pridané 19. 8. 2026 po review).
+ *
+ * Tento súbor pôvodne meral len --st-* a --accent. Stav zľavy „beží" pritom
+ * kreslila zlatá --gold2 (#a8853c), ktorá má na bielej 3,45:1, teda pod
+ * hranicou 4,5:1 pre text — a keďže v zozname meraných tokenov nebola,
+ * test o nej mlčal a tvrdenie „všetko je zmerané" bolo nepravdivé.
+ *
+ * Meranie sa preto viac neriadi zoznamom, ktorý niekto napísal ručne, ale
+ * tým, čo v CSS naozaj kóduje stav: každé pravidlo .state.* a .sig.*.
+ * ════════════════════════════════════════════════════════════════════════
+ */
+describe('farba, ktorá kóduje stav, ide výhradne zo stavovej škály', () => {
+  /** Pravidlá, ktorých selektor je stavový. */
+  function stavovePravidla(): { selektor: string; farba: string }[] {
+    const out: { selektor: string; farba: string }[] = [];
+    const re = /^(\.(?:state|sig)\.[a-z0-9-]+)\s*\{([^}]*)\}/gim;
+    for (const m of CSS.matchAll(re)) {
+      const telo = m[2]!;
+      const farba = telo.match(/(?:^|\s)color:\s*([^;]+);/);
+      if (farba) out.push({ selektor: m[1]!.trim(), farba: farba[1]!.trim() });
+    }
+    return out;
+  }
+
+  /*
+   * Povolene su stavova skala a NEUTRALY. Neutral (--dim) je v poriadku:
+   * je zmerany v kontrastnych testoch vyssie a nikto si ho nepomyli so
+   * signalom — .state.skoncila a .sig.lock su prave take pripady, kde appka
+   * zamerne nesignalizuje nic. Zakazane su ZNACKOVE farby, lebo tie signal
+   * predstieraju: presne tak sa sem dostala zlata pre stav "bezi".
+   */
+  const POVOLENE = [
+    '--dim',
+    '--st-critical',
+    '--st-attention',
+    '--st-progress',
+    '--st-good',
+    '--st-idle',
+  ];
+
+  it('nájde sa vôbec nejaké stavové pravidlo', () => {
+    // Poistka proti tomu, aby test prešiel preto, že nič nenašiel.
+    expect(stavovePravidla().length).toBeGreaterThan(4);
+  });
+
+  it('žiadny stav nekreslí značková farba (teal ani zlatá)', () => {
+    const hriesnici = stavovePravidla().filter(
+      (p) =>
+        p.farba.includes('--accent') ||
+        p.farba.includes('--gold') ||
+        p.farba.includes('--teal') ||
+        p.farba.includes('--brand'),
+    );
+    expect(
+      hriesnici.map((p) => `${p.selektor} → ${p.farba}`),
+      'značková farba nesmie kódovať stav (hlavička globals.css)',
+    ).toEqual([]);
+  });
+
+  it('každý stav berie farbu zo škály, ktorá je zmeraná', () => {
+    const mimo = stavovePravidla().filter(
+      (p) => !POVOLENE.some((t) => p.farba.includes(t)),
+    );
+    expect(
+      mimo.map((p) => `${p.selektor} → ${p.farba}`),
+      'farba mimo --st-* nie je v žiadnom meraní, takže o nej nikto nevie',
+    ).toEqual([]);
+  });
+
+  it('stav „prebieha" sa dá nakresliť — nesplýva s „nečinný"', () => {
+    // Do 19. 8. mapoval blockers-view.ts progress na sig idle, lebo .sig
+    // variantu progress nemal. Piaty stav tým prestal existovať.
+    expect(CSS).toContain('.sig.progress');
+  });
+});
+
 describe('simulácia farbosleposti nie je identita', () => {
   it('deuteranopia mení červenú', () => {
     // Keby `simulate()` vracala vstup, všetky CVD kontroly vyššie by boli

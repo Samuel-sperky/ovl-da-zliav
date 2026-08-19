@@ -33,6 +33,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import type { NavLock } from '@/components/layout/status';
+import Icon from '@/components/ui/Icon';
 
 export const TABS: readonly { href: string; label: string }[] = [
   { href: '/', label: 'Prehľad' },
@@ -89,9 +90,7 @@ export function Nav({ locks = [] }: NavProps) {
           >
             {label}
             {lock === undefined ? null : (
-              <span className="tab-lock" aria-hidden="true">
-                🔒
-              </span>
+              <Icon className="tab-lock" name="lock" size={0.85} />
             )}
           </Link>
         );

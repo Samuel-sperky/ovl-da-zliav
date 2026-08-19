@@ -31,7 +31,8 @@
  */
 import type { ReactNode } from 'react';
 
-import { NOTE_CLASS, NOTE_GLYPH, noteRole, type NoteVariant } from '@/components/ui/primitives';
+import Icon from '@/components/ui/Icon';
+import { NOTE_CLASS, NOTE_ICON, noteRole, type NoteVariant } from '@/components/ui/primitives';
 
 export type { NoteVariant };
 
@@ -55,9 +56,7 @@ export function Note({ variant = 'info', children, testId }: NoteProps) {
       data-variant={variant}
       data-testid={testId}
     >
-      <span className="ovl-note-glyph" aria-hidden="true">
-        {NOTE_GLYPH[variant]}
-      </span>
+      <Icon className="ovl-note-glyph" name={NOTE_ICON[variant]} size={0.9} />
       <span>{children}</span>
     </div>
   );

@@ -73,6 +73,13 @@
  * načítania: obnova, ktorá vráti tú istú sadu, nesmie zahodiť hotovú skúšku,
  * ale akákoľvek zmena produktov, ich predajnosti či ceny ju zahodiť MUSÍ.
  *
+ * **`queueBlockedReason()` je celá poistka I3 na jednom mieste.** Od 19. 8.
+ * 2026 je to exportovaná čistá funkcia, nie IIFE vnútri komponentu — dovtedy
+ * sa pravidlo „vpísaný počet musí sedieť s výberom" nedalo otestovať, lebo
+ * jediný test si `blockedReason` podával ako prop. Kto sem pridá ďalší dôvod
+ * zámku, pridá ho do tej funkcie a doplní mu test; kto tam pridá cestu, ktorá
+ * zámok obchádza, obišiel I3.
+ *
  * Vlastník: V11.
  */
 import Link from 'next/link';
@@ -619,23 +626,15 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     setError(null);
   }, [rows, tiers, percentError, windowError, from, to, signature]);
 
-  const blockedReason = ((): string | null => {
-    if (itemsCount === 0) return 'Vyberte aspoň jeden produkt.';
-    if (scope !== null && scope.writesLocked) {
-      const sentence = guardSentence('writes_locked');
-      return `${sentence.text} ${sentence.hint ?? ''}`.trim();
-    }
-    if (percentError !== undefined && percentError !== null) return percentError;
-    if (windowError !== null) return windowError;
-    if (!previewFresh) return 'Najprv spustite skúšku naprázdno pre tento výber.';
-    if (preview !== null && preview.blockers.length > 0) {
-      return 'Skúška našla prekážku — kým trvá, zaradiť sa nedá.';
-    }
-    if (!typedCountMatches(typed, itemsCount)) {
-      return `Do poľa napíšte ${formatCountSk(itemsCount)}.`;
-    }
-    return null;
-  })();
+  const blockedReason = queueBlockedReason({
+    itemsCount,
+    writesLocked: scope !== null && scope.writesLocked,
+    percentError,
+    windowError,
+    previewFresh,
+    previewBlockers: preview === null ? 0 : preview.blockers.length,
+    typed,
+  });
 
   const doQueue = useCallback(async () => {
     if (preview === null || preview.previewToken === '') return;
@@ -1122,6 +1121,60 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 }
 
 /* ═══════════════════════════ pomocníci ════════════════════════════════════ */
+
+/** Všetko, z čoho sa rozhoduje, či sa dá zaradiť do fronty. */
+export interface QueueGateState {
+  /** Koľko produktov je naozaj načítaných vo výbere. */
+  itemsCount: number;
+  /** Rozsah appky zápisy zamkol (`scope.writesLocked`). */
+  writesLocked: boolean;
+  /** Chyba percenta pásma; `undefined` aj `null` znamenajú „bez chyby". */
+  percentError: string | null | undefined;
+  /** Chyba okna zľavy; `null` = bez chyby. */
+  windowError: string | null;
+  /** Skúška naprázdno sedí na PRÁVE ZOBRAZENÝ výber (odtlačok `signature`). */
+  previewFresh: boolean;
+  /** Koľko prekážok našla posledná skúška. */
+  previewBlockers: number;
+  /** Čo je vpísané v poli ručného počtu. */
+  typed: string;
+}
+
+/**
+ * POISTKA PRED ZÁPISOM DO PRODUKČNÉHO ESHOPU (I3) — jediné miesto, ktoré
+ * hovorí, prečo sa nedá zaradiť, a teda aj jediné, ktoré môže zaradenie
+ * povoliť. `null` znamená „dá sa"; čokoľvek iné je veta pre človeka a zároveň
+ * dôvod, prečo je tlačidlo vypnuté.
+ *
+ * Prečo je to vlastná exportovaná funkcia a nie IIFE vnútri komponentu
+ * (19. 8. 2026): dovtedy sa pravidlo „vpísaný počet musí sedieť s výberom"
+ * nedalo otestovať vôbec. Test karty rozhodnutia si `blockedReason` podával
+ * ako prop, takže overil len to, že vypnuté tlačidlo je vypnuté — o samotnom
+ * pravidle nezistil nič. Mechanika sa presunom nemení ani o znak: poradie
+ * podmienok, ich znenie aj to, čo sa hashuje do `preview_token`, ostávajú
+ * také, aké boli.
+ *
+ * Poradie podmienok je poradie závažnosti a NESMIE sa prehádzať: bez produktov
+ * nemá zmysel hovoriť o skúške, bez čerstvej skúšky nemá zmysel hovoriť
+ * o vpísanom počte. Ručný počet je posledný, lebo je to posledná brzda.
+ */
+export function queueBlockedReason(gate: QueueGateState): string | null {
+  if (gate.itemsCount === 0) return 'Vyberte aspoň jeden produkt.';
+  if (gate.writesLocked) {
+    const sentence = guardSentence('writes_locked');
+    return `${sentence.text} ${sentence.hint ?? ''}`.trim();
+  }
+  if (gate.percentError !== undefined && gate.percentError !== null) return gate.percentError;
+  if (gate.windowError !== null) return gate.windowError;
+  if (!gate.previewFresh) return 'Najprv spustite skúšku naprázdno pre tento výber.';
+  if (gate.previewBlockers > 0) {
+    return 'Skúška našla prekážku — kým trvá, zaradiť sa nedá.';
+  }
+  if (!typedCountMatches(gate.typed, gate.itemsCount)) {
+    return `Do poľa napíšte ${formatCountSk(gate.itemsCount)}.`;
+  }
+  return null;
+}
 
 /**
  * Odtlačok načítaného výberu — poistka I3 (viď hlavička súboru).

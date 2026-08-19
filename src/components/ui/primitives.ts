@@ -18,8 +18,9 @@
  *    stavov je od 19. 8. 2026 optimalizovaná na odstup ΔE ≥ 8 aj pod
  *    deuteranopiou, protanopiou a tritanopiou (`scripts/palette-check.mjs`),
  *    ale odstup farieb pravidlo NERUŠÍ: prúžok, ktorý len „sčervenie", povie
- *    nevidiacemu a čítačke obrazovky stále presne nič. Glyf `▲` (blíži sa) a `■` (vyčerpané) sa preto
- *    líšia aj vtedy, keď majú rovnaký tón — pozri bod 2.
+ *    nevidiacemu a čítačke obrazovky stále presne nič. Značka „blíži sa"
+ *    (trojuholník) a „vyčerpané" (štvorec) sa preto líšia aj vtedy, keď majú
+ *    rovnaký tón — pozri bod 2.
  *
  * 2. **Vyčerpaný rozpočet NIE JE chyba** (K2, `HeaderStatus.tsx`). Pri 200/200
  *    sa nič nerozbilo — appka len počká do 02:00. Červená je v tejto appke
@@ -41,7 +42,8 @@
  *
  * Vlastník: U1.
  */
-import type { StatusTone } from '@/components/ui/ToneBadge';
+import type { IconName } from '@/components/ui/Icon';
+import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 
 /* ═════════════════════ 1. Merací prúžok rozpočtu ══════════════════════════ */
@@ -58,16 +60,20 @@ export const BUDGET_WARN_RATIO = 0.8;
 export type BudgetLevel = 'calm' | 'warn' | 'full';
 
 /**
- * Glyf úrovne. `warn` a `full` sa MUSIA líšiť aj pri rovnakom tóne (bod 2
- * v hlavičke), preto `▲` verzus `■`.
+ * Značka úrovne. `warn` a `full` sa MUSIA líšiť aj pri rovnakom tóne (bod 2
+ * v hlavičke), preto trojuholník verzus štvorec.
+ *
+ * `full` je jediná úroveň s vlastnou ikonou mimo koreňového slovníka tónov:
+ * „strop vyčerpaný" nie je piaty stav, ale iná VEC než „pozor" — a keby si
+ * požičala trojuholník tónu `attention`, bod 2 by prestal platiť.
  */
-export const BUDGET_LEVEL_GLYPH: Readonly<Record<BudgetLevel, string>> = {
-  calm: '○',
-  warn: '▲',
-  full: '■',
+export const BUDGET_LEVEL_ICON: Readonly<Record<BudgetLevel, IconName>> = {
+  calm: TONE_ICON.idle,
+  warn: TONE_ICON.attention,
+  full: 'square',
 };
 
-/** Slovo úrovne — tretí kanál popri farbe a glyfe. */
+/** Slovo úrovne — tretí kanál popri farbe a značke. */
 export const BUDGET_LEVEL_WORD: Readonly<Record<BudgetLevel, string>> = {
   calm: 'v rámci stropu',
   warn: 'blíži sa strop',
@@ -175,11 +181,16 @@ export const NOTE_CLASS: Readonly<Record<NoteVariant, string>> = {
   err: 'ovl-note ovl-note--critical',
 };
 
-/** Glyf vysvetlivky — rovnaký slovník ako `TONE_GLYPH` v `ToneBadge`. */
-export const NOTE_GLYPH: Readonly<Record<NoteVariant, string>> = {
-  info: '○',
-  warn: '▲',
-  err: '✕',
+/**
+ * Značka vysvetlivky. NIE je napísaná — je ODVODENÁ z `TONE_ICON` cez
+ * `NOTE_TONE`, takže sa od koreňového slovníka nemá ako rozísť. Presne tento
+ * druh ručne prepísanej kópie stál 19. 8. 2026 za dvoma rôznymi tabuľkami
+ * `TONE_GLYPH` v tej istej appke.
+ */
+export const NOTE_ICON: Readonly<Record<NoteVariant, IconName>> = {
+  info: TONE_ICON[NOTE_TONE.info],
+  warn: TONE_ICON[NOTE_TONE.warn],
+  err: TONE_ICON[NOTE_TONE.err],
 };
 
 /**
@@ -202,11 +213,17 @@ export type TrendDirection = 'up' | 'down' | 'flat';
  */
 export type TrendMeaning = 'good' | 'bad' | 'idle';
 
-/** Glyf smeru. Šípka je dekoratívna — vedľa nej vždy stojí slovo. */
-export const TREND_GLYPH: Readonly<Record<TrendDirection, string>> = {
-  up: '↑',
-  down: '↓',
-  flat: '→',
+/**
+ * Značka smeru. Šípka je dekoratívna — vedľa nej vždy stojí slovo.
+ *
+ * Do 19. 8. 2026 to boli znaky `↑ ↓ →`. Prvé dva v Interi SÚ, tretí NIE — tá
+ * istá trojica sa teda kreslila dvoma rôznymi písmami vedľa seba a „bez zmeny"
+ * malo inú hrúbku aj šírku než „nárast". Ikony to zjednotili.
+ */
+export const TREND_ICON: Readonly<Record<TrendDirection, IconName>> = {
+  up: 'arrowUp',
+  down: 'arrowDown',
+  flat: 'arrowRight',
 };
 
 /** Slovo smeru — bez neho by šípka bola len obrázok. */

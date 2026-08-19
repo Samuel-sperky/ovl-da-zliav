@@ -36,7 +36,7 @@ import QueueLive from '@/components/campaigns/QueueLive';
 import RetryFailed from '@/components/campaigns/RetryFailed';
 import ScopeRelease from '@/components/campaigns/ScopeRelease';
 import {
-  RESOLUTION_GLYPH,
+  RESOLUTION_ICON,
   RESOLUTION_TONE,
   RESOLUTION_WORD,
   RETRY_WHY_FRESH,
@@ -296,11 +296,11 @@ describe('D — vyčerpaný rozpočet blokuje, ale nie je to chyba (K2)', () => 
   it('každý spôsob riešenia má okrem farby aj glyf a slovo', () => {
     const keys = ['sam', 'sudo', 'cakanie', 'mimo_appky'] as const;
     for (const key of keys) {
-      expect(RESOLUTION_GLYPH[key].length).toBeGreaterThan(0);
+      expect(RESOLUTION_ICON[key].length).toBeGreaterThan(0);
       expect(RESOLUTION_WORD[key].length).toBeGreaterThan(3);
     }
     // Glyfy sa musia líšiť — inak je farba jediný rozlišovač.
-    expect(new Set(keys.map((key) => RESOLUTION_GLYPH[key])).size).toBe(keys.length);
+    expect(new Set(keys.map((key) => RESOLUTION_ICON[key])).size).toBe(keys.length);
   });
 
   it('blokujúci rozpočet nedostane výstražnú farbu, hoci zastavuje všetko', () => {

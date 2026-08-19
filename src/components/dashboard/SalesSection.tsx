@@ -22,14 +22,35 @@
  * v riadku o čerstvosti dát. Vymyslené euro na prístrojovej doske je horšie
  * než priznaná medzera (P7).
  *
- * Vlastník: V9.
+ * ── Odkiaľ berie graf denný priebeh (V1, 19. 8. 2026) ───────────────────────
+ *
+ * `/api/sales` vracia súčty na PRODUKT, nie rad po dňoch. Sekcia pritom celý
+ * čas čítala `sales.days` — pole, ktoré tá odpoveď nikdy neposielala — takže
+ * graf sa nenakreslil ANI RAZ a obrazovka namiesto neho pokojne hlásila
+ * „denný priebeh zatiaľ nemáme". Nič nespadlo; prázdny stav vyzeral ako
+ * pravda o dátach, hoci to bola pravda o odpovedi.
+ *
+ * Rad po dňoch preto prichádza z vlastného čítania `/api/insights/sales-daily`,
+ * zaregistrovaného v spoločnom obnovovaní — nič sa neobnovuje samo (bod 4).
+ * Keď `sales.days` raz predsa začne chodiť, má prednosť: dve čísla o tom istom
+ * z dvoch zdrojov sú horšie než jedno.
+ *
+ * DÔLEŽITÉ: rad aj tri čísla nad ním počítajú z TOHO ISTÉHO poľa. Kto sem
+ * vráti samostatný výpočet dlaždíc, vyrobí obrazovku, na ktorej graf a čísla
+ * vedľa neho hovoria každý svoje — a obe budú vyzerať dôveryhodne.
+ *
+ * Vlastník: V9, graf V1.
  */
 import Link from 'next/link';
+import { useState } from 'react';
 
+import ChartTable from '@/components/charts/ChartTable';
 import SalesChart from '@/components/dashboard/SalesChart';
 import styles from '@/components/dashboard/overview.module.css';
-import type { SalesSnapshot } from '@/components/dashboard/api';
+import type { SalesDay, SalesSnapshot } from '@/components/dashboard/api';
 import { axisDay, chartGeometry, salesNumbers } from '@/components/dashboard/sales-view';
+import { fetchJson } from '@/components/layout/health';
+import { useRefreshable } from '@/components/layout/refresh';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 import { formatDateTimeSk } from '@/lib/ui/format';
 
@@ -39,6 +60,79 @@ export interface SalesSectionProps {
 
 function pieces(value: number): string {
   return `${formatCountSk(value)} ${pluralSk(value, 'kus', 'kusy', 'kusov')}`;
+}
+
+/**
+ * Rad po dňoch z vlastného čítania.
+ *
+ * Nečitateľná odpoveď = prázdny rad, nie nuly. Prázdny rad znamená „graf
+ * nekreslíme a povieme prečo"; nula by znamenala „v ten deň sa nepredalo nič",
+ * čo je tvrdenie o produkčnom eshope.
+ */
+function useDailySeries(): SalesDay[] {
+  const [days, setDays] = useState<SalesDay[]>([]);
+
+  useRefreshable(async () => {
+    const body = await fetchJson<{ days?: unknown }>('/api/insights/sales-daily');
+    const raw = body === null ? null : body.days;
+    if (!Array.isArray(raw)) {
+      setDays([]);
+      return;
+    }
+    const out: SalesDay[] = [];
+    for (const entry of raw) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const row = entry as { day?: unknown; units?: unknown };
+      if (typeof row.day !== 'string' || typeof row.units !== 'number') continue;
+      if (!Number.isFinite(row.units)) continue;
+      out.push({ day: row.day, units: row.units });
+    }
+    out.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+    setDays(out);
+  });
+
+  return days;
+}
+
+function dayCount(value: number): string {
+  return `${formatCountSk(value)} ${pluralSk(value, 'deň', 'dni', 'dní')}`;
+}
+
+/**
+ * Doslovný prepis grafu do riadkov — vrátane toho, čo graf PRIZNÁVA.
+ *
+ * Diera v pokrytí má vlastný riadok s pomlčkou namiesto čísla. Keby sa
+ * vynechala, tabuľka by tvrdila, že rad je súvislý, a bola by dôveryhodnejšia
+ * než graf, ktorý dieru poctivo kreslí.
+ */
+function tableRows(
+  geometry: NonNullable<ReturnType<typeof chartGeometry>>,
+  today: string,
+): Array<{ cells: string[] }> {
+  const gapAfter = new Map(geometry.gaps.map((gap) => [gap.afterDay, gap]));
+  const rows: Array<{ cells: string[] }> = [];
+
+  for (const point of geometry.hover) {
+    const note =
+      point.day === today
+        ? 'dnešok, deň ešte beží'
+        : point.units === 0
+          ? 'deň stiahnutý, predaj žiadny'
+          : '';
+    rows.push({ cells: [axisDay(point.day), formatCountSk(point.units), note] });
+
+    const gap = gapAfter.get(point.day);
+    if (gap !== undefined) {
+      rows.push({
+        cells: [
+          `${axisDay(gap.afterDay)} – ${axisDay(gap.beforeDay)}`,
+          '',
+          `nesťahované, ${dayCount(gap.missingDays)}`,
+        ],
+      });
+    }
+  }
+  return rows;
 }
 
 /** `+4 %` / `−7 %`; nula nedostane znamienko, aby nevyzerala ako pohyb. */
@@ -74,6 +168,9 @@ function Empty({ reason }: { reason: string }) {
 }
 
 export function SalesSection({ sales }: SalesSectionProps) {
+  // Hook stojí PRED prázdnymi stavmi — podmienené volanie hooku React zakazuje.
+  const fetched = useDailySeries();
+
   if (sales === null) {
     return <Empty reason="Údaje o predaji sa nepodarilo načítať." />;
   }
@@ -89,11 +186,16 @@ export function SalesSection({ sales }: SalesSectionProps) {
     );
   }
 
-  const numbers = salesNumbers(sales);
-  const geometry = chartGeometry(sales.days, sales.today);
+  /* Jeden rad pre graf, tabuľku aj tri čísla nad nimi. */
+  const series = sales.days.length > 0 ? sales.days : fetched;
+  const measured: SalesSnapshot = { ...sales, days: series };
+
+  const numbers = salesNumbers(measured);
+  const geometry = chartGeometry(series, sales.today);
   const from = sales.coverage.from;
   const to = sales.coverage.to;
   const range = from === null || to === null ? null : `${axisDay(from)} – ${axisDay(to)}`;
+  const missing = geometry === null ? 0 : geometry.gaps.reduce((n, g) => n + g.missingDays, 0);
 
   return (
     <section className="sec" data-testid="overview-sales" data-mode="data">
@@ -138,17 +240,34 @@ export function SalesSection({ sales }: SalesSectionProps) {
           {geometry === null ? (
             <div className="empty">
               <div className="t">Denný priebeh zatiaľ nemáme</div>
-              <div>Graf sa objaví, keď budú pokryté aspoň dva dni.</div>
+              <div>Graf sa objaví, keď budú stiahnuté aspoň dva dni.</div>
             </div>
           ) : (
-            <SalesChart
-              geometry={geometry}
-              caption={range === null ? 'Denný predaj' : `${range} · denný predaj`}
-              label="Denný predaj v kusoch za pokryté obdobie"
-            />
+            <>
+              <SalesChart
+                geometry={geometry}
+                /* Popis nesie OBDOBIE aj ROZSAH. Rad kusov bez uvedeného
+                   rozsahu vyzerá ako obrat celého eshopu; sú to pritom len
+                   povolené produkty. */
+                caption={`${range ?? 'Denný predaj'} · ${dayCount(geometry.hover.length)} · povolené produkty`}
+                label="Predané kusy povolených produktov po dňoch, len za stiahnuté dni"
+              />
+              <ChartTable
+                caption="predané kusy po dňoch"
+                columns={[{ head: 'Deň' }, { head: 'Kusy', numeric: true }, { head: 'Poznámka' }]}
+                rows={tableRows(geometry, sales.today)}
+                testId="sales-chart-table"
+              />
+            </>
           )}
         </div>
       </div>
+
+      {missing === 0 ? null : (
+        <div className="fresh" data-testid="sales-gap-note">
+          {`V grafe chýba ${dayCount(missing)} — tie dni sa nesťahovali, predaj za ne nepoznáme`}
+        </div>
+      )}
 
       <div className="fresh">
         {sales.coverage.lastSyncedAt === null

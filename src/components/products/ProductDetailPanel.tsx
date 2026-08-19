@@ -47,6 +47,14 @@
  * 4. **Čo appka nevie, je pomlčka — nikdy nula.** Nula je tvrdenie o predaji,
  *    ktoré sa pri nenačítanom riadku nedá urobiť.
  * 5. **Časy sú konkrétne.** `12.05.2026 09:14`, nikdy „pred 3 minútami".
+ * 6. **Pomlčka sa nekreslí do displejového rezu** (D11, 19. 8. 2026 — tu
+ *    doriešené 19. 8. 2026). Bod 4 platí ďalej, ale em pomlčka je celoštvorcová
+ *    vodorovná čiara: v 44 px a reze 660 (`.lvl-1 .big.sm`) prestáva byť
+ *    interpunkciou a vykreslí sa ako vyplnený čierny obdĺžnik — dominanta
+ *    panela potom vyzerá ako chyba vykreslenia. Neznáme sa preto píše pomlčkou
+ *    SO SLOVOM a v čitateľnej veľkosti, presne v tom istom tvare, aký dostala
+ *    karta potvrdenia novej zľavy (`.unknown`, 26 px, `--dim`). Nikdy nedávaj
+ *    `'—'` do `.big` ani do `.big.sm`.
  *
  * Vlastník: V10 (rozšírenie na „všetky údaje": P2 kontraktu produktov).
  */
@@ -54,12 +62,21 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
+/*
+ * `.unknown` je TVAR „dominanta, ktorú appka nevie" (D11) a musí byť na oboch
+ * miestach jeden a ten istý — dva tvary tej istej veci by sa po prvej úprave
+ * rozišli. Býva v module zliav, lebo tam vznikol; jeho správne miesto je
+ * `ui/primitives.module.css` a presun patrí integrátorovi (globals/primitives
+ * nie sú v rozsahu tejto vlny).
+ */
+import styles from '@/components/campaigns/zlavy.module.css';
 import BlockerNotes from '@/components/products/BlockerNotes';
 import type { CatalogRowView, ProductWriteView } from '@/components/products/catalog-api';
 import { catalogRow, isAborted, productWrites } from '@/components/products/catalog-api';
 import type { SoldWindow } from '@/components/products/catalog-filter';
 import { newDiscountHref, SOLD_WINDOWS } from '@/components/products/catalog-filter';
 import { productReasons } from '@/components/products/catalog-status';
+import Icon from '@/components/ui/Icon';
 import type { Blocker } from '@/lib/status/blockers';
 import { formatDateSk, formatDateTimeSk, formatEur, formatPercentSk } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, SURFACE_TERMS } from '@/lib/ui/vocabulary';
@@ -149,6 +166,45 @@ function DetailGroup({ title, children }: { title: string; children: ReactNode }
         {title}
       </h3>
       {children}
+    </div>
+  );
+}
+
+/**
+ * DOMINANTA PANELA — jedno číslo, alebo priznanie, že ho appka nemá.
+ *
+ * Vlastný komponent, nie kus JSX vnútri panela, a je to zámerné (19. 8. 2026):
+ * `sold === null` je stav, do ktorého sa panel dostane až efektom (prepnutie
+ * okna predajnosti, riadok, ktorý sa pre nové okno nevrátil). Vykreslený panel
+ * sa v testoch renderuje `renderToStaticMarkup`, kde efekty nebežia — takže
+ * práve tá vetva, v ktorej pomlčka stála v 44 px reze, sa cez panel odmerať
+ * NEDÁ. Nad týmto komponentom sa dajú odmerať obe vetvy naraz.
+ */
+export function SoldDominant({ sold, windowDays }: { sold: number | null; windowDays: number }) {
+  return (
+    <div className="lvl-1">
+      {sold === null ? (
+        /*
+         * D11 — tu bola do 19. 8. 2026 em pomlčka v `.big.sm`, teda v 44 px
+         * a reze 660. V tej veľkosti pomlčka nie je znak, ale vyplnený
+         * obdĺžnik: dominanta panela vyzerala ako chyba vykreslenia a popisok
+         * pod ňou nemal nad sebou hodnotu. Pomlčka zostáva — dostala len slovo
+         * a veľkosť, v ktorej sa dá prečítať. Je to TEN ISTÝ tvar, aký dostala
+         * karta potvrdenia novej zľavy, nie druhý podobný.
+         */
+        <span className={styles.unknown} data-testid="detail-units-sold">
+          {DASH} zatiaľ nevieme
+        </span>
+      ) : (
+        <span className="big sm num" data-testid="detail-units-sold">
+          {formatCountSk(sold)}
+        </span>
+      )}
+      <span className="sub">
+        {sold === null
+          ? `koľko sa predalo za posledných ${windowDays} dní`
+          : `predaných za posledných ${windowDays} dní`}
+      </span>
     </div>
   );
 }
@@ -317,16 +373,12 @@ export function ProductDetailPanel({
           ) : null}
         </div>
         <button type="button" className="close" onClick={onClose} aria-label="Zavrieť detail">
-          ✕
+          {/* Meno nesie `aria-label` tlačidla; ikona je `aria-hidden`. */}
+          <Icon name="x" />
         </button>
       </div>
 
-      <div className="lvl-1">
-        <span className="big sm num" data-testid="detail-units-sold">
-          {sold === null ? DASH : formatCountSk(sold)}
-        </span>
-        <span className="sub">predaných za posledných {windowDays} dní</span>
-      </div>
+      <SoldDominant sold={sold} windowDays={windowDays} />
       <div className="seg" aria-label="Za koľko dní sa počítajú predané kusy">
         {SOLD_WINDOWS.map((days: SoldWindow) => (
           <button

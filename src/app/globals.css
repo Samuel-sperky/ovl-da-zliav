@@ -2058,14 +2058,26 @@ b.lvl-2 {
 .state.pripravena .g::before {
   content: '○';
 }
+/*
+ * STAVY ZLAVY (19. 8. 2026, oprava po nezavislom review).
+ *
+ * Do tohto datumu tu boli --accent (teal) a --gold2 (zlata), teda znackove
+ * farby — hoci hlavicka tohto suboru sama hovori "teal a gold NIKDY nekoduju
+ * stav". Zlata #a8853c mala navyse na bielej kontrast 3,45:1, teda pod
+ * hranicou 4,5:1 pre text, a nebola v ziadnom merani: paleta.spec.ts merala
+ * len --st-* a --accent, takze o nej nikto nevedel.
+ *
+ * Teraz idu oba stavy zo stavovej skaly, ktora je zmerana aj pri farboslepote.
+ * Glyf a slovo zostavaju — farba je treti nosic, nie jediny.
+ */
 .state.zapisuje {
-  color: var(--accent);
+  color: var(--st-progress);
 }
 .state.zapisuje .g::before {
   content: '◆';
 }
 .state.bezi {
-  color: var(--gold2);
+  color: var(--st-good);
 }
 .state.bezi .g::before {
   content: '●';
@@ -2131,6 +2143,14 @@ b.lvl-2 {
 .sig.bad::before {
   content: '✕';
 }
+/* "Prebieha" bol jediny stav bez vlastnej varianty .sig, takze sa mapoval
+   na idle a splynul s "necinny". Vlna F ho pritom zmerala (12,18:1). */
+.sig.progress {
+  color: var(--st-progress);
+}
+.sig.progress::before {
+  content: '◆';
+}
 .sig.idle {
   color: var(--st-idle);
 }
@@ -2154,7 +2174,13 @@ b.lvl-2 {
    * 🔒 je zavedený zámok tejto appky — Nav.tsx aj queue-model.ts ho už
    * používajú, takže sa tým slovník zjednocuje, nie rozširuje.
    */
-  content: '🔒';
+  /*
+   * ŽIADNE EMOJI (19. 8. 2026). Bolo tu 🔒 z Segoe UI Emoji — jediná FAREBNÁ
+   * vec v appke, ktorá má inak celú paletu zmeranú a monochromatickú. Zámok
+   * kreslí ikona z Icon.tsx (mriežka 16, hrúbka 1,5, currentColor); toto
+   * pravidlo drží už len rozostup pre prípad, že by trieda ostala bez ikony.
+   */
+  content: '';
   /* Emoji je širšie než 10 px vyhradených pre ✓ ▲ ✕ ○ — bez toho by značku
      orezalo. Veľkosť sa mierne sťahuje, aby riadok nenarástol. */
   width: 12px;
@@ -2172,20 +2198,28 @@ b.lvl-2 {
 }
 
 /* ---------- 14.5 Priebeh fronty ------------------------------------------ */
+/*
+ * `.prog-lg` je GEOMETRIA, nie druhá škála veľkosti (19. 8. 2026).
+ *
+ * Kým niesla vlastných 64 px, mala tá istá rola dva mechanizmy: detail zľavy
+ * nemal ani jednu `.lvl-1` a P1 sa nedalo zmerať jednou mierou. Preto tu
+ * zostala len geometria — dominanta a jej bočný popisok v jednom riadku —
+ * a veľkosť nesie výhradne `.lvl-1 .big`.
+ *
+ * Špecificita `.lvl-1.prog-lg .big` (0,0,3,0) prebije `.lvl-1 .big`, takže
+ * tvar sedí a veľkosť ostáva jedna. Kto sem vráti `font-size`, zruší P1.
+ */
 .prog-lg {
   display: flex;
   align-items: flex-end;
   gap: 22px;
   flex-wrap: wrap;
 }
-.prog-lg .n {
-  font-size: 64px;
-  font-weight: 660;
+.lvl-1.prog-lg .big {
   letter-spacing: -0.03em;
   line-height: 0.95;
-  color: var(--ink);
 }
-.prog-lg .n .of {
+.lvl-1.prog-lg .big .of {
   color: var(--dim);
   font-weight: 550;
   font-size: 34px;
@@ -2272,11 +2306,14 @@ table.tbl thead th {
   top: 0;
   z-index: 2;
   background: var(--paper2);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  /* Popisok STLPCA — najtlmenejsia z troch rol (D2). Prva oprava D2 z
+     19. 8. siahla na .ovl-table thead th, ktory NEPOUZIVA ani jeden
+     komponent; hlavicky na siestich obrazovkach kresli tento selektor. */
+  font-size: var(--ovl-fs-eyebrow);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
-  font-weight: 650;
+  font-weight: 600;
   text-align: left;
   padding: 8px 12px;
   border-bottom: 1px solid var(--line2);
@@ -2816,11 +2853,12 @@ details.tech.bare {
   overflow: hidden;
 }
 .zlist-h {
-  font-size: 10px;
-  letter-spacing: 0.13em;
+  /* Popisok STLPCA na zozname zliav — ta ista rola ako table.tbl thead th. */
+  font-size: var(--ovl-fs-eyebrow);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
-  font-weight: 650;
+  font-weight: 600;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
 }
@@ -3245,7 +3283,6 @@ details.tech.bare {
     justify-content: center;
   }
 
-  .prog-lg .n,
   .lvl-1 .big {
     font-size: 44px;
   }

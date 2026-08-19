@@ -30,9 +30,10 @@
  *
  * Vlastník: U1.
  */
+import Icon from '@/components/ui/Icon';
 import styles from '@/components/ui/primitives.module.css';
 import {
-  BUDGET_LEVEL_GLYPH,
+  BUDGET_LEVEL_ICON,
   BUDGET_LEVEL_WORD,
   budgetAriaText,
   budgetCountLabel,
@@ -102,9 +103,7 @@ export function BudgetMeter({
       </div>
       {showState ? (
         <span className={styles.meterState}>
-          <span className={styles.meterGlyph} aria-hidden="true">
-            {BUDGET_LEVEL_GLYPH[level]}
-          </span>
+          <Icon className={styles.meterGlyph} name={BUDGET_LEVEL_ICON[level]} size={0.9} />
           <span>
             {BUDGET_LEVEL_WORD[level]}
             {resetsAt ? <span className={styles.meterReset}> · obnoví sa {resetsAt}</span> : null}

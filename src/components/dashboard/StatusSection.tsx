@@ -28,7 +28,9 @@
  *    klikaním.
  * 2. **Dominanta ostáva jedna.** Verdikt je `.lvl-1 .big.sm` (44 px). Číslo
  *    fronty má vlastnú triedu s 22 px a nič iné v tejto sekcii nesmie byť
- *    väčšie. Kto sem vráti `.prog-lg` (64 px) alebo `.calm` (32 px), zhodí P1.
+ *    väčšie. Veľkosť dominanty nesie od 19. 8. 2026 VÝHRADNE `.lvl-1 .big`;
+ *    `.prog-lg` je už len geometria. Kto sem vráti vlastnú veľkosť — či cez
+ *    `.calm` (32 px), či akokoľvek inak — zhodí P1.
  * 3. **Nula sa nedopĺňa, kreslí sa pomlčka** (bod 5 kontraktu). Keď appka
  *    stav fronty nepozná, je tu `—` a dôvod je pod rozklikom „Prečo —",
  *    rovnako ako v stavovom pruhu. `0 / 0` na prístrojovej doske eshopu je

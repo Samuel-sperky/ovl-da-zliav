@@ -13,7 +13,8 @@
  *
  * P1 povoľuje 55 %, takže je tu rezerva. Tretia najväčšia vec na obrazovke je
  * `.kpi .v` v Predaji (22 px, z globals) — zhodou okolností rovnaká, čo je
- * v poriadku: dominanta je stále jediná. Kto sem vráti `.prog-lg` (64 px)
+ * v poriadku: dominanta je stále jediná. Veľkosť nesie len `.lvl-1 .big`
+ * (`.prog-lg` je od 19. 8. 2026 iba geometria). Kto sem vráti vlastnú veľkosť
  * alebo `.calm` (32 px), zhodí P1 a nebude to vidieť inak než meraním.
  *
  * Vlastník: V9.

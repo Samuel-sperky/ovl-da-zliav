@@ -64,6 +64,7 @@ import type {
 } from '@/components/products/catalog-filter';
 import { SOLD_WINDOWS } from '@/components/products/catalog-filter';
 import type { SavedFilter } from '@/components/products/saved-filters';
+import Icon from '@/components/ui/Icon';
 import { formatCountSk, SURFACE_TERMS } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Popisy ════════════════════════════════════ */
@@ -260,7 +261,10 @@ export function CatalogFilters({
                   aria-label={`Zabudnúť uložený filter ${row.name}`}
                   onClick={() => onRemoveSaved(row.name)}
                 >
-                  ×
+                  {/* Rovnaká ikona ako v šuplíku aj v detaile produktu —
+                      appka mala do 19. 8. 2026 na „zavrieť" tri rôzne znaky:
+                      U+2715 dvakrát a U+00D7 raz. */}
+                  <Icon name="x" size={0.85} />
                 </button>
               </span>
             ))}

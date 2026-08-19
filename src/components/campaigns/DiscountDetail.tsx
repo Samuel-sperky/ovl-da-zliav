@@ -58,6 +58,13 @@
  *  3. **Žiadna veta o kauzalite** (P8). Predané kusy stoja vedľa seba; appka
  *     nikdy nepovie, že ich priniesla zľava.
  *  4. **Odhad je označený `≈`** a tlmený (P7).
+ *  5. **Dominanta je `.lvl-1`, nie vlastná veľkosť** (P1, 19. 8. 2026).
+ *     Do 19. 8. niesla dominantu priebehu trieda `.prog-lg .n` so svojimi
+ *     64 px, takže detail zľavy nemal na obrazovke ani jednu `.lvl-1` — a P1
+ *     sa na ňom nedalo zmerať tou istou mierou ako inde. `.prog-lg` je odteraz
+ *     len geometria (číslo a bočný popisok v jednom riadku), veľkosť nesie
+ *     `.lvl-1 .big`. Kto sem vráti vlastnú veľkosť mimo `.lvl-1/2/3`, urobí
+ *     z jednej role zase dva mechanizmy.
  *
  * Vlastník: V11.
  */
@@ -431,9 +438,19 @@ export function DiscountDetail({ id }: { id: number }) {
              * pod pruhom sú jeho legenda. Vetu „zapísaných 21 · 0 sa
              * nepodarilo · 0 nevieme" sme zrušili — bola to štvorica dlaždíc
              * napísaná ešte raz, slovami.
+             *
+             * P1, 19. 8. 2026 — dominanta tejto obrazovky niesla veľkosť cez
+             * `.prog-lg .n` (64 px), teda mimo škály `.lvl-1/.lvl-2/.lvl-3`.
+             * Dva mechanizmy pre tú istú rolu znamenali, že sa P1 nedá zmerať
+             * jednotne: detail zľavy nemal ani jednu `.lvl-1`, hoci dominantu
+             * mal. `.prog-lg` je odteraz LEN GEOMETRIA (číslo a bočný popisok
+             * v jednom riadku); veľkosť nesie `.lvl-1 .big`. Trieda `.n`
+             * zostáva ako háčik pre `.of` a pre bočný popisok — kým integrátor
+             * neprepíše `globals.css` podľa návrhu, držia obe pravidlá tú istú
+             * mieru (64 px, na mobile 44 px), takže sa nič nehýbe.
              */}
-            <div className="prog-lg">
-              <div className="n num" data-testid="detail-number">
+            <div className="prog-lg lvl-1">
+              <div className="n big num" data-testid="detail-number">
                 {formatCountSk(done)}{' '}
                 <span className="of">/ {formatCountSk(campaign.itemsTotal)}</span>
               </div>

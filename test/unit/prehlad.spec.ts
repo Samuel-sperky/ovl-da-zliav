@@ -484,8 +484,13 @@ describe('Prehľad — sekcie sa vykreslia', () => {
     expect(html).toContain('Použiť');
     // Pozornosť stojí pred návrhom — zlyhanie je fakt, návrh je len ponuka.
     expect(html.indexOf('12 sa nepodarilo')).toBeLessThan(html.indexOf('11 640 produktov'));
-    // K8 — zamknuté funkcie sa nesmú ani skryť, ani predstierať.
-    expect(html).toContain('Marža a obrátkovosť zamknuté');
+    // K8 — zamknuté funkcie sa nesmú ani skryť, ani predstierať. Na Prehľade
+    // ich ale NEOZNAMUJE stĺpec NÁVRHY: riadok „Marža a obrátkovosť zamknuté"
+    // odtiaľ 19. 8. 2026 odišiel, lebo to nie je návrh a tú istú vetu hovorí
+    // ľavý panel Produktov aj Nastavenia. K8 tým neutrpelo — schopnosť je
+    // priznaná tam, kam patrí (stráži to nastavenia-v12 a produkty-hustota).
+    // Tu sa preto tvrdí opak: v stĺpci návrhov to už byť nesmie.
+    expect(html).not.toContain('Marža a obrátkovosť zamknuté');
     expect(html).not.toContain('<table');
   });
 

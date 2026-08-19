@@ -188,12 +188,12 @@ export function CampaignsSection({ campaigns, insights }: CampaignsSectionProps)
           ) : (
             rows.map((row) => <InsightLine key={row.id} row={row} />)
           )}
-          <div className="suggest">
-            <span className="sig lock">Marža a obrátkovosť zamknuté</span>
-            <Link className="btn sm" href="/nastavenia">
-              Nastavenia
-            </Link>
-          </div>
+          {/*
+            Riadok „Marža a obrátkovosť zamknuté" tu bol do 19. 8. 2026 a odišiel
+            z dvoch dôvodov naraz: nie je to NÁVRH, hoci stál v stĺpci NÁVRHY,
+            a tú istú vetu hovorí ľavý panel Produktov aj Nastavenia. Bol to
+            zároveň posledný výskyt emoji v celej appke.
+          */}
         </div>
       </div>
     </section>

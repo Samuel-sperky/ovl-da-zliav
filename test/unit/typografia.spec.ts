@@ -25,7 +25,7 @@
  *
  * Vlastník: vlna F, kontrakt UX/dizajn 19. 8. 2026.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -33,6 +33,34 @@ import { describe, expect, it } from 'vitest';
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 const GLOBALS = read('../../src/app/globals.css');
+const ZLAVY_CSS = read('../../src/components/campaigns/zlavy.module.css');
+
+/**
+ * Všetky zdroje komponentov ako jeden reťazec.
+ *
+ * Slúži na jedinú, ale zásadnú otázku: KRESLÍ ten selektor vôbec niekto?
+ * 19. 8. 2026 sa ukázalo, že oprava rol popiskov (D2) siahla na .ovl-card,
+ * .ovl-table a .ovl-eyebrow — a ani jeden z nich nepoužíva žiadny komponent.
+ * Test bol zelený a obrazovky boli pritom rozbité, lebo živé hlavičky kreslí
+ * table.tbl thead th a .zlist-h. Odvtedy platí: o čom tento súbor niečo
+ * tvrdí, to musí byť v kóde nájditeľné.
+ */
+function zdrojeKomponentov(): string {
+  const koren = fileURLToPath(new URL('../../src', import.meta.url));
+  const out: string[] = [];
+  const chod = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = dir + '/' + e.name;
+      if (e.isDirectory()) chod(p);
+      else if (e.name.endsWith('.tsx') || e.name.endsWith('.ts')) {
+        out.push(readFileSync(p, 'utf8'));
+      }
+    }
+  };
+  chod(koren);
+  return out.join('\n');
+}
+const KOMPONENTY = zdrojeKomponentov();
 const LAYOUT = read('../../src/app/layout.tsx');
 const BALIK_WGHT = read('../../node_modules/@fontsource-variable/inter/wght.css');
 
@@ -112,31 +140,71 @@ describe('appka po písmo nesiaha do siete (I6)', () => {
 
 describe('tri roly popiskov sa dajú rozoznať (D2)', () => {
   /** Vlastnosti pravidla pre daný selektor. */
-  function pravidlo(selektor: string): string {
-    const i = GLOBALS.indexOf(`${selektor} {`);
+  function pravidlo(selektor: string, css: string = GLOBALS): string {
+    const i = css.indexOf(selektor + ' {');
     if (i < 0) throw new Error(`selektor ${selektor} sa nenašiel`);
-    return GLOBALS.slice(i, GLOBALS.indexOf('}', i));
+    return css.slice(i, css.indexOf('}', i));
   }
 
-  it('popisok sekcie je tmavší než popisok stĺpca', () => {
+  /** Kotviaca trieda selektora — prvá trieda zľava. */
+  function kotva(selektor: string): string {
+    const m = selektor.match(/\.([a-zA-Z][\w-]*)/);
+    if (!m) throw new Error(`selektor ${selektor} nemá triedu`);
+    return m[1]!;
+  }
+
+  /**
+   * ŽIVÉ selektory popiskov. Kto sem pridá ďalší, musí zároveň zniesť dôkaz,
+   * že ho niekto kreslí — inak sa zopakuje chyba z 19. 8. 2026.
+   */
+  const ZIVE = [
+    'table.tbl thead th',
+    '.zlist-h',
+    '.sec-h h2',
+    '.kpi .k',
+  ] as const;
+
+  for (const sel of ZIVE) {
+    it(`${sel} naozaj niekto kreslí`, () => {
+      expect(
+        KOMPONENTY,
+        `${sel} je mŕtvy selektor — tvrdenia o ňom nemerajú nič`,
+      ).toContain(kotva(sel));
+    });
+  }
+
+  it('hlavičky stĺpcov sú na oboch miestach rovnaké', () => {
+    // Zoznam zliav kreslí hlavičky vlastným selektorom. Keď sa rozídu, dve
+    // tabuľky v tej istej appke vyzerajú ako z dvoch rôznych appiek.
+    for (const sel of ['table.tbl thead th', '.zlist-h']) {
+      expect(pravidlo(sel), sel).toContain('font-size: var(--ovl-fs-eyebrow)');
+      expect(pravidlo(sel), sel).toContain('font-weight: 600');
+      expect(pravidlo(sel), sel).toContain('letter-spacing: 0.06em');
+    }
+  });
+
+  it('popisok dlaždice pod dominantou nemá verzálky', () => {
+    // .cap sedí priamo pod 64 px číslom na Novej zľave.
+    expect(pravidlo('.cap', ZLAVY_CSS)).not.toContain('text-transform: uppercase');
+    expect(pravidlo('.cap', ZLAVY_CSS)).toContain('var(--ovl-fs-label-tile)');
+  });
+
+  it('popisok sekcie je tmavší a hrubší než popisok stĺpca', () => {
     // Sekcia pomenúva oblasť, stĺpec len zvislý rad. Keď majú rovnakú farbu
     // aj hrúbku, obrazovka nemá hierarchiu — presne to bol defekt D2.
     expect(pravidlo('.sec-h h2')).toContain('color: var(--ink2)');
-    expect(pravidlo('.ovl-table thead th')).toContain('color: var(--dim)');
-  });
-
-  it('popisok sekcie je hrubší než popisok stĺpca', () => {
     expect(pravidlo('.sec-h h2')).toContain('font-weight: 700');
-    expect(pravidlo('.ovl-table thead th')).toContain('font-weight: 600');
+    expect(pravidlo('table.tbl thead th')).toContain('color: var(--dim)');
+    expect(pravidlo('table.tbl thead th')).toContain('font-weight: 600');
   });
 
   it('popisok dlaždice nemá verzálky, aby nesúperil s číslom nad sebou', () => {
-    expect(pravidlo('.ovl-card h2')).not.toContain('text-transform: uppercase');
+    expect(pravidlo('.kpi .k')).not.toContain('text-transform: uppercase');
   });
 
   it('popisky nepoužívajú zlatú — akcent je v tejto palete jediný (R5)', () => {
-    for (const s of ['.sec-h h2', '.ovl-card h2', '.ovl-table thead th', '.ovl-eyebrow']) {
-      expect(pravidlo(s), s).not.toContain('var(--gold)');
+    for (const sel of ZIVE) {
+      expect(pravidlo(sel), sel).not.toContain('var(--gold');
     }
   });
 });

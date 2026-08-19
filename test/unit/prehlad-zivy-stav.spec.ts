@@ -435,18 +435,32 @@ describe('Prehľad — prečo sa nič nedeje', () => {
   /**
    * Pravidlo z doc-bloku `lib/status/blockers.ts`: vyčerpaný denný rozpočet
    * ZASTAVUJE všetko, a napriek tomu nie je chyba — len sa čaká (K2).
+   *
+   * MENÁ TÓNOV PREPÍSANÉ 19. 8. 2026 pri zjednotení slovníkov. Tento test
+   * dovtedy zamykal práve tú divergenciu, kvôli ktorej sa oprava robila:
+   * Prehľad mal vlastnú škálu `warn / lock / idle`, kým tab Zľavy aj
+   * Nastavenia mali `attention / critical / idle`, takže tá istá prekážka
+   * mala na dvoch obrazovkách dve farby. Očakávania sa presunuli na jedinú
+   * škálu `--st-*` z `ui/blocker-look.ts`; pravidlo, ktoré test naozaj
+   * stráži — „čakanie je pokojné, hoci zastavuje" — platí nezmenené a je tu
+   * prvé.
    */
   it('vyčerpaný rozpočet zastavuje, a predsa je pokojný', () => {
     const look = resolutionLook('cakanie');
     expect(look.tone).toBe('idle');
-    expect(look.tone).not.toBe('bad');
-    expect(RESOLUTION_LOOK.sam.tone).toBe('warn');
-    expect(RESOLUTION_LOOK.sudo.tone).toBe('lock');
-    expect(RESOLUTION_LOOK.mimo_appky.tone).toBe('warn');
+    expect(look.tone).not.toBe('critical');
+    expect(RESOLUTION_LOOK.sam.tone).toBe('attention');
+    // Zámok už NIE JE tón: `sudo` je jantárové ako `sam`, lebo používateľ s tým
+    // vie pohnúť. Že si to vypýta heslo, nesie glyf, slovo a príznak `locked`.
+    expect(RESOLUTION_LOOK.sudo.tone).toBe('attention');
+    expect(RESOLUTION_LOOK.sudo.locked).toBe(true);
+    // Zastavený zápis, s ktorým sa z obrazovky nedá urobiť nič, je červený.
+    expect(RESOLUTION_LOOK.mimo_appky.tone).toBe('critical');
   });
 
   it('prekážka bez známeho spôsobu riešenia si nič nedomýšľa', () => {
-    expect(resolutionLook(null).tone).toBe('warn');
+    // Ani poplach (červená), ani upokojenie (sivá) — treba sa na to pozrieť.
+    expect(resolutionLook(null).tone).toBe('attention');
     expect(resolutionLook(null).word.length).toBeGreaterThan(0);
   });
 

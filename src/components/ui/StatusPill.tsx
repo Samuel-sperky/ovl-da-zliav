@@ -13,7 +13,7 @@
  *
  * 1. **Bodka nie je len bodka.** Predlohová `.dot` bola čistý farebný krúžok;
  *    v tmavej téme je taká bodka pod deuteranopiou nečitateľná. Naša značka
- *    nesie GLYF tónu (`TONE_GLYPH` z `ToneBadge` — jeden slovník pre celú
+ *    nesie IKONU tónu (`TONE_ICON` z `ToneBadge` — jeden slovník pre celú
  *    appku) a hneď vedľa nej stojí slovný názov stavu. Farba je až tretia.
  * 2. **Detail sa nikdy neskracuje trojbodkou.** Adresa sa zalomí (`break-all`
  *    v CSS), nezmizne. Skrátená doména je horšia než žiadna — vyzerá presne
@@ -25,8 +25,9 @@
  *
  * Vlastník: U1.
  */
+import Icon, { type IconName } from '@/components/ui/Icon';
 import styles from '@/components/ui/primitives.module.css';
-import { TONE_GLYPH, type StatusTone } from '@/components/ui/ToneBadge';
+import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
 
 export interface StatusPillProps {
   /** Tón stavu (§3.2). `idle` = nespojené, `good` = spojené, `attention` = náhrada. */
@@ -35,8 +36,8 @@ export interface StatusPillProps {
   label: string;
   /** Doména alebo prostredie pod stavom, monospacom. Nikdy nie kľúč. */
   detail?: string | null;
-  /** Prebitie glyfu, keď tón sám nestačí. Predvolene glyf tónu. */
-  glyph?: string;
+  /** Prebitie značky, keď tón sám nestačí. Predvolene ikona tónu. */
+  icon?: IconName;
   /**
    * Oznamovať zmenu stavu čítačke. Zapni len tam, kde sa pilulka počas
    * života stránky naozaj prepína (hlavička); v statickom výpise by z toho
@@ -47,7 +48,7 @@ export interface StatusPillProps {
   testId?: string;
 }
 
-export function StatusPill({ tone, label, detail, glyph, live = false, testId }: StatusPillProps) {
+export function StatusPill({ tone, label, detail, icon, live = false, testId }: StatusPillProps) {
   return (
     <div
       className={styles.pill}
@@ -56,9 +57,7 @@ export function StatusPill({ tone, label, detail, glyph, live = false, testId }:
       role={live ? 'status' : undefined}
     >
       <div className={styles.pillTop}>
-        <span className={styles.pillMark} aria-hidden="true">
-          {glyph ?? TONE_GLYPH[tone]}
-        </span>
+        <Icon className={styles.pillMark} name={icon ?? TONE_ICON[tone]} size={0.9} />
         <span className={styles.pillLabel}>{label}</span>
       </div>
       {detail ? <div className={styles.pillDetail}>{detail}</div> : null}
