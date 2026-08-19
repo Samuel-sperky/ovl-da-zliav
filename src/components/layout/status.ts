@@ -52,7 +52,9 @@ import { useEffect, useState } from 'react';
 import { classifyHealthStatus, type HealthOutcomeKind } from '@/components/layout/health';
 import { formatResumeTime } from '@/components/layout/queue';
 import { useRefreshable } from '@/components/layout/refresh';
+import type { IconName } from '@/components/ui/Icon';
 import type { StatusTone } from '@/components/ui/ToneBadge';
+import { resolutionLook } from '@/components/ui/blocker-look';
 import type { BlockerArea, BlockerId, BlockerResolution } from '@/lib/status/blockers';
 import type { BlockerWire, StatusPayload } from '@/lib/status/snapshot';
 import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
@@ -200,11 +202,11 @@ export function hasBlockers(state: StatusState): boolean {
 
 /* ═══════════════════ 2. Prevod prekážok na tón a vetu ═════════════════════ */
 
-/** Jedna menovka do pruhu: farba + glyf + text, a za tým celá veta na hover. */
+/** Jedna menovka do pruhu: farba + značka + text, a za tým celá veta na hover. */
 export interface StatusChip {
   readonly tone: StatusTone;
-  /** Prebitie glyfu tónu. Používa sa len tam, kde tón sám nestačí. */
-  readonly glyph?: string;
+  /** Prebitie ikony tónu. Používa sa len tam, kde tón sám nestačí. */
+  readonly icon?: IconName;
   /** Krátky štítok do pruhu — pár slov, nikdy celá veta. */
   readonly label: string;
   /** Celá veta aj s ďalším krokom. Ide do `title` a do čítačky. */
@@ -235,8 +237,26 @@ const NEVIEME = '—';
  * a zastavený zápis (runaway zámok), ktorý prichádza mimo zoznamu prekážok.
  */
 export function resolutionTone(resolution: BlockerResolution): StatusTone {
-  if (resolution === 'sam' || resolution === 'sudo') return 'attention';
-  return 'idle';
+  /*
+   * ODVODENÉ Z JEDINÉHO SLOVNÍKA (19. 8. 2026), nie napísané znovu.
+   *
+   * Do tohto dátumu tu stála vlastná tabuľka a bola ŠTVRTÁ v poradí — tá istá
+   * prekážka tak vyšla v chróme sivá a v obsahu červená. Slovník je teraz
+   * jeden (`blocker-look.ts`) a jediné, čo si pruh smie ponechať, je toto
+   * jedno výslovné stlmenie:
+   *
+   * ČERVENÁ SA V CHRÓME NEKRESLÍ. Pruh je na obrazovke stále, takže by pri
+   * vypnutých zápisoch — čo je normálny pilotný stav, nie porucha — svietil
+   * načerveno donekonečna a používateľ by si naň zvykol. Že sa nezapisuje,
+   * hovorí pruh vlastnou menovkou („Ostrý zápis vypnutý"), takže o tú
+   * informáciu nikto nepríde. Červená zostáva vyhradená pre stratu dát
+   * a zastavený zápis, ktoré prichádzajú mimo zoznamu prekážok.
+   *
+   * Kto by stlmenie zrušil, nech to spraví TU a nikde inde — inak vznikne
+   * piata tabuľka.
+   */
+  const tone = resolutionLook(resolution).tone;
+  return tone === 'critical' ? 'idle' : tone;
 }
 
 /**

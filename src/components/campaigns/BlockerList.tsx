@@ -14,6 +14,22 @@
  *    `blockers.ts` a má dôvod: vyčerpaný denný rozpočet je závažnosťou
  *    „blokuje", ale nie je to chyba — appka počká do polnoci. Farbenie podľa
  *    závažnosti by z každého normálneho dňa spravilo poplach (K2).
+ * 1a. **Tón, glyf aj slová idú z JEDINÉHO slovníka** (`ui/blocker-look.ts`).
+ *    Do 19. 8. 2026 mal tab Zľavy vlastnú tabuľku v `queue-model.ts` a Prehľad
+ *    svoju v `dashboard/live-status-model.ts`. Tá istá prekážka
+ *    (`writes_disabled`) bola tu červená „mimo appky" a tam jantárová „rieši
+ *    sa mimo appky" — používateľ prešiel z Prehľadu na Detail a to isté sa mu
+ *    zmenilo z „pozor" na „chyba". Kto sem vráti vlastný prevod
+ *    `resolution → farba`, otvorí tú istú chybu znova.
+ * 1b. **Závažnosť nesie SLOVO** (oprava D6 dotiahnutá 19. 8. 2026). Farba
+ *    patrí spôsobu riešenia, takže bez tohto slova vyzerá riadok, ktorý
+ *    zastavuje zápis, rovnako ako riadok, ktorý len hlási platné pravidlo.
+ *    Prehľad ho kreslil od D6, ale tento riadok — a ten kreslí prekážky na
+ *    Zľavách, Detaile zľavy aj Novej zľave — ho nekreslil vôbec, takže oprava
+ *    platila na jednej zo štyroch obrazoviek. Slovo je zámerne bez tónu
+ *    (holá trieda `.sig`, teda bez farby aj bez glyfu): farbí sa spôsob
+ *    riešenia, závažnosť nie. Stojí ako PRVÉ v riadku značiek, nie na začiatku
+ *    vety o ďalšom kroku — presne to bola chyba, ktorú D6 opravoval.
  * 2. **Stav nikdy nie je len farba.** Každý riadok nesie farbu, glyf aj slovo
  *    o tom, kto to vyrieši (`RESOLUTION_WORD`). V tmavej téme sú jantárová a
  *    červená pod deuteranopiou takmer nerozlíšiteľné.
@@ -29,14 +45,10 @@
  */
 import Link from 'next/link';
 
+import Icon from '@/components/ui/Icon';
 import styles from '@/components/campaigns/zlavy.module.css';
-import {
-  RESOLUTION_GLYPH,
-  RESOLUTION_TONE,
-  RESOLUTION_WORD,
-  type BlockerCard,
-  type StandSentence,
-} from '@/components/campaigns/queue-model';
+import type { BlockerCard, StandSentence } from '@/components/campaigns/queue-model';
+import { resolutionLook, severityWord } from '@/components/ui/blocker-look';
 import { TONE_GLYPH } from '@/components/ui/ToneBadge';
 import { formatDateTimeSk } from '@/lib/ui/format';
 
@@ -54,26 +66,46 @@ export interface BlockerRowProps {
 }
 
 export function BlockerRow({ card, testId }: BlockerRowProps) {
-  const tone = RESOLUTION_TONE[card.resolution];
+  const look = resolutionLook(card.resolution);
+  const tone = look.tone;
 
   return (
     <div
       className={styles.blocker}
       data-tone={tone}
       data-blocker={card.id}
+      data-severity={card.severity}
       data-testid={testId}
       role={tone === 'critical' ? 'alert' : 'status'}
     >
-      <span className={styles.blockerGlyph} aria-hidden="true">
-        {RESOLUTION_GLYPH[card.resolution]}
-      </span>
+      {/* Druhý kanál je IKONA (currentColor, mriežka 16). Slovo o závažnosti
+          aj o spôsobe riešenia nesie riadok pod ňou — ikona sama nikdy
+          nestačí, preto `aria-hidden`. */}
+      <Icon
+        className={styles.blockerGlyph}
+        name={look.icon}
+        size={0.95}
+        aria-hidden="true"
+      />
       <div className={styles.blockerBody}>
         <div className={styles.blockerWhat}>{card.what}</div>
         {card.nextStep === '' ? null : (
           <div className={styles.blockerStep}>{card.nextStep}</div>
         )}
         <div className={styles.blockerMeta}>
-          <span>{RESOLUTION_WORD[card.resolution]}</span>
+          {/*
+           * Závažnosť SLOVOM (D6). Holá `.sig` bez tónu je zámer: dáva slovu
+           * tvar značky (menšie, hrubšie), ale ani farbu, ani glyf — tie
+           * kóduje spôsob riešenia a druhý farebný signál v tom istom riadku
+           * by hovoril, že závažnosť je tiež farba.
+           */}
+          <span className="sig" data-testid="blocker-severity">
+            {severityWord(card.severity)}
+          </span>
+          <span className="sep-dot" aria-hidden="true">
+            ·
+          </span>
+          <span>{look.word}</span>
           {card.clearsAt === null ? null : (
             <>
               <span className="sep-dot" aria-hidden="true">

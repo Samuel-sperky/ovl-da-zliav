@@ -1,56 +1,27 @@
 /**
- * Aura Zľavy — stav zľavy a jeho príznaky ako jeden riadok (V9, architektúra §4).
+ * Aura Zľavy — stav zľavy a jeho príznaky ako jeden riadok (Prehľad).
  *
- * Gramatika je vždy `stav · príznak · príznak`. Stav má presne štyri slová
- * a príznak NIKDY nestojí namiesto stavu ani nemení jeho farbu — zľava so
- * zlyhanými položkami stále beží. Vetu skladá slovník, tento komponent ju
- * len oblieka do tried, ktoré vlastní `globals.css`.
+ * TENTO SÚBOR UŽ NIČ NEKRESLÍ — je to len druhé meno pre `DiscountState`.
  *
- * Červená je vyhradená pre stratu dát a zastavený zápis. Zlyhané položky sú
- * jantárové, vyčerpaný rozpočet je sivý — je to informácia, nie chyba.
+ * PREČO
+ * -----
+ * Do 19. 8. 2026 tu stála doslovná kópia `campaigns/DiscountState.tsx`: tá istá
+ * tabuľka `STATE_CLASS`, tá istá funkcia `flagClass`, to isté značkovanie.
+ * Líšili sa jediným — z ktorého CSS modulu si berú `flagCritical` — a obe
+ * pravidlá boli `color: var(--st-critical)`, teda tá istá farba napísaná
+ * dvakrát. Bola to druhá kópia slovníka stavov zľavy, ktorá čakala, kedy sa
+ * rozíde s prvou. Presne to sa už raz stalo prekážkam (tri prevodníky
+ * `resolution → farba`, tri obrazovky, tri rôzne odpovede) a stálo to tri
+ * samostatné chyby.
  *
- * Vlastník: V9.
+ * Meno `StateLine` zostáva, aby `StatusSection.tsx` a `CampaignsSection.tsx`
+ * nemuseli meniť import. Kto sem vráti telo komponentu, obnoví tú kópiu.
+ *
+ * Slovník appky hovorí „zľava", nikdy „kampaň" — implementácia preto žije pod
+ * menom `DiscountState`.
  */
-import type { CampaignSentence, FlagTone, StateTone } from '@/lib/ui/vocabulary';
-
-import styles from '@/components/dashboard/overview.module.css';
-
-/** Tón stavu → trieda bodky z `globals.css`. */
-const STATE_CLASS: Readonly<Record<StateTone, string>> = {
-  idle: 'state pripravena',
-  progress: 'state zapisuje',
-  live: 'state bezi',
-  done: 'state skoncila',
-};
-
-function flagClass(tone: FlagTone): string {
-  if (tone === 'neutral') return 'flag neutral';
-  if (tone === 'critical') return `flag ${styles.flagCritical}`;
-  return 'flag';
-}
-
-export interface StateLineProps {
-  sentence: CampaignSentence;
-  testId?: string;
-}
-
-export function StateLine({ sentence, testId }: StateLineProps) {
-  return (
-    <span data-testid={testId} data-state={sentence.tone}>
-      <span className={STATE_CLASS[sentence.tone]}>
-        <span className="g" aria-hidden="true" />
-        {sentence.state}
-      </span>
-      {sentence.flags.map((flag) => (
-        <span key={flag.text}>
-          <span className="sep-dot" aria-hidden="true">
-            ·
-          </span>
-          <span className={flagClass(flag.tone)}>{flag.text}</span>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-export default StateLine;
+export {
+  DiscountState as StateLine,
+  default,
+  type DiscountStateProps as StateLineProps,
+} from '@/components/campaigns/DiscountState';

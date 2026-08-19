@@ -25,11 +25,16 @@
  *    GLYF a SLOVO. Glyf a slovo pridáva `globals.css` (`.sig`) alebo primitív
  *    (`StatusPill`, `BudgetMeter`); tento modul dodáva tón a slovo naraz, aby
  *    sa nemohli rozísť.
- * 2. **Farbu prekážky volí `resolution`, nie `severity`.** Je to pravidlo
- *    z hlavičky `lib/status/blockers.ts`: závažnosť hovorí, čo cez prekážku
- *    neprejde, ale používateľ sa pýta inú vec — či s tým má niečo robiť.
- *    Jantár preto znamená „je to na vás", sivá „čaká sa a netreba nič".
- *    Vyčerpaný denný rozpočet je `blokuje`, a napriek tomu je sivý (K2).
+ * 2. **Vzhľad prekážky sa tu UŽ NEROZHODUJE.** Do 19. 8. tu stála vlastná
+ *    tabuľka `RESOLUTION_LOOK` s tónmi `warn / lock / idle`, kým
+ *    `campaigns/queue-model.ts` mal vedľa nej svoju s tónmi
+ *    `critical / attention / idle`. Tá istá prekážka tak bola na Prehľade
+ *    jantárová „rieši sa mimo appky" a na Detaile zľavy červená „mimo appky" —
+ *    používateľ prešiel o obrazovku ďalej a to isté sa mu zmenilo z „pozor" na
+ *    „chyba". Jediný slovník teraz žije v `ui/blocker-look.ts` a tento modul ho
+ *    už len prepúšťa ďalej. Kto sem vráti vlastnú tabuľku, otvorí tú istú
+ *    chybu znova; pravidlo „farbu volí `resolution`, nie `severity`" (K2) drží
+ *    odteraz on.
  * 3. **Vety prekážok sa tu NEPREPISUJÚ.** `what` a `nextStep` skladá server;
  *    tento modul im dáva len poradie, tón a slovo o spôsobe riešenia.
  * 4. **Neznáme sa priznáva.** Chýbajúci údaj nikdy nevedie k upokojujúcej
@@ -42,7 +47,6 @@
  * Vlastník: V9.
  */
 import type {
-  BlockerResolutionCode,
   BlockerRow,
   CatalogSyncView,
   StatusSectionCode,
@@ -50,14 +54,36 @@ import type {
 import type { StatusTone } from '@/components/ui/ToneBadge';
 import { formatDateTimeSk } from '@/lib/ui/format';
 
+/**
+ * Jediný slovník stavu prekážky. Prehľad ho len prepúšťa ďalej, aby staršie
+ * importy (`resolutionLook` z tohto modulu) ostali funkčné — rozhoduje sa
+ * v `ui/blocker-look.ts` a nikde inde.
+ */
+export {
+  RESOLUTION_LOOK,
+  SEVERITY_WORD,
+  UNKNOWN_RESOLUTION_LOOK,
+  resolutionLook,
+  severityWord,
+  toneSigClass,
+} from '@/components/ui/blocker-look';
+export type { BlockerLook, BlockerLook as ResolutionLook } from '@/components/ui/blocker-look';
+
 /* ═══════════════════════ 1. Signálne značky (.sig) ════════════════════════ */
 
 /**
- * Tón signálnej značky. Mená sú zhodné s triedami `.sig.*` v `globals.css`,
- * ktoré nesú aj glyf (`✓ ▲ ✕ ○ –`) — nová sada tried by znamenala druhý
- * slovník stavov na tej istej obrazovke.
+ * Meno triedy `.sig.*` z `globals.css` — NIE druhá škála stavov.
+ *
+ * Sú to historické mená tried (`ok`, `warn`, `bad`) nad tou istou päticou
+ * `--st-*`, ktorú vystavuje `StatusTone`. Nové miesta majú počítať v tónoch a
+ * na triedu prekladať cez `toneSigClass()`; tento typ existuje pre miesta,
+ * ktoré si tón ukladajú rovno ako meno triedy (`overview-verdict.ts`).
+ *
+ * `lock` je medzi nimi zámerne: patrí trvalému obmedzeniu, ktoré appka vedome
+ * NEsignalizuje ako závažnosť (pilotný strop). Prekážke sa priradiť nesmie —
+ * zámok je spôsob riešenia, a ten nesie `BlockerLook.locked`.
  */
-export type SigTone = 'ok' | 'warn' | 'bad' | 'idle' | 'lock';
+export type SigTone = 'ok' | 'warn' | 'bad' | 'progress' | 'idle' | 'lock';
 
 /** Trieda značky pre `className`. Jediné miesto, kde sa `.sig` skladá. */
 export function sigClass(tone: SigTone): string {
@@ -137,36 +163,6 @@ export function heartbeatSummary(heartbeat: HeartbeatView | null): HeartbeatSumm
 }
 
 /* ═══════════════════════ 4. Prekážky na obrazovke ═════════════════════════ */
-
-export interface ResolutionLook {
-  readonly tone: SigTone;
-  /** Slovo o tom, kto to vyrieši. Stojí vedľa glyfu, nikdy namiesto neho. */
-  readonly word: string;
-}
-
-/**
- * Farba a slovo podľa SPÔSOBU RIEŠENIA, nie podľa závažnosti.
- *
- * Používateľ sa nepýta „aké je to vážne", ale „mám s tým niečo robiť". Jantár
- * preto znamená „je to na vás", sivá „čaká sa a netreba nič" a zámok „cesta
- * existuje, ale vypýta si heslo".
- */
-export const RESOLUTION_LOOK: Readonly<Record<BlockerResolutionCode, ResolutionLook>> = {
-  sam: { tone: 'warn', word: 'rieši sa v appke' },
-  sudo: { tone: 'lock', word: 'vyžiada si heslo' },
-  cakanie: { tone: 'idle', word: 'čaká sa, netreba nič' },
-  mimo_appky: { tone: 'warn', word: 'rieši sa mimo appky' },
-};
-
-/** Prekážka, ktorej spôsob riešenia appka nepozná — nič si o ňom nedomýšľa. */
-export const UNKNOWN_RESOLUTION_LOOK: ResolutionLook = {
-  tone: 'warn',
-  word: 'treba sa na to pozrieť',
-};
-
-export function resolutionLook(resolution: BlockerResolutionCode | null): ResolutionLook {
-  return resolution === null ? UNKNOWN_RESOLUTION_LOOK : RESOLUTION_LOOK[resolution];
-}
 
 /**
  * Prekážky, ktoré patria na Prehľad — VŠETKY TRI ÚROVNE (kontrakt UI, bod 6).

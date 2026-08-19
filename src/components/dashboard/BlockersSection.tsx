@@ -37,6 +37,13 @@
  *    a GLYF podľa spôsobu riešenia, SLOVO podľa závažnosti. Spôsob riešenia
  *    tým o slovo neprišiel — presunul sa k ďalšiemu kroku, ktorý aj tak
  *    popisuje („rieši sa mimo appky · Zapnúť ich môže len správca…").
+ * 1c. **Tón, glyf aj slová prichádzajú z JEDINÉHO slovníka** (19. 8. 2026,
+ *    `ui/blocker-look.ts`). Do tohto dátumu mala sekcia vlastnú tabuľku, kde
+ *    bolo `mimo_appky` jantárové a `sudo` malo tlmený „tón" `lock`, kým tab
+ *    Zľavy kreslil tú istú prekážku červeno a jantárovo. Slovník je odvtedy
+ *    jeden a `SEVERITY_WORD` je v ňom preto, aby ho kreslil aj
+ *    `campaigns/BlockerList.tsx` — oprava D6 platila dovtedy na jednej zo
+ *    štyroch obrazoviek. Zámok už nie je tón, ale `look.locked`.
  * 2. **Každý riadok má ČO a ČO S TÝM.** Prekážka bez ďalšieho kroku je log,
  *    nie obrazovka. Keď prekážka vedie niekam v appke, riadok má aj tlačidlo.
  * 3. **Poradie zo servera sa nemení.** `blockers.ts` ho drží ako súčasť
@@ -52,11 +59,10 @@ import styles from '@/components/dashboard/overview.module.css';
 import {
   hasObstacles,
   pathLabel,
-  resolutionLook,
   screenBlockers,
-  sigClass,
 } from '@/components/dashboard/live-status-model';
-import type { BlockerRow, BlockerSeverityCode } from '@/components/dashboard/status-api';
+import type { BlockerRow } from '@/components/dashboard/status-api';
+import { resolutionLook, severityWord, toneSigClass } from '@/components/ui/blocker-look';
 import LockBadge from '@/components/ui/LockBadge';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -65,30 +71,20 @@ export interface BlockersSectionProps {
   blockers: readonly BlockerRow[] | null;
 }
 
-/**
- * Závažnosť ako SLOVO. Farba patrí spôsobu riešenia, takže bez tohto slova by
- * riadok, ktorý zastavuje zápis, vyzeral rovnako ako riadok, ktorý len hlási
- * platné pravidlo.
- */
-const SEVERITY_WORD: Readonly<Record<BlockerSeverityCode, string>> = {
-  blokuje: 'zastavuje zápis',
-  obmedzuje: 'spomaľuje zápis',
-  informuje: 'nezastavuje nič',
-};
-
 function Row({ row }: { row: BlockerRow }) {
   const look = resolutionLook(row.resolution);
   // Zámok už slovo o spôsobe riešenia povie sám („Vyžiada si heslo — …"),
   // takže sa v tlmenom riadku pod ním neopakuje. Dve kópie tej istej vety
-  // v jednom riadku sú šum, nie dôraz.
-  const locked = row.resolution === 'sudo';
+  // v jednom riadku sú šum, nie dôraz. `locked` je vlastnosť spôsobu riešenia,
+  // nie tón — farba riadku ostáva jantárová ako pri `sam`.
+  const locked = look.locked;
 
   return (
     <div className={styles.reason} data-testid="blocker-row" data-blocker={row.id} data-severity={row.severity}>
       {/* Značka so stavom — vlastný stĺpec, rovnaké x na každom riadku (D6). */}
       <div className={styles.reasonMark}>
-        <span className={sigClass(look.tone)} data-testid="blocker-severity">
-          {SEVERITY_WORD[row.severity]}
+        <span className={toneSigClass(look.tone)} data-testid="blocker-severity">
+          {severityWord(row.severity)}
         </span>
       </div>
 

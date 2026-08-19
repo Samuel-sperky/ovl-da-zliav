@@ -18,12 +18,17 @@
  * ČO SA V TOMTO MODULE NESMIE POKAZIŤ
  * -----------------------------------
  *
- *  1. **Farba prekážky sa volí podľa `resolution`, NIE podľa `severity`.**
- *     Je to napísané v doc-bloku `lib/status/blockers.ts` a má to dôvod:
- *     vyčerpaný denný rozpočet je `blokuje`, ale nie je to chyba — appka len
- *     počká do polnoci. Keby sa farbilo podľa závažnosti, obrazovka by pri
- *     každom normálnom dni kričala. Preto `RESOLUTION_TONE` a k nemu vždy aj
- *     `RESOLUTION_GLYPH` + `RESOLUTION_WORD`: stav nikdy nie je len farba.
+ *  1. **Vzhľad prekážky sa tu UŽ NEROZHODUJE.** Do 19. 8. 2026 tu stála
+ *     vlastná tabuľka `RESOLUTION_TONE/ICON/WORD`, kým
+ *     `dashboard/live-status-model.ts` mal vedľa nej svoju s tónmi
+ *     `warn / lock / idle`. Tá istá prekážka (`writes_disabled`) tak bola na
+ *     Prehľade jantárová „rieši sa mimo appky" a tu červená „mimo appky" —
+ *     jeden krok používateľa a to isté sa zmenilo z „pozor" na „chyba".
+ *     Slovník je odvtedy JEDEN a žije v `ui/blocker-look.ts`; tri mapy nižšie
+ *     zostali len ako kompatibilné okná a sú z neho ODVODENÉ, nie napísané.
+ *     Pravidlo, ktoré držali — farba podľa `resolution`, nie podľa `severity`,
+ *     lebo vyčerpaný rozpočet je `blokuje`, a pritom sa nič nepokazilo (K2) —
+ *     drží odteraz on.
  *
  *  2. **Dve miesta nesmú hovoriť dve rôzne čísla.** Koľko položiek je vo fronte
  *     PRED novou zľavou vieme z dvoch zdrojov: presne z `campaign_items`
@@ -50,10 +55,12 @@
  *
  * Vlastník: V11.
  */
+import type { IconName } from '@/components/ui/Icon';
 import type { StatusTone } from '@/components/ui/ToneBadge';
 import type { Blocker, BlockerResolution, BlockerSeverity } from '@/lib/status/blockers';
 import type { BlockerWire } from '@/lib/status/snapshot';
 
+import { lookChannel } from '@/components/ui/blocker-look';
 import { diffDays, isDateOnly } from '@/lib/domain/dates';
 import { GUARD_CODES_KNOWN, formatCountSk, guardSentence, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -82,37 +89,34 @@ export interface BlockerCard {
   readonly clearsAt: string | null;
 }
 
-/**
- * Farba podľa toho, ČO S TÝM — nie podľa toho, ako veľmi to blokuje.
+/*
+ * Tri kanály stavu prekážky — ODVODENÉ z jediného slovníka appky
+ * (`ui/blocker-look.ts`), nie napísané tu.
+ *
+ * Mapy zostali kvôli miestam, ktoré ich už roky importujú po jednom kanáli.
+ * Nové miesta majú siahať rovno po `resolutionLook()`: vráti tón, ikonu, slovo
+ * aj `locked` naraz, takže sa tri kanály nemôžu rozísť ani teoreticky.
  *
  *  - `cakanie`    → pokojná sivá. Nič sa nepokazilo, appka čaká na polnoc (K2).
- *  - `sam`, `sudo` → jantárová. Používateľ s tým vie pohnúť, len ešte nepohol.
+ *  - `sam`, `sudo` → jantárová. Používateľ s tým vie pohnúť, len ešte nepohol;
+ *    zámok pri `sudo` nesie ikona a slovo, nie farba.
  *  - `mimo_appky` → červená. Zápis je zastavený a z obrazovky sa s tým nedá
  *    urobiť nič; červená je v tejto appke vyhradená pre stratu dát a zastavený
  *    zápis a toto je presne ten druhý prípad.
  */
-export const RESOLUTION_TONE: Readonly<Record<BlockerResolution, StatusTone>> = {
-  sam: 'attention',
-  sudo: 'attention',
-  cakanie: 'idle',
-  mimo_appky: 'critical',
-};
 
-/** Glyf — druhý kanál popri farbe. `sudo` má zámok, lebo si pýta heslo. */
-export const RESOLUTION_GLYPH: Readonly<Record<BlockerResolution, string>> = {
-  sam: '▲',
-  sudo: '🔒',
-  cakanie: '○',
-  mimo_appky: '✕',
-};
+/** Farba podľa toho, ČO S TÝM — nie podľa toho, ako veľmi to blokuje. */
+export const RESOLUTION_TONE: Readonly<Record<BlockerResolution, StatusTone>> =
+  lookChannel('tone');
+
+/** Ikona — druhý kanál popri farbe. `sudo` má zámok, lebo si pýta heslo. */
+export const RESOLUTION_ICON: Readonly<Record<BlockerResolution, IconName>> =
+  lookChannel('icon');
+
 
 /** Slovo — tretí kanál. Bez neho je farba aj glyf len obrázok. */
-export const RESOLUTION_WORD: Readonly<Record<BlockerResolution, string>> = {
-  sam: 'vyriešite v appke',
-  sudo: 'vyžiada si heslo',
-  cakanie: 'čaká sa, netreba nič',
-  mimo_appky: 'mimo appky',
-};
+export const RESOLUTION_WORD: Readonly<Record<BlockerResolution, string>> =
+  lookChannel('word');
 
 /** Prekážka z lokálneho prepočtu → karta. */
 export function cardOfBlocker(blocker: Blocker): BlockerCard {
