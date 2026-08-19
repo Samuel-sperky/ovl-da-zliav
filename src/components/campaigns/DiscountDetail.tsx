@@ -97,7 +97,6 @@ import { useRefreshable } from '@/components/layout/refresh';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
-import { TONE_GLYPH } from '@/components/ui/ToneBadge';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -479,7 +478,7 @@ export function DiscountDetail({ id }: { id: number }) {
             <div className={`kpis ${styles.queueTiles}`}>
               <div className={styles.queueTile} data-state="ok" data-any={anyOf(campaign.itemsOk)}>
                 <StatTile
-                  label={`${TONE_GLYPH.good} Zapísané`}
+                  label={`Zapísané`}
                   value={formatCountSk(campaign.itemsOk)}
                   detail={`z ${formatCountSk(campaign.itemsTotal)} produktov tejto zľavy`}
                   testId="tile-ok"
@@ -491,7 +490,7 @@ export function DiscountDetail({ id }: { id: number }) {
                 data-any={anyOf(campaign.itemsPending)}
               >
                 <StatTile
-                  label={`${TONE_GLYPH.progress} Čaká na zápis`}
+                  label={`Čaká na zápis`}
                   value={formatCountSk(campaign.itemsPending)}
                   detail={
                     campaign.itemsPending === 0
@@ -507,7 +506,7 @@ export function DiscountDetail({ id }: { id: number }) {
                 data-any={anyOf(campaign.itemsFailed)}
               >
                 <StatTile
-                  label={`${TONE_GLYPH.critical} Nepodarilo sa`}
+                  label={`Nepodarilo sa`}
                   value={formatCountSk(campaign.itemsFailed)}
                   detail={
                     campaign.itemsFailed === 0
@@ -523,7 +522,7 @@ export function DiscountDetail({ id }: { id: number }) {
                 data-any={anyOf(campaign.itemsUncertain)}
               >
                 <StatTile
-                  label={`${TONE_GLYPH.attention} Nevieme, či sa zapísalo`}
+                  label={`Nevieme, či sa zapísalo`}
                   value={formatCountSk(campaign.itemsUncertain)}
                   detail={
                     campaign.itemsUncertain === 0

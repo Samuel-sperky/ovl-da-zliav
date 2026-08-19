@@ -49,7 +49,7 @@ import Icon from '@/components/ui/Icon';
 import styles from '@/components/campaigns/zlavy.module.css';
 import type { BlockerCard, StandSentence } from '@/components/campaigns/queue-model';
 import { resolutionLook, severityWord } from '@/components/ui/blocker-look';
-import { TONE_GLYPH } from '@/components/ui/ToneBadge';
+import { TONE_ICON } from '@/components/ui/ToneBadge';
 import { formatDateTimeSk } from '@/lib/ui/format';
 
 /** Kam vedie prekážka — popis odkazu podľa cesty, nikdy podľa kódu. */
@@ -155,9 +155,15 @@ export function StandRow({ stand, testId }: { stand: StandSentence; testId?: str
       data-testid={testId}
       role={stand.tone === 'critical' ? 'alert' : 'status'}
     >
-      <span className={styles.blockerGlyph} aria-hidden="true">
-        {TONE_GLYPH[stand.tone]}
-      </span>
+      {/* Ikona, nie znak — rovnako ako v riadku prekážky nad ňou. Do 19. 8.
+          tu stál TONE_GLYPH, ktorý po prechode na ikony vracia prázdno, takže
+          riadok o stojacej fronte prišiel o druhý kanál úplne. */}
+      <Icon
+        className={styles.blockerGlyph}
+        name={TONE_ICON[stand.tone]}
+        size={0.95}
+        aria-hidden="true"
+      />
       <div className={styles.blockerBody}>
         <div className={styles.blockerWhat}>{stand.what}</div>
         <div className={styles.blockerStep}>

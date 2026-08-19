@@ -2175,12 +2175,28 @@ b.lvl-2 {
    * používajú, takže sa tým slovník zjednocuje, nie rozširuje.
    */
   /*
-   * ŽIADNE EMOJI (19. 8. 2026). Bolo tu 🔒 z Segoe UI Emoji — jediná FAREBNÁ
-   * vec v appke, ktorá má inak celú paletu zmeranú a monochromatickú. Zámok
-   * kreslí ikona z Icon.tsx (mriežka 16, hrúbka 1,5, currentColor); toto
-   * pravidlo drží už len rozostup pre prípad, že by trieda ostala bez ikony.
+   * ŽIADNE EMOJI (19. 8. 2026). Bolo tu 🔒 zo Segoe UI Emoji — jediná FAREBNÁ
+   * vec v appke, ktorá má inak celú paletu zmeranú a monochromatickú.
+   *
+   * Zámok kreslí MASKA z tej istej cesty, akú má ikona `lock` v Icon.tsx:
+   * maskovaná plocha sa vyfarbí `currentColor`, takže značka dedí farbu textu
+   * a v tmavej téme sa nemusí riešiť zvlášť.
+   *
+   * Prečo maska a nie `<Icon>`: rodina `.sig` kreslí značky cez `::before`
+   * na 27 miestach a jej prechod na komponent je samostatná úloha. Kým
+   * neprebehne, je toto JEDINÉ miesto, kde sa cesta ikony opakuje — pri jej
+   * zmene treba upraviť obe. Po prechode toto pravidlo zanikne.
    */
   content: '';
+  width: 11px;
+  height: 11px;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2016%2016%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%271.5%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.3%207.2h9.4a1.1%201.1%200%200%201%201.1%201.1v4.9a1.1%201.1%200%200%201-1.1%201.1H3.3a1.1%201.1%200%200%201-1.1-1.1V8.3a1.1%201.1%200%200%201%201.1-1.1Z%27%2F%3E%3Cpath%20d%3D%27M4.8%207.2V5a3.2%203.2%200%200%201%206.4%200v2.2%27%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2016%2016%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%271.5%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.3%207.2h9.4a1.1%201.1%200%200%201%201.1%201.1v4.9a1.1%201.1%200%200%201-1.1%201.1H3.3a1.1%201.1%200%200%201-1.1-1.1V8.3a1.1%201.1%200%200%201%201.1-1.1Z%27%2F%3E%3Cpath%20d%3D%27M4.8%207.2V5a3.2%203.2%200%200%201%206.4%200v2.2%27%2F%3E%3C%2Fsvg%3E");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
   /* Emoji je širšie než 10 px vyhradených pre ✓ ▲ ✕ ○ — bez toho by značku
      orezalo. Veľkosť sa mierne sťahuje, aby riadok nenarástol. */
   width: 12px;

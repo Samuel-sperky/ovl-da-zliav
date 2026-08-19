@@ -120,10 +120,15 @@ describe('A — štyri dlaždice zostávajú, duplicita zmizla inde (D15, bod 22
     expect(bar).not.toContain('var(--accent)');
   });
 
-  it('stav nesie farbu, glyf aj slovo — glyf je zo spoločnej škály', () => {
-    expect(DETAIL).toContain("import { TONE_GLYPH } from '@/components/ui/ToneBadge'");
-    expect(DETAIL).toContain('${TONE_GLYPH.good} Zapísané');
-    expect(DETAIL).toContain('${TONE_GLYPH.critical} Nepodarilo sa');
+  it('stav nesie farbu aj slovo — a nikdy prázdnu značku', () => {
+    // Do 19. 8. 2026 sa sem lepil TONE_GLYPH, ktorý po prechode na ikony
+    // vracal samé prázdne reťazce — z „glyf + slovo" ostala medzera navyše.
+    // Mapa je preč. Kým dlaždice dostanú <Icon>, nesie stav FARBA (data-state
+    // + --st-*) a SLOVO v popisku; musia byť oba, inak je to len farba.
+    expect(DETAIL).not.toContain('TONE_GLYPH');
+    for (const word of ['Zapísané', 'Čaká na zápis', 'Nepodarilo sa', 'Nevieme, či sa zapísalo']) {
+      expect(DETAIL, word).toContain(word);
+    }
   });
 
   it('prúžok farby dostane len dlaždica s nenulovým číslom — nula nie je poplach', () => {
@@ -159,7 +164,9 @@ describe('B — dôvody stoja v jednom ráme (D16)', () => {
   });
 
   it('aj tento riadok má vedľa farby glyf', () => {
-    expect(PANEL).toContain('{TONE_GLYPH[stand.tone]}');
+    // Značku kreslí IKONA, nie znak (19. 8. 2026): TONE_GLYPH po prechode
+    // vracal prázdno, takže riadok o stojacej fronte prišiel o druhý kanál.
+    expect(PANEL).toContain('TONE_ICON[stand.tone]');
   });
 
   it('prázdny rám sa nekreslí — bol by tvrdením, že niečo stojí', () => {

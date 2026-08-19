@@ -40,23 +40,6 @@ export const TONE_ICON: Readonly<Record<StatusTone, IconName>> = {
   idle: 'circle',
 };
 
-/**
- * @deprecated Textový kanál značky. Zostáva PRÁZDNY a je to zámer.
- *
- * Dve obrazovky mimo tohto balíka (`campaigns/DiscountDetail.tsx`,
- * `campaigns/BlockerList.tsx`) ho ešte lepia do reťazcov a do vlastných
- * spanov. Kým prejdú na `TONE_ICON` / `<Icon>`, musí táto mapa existovať — ale
- * nesmie vrátiť znak, inak sa symbolové glyfy vrátia zadnými dverami. Značku
- * na tých miestach kreslí CSS maska (`globals.css`, `campaigns/zlavy.module.css`).
- * Stráži to `test/unit/ikony.spec.ts`.
- */
-export const TONE_GLYPH: Readonly<Record<StatusTone, string>> = {
-  critical: '',
-  attention: '',
-  progress: '',
-  good: '',
-  idle: '',
-};
 
 export interface ToneBadgeProps extends Omit<HTMLAttributes<HTMLSpanElement>, 'children'> {
   tone: StatusTone;
