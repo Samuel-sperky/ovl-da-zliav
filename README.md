@@ -122,6 +122,11 @@ rozbehnúť).
   `33-KISS-DIZAJN.md`, `34-KISS-OVERENIE.md` — cesta k dizajnu pred V3
 - `design/v3/ARCHITEKTURA.md` — architektúra UI V3 a pravidlá P1–P8;
   mockupy sú `design/v3/*.html`
+- `KONTRAKT-UX-DIZAJN-2026-08-19.md` — dokončenie UX a dizajnu šiestich
+  obrazoviek: neutrálna paleta so **zmeranými** kontrastmi a odstupmi pri
+  farbosleposti, tri roly popiskov, hustota proti reálnym 41 220 produktom.
+  Paletu stráži `test/unit/paleta.spec.ts` (číta tokeny priamo z
+  `globals.css`), písmo `test/unit/typografia.spec.ts`.
 
 **Prevádzka a API shopu**
 

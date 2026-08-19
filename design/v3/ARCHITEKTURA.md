@@ -39,7 +39,8 @@ sa ohnúť smú — ale nie ticho. Kto ich ohne, dopíše sem riadok.
 | 13. 8. 2026 | **P4** | chróm — výzva „len na čítanie" | Pri chýbajúcom alebo expirovanom kľúči pribúda pod pruh štvrtý riadok chrómu s odkazom na opravu (D10). Nie je to opakovanie menovky v pruhu: pruh hlási fakt, výzva ponúka akciu, ktorou sa fakt zmení. Kým kľúč platí, chróm sú tri riadky. |
 | 18. 8. 2026 | **P4, P5** | Produkty — bočný panel detailu | Zadanie žiada „všetky údaje vypísané", takže panel má päť blokov (predané kusy ako dominanta · prekážky · údaje o produkte · zľavy podľa vlastných zápisov · zatiaľ nedostupné) a je vyšší než obrazovka. Cena za výnimku je merateľná: panel je **prekryv 400 px so svojím vlastným skrolom**, obrazovka pod ním sa nehýbe a tabuľka ostáva dominantou. Zamknuté riadky sa nedajú vynechať — z chýbajúceho riadku sa nedá zistiť, že tá informácia existuje, a práve to je dôvod, prečo panel vznikol. Keby panel prestal byť prekryvom alebo posunul obsah stránky, výnimka padá. |
 | 18. 8. 2026 | **P4** | Nastavenia — podstránka „Čo smie robiť a koľko toho smie" | Nastavenia sa rozpadli z jednej stránky (12 sekcií, 4,7 obrazovky) na rozcestník so štyrmi kartami a štyri podstránky. Tri z nich sú pod hranicou; táto má tri sekcie a pri 1440×900 meria **1,8 obrazovky**. Rozdeliť ju na dve by znamenalo piatu kartu, a rozsah so zápismi a rozpočtami patria k sebe: sú to tri odpovede na jednu otázku „prečo appka zapíše práve toľko". Cena za výnimku je merateľná — **tri sekcie a ani jedna štvrtá**, každá s technickým detailom pod rozklikom. Keby pribudla štvrtá sekcia, výnimka padá a rozpočty idú na vlastnú podstránku. |
-| 18. 8. 2026 | **P4** | Produkty — ľavý panel filtrov | Pribudla skupina „Stav v eshope" (tri možnosti) a podmienená skupina „Odkiaľ je riadok". Ľavý stĺpec tým narástol pod hranu 900 px. Cena za výnimku: **skupiny sú riadkové voľby bez kariet a bez vysvetliviek**, a „Odkiaľ je riadok" sa kreslí len vtedy, keď obrazovka riadky naozaj filtruje. Dominantou obrazovky zostáva tabuľka. |
+| 19. 8. 2026 | **P4, P5** | Nastavenia — podstránka „Čo sa už stalo a ako appku zastaviť" | Päť sekcií (História · Diagnostika · Zamknuté funkcie · Poistky · Odhlásenie) a pri 1440×900 **1,6 obrazovky**. Šiesta karta na rozcestníku by rozbila „štyri otázky, štyri stránky" (kontrakt UI, bod 13), a história, diagnostika aj brzdy sú jedna otázka: „čo sa stalo a ako to zastavím". Cena za výnimku je merateľná — **audit tabuľka skroluje vo vlastnom ráme (340 px)** a každá sekcia má techniku pod rozklikom. Keby pribudla šiesta sekcia, výnimka padá. |
+| ~~18. 8. 2026~~ | ~~**P4**~~ | ~~Produkty — ľavý panel filtrov~~ | Pribudla skupina „Stav v eshope" (tri možnosti) a podmienená skupina „Odkiaľ je riadok". Ľavý stĺpec tým narástol pod hranu 900 px. Cena za výnimku: **skupiny sú riadkové voľby bez kariet a bez vysvetliviek**, a „Odkiaľ je riadok" sa kreslí len vtedy, keď obrazovka riadky naozaj filtruje. Dominantou obrazovky zostáva tabuľka. **ZRUŠENÁ 19. 8. 2026** — po zjednotení zamknutých filtrov do jednej skupiny (D9) meria panel pri 1440 px **772 px**, teda pod hranou 900 px. Výnimka už nie je na čo. Riadok zostáva ako záznam, nie ako povolenie. |
 
 ### Spoločná hlavička (na každej stránke identická)
 
@@ -201,7 +202,11 @@ otvorený, hustý), zvyšok tabuľka.
 - **Hľadanie**: jedno pole nad tabuľkou — názov, ID aj SKU (odpoveď 71).
 - **Stĺpce** (odpoveď 58): Názov · Kategória/Kov · Predané ks (30 d) + Sklad ·
   Cena + Marža · Aktuálna zľava. Zamknuté bunky = `—` s tenkým zámkom.
-- **Stránkovanie po 50** (odpoveď 58), počet vľavo dole: `40 483 produktov`.
+- **Stránkovanie 50 / 100 / 200**, predvolených 50 (odpoveď 58), počet vľavo
+  dole: `41 220 produktov`. Od 19. 8. 2026 aj **skok na stránku** (kreslí sa až
+  od 8 strán) a ukazovateľ `strana 412 z 825` v pätke — bez nich sa na riadok
+  30 000 nedalo nijako dostať. Virtualizácia to nerieši: v DOM nikdy nie je
+  41 220 riadkov, stránkuje server.
 - **Lišta výberu** (odpoveď 59): keď je niečo označené, zdola vysunie tmavý pruh:
   `Vybraných 8 000  ·  [Zlacniť]  [Uložiť filter]  [Zrušiť výber]`.
   V ňom aj `Vybrať všetkých 11 640, ktoré vyhovujú filtru`.
