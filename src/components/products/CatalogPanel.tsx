@@ -13,9 +13,10 @@
  *
  * Prečo je karta katalógu PRVÁ
  * ────────────────────────────
- * Appka má dnes načítaných okolo 2 900 zo 41 082 produktov a tabuľka vyzerá
- * rovnako, či je katalóg celý, alebo z neho videla tridsať stránok. Bez tej
- * karty si používateľ vyberie 150 kusov zo siedmich percent eshopu a nemá ako
+ * Tabuľka vyzerá rovnako, či je katalóg celý, alebo z neho appka videla tridsať
+ * stránok. Zrkadlo je k 19. 8. 2026, 00:13 úplné (41 220 z 41 220), lenže eshop
+ * medzitým pridáva a maže a prechod sa môže zaseknúť na rozpočte čítaní. Bez
+ * tej karty by si používateľ vybral 150 kusov zo zlomku eshopu a nemal by ako
  * to zistiť. Preto je stav katalógu prvá vec na obrazovke, nie posledná.
  *
  * Výber a jeho dve podoby
@@ -29,12 +30,14 @@
  *
  * Hľadanie: zrkadlo hneď, eshop na kliknutie
  * ──────────────────────────────────────────
- * Písanie do poľa hľadá v NAČÍTANÝCH riadkoch — podľa názvu a čísla produktu.
+ * Písanie do poľa hľadá v zrkadle — podľa NÁZVU a ČÍSLA produktu, slovo po
+ * slove: „náramok zirkón" nájde všetky náramky so zirkónom bez ohľadu na
+ * poradie slov, nie len tie, čo majú v názve práve túto dvojicu za sebou.
  * Eshop pozná navyše kód, popis aj kategórie, ale hľadanie v ňom míňa anonymný
  * rozpočet čítaní, takže sa NIKDY nespustí samo: je to tlačidlo, ktoré stojí
  * hneď pri poli a je dostupné vždy, keď je v hľadaní text — aj keď zrkadlo
- * niečo našlo. Zrkadlo má 2 900 zo 41 082 produktov, takže tri nájdené riadky
- * nie sú dôkaz, že v eshope nie je tridsať ďalších.
+ * niečo našlo. Tri nájdené názvy nie sú dôkaz, že v eshope nie je tridsať
+ * ďalších, ktoré majú hľadané slovo len v kóde alebo v popise.
  *
  * Počet zhôd je pri neúplnom zrkadle DOLNÁ HRANICA
  * ────────────────────────────────────────────────
@@ -140,6 +143,31 @@ function dataAsOfSentence(iso: string | null): string {
     hour12: false,
   }).format(at);
   return `Dáta k ${day} ${time}`;
+}
+
+/**
+ * `19. 8. 2026, 00:13` — presný okamih, ku ktorému zrkadlo platí. Rok je tu
+ * navyše oproti riadku nad tabuľkou zámerne: táto veta stojí v prázdnom stave,
+ * kde ide o to, či sa vôbec oplatí veriť tomu, že produkt neexistuje.
+ * `null` = zrkadlo sa ešte nenačítalo, a vtedy sa čas NEDOPLŇUJE (P7).
+ */
+function mirrorAsOfPhrase(iso: string | null): string | null {
+  if (iso === null) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const day = new Intl.DateTimeFormat('sk-SK', {
+    timeZone: LOGIC_TIME_ZONE,
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+  }).format(at);
+  const time = new Intl.DateTimeFormat('sk-SK', {
+    timeZone: LOGIC_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(at);
+  return `${day}, ${time}`;
 }
 
 /* ═══════════════════════════ 2. Obrazovka ═════════════════════════════════ */
@@ -350,6 +378,15 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   const catalogTotal = view === null ? 0 : view.catalogTotal;
 
   /**
+   * Dočítal posledný prechod zrkadlo po koniec? Nezisťuje sa to porovnávaním
+   * čísel, ale výhradne z `catalog.complete` — a keď sa stav katalógu
+   * nepodarilo zistiť, odpoveď je „nie". Fail-closed: nevedieť nie je to isté
+   * ako mať celý eshop, a od tohto jedného príznaku visia dve tvrdenia na
+   * obrazovke (značka `≈` a slovo za druhým číslom).
+   */
+  const catalogIsComplete = catalog !== null && catalog.complete;
+
+  /**
    * P7 — je počet zhôd meraný fakt, alebo dolná hranica?
    *
    * Fakt je len vtedy, keď zrkadlo obsahuje celý eshop. Vo všetkých ostatných
@@ -357,7 +394,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
    * dolná hranica a píše sa `≈`. Fail-closed je tu úmysel: neistota sa nemá
    * ako vyvrátiť a presné číslo by bolo tvrdenie, ktoré appka nemá kryté.
    */
-  const matchingIsLowerBound = catalog === null || !catalog.complete;
+  const matchingIsLowerBound = !catalogIsComplete;
 
   /** Je v hľadaní text, ktorý už dobehol do filtra? Bez neho nie je čo dohľadať. */
   const searchTerm = filter.query.trim();
@@ -503,6 +540,35 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
 
   const empty = catalogEmptyView({ narrowed: filterIsNarrowed(filter), status: catalog });
 
+  /**
+   * PRÁZDNY VÝSLEDOK HĽADANIA MUSÍ POVEDAŤ, KDE SA HĽADALO.
+   *
+   * Prázdna tabuľka po zadanom texte je najsilnejšie tvrdenie na tejto
+   * obrazovke — číta sa ako „taký produkt neexistuje". Pritom zrkadlo hľadá
+   * VÝHRADNE v názve a čísle: kód produktu, popis ani kategórie v ňom fyzicky
+   * nie sú (`raw` je `{id, name, price, has_attributes}`), takže nula tu často
+   * znamená len „hľadalo sa inde, než kde to je".
+   *
+   * Text preto nesie tri veci a nič viac (kontrakt bod 11 — jedna veta a jedno
+   * tlačidlo): kde sa hľadalo, ku ktorému okamihu zrkadlo platí (bod 10 —
+   * konkrétny čas a dátum) a čo pozná len eshop. Keď zrkadlo NIE JE dočítané,
+   * pridá sa k tomu aj to — tvrdenie „hľadanie našlo všetko" nesmie zaznieť
+   * ani tu, ani v počte zhôd (`matchingIsLowerBound`).
+   */
+  const searchEmpty = ((): { title: string; description: string } => {
+    const asOf = mirrorAsOfPhrase(view === null ? null : view.dataAsOf);
+    const where =
+      asOf === null
+        ? 'V zrkadle katalógu sa hľadá len v názve a čísle produktu'
+        : `V zrkadle katalógu (stav k ${asOf}) sa hľadá len v názve a čísle produktu`;
+    return {
+      title: 'V názve ani čísle produktu nič také nie je',
+      description: catalogIsComplete
+        ? `${where}; kód produktu, popis a kategórie pozná iba eshop.`
+        : `${where}; kód produktu, popis a kategórie pozná iba eshop — a zrkadlo zatiaľ nemá celý katalóg.`,
+    };
+  })();
+
   return (
     <>
       <CatalogStatusPanel
@@ -544,9 +610,11 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
 
             {/* DOHĽADANIE JE PONUKA, NIE AUTOMAT (kontrakt UI, body 25–28).
                 Stojí pri poli a je dostupné vždy, keď je v hľadaní text — aj
-                keď zrkadlo niečo našlo: 2 900 zo 41 082 riadkov znamená, že
-                nájdené tri nie sú dôkaz o neexistujúcich tridsiatich. Spúšťa
-                ho výhradne kliknutie, lebo míňa anonymný rozpočet čítaní. */}
+                keď zrkadlo niečo našlo. Dôvod už nie je „mám len časť
+                katalógu": zrkadlo je úplné, ale pozná o produkte len NÁZOV
+                a ČÍSLO. Kód, popis a kategórie vie iba eshop, takže tri
+                nájdené názvy nie sú dôkaz o neexistujúcich tridsiatich.
+                Spúšťa ho výhradne kliknutie, lebo míňa rozpočet čítaní. */}
             {searchDraft === '' ? null : (
               <button
                 type="button"
@@ -562,7 +630,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
 
             {/* Čo hľadá pole a čo až eshop. Jedna veta, nie odstavec (P2). */}
             <span className="lvl-3" data-testid="catalog-search-hint">
-              Načítané riadky podľa názvu a čísla; kód nájde eshop.
+              Hľadá v názve a čísle; kód nájde eshop.
             </span>
 
             {narrow ? (
@@ -599,9 +667,11 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
               data-testid="catalog-matching"
             >
               {view === null ? '—' : `${matchingIsLowerBound ? '≈ ' : ''}${formatCountSk(matching)}`}
-              {/* „z … načítaných", nie „z … produktov": kým je katalóg neúplný,
-                  druhé číslo je počet riadkov, ktoré appka má — nie veľkosť
-                  eshopu. Bez toho slova vyzerá neúplný katalóg ako celý. */}
+              {/* „načítaných", alebo „produktov"? Rozhoduje `catalog.complete`,
+                  nie odhad. Kým je zrkadlo neúplné, druhé číslo je počet
+                  riadkov, ktoré appka má — nie veľkosť eshopu, a bez toho slova
+                  by neúplný katalóg vyzeral ako celý. Keď je zrkadlo dočítané,
+                  klame to opačným smerom: úplný katalóg by vyzeral ako výsek. */}
               {view === null ? null : (
                 <small
                   style={{
@@ -612,7 +682,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                     letterSpacing: 0,
                   }}
                 >
-                  z {formatCountSk(catalogTotal)} načítaných
+                  z {formatCountSk(catalogTotal)} {catalogIsComplete ? 'produktov' : 'načítaných'}
                 </small>
               )}
             </span>
@@ -676,16 +746,32 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 rowReason={rowReason}
                 emptyState={
                   <EmptyState
-                    title={empty.title}
-                    description={empty.description}
+                    /* Prázdny výsledok HĽADANIA je iný príbeh než prázdny
+                       katalóg: nehovorí „nič tu nie je", ale „nič také nie je
+                       TAM, kde zrkadlo vie pozrieť". Preto má vlastnú vetu
+                       a vlastný ďalší krok. */
+                    title={searchTerm.length > 0 ? searchEmpty.title : empty.title}
+                    description={
+                      searchTerm.length > 0 ? searchEmpty.description : empty.description
+                    }
                     action={
-                      /* Keď je v hľadaní text, ponuka „Dohľadať v eshope" už
-                         stojí pri poli o kúsok vyššie a je dostupná vždy —
-                         druhé rovnaké tlačidlo pár centimetrov pod ním by bola
-                         len šum. „Načítať ďalšiu dávku" sa pri hľadaní
-                         neponúka zámerne: na hľadaný kus je odpoveďou eshop,
-                         nie ďalšia stovka riadkov v abecednom poradí. */
-                      searchTerm.length > 0 ? undefined : empty.offerLoad ? (
+                      /* Ďalší krok po prázdnom hľadaní je eshop, nie ďalšia
+                         stovka riadkov v abecednom poradí — kód, popis
+                         a kategórie pozná len on. Tlačidlo je to isté, ktoré
+                         stojí pri poli (rovnaká akcia aj rovnaké zámky), ale
+                         patrí aj sem: prázdny stav bez ďalšieho kroku je slepá
+                         ulica (kontrakt bod 11). */
+                      searchTerm.length > 0 ? (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => void lookupNow()}
+                          disabled={lookingUp || !searchSettled}
+                          data-testid="catalog-empty-lookup"
+                        >
+                          {lookingUp ? 'Hľadám v eshope…' : 'Dohľadať v eshope'}
+                        </button>
+                      ) : empty.offerLoad ? (
                         <button
                           type="button"
                           className="btn sm"

@@ -13,6 +13,13 @@
  *     v eshope nie je tridsať ďalších.
  *  3. **Počet zhôd je pri neúplnom zrkadle označený `≈`** (bod 8, P7). Je to
  *     dolná hranica, nie fakt.
+ *  4. **Dve slová sú dve podmienky, nie fráza** (19. 8. 2026). Cez celý stack —
+ *     pole, debounce, `?query=`, `WHERE`, kolácia DB — sa dá overiť len tu:
+ *     unit test vidí tvar SQL, ale nie to, čo z DB naozaj vypadne. Na živých
+ *     dátach to bol rozdiel 10 verzus 797 produktov.
+ *  5. **Prázdny výsledok povie, KDE sa hľadalo** (bod 11). Prázdna tabuľka bez
+ *     vysvetlenia sa číta ako „taký produkt neexistuje", hoci zrkadlo pozná
+ *     z produktu len názov a číslo.
  *
  * Test NEKLIKÁ na „Dohľadať v eshope" — to je platené volanie do eshopu
  * a scenár o jeho výsledku patrí k mocku hľadania (`hladanie-produktov.spec.ts`).
@@ -20,7 +27,7 @@
  *
  * Vlastník: V15 (hľadanie a tabuľka).
  */
-import { expect, login, test } from './fixtures';
+import { expect, login, test, type DbHelper } from './fixtures';
 
 /** Zrkadlo je zámerne NEÚPLNÉ — presne to spúšťa značku `≈`. */
 const MIRROR = [
@@ -30,6 +37,45 @@ const MIRROR = [
 ] as const;
 
 const SHOP_TOTAL = 41_082;
+
+/**
+ * Zrkadlo pre hľadanie viacerých slov. Prvé dva názvy majú OBE slová, ale ani
+ * jeden ich nemá vedľa seba v tom poradí, v akom ich človek napíše — jeden
+ * súvislý podreťazec by z nich nenašiel ani jeden. Ďalšie dva majú vždy len
+ * jedno zo slov, takže strážia, že spojka je `AND` a nie `OR`.
+ */
+const SLOVA = [
+  { id: 911, name: 'Strieborný náramok so zirkónmi 19 cm', price: 24.9 },
+  { id: 912, name: 'Zirkónový náramok Aria', price: 29.9 },
+  { id: 913, name: 'Zlatý náramok Lumen', price: 149.0 },
+  { id: 914, name: 'Zirkónové náušnice Aria', price: 18.5 },
+] as const;
+
+/** Vloží riadky do zrkadla katalógu. */
+async function seedMirror(
+  db: DbHelper,
+  rows: readonly { id: number; name: string; price: number }[],
+): Promise<void> {
+  for (const product of rows) {
+    await db.query(
+      'INSERT INTO catalog_cache (product_id, name, price, has_attributes, source, fetched_at) ' +
+        'VALUES (?, ?, ?, 0, ?, UTC_TIMESTAMP(3)) ' +
+        'ON DUPLICATE KEY UPDATE name = VALUES(name), price = VALUES(price), ' +
+        'fetched_at = UTC_TIMESTAMP(3)',
+      [product.id, product.name, product.price, 'list'],
+    );
+  }
+}
+
+/** Vráti `catalog_sync_state` do východiska — `db.reset()` ho nečistí. */
+async function resetSyncState(db: DbHelper): Promise<void> {
+  await db.query(
+    'UPDATE catalog_sync_state SET per_page = 100, last_page = 0, shop_total = NULL, ' +
+      'rows_written = 0, completed = 0, started_at = NULL, last_read_at = NULL, ' +
+      'finished_at = NULL, paused_until = NULL, pause_reason = NULL, last_error = NULL ' +
+      'WHERE id = 1',
+  );
+}
 
 test.describe('produkty — hľadanie, počet zhôd a výber', () => {
   test('výber prežije prechod na iný tab, ponuka dohľadania nezmizne', async ({ page, db }) => {
@@ -105,6 +151,121 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
           'finished_at = NULL, paused_until = NULL, pause_reason = NULL, last_error = NULL ' +
           'WHERE id = 1',
       );
+    }
+  });
+
+  /**
+   * DVE SLOVÁ NIE SÚ FRÁZA.
+   *
+   * Do 19. 8. 2026 išiel celý text do jediného `LIKE '%…%'`, teda sa hľadala
+   * súvislá fráza v presnom poradí. Na živých dátach to znamenalo, že
+   * „náramok zirkón" našlo 10 produktov z 797, ktoré obe slová naozaj majú.
+   * Zrkadlo je tu ÚPLNÉ, aby sa popri tom overilo aj druhé číslo v hlavičke:
+   * nad dočítaným katalógom sú to „produkty", nie „načítané riadky", a `≈`
+   * pri počte zhôd nemá čo robiť.
+   */
+  test('hľadanie dvoch slov nájde obe bez ohľadu na poradie a diakritiku', async ({ page, db }) => {
+    await seedMirror(db, SLOVA);
+    await db.query(
+      'UPDATE catalog_sync_state SET per_page = 100, last_page = 1, shop_total = ?, ' +
+        'rows_written = ?, completed = 1, started_at = UTC_TIMESTAMP(3), ' +
+        'last_read_at = UTC_TIMESTAMP(3), finished_at = UTC_TIMESTAMP(3), paused_until = NULL, ' +
+        'pause_reason = NULL, last_error = NULL WHERE id = 1',
+      [SLOVA.length, SLOVA.length],
+    );
+
+    try {
+      await login(page);
+
+      await page.goto('/produkty');
+      await expect(page.getByTestId('catalog-table')).toBeVisible();
+
+      /* 1. Dočítané zrkadlo: presné číslo bez `≈` a slovo „produktov"
+            namiesto „načítaných" (kontrakt bod 8 z druhej strany). */
+      const matching = page.getByTestId('catalog-matching');
+      await expect(matching).not.toContainText('≈', { timeout: 15_000 });
+      await expect(matching).toContainText('produktov');
+      await expect(matching).not.toContainText('načítaných');
+
+      /* 2. Pole priznáva, kde hľadá — a kde nie. */
+      await expect(page.getByTestId('catalog-search-hint')).toContainText(
+        'Hľadá v názve a čísle; kód nájde eshop.',
+      );
+
+      const riadky = page.locator('table.tbl tbody tr');
+
+      /* 3. Dve slová, ktoré v žiadnom názve nestoja vedľa seba. Fráza by
+            nenašla nič; slovo po slove sú to dva produkty. */
+      await page.getByTestId('catalog-search').fill('náramok zirkón');
+      await expect(riadky).toHaveCount(2, { timeout: 15_000 });
+      await expect(riadky.nth(0)).toContainText('náramok');
+      await expect(riadky.nth(1)).toContainText('náramok');
+      // `AND`, nie `OR`: náramok bez zirkónu ani zirkón bez náramku sa neráta.
+      await expect(page.locator('table.tbl tbody')).not.toContainText('Lumen');
+      await expect(page.locator('table.tbl tbody')).not.toContainText('náušnice');
+
+      /* 4. Poradie slov je jedno. */
+      await page.getByTestId('catalog-search').fill('zirkón náramok');
+      await expect(riadky).toHaveCount(2, { timeout: 15_000 });
+
+      /* 5. Diakritika sa nerieši v kóde — skladá ju kolácia
+            `utf8mb4_unicode_ci`. Bez nej by tento krok vrátil nulu. */
+      await page.getByTestId('catalog-search').fill('naramok zirkon');
+      await expect(riadky).toHaveCount(2, { timeout: 15_000 });
+
+      /* 6. Jedno slovo naďalej funguje ako predtým. */
+      await page.getByTestId('catalog-search').fill('náramok');
+      await expect(riadky).toHaveCount(3, { timeout: 15_000 });
+    } finally {
+      await resetSyncState(db);
+    }
+  });
+
+  /**
+   * PRÁZDNY VÝSLEDOK MUSÍ POVEDAŤ, KDE SA HĽADALO (kontrakt bod 11).
+   *
+   * Zrkadlo pozná z produktu len názov a číslo — kód, popis ani kategórie
+   * v ňom fyzicky nie sú. Prázdna tabuľka bez tejto vety sa preto číta ako
+   * „taký produkt neexistuje", čo je tvrdenie, ktoré appka nemá čím kryť.
+   */
+  test('prázdny výsledok hľadania priznáva, kde sa hľadalo, a ponúka eshop', async ({
+    page,
+    db,
+  }) => {
+    await seedMirror(db, SLOVA);
+    await db.query(
+      'UPDATE catalog_sync_state SET per_page = 100, last_page = 1, shop_total = ?, ' +
+        'rows_written = ?, completed = 1, started_at = UTC_TIMESTAMP(3), ' +
+        'last_read_at = UTC_TIMESTAMP(3), finished_at = UTC_TIMESTAMP(3), paused_until = NULL, ' +
+        'pause_reason = NULL, last_error = NULL WHERE id = 1',
+      [SLOVA.length, SLOVA.length],
+    );
+
+    try {
+      await login(page);
+
+      await page.goto('/produkty');
+      await expect(page.getByTestId('catalog-table')).toBeVisible();
+
+      /* Kód produktu, ktorý zrkadlo nemá ako poznať. */
+      await page.getByTestId('catalog-search').fill('REF-000123');
+
+      const empty = page.getByTestId('catalog-empty');
+      await expect(empty).toBeVisible({ timeout: 15_000 });
+
+      /* 1. Kde sa hľadalo, ku ktorému okamihu a čo pozná len eshop. */
+      await expect(empty).toContainText('v názve a čísle produktu');
+      await expect(empty).toContainText('kód produktu, popis a kategórie pozná iba eshop');
+      /* Konkrétny čas a dátum, nie „nedávno" (kontrakt bod 10). */
+      await expect(empty).toContainText(/stav k \d{1,2}\. \d{1,2}\. \d{4}, \d{2}:\d{2}/);
+      /* Dočítané zrkadlo o sebe netvrdí, že mu niečo chýba. */
+      await expect(empty).not.toContainText('zatiaľ nemá celý katalóg');
+
+      /* 2. Jedno tlačidlo a je to ďalší krok, nie ďalšia dávka riadkov. */
+      await expect(page.getByTestId('catalog-empty-lookup')).toBeEnabled({ timeout: 15_000 });
+      await expect(page.getByTestId('catalog-empty-load')).toBeHidden();
+    } finally {
+      await resetSyncState(db);
     }
   });
 });

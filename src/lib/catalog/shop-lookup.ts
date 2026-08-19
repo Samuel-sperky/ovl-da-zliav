@@ -3,18 +3,23 @@
  *
  * ČO TENTO MODUL RIEŠI
  * --------------------
- * Zrkadlo katalógu (`catalog_cache`) má 2 900 zo 41 082 produktov a rýchlejšie
- * to nebude: anonymný denný strop dovolí 240 čítaní za UTC deň, celý prechod je
- * 411 stránok, teda dva dni. Kým to dobehne, hľadanie nad zrkadlom vracia
- * prázdnu tabuľku — a prázdna tabuľka vyzerá presne ako „taký produkt
+ * Zrkadlo katalógu (`catalog_cache`) je k 19. 8. 2026, 00:13 ÚPLNÉ — 41 220
+ * z 41 220 riadkov. To ale neznamená, že vie všetko: o každom produkte pozná
+ * len NÁZOV a ČÍSLO. Kód produktu, popis ani kategórie v ňom fyzicky nie sú
+ * (`raw` je `{id, name, price, has_attributes}`), lebo zoznamový endpoint ich
+ * nevracia. A eshop medzitým pridáva a maže, takže úplnosť platí k času
+ * posledného prechodu, nie navždy.
+ *
+ * Hľadanie nad zrkadlom preto vráti prázdnu tabuľku vždy, keď človek zadá kód
+ * alebo slovo z popisu — a prázdna tabuľka vyzerá presne ako „taký produkt
  * neexistuje". Používateľ z toho vyvodí, že produkt nemá, hoci ho appka len
- * ešte nenačítala.
+ * takto nájsť nevie.
  *
  * `GET /api/products/searchIndex` to rieši BEZ jediného nového oprávnenia:
- * je verejný (rovnako ako `GET /api/products/get`), hľadá vo VŠETKÝCH 41 082
- * produktoch — v názve, popise, **kóde produktu** aj v kategóriách — a znáša
- * preklepy aj poradie slov. Vracia ale LEN ID, takže názov a cenu treba
- * dotiahnuť po jednom.
+ * je verejný (rovnako ako `GET /api/products/get`), hľadá vo VŠETKÝCH
+ * produktoch eshopu — v názve, popise, **kóde produktu** aj v kategóriách —
+ * a znáša preklepy aj poradie slov. Vracia ale LEN ID, takže názov a cenu
+ * treba dotiahnuť po jednom.
  *
  * Z toho plynie celý tvar tohto modulu: hľadanie je DVOJKROKOVÉ a druhý krok
  * je platený. Preto sa nespúšťa samo (kontrakt bod 4 — žiadne automatické
@@ -27,7 +32,7 @@
  *     znamenalo, že hľadanie a synchronizácia katalógu si navzájom ticho kradnú
  *     strop — a ban od shopu (predvolene 10 minút na IP) by zhodil oboje.
  *  2. **Strop na jedno hľadanie je tvrdý.** `LOOKUP_RESOLVE_MAX` je 10 a nedá sa
- *     prekročiť ani parametrom. 41 082 volaní `get` nie je hľadanie, to je
+ *     prekročiť ani parametrom. 41 220 volaní `get` nie je hľadanie, to je
  *     scraping — a dokumentácia shopu ho výslovne zakazuje.
  *  3. **Minútový strop sa kontroluje tiež, nielen denný.** `reserve()` stráži
  *     len denné číslo; minútový (24 z 30) by hľadanie prekročilo hravo, lebo

@@ -7,10 +7,21 @@
  *  1. **Číta zrkadlo katalógu** (`catalog_cache`) — stránka riadkov a počty do
  *     bočného panela. Nikdy celý katalóg, nikdy jediný request na shop.
  *  2. **Na vyžiadanie dohľadá v eshope, čo zrkadlo nemá** (`?lookup=1`).
- *     Zrkadlo má 2 900 zo 41 082 produktov, takže bez tohto kroku vyzerá
- *     „ešte som to nenačítal" presne ako „taký produkt neexistuje". Dohľadanie
+ *     Zrkadlo je k 19. 8. 2026, 00:13 úplné — 41 220 z 41 220 riadkov — ale
+ *     vie o produkte len NÁZOV a ČÍSLO. Kód produktu, popis a kategórie
+ *     v ňom fyzicky nie sú (`raw` je `{id, name, price, has_attributes}`)
+ *     a eshop medzitým pridáva a maže. Bez tohto kroku by teda „to zrkadlo
+ *     nevie" vyzeralo presne ako „taký produkt neexistuje". Dohľadanie
  *     ide cez VEREJNÝ `searchIndex` + `get`, teda bez nového oprávnenia — ale
  *     míňa anonymný rozpočet čítaní, a preto sa NIKDY nespúšťa samo.
+ *
+ * ČO HĽADÁ ZRKADLO: SLOVÁ V `name`, SPOJENÉ CEZ `AND`
+ * ---------------------------------------------------
+ * Text z `?query=` sa v repozitári delí na slová (strop 6) a každé dostane
+ * vlastný `LIKE` nad `c.name`. Nie je to fráza: „náramok zirkón" vráti 797
+ * produktov, nie 10, ktoré vracal jeden súvislý podreťazec. Diakritika sa
+ * nerieši nikde v kóde — kolácia `utf8mb4_unicode_ci` skladá `á` a `a` sama.
+ * Prečo tu nie je FULLTEXT ani engine, hovorí hlavička `catalog.repo.ts`.
  *
  * ŠTYRI VECI, NA KTORÝCH TÁTO ROUTE STOJÍ
  * ---------------------------------------
@@ -519,7 +530,7 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
           soldFrom: result.soldFrom,
           soldTo: result.soldTo,
           counts,
-          /** Koľko riadkov má zrkadlo vôbec („z 41 082 produktov"). */
+          /** Koľko riadkov má zrkadlo vôbec („z 41 220 produktov"). */
           catalogTotal,
           /** P7 — meraný fakt „Dáta k …", nie odhad. `null` = zrkadlo je prázdne. */
           dataAsOf: dataAsOf === null ? null : dataAsOf.toISOString(),

@@ -410,9 +410,14 @@ describe('catalog.repo — dávkový upsert a parametrizované SQL (K7)', () => 
       expect(call.sql).not.toContain('DROP TABLE');
       expect(call.sql).not.toContain('100%');
     }
-    // Text ide ako parameter a `%` v ňom je escapnutý, nie wildcard.
+    // Text ide ako parametre a `%` v nich je escapnutý, nie wildcard. Od
+    // 19. 8. 2026 sa hľadá SLOVO PO SLOVE (tvar `WHERE` stráži
+    // `hladanie-viac-slov.spec.ts`), takže je to viac parametrov než jeden —
+    // invariant „hodnota sa do SQL nikdy neinterpoluje" platí ďalej.
     const values = calls.flatMap((call) => call.values.map(String));
-    expect(values.some((value) => value.includes("100\\% zľava'; DROP TABLE"))).toBe(true);
+    expect(values).toContain('100\\%');
+    expect(values).toContain("zľava';");
+    expect(values).toContain('DROP');
   });
 
   it('prázdny zoznam productIds znamená prázdny výsledok, nie „bez filtra"', async () => {

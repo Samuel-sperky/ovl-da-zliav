@@ -3,7 +3,7 @@
  * KONTRAKT V3: K7, K8, K1 bod 2).
  *
  * `catalog_cache` prestala byť cache desiatich produktov a stala sa ZRKADLOM
- * katalógu (40 483 riadkov, K7). Z toho plynie všetko ostatné v tomto súbore:
+ * katalógu (41 220 riadkov, K7). Z toho plynie všetko ostatné v tomto súbore:
  *
  *  - **Zápis po dávkach** (`upsertMany`, ~500 riadkov na príkaz). 40 tisíc
  *    jednotlivých `INSERT`-ov nie je synchronizácia, to je DoS na vlastnú DB.
@@ -34,6 +34,34 @@
  * aj POKROK behu (`catalog_sync_state`): kde sa skončilo, koľko hlási shop, kedy
  * sa naposledy čítalo a prečo sa prípadne čaká. Bez neho by sa beh po každom
  * prerušení vracal na stránku 1 a chvost katalógu by sa neprečítal nikdy.
+ *
+ * HĽADANIE: PREČO TU NIE JE ŽIADNY VYHĽADÁVACÍ ENGINE (19. 8. 2026)
+ * -----------------------------------------------------------------
+ * Hľadanie v katalógu stojí na `LIKE` nad jediným stĺpcom `c.name`. Nie preto,
+ * že sa na lepšie nedostalo, ale preto, že každá „lepšia" možnosť sa zmerala
+ * a prehrala. Čísla sú z tejto DB (41 220 riadkov), nie z návodu:
+ *
+ *  - **Slovenská diakritika už funguje, zadarmo.** Kolácia
+ *    `utf8mb4_unicode_ci` skladá `á` a `a` na jednu vec: `LIKE '%naramok%'`
+ *    aj `LIKE '%náramok%'` vrátia zhodne 7 379 riadkov. Vlastné odstraňovanie
+ *    diakritiky by bola druhá implementácia toho, čo DB robí sama.
+ *  - **Rýchlosť nie je problém.** Plná stránkovaná query so všetkými JOINmi
+ *    nad 41 220 riadkami beží 85 ms. `COUNT(*)` s dvoma slovami 45 ms,
+ *    so šiestimi 43 ms — slová navyše nič nestoja.
+ *  - **FULLTEXT je pasca.** `innodb_ft_min_token_size` je 3, takže v BOOLEAN
+ *    MODE vráti `+piercing +do +brady` aj `+4 +mm` NULA riadkov; `LIKE` vráti
+ *    262, resp. 1 269. Zníženie premennej sa za behu nedá (je read-only) —
+ *    znamenalo by zmenu konfigurácie DB kontajnera. A nula je v tejto appke
+ *    tvrdenie, nie prázdny výsledok.
+ *  - **Engine v appke (MiniSearch a spol.) by hľadal v tom istom.** Zrkadlo
+ *    fyzicky nemá popis, kód produktu ani kategórie — `raw` je
+ *    `{id, name, price, has_attributes}`. Index by čítal ten istý `name`,
+ *    ktorý `LIKE` vidí celý, a pridal by pamäť a druhý zdroj pravdy.
+ *
+ * Čo sa naopak POKAZIŤ dalo a opravené je: term sa delí NA SLOVÁ a každé má
+ * vlastný `LIKE` spojený cez `AND` (viď `buildWhere`). Jeden súvislý podreťazec
+ * hľadal frázu v presnom poradí — „naramok zirkon" vracalo 10 zhôd, kým slová
+ * cez `AND` ich nájdu 797. Kto do poľa napíše dve slová, nemyslí frázu.
  *
  * Repozitár je zároveň JEDINÉ DVERE k zdieľanému rozpočtu čítaní
  * (`shop_read_budget` cez `@/lib/repo/read-budget.repo`), aby synchronizácia
@@ -99,7 +127,8 @@ export interface CatalogSearchRow extends CatalogCacheRecordV3 {
  * či ten produkt zrkadlo katalógu má (kontrakt UI, bod 26).
  *
  * Existuje to preto, že hľadanie cez `searchIndex` nájde produkt aj vtedy, keď
- * `catalog_cache` má 2 900 zo 41 082 riadkov. Taký produkt by inak prišiel na
+ * ho `catalog_cache` nemá — zrkadlo je úplné k času posledného prechodu, ale
+ * eshop medzitým pridáva a maže. Taký produkt by inak prišiel na
  * obrazovku s prázdnymi číslami, hoci predajnosť (`product_sales_daily`) aj
  * vlastné zápisy zliav (`campaign_items`) sú kľúčované PRODUKTOM, nie zrkadlom
  * — a teda o ňom vieme presne to isté, čo o ktoromkoľvek riadku zrkadla.
@@ -328,6 +357,20 @@ const LOCKED_FILTERS: readonly LockedCatalogFilter[] = [
 ];
 
 const KNOWN_SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'not_found', 'unknown'];
+
+/**
+ * Koľko slov z hľadania sa premietne do `WHERE`. Slová nad strop sa ZAHODIA.
+ *
+ * Strop je poistka proti zlepenému vstupu, nie proti používateľovi: šesť slov
+ * je viac, než sa do názvu šperku zmestí, ale štyridsať `LIKE`-ov v jednom
+ * `WHERE` je pomalý full scan bez šance na skratku. Zmerané tu: `COUNT(*)` so
+ * šiestimi slovami beží 43 ms, s dvoma 45 ms — pri tomto strope slová navyše
+ * nič nestoja, a práve preto sa strop nemá kam posúvať vyššie.
+ */
+const MAX_SEARCH_WORDS = 6;
+
+/** Najdlhšie slovo, ktoré má zmysel hľadať — `name` je `VARCHAR(255)`. */
+const MAX_SEARCH_WORD_LENGTH = 191;
 
 /**
  * Veľkosť stránky, s ktorou sa počíta, kým pokrok neexistuje. Zhoda
@@ -584,6 +627,18 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
+/**
+ * Hľadaný text na slová (strop `MAX_SEARCH_WORDS`). Poradie sa zachováva, aby
+ * sa parametre dotazu dali čítať zľava doprava tak, ako ich človek napísal.
+ */
+function searchWords(term: string): string[] {
+  return term
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .slice(0, MAX_SEARCH_WORDS)
+    .map((word) => word.slice(0, MAX_SEARCH_WORD_LENGTH));
+}
+
 function normalizeWindowDays(value: number | undefined): number {
   const parsed = Math.trunc(Number(value));
   return ALLOWED_SOLD_WINDOWS.includes(parsed) ? parsed : DEFAULT_SOLD_WINDOW_DAYS;
@@ -662,8 +717,21 @@ function buildWhere(filter: CatalogSearchFilter, includeFacets: boolean): WhereP
       where.push("(c.product_id = ? OR c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\')");
       values.push(Number(term), escapeLike(term));
     } else {
-      where.push("c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\'");
-      values.push(escapeLike(term.slice(0, 191)));
+      /*
+       * KAŽDÉ SLOVO MÁ VLASTNÝ `LIKE`, SPOJENÉ CEZ `AND`.
+       *
+       * Jeden súvislý podreťazec cez celý term hľadal FRÁZU v presnom poradí,
+       * a to nikto do poľa nepíše: „naramok zirkon" tak našlo 10 produktov,
+       * kým slovo po slove ich je 797 (zmerané, 41 220 riadkov). Zvyšok
+       * príbehu — prečo tu nie je engine ani FULLTEXT — je v hlavičke súboru.
+       *
+       * Poradie slov je tým pádom jedno a diakritika sa nerieši: kolácia
+       * `utf8mb4_unicode_ci` skladá `á` a `a` sama.
+       */
+      for (const word of searchWords(term)) {
+        where.push("c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\'");
+        values.push(escapeLike(word));
+      }
     }
   }
 
@@ -730,7 +798,7 @@ export interface CatalogRepoExt extends CatalogRepo {
     productIds: readonly number[],
     opts?: { soldWindowDays?: number; today?: DateOnly; conn?: Queryable },
   ): Promise<CatalogFactsResult>;
-  /** Koľko riadkov katalóg vôbec má (hlavička „z 40 483 produktov"). */
+  /** Koľko riadkov katalóg vôbec má (hlavička „z 41 220 produktov"). */
   totalRows(conn?: Queryable): Promise<number>;
   /** K7: „Dáta k …" — meraný fakt, nie odhad (P7). `null` = katalóg je prázdny. */
   lastFetchedAt(conn?: Queryable): Promise<UtcDate | null>;
