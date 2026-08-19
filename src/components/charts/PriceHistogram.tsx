@@ -1,3 +1,17 @@
+/**
+ * !!! TENTO GRAF ZATIAĽ ŽIADNA OBRAZOVKA NEKRESLÍ (19. 8. 2026) !!!
+ *
+ * Komponent aj jeho výpočet (price-bins.ts) sú hotové a otestované
+ * (test/unit/grafy-ceny.spec.ts), ale chýba im dátový zdroj: rozdelenie cien
+ * naprieč 41 220 produktmi sa nikde nepočíta. Treba dotaz do catalog_cache,
+ * ktorý ceny nabinuje, a miesto na Produktoch — pod rozklikom, aby nepribudla
+ * piata sekcia (P5).
+ *
+ * Je to tu napísané preto, že mŕtvy kód sa v tomto projekte už raz tváril ako
+ * živý: oprava rol popiskov siahla na tri selektory, ktoré nikto nekreslil,
+ * a test bol pritom zelený. Kým sa graf nezapojí, musí to byť vidieť na prvom
+ * riadku súboru.
+ */
 'use client';
 
 /**
