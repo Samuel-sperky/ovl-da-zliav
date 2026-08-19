@@ -50,3 +50,9 @@ docker-compose.override.yml
 # do repa nepatria (binárne, znovuvytvoriteľné).
 design/png/
 *.zip
+
+# Plný export katalógu do e2e fixture (scripts/export-catalog-fixture.sh).
+# 41 220 názvov produktov z produkčného eshopu, ~5,9 MB — generovateľné
+# z bežiacej DB, do repa nepatrí. V gite žije len reálna vzorka 500 riadkov
+# (katalog-vzorka.ndjson), aby e2e prešlo aj bez databázy.
+test/e2e/fixtures/katalog.ndjson

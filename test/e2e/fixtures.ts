@@ -19,6 +19,9 @@
  *
  * Vlastník: A18.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { test as base, expect, type Page } from '@playwright/test';
 import mariadb, { type Pool } from 'mariadb';
 
@@ -38,6 +41,47 @@ export const ADMIN = {
 
 /** Produkty z default katalógu mocku, ktoré scenáre používajú. */
 export const E2E_PRODUCTS = [201, 202, 203] as const;
+
+/* ═══════════════════ 0. Reálny katalóg pre snímky ══════════════════════════ */
+
+/** Riadok exportu zo `scripts/export-catalog-fixture.sh`. */
+interface KatalogRiadok {
+  id: number;
+  n: string | null;
+  p: number | null;
+  a: boolean;
+  s: 'ok' | 'not_found' | 'unknown';
+  src: 'list' | 'get' | 'batch';
+}
+
+/**
+ * Načíta reálny katalóg z fixture.
+ *
+ * Poradie je zámerné: plný export (41 220 riadkov, mimo gitu) má prednosť,
+ * lebo len na ňom sa dá posúdiť hustota. Keď chýba — typicky v CI alebo na
+ * stroji bez bežiacej databázy — použije sa vzorka 500 reálnych riadkov, ktorá
+ * v gite je. Prázdny výsledok je posledná možnosť a volajúci sa o ňom dozvie
+ * z návratovej hodnoty; test sa nemá tváriť, že bežal nad katalógom, keď nebežal.
+ */
+function nacitajKatalog(limit?: number): KatalogRiadok[] {
+  /*
+   * Cesty sú od KOREŇA repozitára, nie cez `import.meta.url`: Playwright si
+   * tieto súbory kompiluje ako CommonJS a `import.meta` v nich vyhodí
+   * "Cannot use 'import.meta' outside a module" — beh potom skončí na
+   * "No tests found", teda vyzerá to ako chýbajúci test, nie ako chyba cesty.
+   */
+  const cesty = ['test/e2e/fixtures/katalog.ndjson', 'test/e2e/fixtures/katalog-vzorka.ndjson'];
+  for (const rel of cesty) {
+    const cesta = resolve(process.cwd(), rel);
+    if (!existsSync(cesta)) continue;
+    const riadky = readFileSync(cesta, 'utf8')
+      .split(/\r?\n/)
+      .filter((r) => r.trim() !== '')
+      .map((r) => JSON.parse(r) as KatalogRiadok);
+    return typeof limit === 'number' ? riadky.slice(0, limit) : riadky;
+  }
+  return [];
+}
 
 /* ═════════════════════════════ 1. DB helper ════════════════════════════════ */
 
@@ -119,6 +163,15 @@ export interface DbHelper {
   adminUserId(): Promise<number>;
   /** Priamy seed allowlistu (keď scenár nemá dôvod prechádzať UI). */
   seedAllowlist(productIds: readonly number[]): Promise<void>;
+  /**
+   * Naplní `catalog_cache` REÁLNYM katalógom zo `scripts/export-catalog-fixture.sh`.
+   *
+   * Bez toho sa snímky obrazoviek robili proti prázdnej tabuľke a hustota sa
+   * nikdy neposudzovala — pritom priemerný názov produktu má 64 znakov a
+   * najdlhší 117. Vracia počet vložených riadkov, aby test vedel povedať, či
+   * bežal nad plným katalógom (41 220) alebo nad vzorkou (500).
+   */
+  seedCatalogFromFixture(options?: { limit?: number }): Promise<number>;
   /** Predané kusy per produkt — z nich vznikajú pásma zľavy (K3, P4). */
   seedSales(rows: readonly SeedSalesRow[]): Promise<void>;
   seedCampaign(input: SeedCampaignInput): Promise<number>;
@@ -220,6 +273,34 @@ function makeDb(): DbHelper {
         );
         slot += 1;
       }
+    },
+
+    async seedCatalogFromFixture(options?: { limit?: number }): Promise<number> {
+      const riadky = nacitajKatalog(options?.limit);
+      if (riadky.length === 0) return 0;
+
+      /*
+       * Po dávkach: 41 220 samostatných INSERT-ov trvá minúty a e2e by na tom
+       * vypršalo. Jeden obrovský INSERT zase prekročí max_allowed_packet.
+       * 1 000 riadkov na dávku je overený kompromis.
+       */
+      const DAVKA = 1000;
+      for (let i = 0; i < riadky.length; i += DAVKA) {
+        const cast = riadky.slice(i, i + DAVKA);
+        const values = cast.map(() => '(?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3))').join(', ');
+        const params: (string | number | null)[] = [];
+        for (const r of cast) {
+          params.push(r.id, r.n, r.p, r.a ? 1 : 0, r.s, r.src);
+        }
+        await query(
+          'INSERT INTO catalog_cache ' +
+            '(product_id, name, price, has_attributes, shop_status, source, fetched_at) ' +
+            `VALUES ${values} ` +
+            'ON DUPLICATE KEY UPDATE name = VALUES(name), price = VALUES(price)',
+          params,
+        );
+      }
+      return riadky.length;
     },
 
     async seedCampaign(input: SeedCampaignInput): Promise<number> {

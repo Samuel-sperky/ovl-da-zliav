@@ -13,6 +13,15 @@
  * 10 %, okno 14.–27. 8., všetko zapísané), aby snímky ukazovali obrazovky
  * v stave, v akom sú u používateľa naozaj.
  *
+ * KATALÓG JE REÁLNY (19. 8. 2026, akceptačné kritérium 6). Do 19. 8. sa snímky
+ * robili nad PRÁZDNOU tabuľkou katalógu, takže každá obrazovka na nich vyzerala
+ * prázdno a hustota — priemerný názov produktu 64 znakov, najdlhší 117 — sa
+ * nikdy neposudzovala. Dizajn schválený na prázdnej tabuľke nie je schválený.
+ * `seedCatalogFromFixture()` naplní zrkadlo skutočným exportom z bežiacej
+ * appky (41 220 riadkov; keď export chýba, vzorkou 500 reálnych riadkov, ktorá
+ * je v gite). Počet sa vypíše do logu, aby sa z reportu dalo prečítať, nad čím
+ * snímky naozaj vznikli.
+ *
  * Snímky idú do `screenshots/`.
  *
  * Vlastník: A18.
@@ -24,10 +33,18 @@ const PRODUKTY = Array.from({ length: 21 }, (_, i) => 201 + i);
 
 test.describe('snímky obrazoviek', () => {
   test('štyri taby a detail zľavy po prestavbe priehľadnosti', async ({ page, db }) => {
+    // Naplnenie 41 220 riadkov po dávkach trvá pár sekúnd — 90 s na celý test
+    // by pri jedenástich snímkach nemuselo stačiť.
+    test.setTimeout(180_000);
     await login(page);
     await storeApiKey(page);
 
-    /* 1. Prehľad bez jedinej zľavy — verdikt, prázdny stav a riadok kontrol. */
+    const riadkov = await db.seedCatalogFromFixture();
+    console.log(`snímky: katalóg naplnený na ${riadkov} riadkov`);
+
+    /* 1. Prehľad bez jedinej zľavy — verdikt, prázdny stav a riadok kontrol.
+       Katalóg je pritom NAČÍTANÝ, takže obrazovka ukazuje stav, v akom je
+       inštalácia používateľa, nie stav pred prvým spustením. */
     await page.goto('/');
     await expect(page.getByTestId('overview')).toBeVisible();
     await expect(page.getByTestId('verdict-headline')).toBeVisible();
