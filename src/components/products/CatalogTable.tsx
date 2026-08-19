@@ -48,9 +48,39 @@
  * stave nerozhoduje: dostane hotový `emptyState` od obrazovky, ktorá stav
  * katalógu pozná.
  *
- * Vlastník: V10.
+ * HUSTOTA PRE 41 220 RIADKOV (D10, 19. 8. 2026)
+ * ─────────────────────────────────────────────
+ * Zmerané na reálnej databáze: 41 220 produktov, priemerný názov 64 znakov,
+ * NAJDLHŠÍ 117 znakov, ceny 0,00 – 1 758,46 €.
+ *
+ * 1. **Mriežka stĺpcov je pevná** (`table-layout: fixed` + `<colgroup>`).
+ *    S automatickým rozložením meria prehliadač VŠETKY názvy na stránke
+ *    a najdlhší z nich rozhodne, kde začne stĺpec Cena — čísla sa teda pri
+ *    každom preklikaní stránky posunú inam a oko ich hľadá odznova. Pri 825
+ *    stránkach je to 825 rôznych mriežok. Pevná mriežka to zastaví: čísla
+ *    stoja na tom istom mieste na každej stránke a na každom filtri.
+ * 2. **Názov je JEDEN riadok s výpustkou; celý je v `title` aj v bočnom
+ *    paneli.** Pri 1440 px má stĺpec názvu ≈ 745 px, teda ≈ 112 znakov —
+ *    priemerný názov (64) sa doň zmestí aj s rezervou a oreže sa len chvost
+ *    tých najdlhších. Zalamovanie sa zamietlo: rôzne vysoké riadky rozbijú
+ *    zvislý rytmus, podľa ktorého sa stĺpec Cena skenuje, a stránku z 50
+ *    riadkov predĺžia z ≈ 1 600 px na až 2 600 px. Pevné dvojriadkové bunky
+ *    by rytmus udržali a zmestili by každý názov, ale platili by +50 % výšky
+ *    na KAŽDOM riadku za chvost, ktorý je pri týchto názvoch ozdoba —
+ *    rozlišovacia časť („Prevliekací strieborný náhrdelník 925 …") stojí na
+ *    začiatku. Na úzkej obrazovke (≤ 640 px) sa riadky menia na karty a názov
+ *    sa zalamuje celý; preto tu `white-space` DEDÍ z bunky a nediktuje sa.
+ * 3. **Virtualizácia sa nepridáva.** V DOM nikdy nie je 41 220 riadkov —
+ *    server stránkuje po 50/100/200. Chýbal spôsob, ako sa na riadok 30 000
+ *    DOSTAŤ, nie ako ho vykresliť. Preto skok na stránku a poradie stĺpcov,
+ *    nie knižnica navyše.
+ * 4. **Skok na stránku sa kreslí až vtedy, keď stránkovač vypúšťa čísla**
+ *    (viac než 7 strán). Pri troch stranách by bol políčkom, ktoré nahrádza
+ *    kliknutie na číslo vedľa neho.
+ *
+ * Vlastník: V10; hustota O3.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import type { CatalogRowView } from '@/components/products/catalog-api';
@@ -62,6 +92,12 @@ import { formatCountSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Pomôcky ═══════════════════════════════════ */
 
+/**
+ * Meno produktu ako tlačidlo. `display: block` + `width: 100%` je to, čo dá
+ * výpustke rám, v ktorom má orezávať; `whiteSpace: 'inherit'` je zámerné —
+ * v širokom rozložení dedí `nowrap` z bunky, v kartovom (≤ 640 px) `normal`,
+ * takže sa názov na úzkej obrazovke zalomí celý bez jedinej media query.
+ */
 const NAME_BUTTON: CSSProperties = {
   background: 'transparent',
   border: 0,
@@ -70,12 +106,31 @@ const NAME_BUTTON: CSSProperties = {
   color: 'inherit',
   cursor: 'pointer',
   textAlign: 'left',
-  maxWidth: '100%',
+  display: 'block',
+  width: '100%',
+  whiteSpace: 'inherit',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
 
-const NARROW: CSSProperties = { width: '96px' };
+/**
+ * Pevná mriežka stĺpcov (D10, bod 1 v hlavičke). Šírky sú ODMERANÉ v prehliadači
+ * na najširšom obsahu, aký sa v stĺpci môže objaviť, plus 24 px odsadenia bunky
+ * a 14 px na šípku triedenia:
+ *  · `PREDANÉ 360 D` je najdlhší nadpis okna predajnosti — 92 px textu,
+ *  · `1 758,46 €` je najdrahší produkt v katalógu — 59 px,
+ *  · `ZĽAVA TERAZ` je nadpis širší než ktorákoľvek jeho hodnota — 78 px.
+ * Šípka sa počíta aj tam, kde práve nie je: keď sa poradie prehodí, stĺpec sa
+ * NESMIE zúžiť ani preliať. Názov dostáva celý zvyšok — pri 1440 px ≈ 725 px.
+ */
+const COLUMNS: CSSProperties = { tableLayout: 'fixed' };
+const COL_SELECT: CSSProperties = { width: '34px' };
+const COL_SOLD: CSSProperties = { width: '130px' };
+const COL_PRICE: CSSProperties = { width: '100px' };
+const COL_DISCOUNT: CSSProperties = { width: '104px' };
+
+/** Pod týmto počtom strán stránkovač vypisuje všetky čísla — skok netreba. */
+const JUMP_FROM_PAGES = 8;
 
 /** Hlavička sa klikom triedi, ale ostáva hlavičkou — preto dedí celý štýl. */
 const SORT_BUTTON: CSSProperties = {
@@ -257,7 +312,17 @@ export function CatalogTable({
   return (
     <div className="tbl-frame" data-testid="catalog-table">
       <div className="tbl-scroll">
-        <table className="tbl">
+        <table className="tbl" style={COLUMNS}>
+          {/* Pevná mriežka — pozri bod 1 v hlavičke modulu. V kartovom
+              rozložení (≤ 640 px) sa tabuľka kreslí ako bloky a `col` sa
+              neuplatní, čo je správne: karta má jeden stĺpec. */}
+          <colgroup>
+            <col style={COL_SELECT} />
+            <col />
+            <col style={COL_SOLD} />
+            <col style={COL_PRICE} />
+            <col style={COL_DISCOUNT} />
+          </colgroup>
           <thead>
             <tr>
               <th className="sel">
@@ -273,13 +338,13 @@ export function CatalogTable({
                 />
               </th>
               <th aria-sort={sortDirection('name', sort)}>{columnHead('name', 'Názov')}</th>
-              <th className="n" style={NARROW} aria-sort={sortDirection('sold', sort)}>
+              <th className="n" aria-sort={sortDirection('sold', sort)}>
                 {columnHead('sold', `Predané ${soldWindowDays} d`)}
               </th>
-              <th className="n" style={NARROW} aria-sort={sortDirection('price', sort)}>
+              <th className="n" aria-sort={sortDirection('price', sort)}>
                 {columnHead('price', 'Cena')}
               </th>
-              <th className="n" style={NARROW} title="Podľa vlastných zápisov appky">
+              <th className="n" title="Podľa vlastných zápisov appky">
                 Zľava teraz
               </th>
             </tr>
@@ -314,9 +379,12 @@ export function CatalogTable({
                       />
                     </td>
                     <td className="name" data-l="Produkt">
+                      {/* `title` je celý názov — orezaný chvost sa dá prečítať
+                          bez otvorenia panela (D10, bod 2 v hlavičke). */}
                       <button
                         type="button"
                         style={NAME_BUTTON}
+                        title={row.name ?? undefined}
                         onClick={() => onOpenDetail(row.productId)}
                         data-testid={`open-detail-${row.productId}`}
                       >
@@ -378,6 +446,14 @@ export function CatalogTable({
           ) : (
             <b className="num">{formatCountSk(total)}</b>
           )}
+          {/* Kde v poradí človek stojí. Pri 41 220 riadkoch a 825 stránkach je
+              samotné „zobrazených 50" údaj bez orientácie (D10). */}
+          {pages > 1 ? (
+            <span className="num" data-testid="table-page-of">
+              {' · strana '}
+              {formatCountSk(page)} z {formatCountSk(pages)}
+            </span>
+          ) : null}
         </span>
         <div className="row" style={{ gap: '14px' }}>
           <div className="seg" aria-label="Riadkov na stránku">
@@ -415,9 +491,55 @@ export function CatalogTable({
               ),
             )}
           </nav>
+          {pages >= JUMP_FROM_PAGES ? <PageJump pages={pages} onPage={onPage} /> : null}
         </div>
       </div>
     </div>
+  );
+}
+
+/* ═══════════════════════════ 3. Skok na stránku ═══════════════════════════ */
+
+/**
+ * Rýchly skok (D10). Stránkovač ponúka okolie aktuálnej strany a okraje —
+ * z 825 strán je tak dosiahnuteľných šesť. Toto je zvyšok: napíš číslo, choď.
+ *
+ * Prečo formulár a nie skok pri písaní: každá zmena strany je dotaz na server
+ * a písanie „412" by poslalo tri (4, 41, 412). Potvrdenie je jeden dotaz.
+ * Mimo rozsahu sa nič nedeje — tabuľka nespadne na prvú stranu, lebo tichý
+ * skok inam, než človek napísal, je horší než žiadny skok.
+ */
+export function PageJump({ pages, onPage }: { pages: number; onPage: (page: number) => void }) {
+  const [draft, setDraft] = useState('');
+
+  function jump(event: { preventDefault: () => void }) {
+    event.preventDefault();
+    const wanted = Number.parseInt(draft.trim(), 10);
+    if (!Number.isInteger(wanted) || wanted < 1 || wanted > pages) return;
+    onPage(wanted);
+    setDraft('');
+  }
+
+  return (
+    <form className="row" style={{ gap: '6px' }} onSubmit={jump}>
+      <label className="lvl-3" htmlFor="catalog-page-jump">
+        Strana
+      </label>
+      <input
+        id="catalog-page-jump"
+        className="inp"
+        style={{ width: '72px', padding: '3px 7px', fontSize: '12px' }}
+        inputMode="numeric"
+        value={draft}
+        placeholder={`1 – ${pages}`}
+        aria-label={`Prejsť na stranu, 1 až ${pages}`}
+        onChange={(event) => setDraft(event.target.value)}
+        data-testid="page-jump-input"
+      />
+      <button type="submit" className="btn sm ghost" data-testid="page-jump-go">
+        Prejsť
+      </button>
+    </form>
   );
 }
 

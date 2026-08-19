@@ -358,6 +358,56 @@ export function orderDiscounts<T extends DiscountLike>(
   };
 }
 
+/** Rozdelenie zoznamu na dominantu, zvyšok a rozklik „Skončené". */
+export interface FeaturedDiscounts<T extends DiscountLike> {
+  /** Zľava na čele obrazovky. `null` = v appke nie je ani jedna. */
+  readonly featured: T | null;
+  /** Ostatné živé zľavy — riadky zoznamu pod dominantou. */
+  readonly rest: readonly T[];
+  /** Skončené do rozkliku, VŽDY bez tej, ktorá stojí na čele. */
+  readonly finished: readonly T[];
+}
+
+/**
+ * Kto stojí na čele obrazovky Zľavy. Rozhodnutie je tu, nie v JSX — je to
+ * pravidlo o dominante (P1) a pravidlo sa musí dať overiť bez prehliadača.
+ *
+ * TRI ZÁCHYTY V PORADÍ:
+ *
+ *   1. zľava, ktorá sa práve zapisuje (`leading`) — to sa deje teraz,
+ *   2. prvá živá v poradí naliehavosti (`beží` → `pripravená`),
+ *   3. posledná SKONČENÁ.
+ *
+ * Tretí záchyt pribudol 19. 8. 2026 a nie je to detail. Kým existoval len prvý
+ * a druhý, obrazovka so samými skončenými zľavami — po prvej sezóne bežný stav
+ * — nemala dominantu žiadnu: celý tab bol jeden zbalený rozklik a percento,
+ * kvôli ktorému sa tab otvára (kontrakt UI, bod 21), sa nedalo prečítať nikde.
+ *
+ * Zľava na čele sa v rozkliku „Skončené" NEOPAKUJE. Ten istý riadok dvakrát na
+ * jednej obrazovke je najlacnejší spôsob, ako pokaziť počítanie — číslo pri
+ * slove „Skončené" musí sedieť s počtom riadkov pod ním.
+ */
+export function featureDiscounts<T extends DiscountLike>(
+  ordered: OrderedDiscounts<T>,
+): FeaturedDiscounts<T> {
+  if (ordered.leading !== null) {
+    return { featured: ordered.leading, rest: ordered.active, finished: ordered.finished };
+  }
+  const firstActive = ordered.active[0];
+  if (firstActive !== undefined) {
+    return {
+      featured: firstActive,
+      rest: ordered.active.slice(1),
+      finished: ordered.finished,
+    };
+  }
+  const firstFinished = ordered.finished[0];
+  if (firstFinished !== undefined) {
+    return { featured: firstFinished, rest: [], finished: ordered.finished.slice(1) };
+  }
+  return { featured: null, rest: [], finished: [] };
+}
+
 /**
  * Koľko položiek je vo fronte PRED novou zľavou. Rozpočet sa delí — bez tohto
  * čísla by odhad dobehnutia klamal o týždne (odpoveď 15).

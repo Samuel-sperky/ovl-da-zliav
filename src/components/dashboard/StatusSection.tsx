@@ -33,11 +33,21 @@
  *    stav fronty nepozná, je tu `—` a dôvod je pod rozklikom „Prečo —",
  *    rovnako ako v stavovom pruhu. `0 / 0` na prístrojovej doske eshopu je
  *    tvrdenie, nie medzera.
- * 4. **Prázdny stav je JEDNA VETA a JEDNO TLAČIDLO** (bod 11). Tri očíslované
- *    kroky, ktoré tu boli do 18. 8., sa zrušili — návod patrí do rozcestníka
- *    „Čo appka vie" v Nastaveniach. Preto sa v prázdnom stave NEKRESLÍ stĺpec
- *    akcií: druhé tlačidlo „Nová zľava" hneď vedľa prvého by bolo presne to,
- *    čo bod 11 zakazuje.
+ * 4. **Prázdny stav je JEDNA VETA a JEDNO TLAČIDLO** (bod 11) a je TICHÝ
+ *    (oprava D5, 19. 8. 2026). Do tohto dátumu to bola vycentrovaná škatuľa
+ *    `.empty` uprostred karty: 15 px nadpis, 34 px vzduchu okolo a plné teal
+ *    tlačidlo v strede. Na jednej karte tak stáli dve dominanty naraz —
+ *    verdikt v 44 px a druhé ohnisko pod ním — a to P1 zakazuje. Dominantou
+ *    zostáva VERDIKT, lebo obrazovka odpovedá na „je všetko v poriadku?";
+ *    „ešte nemáte zľavu" je odpoveď na inú otázku a patrí do tlmenej roviny.
+ *    Veta je preto dnes tlmený riadok presne tam, kde inokedy stoja čísla
+ *    fronty, a JEDINÉ tlačidlo stojí v stĺpci akcií, teda tam, kde primárna
+ *    akcia stojí vo všetkých ostatných stavoch — obrazovka sa medzi stavmi
+ *    nepreskladá a tlačidlo neposkakuje.
+ *    Tri očíslované kroky, ktoré tu boli do 18. 8., sa zrušili — návod patrí
+ *    do rozcestníka „Čo appka vie" v Nastaveniach. V prázdnom stave sa preto
+ *    v stĺpci akcií kreslí PRESNE JEDNO tlačidlo: „Zoznam zliav" vedľa neho by
+ *    bol druhý klik na obrazovke, kde ten zoznam nemá čo ukázať.
  * 5. **Fronta sa po odstávke NIKDY nerozbehne sama.** „Pokračovať" je vedomý
  *    klik a v tom jedinom stave je primárnym tlačidlom on, nie „Nová zľava".
  *
@@ -320,44 +330,50 @@ export function StatusSection({
             {progress.mode === 'unknown' ? <UnknownBody /> : null}
             {progress.mode === 'calm' ? <CalmBody calm={calm} budget={budget} /> : null}
             {running ? <RunningBody progress={progress} budget={budget} /> : null}
+            {/*
+              D5 — prázdny stav je jeden tlmený riadok na mieste čísel fronty,
+              nie vycentrovaná škatuľa s vlastným tlačidlom. Tlačidlo má
+              obrazovka jedno a stojí v stĺpci akcií vpravo.
+            */}
             {empty ? (
-              <div className="empty" data-testid="overview-empty">
-                <div className="t">Zatiaľ nie je žiadna zľava</div>
-                <div className="a">
-                  <Link className="btn primary" href="/zlavy/nova" data-testid="first-new-campaign">
-                    Nová zľava
-                  </Link>
-                </div>
+              <div className="prog-meta" data-testid="overview-empty">
+                <span>Zatiaľ nie je žiadna zľava.</span>
               </div>
             ) : null}
           </div>
         </div>
 
-        {/* Bod 11: v prázdnom stave je jedno tlačidlo a to stojí v ňom samom. */}
-        {empty ? null : (
-          <div className={styles.actions}>
-            {paused ? <ResumeQueue onChanged={onChanged} /> : null}
-            <Link
-              className={paused ? 'btn' : 'btn primary'}
-              href="/zlavy/nova"
-              data-testid="overview-new-campaign"
-            >
+        <div className={styles.actions} data-testid="overview-actions">
+          {/* Bod 11: v prázdnom stave presne jedno tlačidlo, nič vedľa neho. */}
+          {empty ? (
+            <Link className="btn primary" href="/zlavy/nova" data-testid="first-new-campaign">
               Nová zľava
             </Link>
-            {running ? (
-              <Link className="btn ghost" href={detailHref}>
-                Detail zľavy
+          ) : (
+            <>
+              {paused ? <ResumeQueue onChanged={onChanged} /> : null}
+              <Link
+                className={paused ? 'btn' : 'btn primary'}
+                href="/zlavy/nova"
+                data-testid="overview-new-campaign"
+              >
+                Nová zľava
               </Link>
-            ) : (
-              <Link className="btn ghost" href="/zlavy">
-                Zoznam zliav
-              </Link>
-            )}
-            {progress.mode === 'running' && progress.campaignId !== null ? (
-              <StopQueue campaignId={progress.campaignId} onChanged={onChanged} />
-            ) : null}
-          </div>
-        )}
+              {running ? (
+                <Link className="btn ghost" href={detailHref}>
+                  Detail zľavy
+                </Link>
+              ) : (
+                <Link className="btn ghost" href="/zlavy">
+                  Zoznam zliav
+                </Link>
+              )}
+              {progress.mode === 'running' && progress.campaignId !== null ? (
+                <StopQueue campaignId={progress.campaignId} onChanged={onChanged} />
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
 
       <div className={styles.checks} data-testid="overview-checks">

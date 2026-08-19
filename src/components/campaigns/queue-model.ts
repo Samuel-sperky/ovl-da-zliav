@@ -205,8 +205,12 @@ const QUEUE_STAND_SENTENCES: Readonly<Record<string, StandSentence>> = {
     path: null,
   },
   queue_paused: {
-    what: 'Fronta je pozastavená po odstávke počítača — sama sa nerozbehne, aby po dlhom výpadku nezapísala dávku naslepo.',
-    nextStep: 'Pokračovanie potvrdíte v Prehľade; fronta potom nadviaže tam, kde stojí.',
+    // P2 hovorí max 90 znakov na povrchu. Táto veta mala 111 a niesla naraz
+    // FAKT (fronta stojí) aj DÔVOD (aby po výpadku nezapísala naslepo).
+    // Dôvod patrí k ďalšiemu kroku, ktorý sa aj tak číta hneď za ňou.
+    what: 'Fronta je pozastavená po odstávke počítača a sama sa nerozbehne.',
+    nextStep:
+      'Pokračovanie sa potvrdzuje v Prehľade — po dlhom výpadku appka dávku nezapíše naslepo.',
     tone: 'attention',
     path: '/',
   },

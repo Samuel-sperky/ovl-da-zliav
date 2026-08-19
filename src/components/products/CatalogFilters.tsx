@@ -7,26 +7,36 @@
  * `.filters.open`). Dominanta obrazovky je TABUĽKA — tento panel je preto
  * zámerne tichý: malé písmo, žiadne karty, žiadne vysvetľujúce odstavce (P2).
  *
- * Zamknuté filtre (K8, architektúra §5)
- * ─────────────────────────────────────
+ * Zamknuté filtre (K8, architektúra §5) — JEDNA SKUPINA, JEDNO VYSVETLENIE
+ * ───────────────────────────────────────────────────────────────────────
  * Kategória, kov, typ šperku, marža, obrátkovosť a sklad sú v zozname
  * VIDITEĽNÉ, sivé a neklikateľné — nesmú byť skryté ani predstierané. Ich
  * zoznam sa NEPÍŠE natvrdo do obrazovky: prichádza z odpovede API
  * (`lockedFilters`). Keď dáta zo shopu pribudnú, filter zmizne zo zoznamu
  * v repozitári a táto obrazovka ho prestane kresliť sivý sama od seba.
  *
- * Jediná výnimka je „Skutočná zľava v eshope" a je vedomá: nie je to filter nad
- * stĺpcom zrkadla, ale schopnosť, ktorú appka celú nemá, takže ju API do
- * `lockedFilters` nemá ako poslať. Keby sa nekreslila, používateľ by pri
- * políčku „práve v zľave" nemal ako zistiť, že to NIE JE stav eshopu — a presne
- * to je otázka, kvôli ktorej na túto obrazovku prišiel. Až API začne vedieť
- * filtrovať podľa skutočnej zľavy, tento riadok odtiaľto zmizne.
+ * Do 19. 8. 2026 boli zamknuté filtre v paneli DVOMA rôznymi spôsobmi naraz
+ * (D9): obrátkovosť visela pod Predajnosťou, sklad mal vlastnú skupinu
+ * s jediným sivým riadkom, skutočná zľava sedela medzi zaškrtávacími políčkami
+ * a kategória, kov, typ a marža stáli zvlášť v skupine „Zatiaľ nedostupné".
+ * Ten istý stav sa dal prečítať v troch rôznych tvaroch a vysvetlenie k nemu
+ * bolo na dvoch miestach. Teraz je zamknuté JEDNOU skupinou na spodku panela,
+ * s jednou vetou a jedným odkazom do Nastavení — kontrakt UI, bod 18:
+ * vysvetlenie žije na jedinom mieste (`LockedFeatures.tsx`) a NEROZŠIRUJE sa.
+ *
+ * „Skutočná zľava v eshope" je v tej skupine tiež, hoci ju API do
+ * `lockedFilters` neposiela: nie je to filter nad stĺpcom zrkadla, ale
+ * schopnosť, ktorú appka celú nemá. Až API začne vedieť filtrovať podľa
+ * skutočnej zľavy, tento riadok odtiaľto zmizne.
  *
  * ZĽAVA JE VLASTNÝ ZÁPIS, NIE STAV ESHOPU
  * ───────────────────────────────────────
  * „Práve v zľave" a „nikdy nezlacnené" hovoria o tom, čo appka SAMA zapísala.
- * Nesie to nadpis skupiny, nie poznámka pod ňou — poznámku pod skupinou nikto
+ * Nesie to NADPIS skupiny, nie poznámka pod ňou — poznámku pod skupinou nikto
  * nečíta a zámena týchto dvoch vecí je najdrahší omyl na tejto obrazovke.
+ * Preto ten rozdiel drží nadpis aj po presune zamknutého riadku o skupinu
+ * nižšie, a pod políčkami zostáva jedna krátka veta. Riadok „Skutočná zľava
+ * v eshope" bol pri nich druhou poistkou, nie jedinou.
  *
  * Čísla pri možnostiach sú z `counts` — meraný fakt, nie odhad (P7), preto sú
  * bez značky `≈`. Kým čísla nie sú, nekreslí sa nič; nula by klamala.
@@ -79,10 +89,12 @@ const LOCKED_LABELS: Readonly<Record<string, string>> = {
   margin: 'Marža',
 };
 
-/** Ktorý zamknutý filter patrí do ktorej skupiny panela. */
-const LOCKED_IN_SOLD = ['turnover'] as const;
-const LOCKED_IN_STOCK = ['stock'] as const;
-const LOCKED_STANDALONE = ['category', 'metal', 'jewelryType', 'margin'] as const;
+/**
+ * Poradie zamknutých filtrov v jedinej skupine „Zatiaľ nedostupné" (D9).
+ * Zhora to, čo si používateľ pýta najčastejšie. Kód, ktorý tu nie je, sa
+ * nekreslí — radšej nič než kód na povrchu (P3).
+ */
+const LOCKED_ORDER = ['category', 'metal', 'jewelryType', 'turnover', 'stock', 'margin'] as const;
 
 /**
  * Čo eshop o produkte povedal pri poslednom načítaní. Tri vylučujúce sa
@@ -117,25 +129,22 @@ const BARE_BUTTON: CSSProperties = {
   cursor: 'pointer',
 };
 
-function LockedOption({ code }: { code: string }) {
-  const label = LOCKED_LABELS[code];
-  if (label === undefined) return null;
+function LockedOption({
+  label,
+  testId,
+}: {
+  label: string;
+  testId?: string | undefined;
+}) {
   return (
-    <div className="fopt locked" aria-disabled="true" title={SURFACE_TERMS.lockedFeature}>
+    <div
+      className="fopt locked"
+      aria-disabled="true"
+      title={SURFACE_TERMS.lockedFeature}
+      data-testid={testId}
+    >
       {label}
     </div>
-  );
-}
-
-function LockedGroup({ codes, locked }: { codes: readonly string[]; locked: readonly string[] }) {
-  const present = codes.filter((code) => locked.includes(code));
-  if (present.length === 0) return null;
-  return (
-    <>
-      {present.map((code) => (
-        <LockedOption key={code} code={code} />
-      ))}
-    </>
   );
 }
 
@@ -217,6 +226,11 @@ export function CatalogFilters({
   onOriginChange,
 }: CatalogFiltersProps) {
   const locked = Object.keys(lockedFilters);
+  /** Zamknuté filtre v jednom zozname a v stálom poradí — pozri hlavičku (D9). */
+  const lockedRows = LOCKED_ORDER.filter((code) => locked.includes(code)).map((code) => ({
+    code: code as string,
+    label: LOCKED_LABELS[code] as string,
+  }));
 
   function toggleBucket(bucket: SoldBucket, on: boolean) {
     const next = on
@@ -286,18 +300,7 @@ export function CatalogFilters({
             <Count value={soldCount(bucket)} />
           </label>
         ))}
-        <LockedGroup codes={LOCKED_IN_SOLD} locked={locked} />
       </div>
-
-      {/* Sklad je dnes celý bez dát (shop ho cez API nevracia). Keď pribudne,
-          zmizne z `lockedFilters` — a vtedy sem patria skutočné možnosti;
-          prázdna skupina s nadpisom by vyzerala ako pokazený filter. */}
-      {LOCKED_IN_STOCK.some((code) => locked.includes(code)) ? (
-        <div className="fgroup">
-          <h3>Sklad</h3>
-          <LockedGroup codes={LOCKED_IN_STOCK} locked={locked} />
-        </div>
-      ) : null}
 
       <div className="fgroup">
         <h3>Cena</h3>
@@ -353,14 +356,6 @@ export function CatalogFilters({
           Nikdy nezlacnené
           <Count value={counts === null ? null : counts.neverDiscounted} />
         </label>
-        <div
-          className="fopt locked"
-          aria-disabled="true"
-          title={SURFACE_TERMS.lockedFeature}
-          data-testid="filter-real-discount"
-        >
-          Skutočná zľava v eshope
-        </div>
         <div className="lvl-3" style={{ marginTop: '4px' }}>
           Appka vidí len to, čo sama zapísala.
         </div>
@@ -393,15 +388,22 @@ export function CatalogFilters({
         </div>
       )}
 
-      {LOCKED_STANDALONE.some((code) => locked.includes(code)) ? (
-        <div className="fgroup">
-          <h3>Zatiaľ nedostupné</h3>
-          <LockedGroup codes={LOCKED_STANDALONE} locked={locked} />
-          <div className="lvl-3" style={{ marginTop: '6px' }}>
-            {SURFACE_TERMS.lockedFeature} · <a href="/nastavenia#zamknute">viac</a>
-          </div>
+      {/* JEDINÉ miesto so zamknutými filtrami (D9). Skupina stojí na spodku,
+          lebo sa ňou nedá pracovať — je to priznanie, nie ovládanie. Vysvetlenie
+          je jedna veta a jeden odkaz; celé žije v `LockedFeatures.tsx` a tu sa
+          NEROZŠIRUJE (kontrakt UI, bod 18). */}
+      <div className="fgroup" data-testid="filter-locked">
+        <h3>Zatiaľ nedostupné</h3>
+        {lockedRows.map((row) => (
+          <LockedOption key={row.code} label={row.label} />
+        ))}
+        {/* Skutočná zľava v eshope nie je stĺpec zrkadla, takže ju API do
+            `lockedFilters` nepošle — a napriek tomu musí byť vidieť. */}
+        <LockedOption label="Skutočná zľava v eshope" testId="filter-real-discount" />
+        <div className="lvl-3" style={{ marginTop: '6px' }}>
+          {SURFACE_TERMS.lockedFeature} · <a href="/nastavenia#zamknute">viac</a>
         </div>
-      ) : null}
+      </div>
     </aside>
   );
 }

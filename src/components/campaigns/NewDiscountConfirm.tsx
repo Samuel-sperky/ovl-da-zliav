@@ -35,17 +35,33 @@
  *    patrí do riadku pod dominantu, nie vedľa nej.
  * 3. **Zamknuté tlačidlo hovorí dôvod.** `blockedReason` je jediná veta, ktorá
  *    vysvetlí, prečo sa nedá zaradiť; bez nej je zašedené tlačidlo hádanka.
+ * 4. **Pomlčka sa do 64 px nekreslí** (D11, 19. 8. 2026). Pravidlo „keď appka
+ *    nevie, je tam pomlčka, nikdy nula" (kontrakt UI, bod 5) platí ďalej, ale
+ *    em pomlčka v rezoch dominanty prestáva byť interpunkciou a je z nej plný
+ *    čierny obdĺžnik. Neznáme sa preto píše pomlčkou SO SLOVOM a v čitateľnej
+ *    veľkosti. Nikdy nedávaj `'—'` do `.big`.
+ *
+ * PORADIE KROKOV = PORADIE ZÁVAŽNOSTI (D12, 19. 8. 2026)
+ * ------------------------------------------------------
+ * Do 19. 8. stálo pole na ručný počet nad dvojicou tlačidiel, v ktorej bolo
+ * `Zaradiť do fronty` prvé, široké a plné, a `Skúška naprázdno` druhé — teda
+ * opačne, než v akom poradí sa tie kroky robia a než akú váhu majú. Odteraz
+ * idú pod sebou v poradí vykonávania: **skúška → ručne vpísaný počet →
+ * zaradenie**, a ručný počet je v ráme a je najťažší prvok spodku karty.
+ * Mení sa vzhľad a poradie potvrdenia, NIE jeho mechanika: `previewFresh`,
+ * `typedCountMatches` ani `previewToken` sa tým nedotýkajú (I3).
  *
  * Vlastník: V11.
  */
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import BlockerList from '@/components/campaigns/BlockerList';
 import styles from '@/components/campaigns/zlavy.module.css';
 import type { TierPlan } from '@/components/campaigns/discounts-model';
 // Preklad blokátora zo skúšky naprázdno žije v `queue-model.ts` — používa ho aj
 // panel opakovania a dve kópie toho istého prekladu by sa časom rozišli (K10).
-import { previewBlockerText } from '@/components/campaigns/queue-model';
+import { previewBlockerText, type BlockerCard } from '@/components/campaigns/queue-model';
 import type { CreateResult, PreviewData } from '@/components/campaigns/zlavy-api';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
@@ -67,6 +83,12 @@ export interface NewDiscountConfirmProps {
    * od neho odtrhla.
    */
   plan?: ReactNode;
+  /**
+   * Prekážky, ktoré teraz stoja v ceste zápisu (D13). Do 19. 8. mali vlastnú
+   * kartu v pravom stĺpci a hovorili to isté, čo stavový pruh nad obrazovkou.
+   * Kreslia sa TU, pri rozhodnutí, ktoré blokujú — a nikde inde na obrazovke.
+   */
+  obstacles?: readonly BlockerCard[];
   typed: string;
   onTyped: (value: string) => void;
   /** Skúška naprázdno sedí na aktuálny výber a nemá blokátory. */
@@ -88,6 +110,7 @@ export function NewDiscountConfirm({
   tiers,
   averagePrice,
   plan,
+  obstacles = [],
   typed,
   onTyped,
   previewFresh,
@@ -152,10 +175,25 @@ export function NewDiscountConfirm({
       </div>
 
       <div className={`${styles.confirm} lvl-1`}>
-        <span className="big" data-testid="confirm-count">
-          {countKnown ? formatCountSk(itemsCount) : '—'}
+        {countKnown ? (
+          <span className="big" data-testid="confirm-count">
+            {formatCountSk(itemsCount)}
+          </span>
+        ) : (
+          /*
+           * D11 — tu bola do 19. 8. 2026 em pomlčka v `.big`, teda v 64 px
+           * a reze 660. V tej veľkosti pomlčka nie je znak, ale vyplnený
+           * obdĺžnik: dominanta karty vyzerala ako chyba vykreslenia a
+           * popisok pod ňou nemal nad sebou hodnotu. Pomlčka zostáva —
+           * dostala len slovo a veľkosť, v ktorej sa dá prečítať.
+           */
+          <span className={styles.unknown} data-testid="confirm-count">
+            — zatiaľ nevieme
+          </span>
+        )}
+        <span className={styles.cap}>
+          {countKnown ? 'produktov dostane zľavu' : 'koľko produktov dostane zľavu'}
         </span>
-        <span className={styles.cap}>produktov dostane zľavu</span>
       </div>
 
       <div className={`prog-meta ${styles.center}`}>
@@ -181,22 +219,53 @@ export function NewDiscountConfirm({
         <span className="lockline">odomkne sa po doplnení nákupných cien</span>
       </div>
 
-      <div className={styles.typein}>
-        <label className="lvl-3" htmlFor="confirm-count-input">
+      {/*
+       * D13 — prekážky stoja tam, kde blokujú: pri rozhodnutí. Vlastnú kartu
+       * v pravom stĺpci už nemajú, lebo tá hovorila to isté, čo stavový pruh.
+       */}
+      {obstacles.length === 0 ? null : (
+        <div className={styles.confirmObstacles}>
+          <BlockerList cards={obstacles} testId="confirm-obstacles" />
+        </div>
+      )}
+
+      {/* Krok 1 — skúška naprázdno. Robí sa ako prvá, teda stojí ako prvá. */}
+      <div className={styles.stepDry}>
+        <button
+          type="button"
+          className={`btn lg ${styles.wide}`}
+          disabled={busy === 'previewing' || busy === 'loading' || itemsCount === 0}
+          onClick={onPreview}
+          data-testid="dry-run"
+        >
+          {busy === 'previewing' ? 'Počítam…' : 'Skúška naprázdno'}
+        </button>
+        <div className="hint" style={{ textAlign: 'center' }}>
+          Skúška nič nezapíše — prepočíta výber a ukáže, čo by sa stalo.
+        </div>
+      </div>
+
+      {/*
+       * Krok 2 — ručne vpísaný počet. Povrchová podoba I3 a najťažší prvok
+       * spodku karty: pred ním sa nedá prekliknúť ďalej.
+       */}
+      <div className={styles.gate}>
+        <label className={styles.gateLabel} htmlFor="confirm-count-input">
           Napíšte počet produktov
         </label>
         <input
           id="confirm-count-input"
-          className="inp big"
+          className={`inp ${styles.gateInput}`}
           inputMode="numeric"
           autoComplete="off"
-          placeholder={String(itemsCount)}
+          placeholder={countKnown ? String(itemsCount) : ''}
           value={typed}
           onChange={(event) => onTyped(event.target.value)}
           data-testid="confirm-count-input"
         />
       </div>
 
+      {/* Krok 3 — zápis do ostrého eshopu. */}
       <div className={styles.acts}>
         <button
           type="button"
@@ -207,19 +276,6 @@ export function NewDiscountConfirm({
         >
           {busy === 'creating' ? 'Zaraďujem…' : 'Zaradiť do fronty'}
         </button>
-        <button
-          type="button"
-          className="btn lg"
-          disabled={busy === 'previewing' || busy === 'loading' || itemsCount === 0}
-          onClick={onPreview}
-          data-testid="dry-run"
-        >
-          {busy === 'previewing' ? 'Počítam…' : 'Skúška naprázdno'}
-        </button>
-      </div>
-
-      <div className="hint" style={{ textAlign: 'center' }}>
-        Skúška nič nezapíše — prepočíta výber a ukáže, čo by sa stalo.
       </div>
 
       {blockedReason === null ? null : (

@@ -311,6 +311,15 @@ export interface CatalogStateView {
  * Tón `critical` tu nevzniká ani pri chybe čítania — červená je v tejto appke
  * vyhradená pre zastavený ZÁPIS (bod 3 v hlavičke). Chybu preto nesie slovo,
  * nie farba.
+ *
+ * PRÁZDNY KATALÓG SA TU NEHLÁSI DRUHÝKRÁT (D4)
+ * ────────────────────────────────────────────
+ * Do 19. 8. tu pri nule stálo „Katalóg je zatiaľ prázdny" — tá istá veta, akú
+ * o kúsok nižšie hovorí prázdna tabuľka a ešte raz žltý pás s prekážkou. Že je
+ * katalóg prázdny, hovorí v tejto karte ČÍSLO (dlaždica „Načítaných z katalógu
+ * 0"); pilulka preto odpovedá na inú otázku — čo sa s načítaním práve deje.
+ * Prázdny katalóg, ktorý sa dopĺňa, a prázdny katalóg, ktorý sa ani nezačal
+ * čítať, sú dva rôzne stavy a doteraz vyzerali rovnako.
  */
 export function catalogStateView(status: CatalogStatusView | null): CatalogStateView {
   if (status === null) {
@@ -319,8 +328,8 @@ export function catalogStateView(status: CatalogStatusView | null): CatalogState
 
   const detail = status.percent === null ? null : `${formatCountSk(status.percent)} % katalógu`;
 
-  if (status.loadedProducts === 0) {
-    return { tone: 'attention', label: 'Katalóg je zatiaľ prázdny', detail: null };
+  if (status.loadedProducts === 0 && status.waiting === null && status.pagesDone === 0) {
+    return { tone: 'attention', label: 'Načítanie katalógu sa ešte nezačalo', detail: null };
   }
   if (status.complete) {
     return { tone: 'good', label: 'Katalóg je načítaný celý', detail };
@@ -593,10 +602,12 @@ export function catalogEmptyView(opts: {
   const missing = loaded !== null && total !== null ? Math.max(0, total - loaded) : null;
 
   if (loaded === 0) {
+    // D4 — jedna veta, nie tri. Že katalóg nie je načítaný, hovorí táto
+    // tabuľka; karta nad ňou hovorí, čo sa s načítaním deje, a prekážka
+    // `catalog_incomplete` sa na tejto obrazovke nekreslí vôbec.
     return {
       title: 'Katalóg je zatiaľ prázdny',
-      description:
-        'Appka nemá zo shopu načítaný ani jeden produkt, takže nie je z čoho vyberať. Prvá dávka načíta stovku produktov a ďalšie si appka doberá sama.',
+      description: 'Prvá dávka načíta stovku produktov, ďalšie si appka doberá sama.',
       offerLoad: true,
     };
   }

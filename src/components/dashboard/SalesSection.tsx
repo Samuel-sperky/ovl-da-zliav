@@ -51,22 +51,25 @@ function signedPercent(value: number): string {
  * Prázdny stav = JEDNA VETA a JEDNO TLAČIDLO (kontrakt UI, bod 11). Veta je
  * dôvod, nie „žiadne dáta": prázdny graf môže znamenať vypnuté sťahovanie
  * objednávok alebo prvý beh, a to sú dve rôzne veci.
+ *
+ * A NIE JE TO SEKCIA (oprava D7, 19. 8. 2026). Do tohto dátumu zaberala tá
+ * jedna veta celú kartu — nadpis sekcie, 34 px vzduchu a vycentrované
+ * tlačidlo, spolu okolo 180 px. Sekcia je prísľub obsahu; keď obsah nie je,
+ * ostane na obrazovke prázdna škatuľa, ktorá si berie miesto štvrtej sekcie
+ * (P5) aj kus hranice 1,5 obrazovky (P4). Veta a tlačidlo sa preto zmestia do
+ * jedného riadku a slovo „Predaj" je jeho začiatkom, nie samostatnou
+ * hlavičkou — obrazovka nemá dostať štvrtú veľkosť popisku.
+ *
+ * Len čo dáta prídu, „Predaj" sa sekciou znova stane. Vtedy má čo ukázať.
  */
 function Empty({ reason }: { reason: string }) {
   return (
-    <section className="sec" data-testid="overview-sales" data-mode="empty">
-      <div className="sec-h">
-        <h2>Predaj</h2>
-      </div>
-      <div className="empty">
-        <div className="t">{reason}</div>
-        <div className="a">
-          <Link className="btn" href="/nastavenia">
-            Otvoriť Nastavenia
-          </Link>
-        </div>
-      </div>
-    </section>
+    <div className={styles.thin} data-testid="overview-sales" data-mode="empty">
+      <span className="lvl-2">{`Predaj — ${reason}`}</span>
+      <Link className="btn sm" href="/nastavenia">
+        Otvoriť Nastavenia
+      </Link>
+    </div>
   );
 }
 

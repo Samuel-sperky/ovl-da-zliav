@@ -29,6 +29,14 @@
  *    a napriek tomu je sivý — nie je to chyba, len sa čaká (K2). Závažnosť
  *    preto nesie SLOVO (`SEVERITY_WORD`), nikdy nie farba: bez neho by sa
  *    z troch úrovní v jednom zozname nedalo poznať, čo zastavuje a čo nie.
+ * 1b. **Slovo o závažnosti je slovom ZNAČKY** (oprava D6, 19. 8. 2026). Do
+ *    tohto dátumu stálo na začiatku druhého riadku textu, teda mimo značky,
+ *    ku ktorej patrí, a hneď za ním pokračovala veta o ďalšom kroku — čitateľ
+ *    ho prečítal ako začiatok tej vety a tri riadky pod sebou sa nedali prejsť
+ *    očami po stĺpci. Teraz značka nesie všetky tri kanály stavu naraz: FARBU
+ *    a GLYF podľa spôsobu riešenia, SLOVO podľa závažnosti. Spôsob riešenia
+ *    tým o slovo neprišiel — presunul sa k ďalšiemu kroku, ktorý aj tak
+ *    popisuje („rieši sa mimo appky · Zapnúť ich môže len správca…").
  * 2. **Každý riadok má ČO a ČO S TÝM.** Prekážka bez ďalšieho kroku je log,
  *    nie obrazovka. Keď prekážka vedie niekam v appke, riadok má aj tlačidlo.
  * 3. **Poradie zo servera sa nemení.** `blockers.ts` ho drží ako súčasť
@@ -70,24 +78,33 @@ const SEVERITY_WORD: Readonly<Record<BlockerSeverityCode, string>> = {
 
 function Row({ row }: { row: BlockerRow }) {
   const look = resolutionLook(row.resolution);
+  // Zámok už slovo o spôsobe riešenia povie sám („Vyžiada si heslo — …"),
+  // takže sa v tlmenom riadku pod ním neopakuje. Dve kópie tej istej vety
+  // v jednom riadku sú šum, nie dôraz.
+  const locked = row.resolution === 'sudo';
 
   return (
     <div className={styles.reason} data-testid="blocker-row" data-blocker={row.id} data-severity={row.severity}>
+      {/* Značka so stavom — vlastný stĺpec, rovnaké x na každom riadku (D6). */}
+      <div className={styles.reasonMark}>
+        <span className={sigClass(look.tone)} data-testid="blocker-severity">
+          {SEVERITY_WORD[row.severity]}
+        </span>
+      </div>
+
       <div className={styles.reasonBody}>
         <div className="lvl-2">
-          {row.resolution === 'sudo' ? (
-            <LockBadge label="Vyžiada si heslo" reason={row.what} />
-          ) : (
-            <>
-              <span className={sigClass(look.tone)}>{look.word}</span> {row.what}
-            </>
-          )}
+          {locked ? <LockBadge label="Vyžiada si heslo" reason={row.what} /> : row.what}
         </div>
         <div className="lvl-3">
-          <b>{SEVERITY_WORD[row.severity]}</b>
-          <span className="sep-dot" aria-hidden="true">
-            {' · '}
-          </span>
+          {locked ? null : (
+            <>
+              {look.word}
+              <span className="sep-dot" aria-hidden="true">
+                {' · '}
+              </span>
+            </>
+          )}
           {row.nextStep}
           {row.assumed ? <span className={styles.assumed}> Appka to teraz nevie overiť.</span> : null}
         </div>

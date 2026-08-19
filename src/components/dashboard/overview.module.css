@@ -226,20 +226,42 @@
 /* ───────────────────────────── Prekážky ─────────────────────────────────── */
 
 /*
- * PREKÁŽKA — dva riadky textu vľavo (čo sa deje, čo s tým) a cesta ďalej
- * vpravo. Ďalší krok NIE JE pod rozklikom: prekážka bez neho je zase len log.
+ * PREKÁŽKA — tri stĺpce: značka so stavom · čo sa deje a čo s tým · cesta
+ * ďalej. Ďalší krok NIE JE pod rozklikom: prekážka bez neho je zase len log.
+ *
+ * PRVÝ STĹPEC JE PEVNE ŠIROKÝ A TO JE CELÁ OPRAVA D6. Do 19. 8. stálo slovo
+ * o závažnosti („zastavuje zápis") na začiatku DRUHÉHO riadku textu, teda
+ * mimo značky, ku ktorej patrí, a hneď za ním pokračovala veta o ďalšom
+ * kroku. Slovo sa v próze stratilo a tri riadky pod sebou sa nedali prejsť
+ * očami po stĺpci. Teraz je stav slovom SAMOTNEJ značky a značky všetkých
+ * riadkov začínajú na rovnakom x.
+ *
+ * Šírka 140 px je najdlhšie slovo stavu („nezastavuje nič", 11.5 px) aj
+ * s glyfom. Keby pribudla dlhšia úroveň závažnosti, musí sa zväčšiť aj tu —
+ * inak sa stĺpec zlomí do dvoch riadkov a skenovanie zmizne.
  */
 .reason {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: 140px 1fr auto;
+  gap: 4px 14px;
+  align-items: start;
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
 }
 
 .reason:last-child {
   border-bottom: 0;
+}
+
+/* Cesta ďalej sa neviaže na prvý riadok, drží sa stredu prekážky. */
+.reason :global(.btn) {
+  align-self: center;
+}
+
+/* Optické zarovnanie 11.5 px značky s prvým riadkom 14 px textu vedľa nej. */
+.reasonMark {
+  padding-top: 2px;
+  min-width: 0;
 }
 
 .reasonBody {
@@ -252,6 +274,38 @@
 /* Priznaná domnienka — stojí v tlmenom riadku vedľa ďalšieho kroku. */
 .assumed {
   font-style: italic;
+}
+
+/* ───────────────────────────── Jednoriadkový oznam ──────────────────────── */
+
+/*
+ * SEKCIA, KTORÁ MÁ POVEDAŤ JEDNU VETU, NIE JE SEKCIA (oprava D7).
+ *
+ * „Predaj" bez pokrytia zaberal celú kartu s vycentrovaným prázdnym stavom —
+ * 180 px na vetu „Prvé sťahovanie objednávok ešte nedobehlo." a jedno
+ * tlačidlo. Na prístrojovej doske, ktorá má štyri sekcie a hranicu 1,5
+ * obrazovky, je to najdrahšie miesto v appke.
+ *
+ * `.thin` je tá istá plocha ako `.sec` (rovnaký papier, rám aj rádius, aby
+ * obrazovka nemala dva druhy kariet), ale vysoká presne na jeden riadok.
+ * Veta a jedno tlačidlo stoja vedľa seba, nie pod sebou. Prázdny stav tým
+ * ostáva „jedna veta + jedno tlačidlo" (kontrakt UI, bod 11) a zároveň
+ * prestáva súperiť s dominantou.
+ *
+ * Kto sem pridá druhé tlačidlo alebo druhý riadok, vyrobí z toho zase sekciu
+ * a D7 sa vráti.
+ */
+.thin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 9px 16px;
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
 }
 
 /* ───────────────────────────── Drobnosti ────────────────────────────────── */
@@ -288,5 +342,21 @@
   .mid,
   .salesGrid {
     grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * Pod 640 px už na tri stĺpce prekážky nie je miesto — 140 px značky by
+ * zožrali polovicu riadku a veta by sa lámala po dvoch slovách. Riadok sa
+ * preto skladá pod seba a značka ostáva prvá, teda stále nad textom, ktorý
+ * vysvetľuje. Nič sa neskrýva.
+ */
+@media (max-width: 640px) {
+  .reason {
+    grid-template-columns: 1fr;
+  }
+
+  .reason :global(.btn) {
+    align-self: start;
   }
 }

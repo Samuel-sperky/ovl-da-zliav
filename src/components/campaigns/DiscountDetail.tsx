@@ -29,6 +29,23 @@
  * opravovať niečo, čo je možno v poriadku — preto sa tie dve čísla nikdy
  * nesčítajú a každé má vlastný ďalší krok.
  *
+ * PRETO SA DUPLICITA RIEŠILA INAK (D15, 19. 8. 2026)
+ * -------------------------------------------------
+ * Dominanta a štyri dlaždice hovorili pri hotovej zľave to isté (`21 / 21`
+ * a `21 · 0 · 0 · 0`), a nad dlaždicami to ešte raz opakovala veta
+ * „zapísaných 21 · …" a pod nimi „ostáva zapísať 0". Dlaždice sa zrušiť
+ * nesmú, tak sa zrušilo všetko ostatné: dominanta hovorí, koľko z fronty je
+ * vybavených, pruh pod ňou je rozdelený na tie isté štyri stavy a dlaždice sú
+ * jeho legenda. Kto sem pridá ďalšie číslo, nech si najprv overí, či už nemá
+ * svoju dlaždicu.
+ *
+ * JEDEN ZOZNAM DÔVODOV, NIE DVE ČERVENÉ ŠKATULE (D16)
+ * ---------------------------------------------------
+ * Dôvod, prečo fronta stojí (`queueStandSentence`, stav BEHU appky), a
+ * prekážky zápisu (`alarmingCards`, stav DÁT a poistiek) sú dve rôzne veci a
+ * do jednej vety sa zliať nesmú — ale odpovedajú na tú istú otázku, takže
+ * stoja v jednom ráme pod jedným nadpisom.
+ *
  * ČO SA TU EŠTE NESMIE POKAZIŤ
  * ----------------------------
  *
@@ -47,14 +64,14 @@
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
 
-import BlockerList from '@/components/campaigns/BlockerList';
+import { StandPanel } from '@/components/campaigns/BlockerList';
 import DiscountPerformance from '@/components/campaigns/DiscountPerformance';
 import DiscountState from '@/components/campaigns/DiscountState';
 import RetryFailed from '@/components/campaigns/RetryFailed';
 import styles from '@/components/campaigns/zlavy.module.css';
 import { postJson } from '@/components/campaigns/api';
 import { percentHeadline } from '@/components/campaigns/DiscountsList';
-import { progressPercent, sentenceOf } from '@/components/campaigns/discounts-model';
+import { sentenceOf } from '@/components/campaigns/discounts-model';
 import {
   alarmingCards,
   dayCount,
@@ -73,6 +90,7 @@ import { useRefreshable } from '@/components/layout/refresh';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
+import { TONE_GLYPH } from '@/components/ui/ToneBadge';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -90,14 +108,6 @@ function isProblem(item: DiscountItemView): boolean {
   // D39c — rozhodovalo sa nad inou cenou. Nie je to chyba zápisu, ale
   // zamlčať sa to nesmie.
   return item.priceMismatch;
-}
-
-function Dot() {
-  return (
-    <span className="sep-dot" aria-hidden="true">
-      ·
-    </span>
-  );
 }
 
 /**
@@ -382,6 +392,13 @@ export function DiscountDetail({ id }: { id: number }) {
   };
   const canEnd = sentence.state !== 'skončila' && campaign.itemsOk + campaign.itemsUncertain > 0;
 
+  /** Podiel jedného stavu na celej zľave — šírka jeho úseku v pruhu fronty. */
+  const shareOf = (units: number): string =>
+    campaign.itemsTotal <= 0 ? '0' : ((units / campaign.itemsTotal) * 100).toFixed(2);
+
+  /** Má stav čo hlásiť? Prúžok farby dostane len dlaždica s nenulovým číslom. */
+  const anyOf = (units: number): 'ano' | 'nie' => (units > 0 ? 'ano' : 'nie');
+
   return (
     <div className={styles.page} data-testid="discount-detail">
       <div className={styles.dhead}>
@@ -407,84 +424,121 @@ export function DiscountDetail({ id }: { id: number }) {
 
         <div className={`${styles.top} ${styles.topStart}`}>
           <div>
+            {/*
+             * D15 — dominanta a dlaždice sú JEDEN ÚTVAR, nie dva zoznamy tých
+             * istých čísel. Dominanta hovorí, koľko z fronty je vybavených;
+             * pruh pod ňou je rozdelený na tie isté štyri stavy a dlaždice
+             * pod pruhom sú jeho legenda. Vetu „zapísaných 21 · 0 sa
+             * nepodarilo · 0 nevieme" sme zrušili — bola to štvorica dlaždíc
+             * napísaná ešte raz, slovami.
+             */}
             <div className="prog-lg">
               <div className="n num" data-testid="detail-number">
                 {formatCountSk(done)}{' '}
                 <span className="of">/ {formatCountSk(campaign.itemsTotal)}</span>
               </div>
               <div className="side lvl-3">
-                zapísaných {formatCountSk(campaign.itemsOk)}
-                {campaign.itemsFailed === 0
-                  ? ''
-                  : ` · ${formatCountSk(campaign.itemsFailed)} sa nepodarilo`}
-                {campaign.itemsUncertain === 0
-                  ? ''
-                  : ` · ${formatCountSk(campaign.itemsUncertain)} nevieme, či sa zapísalo`}
+                {campaign.itemsPending === 0
+                  ? 'fronta má túto zľavu vybavenú'
+                  : 'vybavených z fronty'}
               </div>
             </div>
 
-            <div className="bar" aria-hidden="true">
-              <i style={{ width: `${progressPercent(done, campaign.itemsTotal).toFixed(2)}%` }} />
+            <div className={styles.queueBar} aria-hidden="true">
+              <i data-state="ok" style={{ width: `${shareOf(campaign.itemsOk)}%` }} />
+              <i data-state="uncertain" style={{ width: `${shareOf(campaign.itemsUncertain)}%` }} />
+              <i data-state="failed" style={{ width: `${shareOf(campaign.itemsFailed)}%` }} />
+              <i data-state="pending" style={{ width: `${shareOf(campaign.itemsPending)}%` }} />
             </div>
 
-            <div className="prog-meta">
-              {data.estimate === null ? (
-                <span>
-                  {campaign.itemsPending === 0
-                    ? 'fronta má túto zľavu vybavenú'
-                    : 'odhad dokončenia zatiaľ nevieme'}
-                </span>
-              ) : (
+            {/*
+             * Štyri dlaždice fronty — nikdy tri (D45, kontrakt UI, bod 22).
+             * „Nevieme, či sa zapísalo" je vlastný stav: zápis odišiel a
+             * odpoveď nedorazila, takže produkt zlacnený BYŤ MÔŽE. Farbu
+             * dostane len dlaždica, ktorá má čo hlásiť — červený prúžok nad
+             * nulou zlyhaní by bol falošný poplach. Stav preto nesie farbu,
+             * glyf aj slovo naraz.
+             */}
+            <div className={`kpis ${styles.queueTiles}`}>
+              <div className={styles.queueTile} data-state="ok" data-any={anyOf(campaign.itemsOk)}>
+                <StatTile
+                  label={`${TONE_GLYPH.good} Zapísané`}
+                  value={formatCountSk(campaign.itemsOk)}
+                  detail={`z ${formatCountSk(campaign.itemsTotal)} produktov tejto zľavy`}
+                  testId="tile-ok"
+                />
+              </div>
+              <div
+                className={styles.queueTile}
+                data-state="pending"
+                data-any={anyOf(campaign.itemsPending)}
+              >
+                <StatTile
+                  label={`${TONE_GLYPH.progress} Čaká na zápis`}
+                  value={formatCountSk(campaign.itemsPending)}
+                  detail={
+                    campaign.itemsPending === 0
+                      ? 'fronta má túto zľavu vybavenú'
+                      : 'fronta na ne ešte nedošla'
+                  }
+                  testId="tile-pending"
+                />
+              </div>
+              <div
+                className={styles.queueTile}
+                data-state="failed"
+                data-any={anyOf(campaign.itemsFailed)}
+              >
+                <StatTile
+                  label={`${TONE_GLYPH.critical} Nepodarilo sa`}
+                  value={formatCountSk(campaign.itemsFailed)}
+                  detail={
+                    campaign.itemsFailed === 0
+                      ? 'nič sa nepokazilo'
+                      : 'tieto produkty zlacnené nie sú — dajú sa zopakovať'
+                  }
+                  testId="tile-failed"
+                />
+              </div>
+              <div
+                className={styles.queueTile}
+                data-state="uncertain"
+                data-any={anyOf(campaign.itemsUncertain)}
+              >
+                <StatTile
+                  label={`${TONE_GLYPH.attention} Nevieme, či sa zapísalo`}
+                  value={formatCountSk(campaign.itemsUncertain)}
+                  detail={
+                    campaign.itemsUncertain === 0
+                      ? 'každý zápis dostal odpoveď'
+                      : 'zápis odišiel, odpoveď nedorazila'
+                  }
+                  testId="tile-uncertain"
+                />
+              </div>
+            </div>
+
+            {/*
+             * Pod dlaždicami zostáva už len to, čo v nich NIE JE — deň
+             * dobehnutia. „Ostáva zapísať N" tu bolo tretí raz to isté číslo,
+             * ktoré má vlastnú dlaždicu.
+             */}
+            {data.estimate === null ? (
+              campaign.itemsPending === 0 ? null : (
+                <div className="prog-meta">
+                  <span>odhad dokončenia zatiaľ nevieme</span>
+                </div>
+              )
+            ) : (
+              <div className="prog-meta">
                 <span>
                   hotové <b className="est">{formatDateSk(data.estimate.date)}</b>
-                  {data.estimate.days === 0 ? null : <> · pobeží ešte {dayCount(data.estimate.days)}</>}
+                  {data.estimate.days === 0 ? null : (
+                    <> · pobeží ešte {dayCount(data.estimate.days)}</>
+                  )}
                 </span>
-              )}
-              <Dot />
-              <span>
-                ostáva zapísať <b>{formatCountSk(campaign.itemsPending)}</b>
-              </span>
-            </div>
-
-            {/* Štyri dlaždice fronty — nikdy tri (D45, kontrakt UI, bod 22). */}
-            <div className="kpis gap-t">
-              <StatTile
-                label="Zapísané"
-                value={formatCountSk(campaign.itemsOk)}
-                detail={`z ${formatCountSk(campaign.itemsTotal)} produktov tejto zľavy`}
-                testId="tile-ok"
-              />
-              <StatTile
-                label="Čaká na zápis"
-                value={formatCountSk(campaign.itemsPending)}
-                detail={
-                  campaign.itemsPending === 0
-                    ? 'fronta má túto zľavu vybavenú'
-                    : 'fronta na ne ešte nedošla'
-                }
-                testId="tile-pending"
-              />
-              <StatTile
-                label="Nepodarilo sa"
-                value={formatCountSk(campaign.itemsFailed)}
-                detail={
-                  campaign.itemsFailed === 0
-                    ? 'nič sa nepokazilo'
-                    : 'tieto produkty zlacnené nie sú — dajú sa zopakovať'
-                }
-                testId="tile-failed"
-              />
-              <StatTile
-                label="Nevieme, či sa zapísalo"
-                value={formatCountSk(campaign.itemsUncertain)}
-                detail={
-                  campaign.itemsUncertain === 0
-                    ? 'každý zápis dostal odpoveď'
-                    : 'zápis odišiel, odpoveď nedorazila'
-                }
-                testId="tile-uncertain"
-              />
-            </div>
+              </div>
+            )}
 
             {campaign.itemsUncertain === 0 ? null : (
               <div className={styles.startNote}>
@@ -525,30 +579,21 @@ export function DiscountDetail({ id }: { id: number }) {
               </div>
             </div>
 
-            {showStand && stand !== null ? (
-              <div className={styles.startNote}>
-                <Note
-                  variant={
-                    stand.tone === 'critical' ? 'err' : stand.tone === 'idle' ? 'info' : 'warn'
-                  }
-                  testId="detail-stand"
-                >
-                  {stand.what} {stand.nextStep}
-                  {stand.path === null ? null : (
-                    <>
-                      {' '}
-                      <Link href={stand.path}>Otvoriť</Link>
-                    </>
-                  )}
-                </Note>
-              </div>
-            ) : null}
-
-            {alarming.length === 0 ? null : (
-              <div className="gap-t">
-                <BlockerList cards={alarming} title="Čo bráni zápisu" testId="detail-blockers" />
-              </div>
-            )}
+            {/*
+             * D16 — jeden zoznam, nie dve červené škatule pod sebou. Dôvod,
+             * prečo fronta stojí (stav BEHU appky), a prekážky zápisu (stav
+             * DÁT a poistiek) sú dve rôzne veci, ktoré sa nesmú zliať do
+             * jednej vety — ale odpovedajú na tú istú otázku, takže patria do
+             * jedného rámu s jedným nadpisom. Do 19. 8. 2026 bola prvá z nich
+             * vyplnená ružová `Note` a druhá skupina s vlastným nadpisom;
+             * obrazovka tak mala dva poplachy tam, kde je jeden dôvod.
+             */}
+            <StandPanel
+              stand={showStand ? stand : null}
+              cards={alarming}
+              testId="detail-blockers"
+              className="gap-t"
+            />
 
             <div className="fresh">
               Podľa vlastných zápisov appky · dáta k {clockSk(at)}

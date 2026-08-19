@@ -36,7 +36,7 @@ export const SETTINGS_CSS = `
   text-transform:uppercase;color:var(--dim);padding:4px 10px 2px}
 /* Odkaz „prejsť tam" v bunke tabuľky — text, nie tlačidlo: v hustej tabuľke
    by päť tlačidiel pod sebou prekričalo samotné vety. */
-.set-page .set-jump{font-size:12px;color:var(--teal);text-decoration:none;
+.set-page .set-jump{font-size:12px;color:var(--accent);text-decoration:none;
   border-bottom:1px solid transparent}
 .set-page .set-jump:hover{border-bottom-color:currentColor}
 /* Dva rozpočtové prúžky vedľa seba. Zápisy a čítania sú oddelené kvóty a
@@ -87,8 +87,8 @@ export const SETTINGS_CSS = `
   background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
   padding:14px 16px;box-shadow:var(--shadow);text-decoration:none;color:inherit;
   transition:border-color .12s ease,transform .12s ease}
-.set-page .set-card:hover{border-color:var(--teal);transform:translateY(-1px)}
-.set-page .set-card:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.set-page .set-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+.set-page .set-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .set-page .set-card h2{font-size:13.5px;font-weight:640;color:var(--ink);
   letter-spacing:0;text-transform:none;line-height:1.35}
 .set-page .set-card .card-lead{font-size:12px;color:var(--dim);line-height:1.5}
@@ -106,7 +106,7 @@ export const SETTINGS_CSS = `
 /* ─────────────────── Podstránka: návrat a hlavička ─────────────────────── */
 .set-page .sub-back{font-size:12px;color:var(--dim);text-decoration:none;
   display:inline-block;margin-bottom:8px}
-.set-page .sub-back:hover{color:var(--teal)}
+.set-page .sub-back:hover{color:var(--accent)}
 /* Odkaz do červenej zóny stojí sám na spodku brzdovej podstránky — nie je to
    karta a nesmie tak ani vyzerať. */
 .set-page .dz-link{margin-top:12px;font-size:12px;color:var(--dim)}

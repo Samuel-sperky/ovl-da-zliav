@@ -28,7 +28,9 @@ import {
   countSk,
   type CardFacts,
 } from '@/components/settings/index-cards';
+import { TONE_SIG_CLASS } from '@/components/settings/blockers-view';
 import { PAGE_NEEDS } from '@/components/settings/SettingsSubPage';
+import { SETTINGS_CSS } from '@/components/settings/styles';
 import {
   INDEX_PAGES,
   SETTINGS_ANCHORS,
@@ -286,5 +288,34 @@ describe('stav karty', () => {
     expect(countSk(11, forms)).toBe('11 údajov');
     // Nula je „údajov", nie „údaj".
     expect(countSk(0, forms)).toBe('0 údajov');
+  });
+});
+
+/* ═══════════ D19 — geometria rozcestníka stojí na tokenoch palety ═════════ */
+
+describe('D19 — Nastavenia používajú akcent, nie surový teal', () => {
+  it('žiadna farba nie je natvrdo napísaná', () => {
+    expect(SETTINGS_CSS).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('akcent sa berie cez `--accent`, nie cez `--teal`', () => {
+    // Vlna F oddelila akcent od primitívu rodiny: `--teal` je surová farba
+    // (v svetlej téme je príliš svetlá na text), `--accent` je rola. Karta,
+    // odkaz aj zvýraznenie sú AKCIE a aktívny stav — presne to, na čo je
+    // akcent vyhradený (R5). Stav nesmie kódovať nikdy.
+    expect(SETTINGS_CSS).not.toContain('var(--teal)');
+    expect(SETTINGS_CSS).toContain('var(--accent)');
+  });
+
+  it('zlatá sa na popisky nepoužíva', () => {
+    expect(SETTINGS_CSS).not.toContain('var(--gold');
+  });
+
+  it('stav karty nie je nikdy len farba — nesie triedu so značkou aj text', () => {
+    // `TONE_SIG_CLASS` mapuje tón na `.sig …`, a `.sig::before` je GLYF.
+    // Veta karty je tretí kanál.
+    for (const tone of ['critical', 'attention', 'good', 'idle'] as const) {
+      expect(TONE_SIG_CLASS[tone]).toMatch(/^sig\b/);
+    }
   });
 });

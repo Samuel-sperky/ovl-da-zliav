@@ -429,7 +429,9 @@ describe('Výkon výberu v detaile zľavy', () => {
   it('zamknuté panely povedia dôvod, nie sú skryté (K8)', () => {
     const markup = renderToStaticMarkup(createElement(DiscountPerformance, { id: 7 }));
     expect(markup).toContain('Tržby');
-    expect(markup).toContain('Vlani rovnaké obdobie');
+    // D18 (19. 8. 2026): „Vlani rovnaké obdobie" bola príslovka nalepená na
+    // podstatné meno v nominatíve. Po slovensky je poradie opačné.
+    expect(markup).toContain('Rovnaké obdobie vlani');
     expect(markup).toContain('data-testid="performance-locked"');
   });
 

@@ -20,6 +20,14 @@
  * Pri pásmach sa v dominante kreslí ROZSAH (`15–30 %`), nie najvyššie
  * percento. Najvyššie percento by tvrdilo, že toľko dostali všetky produkty.
  *
+ * DOMINANTA JE NA OBRAZOVKE VŽDY, KEĎ EXISTUJE ASPOŇ JEDNA ZĽAVA (19. 8.
+ * 2026). Do tohto dátumu na čelo postúpila len zľava, ktorá sa zapisuje,
+ * prípadne prvá bežiaca. Keď boli všetky skončené — po prvej sezóne bežný
+ * stav — nemal tab dominantu žiadnu a percento sa nedalo prečítať nikde:
+ * obrazovka bola jeden zbalený rozklik. Tretím záchytom je preto posledná
+ * skončená zľava. Že skončila, hovorí veta stavu vedľa percenta; číslo sa
+ * kvôli tomu nezmenšuje, lebo dominanta obrazovky nie je odmena za aktivitu.
+ *
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
  *
@@ -42,10 +50,11 @@
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
 
-import BlockerList from '@/components/campaigns/BlockerList';
+import { StandPanel } from '@/components/campaigns/BlockerList';
 import DiscountState from '@/components/campaigns/DiscountState';
 import styles from '@/components/campaigns/zlavy.module.css';
 import {
+  featureDiscounts,
   orderDiscounts,
   progressPercent,
   sentenceOf,
@@ -176,7 +185,12 @@ function DiscountRowView({ row, today }: { row: DiscountRow; today?: string }) {
         {head.sub === null ? null : <span className={styles.pctSub}>{head.sub}</span>}
       </div>
 
-      <div className={styles.cName}>
+      {/*
+        Názov je jediná bunka riadku, ktorú appka reže na tri bodky (`.cName`
+        má `text-overflow`). `title` je preto povinný — bez neho sa dlhý názov
+        nedá dočítať inak než otvorením detailu.
+      */}
+      <div className={styles.cName} title={row.name}>
         <Link href={`/zlavy/${row.id}`}>{row.name}</Link>
       </div>
 
@@ -266,12 +280,12 @@ export function DiscountsList() {
       : orderDiscounts(rows);
 
   /*
-   * Na čele stojí zľava, ktorá sa práve zapisuje. Keď žiadna nezapisuje,
-   * postúpi prvá v poradí naliehavosti — obrazovka bez dominanty by porušila
-   * P1 a percento by sa nemalo kde ukázať.
+   * Kto stojí na čele, rozhoduje `featureDiscounts()` — je to pravidlo
+   * o dominante (P1) a musí sa dať overiť bez prehliadača. Obrazovka si tu
+   * nesmie dopísať vlastnú podmienku; dve rôzne pravidlá o tom istom sa raz
+   * rozídu a nebude vidieť, ktoré platí.
    */
-  const featured = ordered.leading ?? ordered.active[0] ?? null;
-  const rest = ordered.leading === null ? ordered.active.slice(1) : ordered.active;
+  const { featured, rest, finished } = featureDiscounts(ordered);
 
   const stand = queue === null ? null : queueStandSentence(queue.standing.reason);
   const writing = queue !== null && queue.standing.writing;
@@ -312,26 +326,15 @@ export function DiscountsList() {
       ) : null}
 
       {/* Prečo sa práve teraz nezapisuje — nad zoznamom, nie v logu.
-          Nie je to sekcia: kreslí sa len vtedy, keď niečo naozaj stojí. */}
-      {showStand && stand !== null ? (
-        <div data-testid="discounts-standing">
-          <Note
-            variant={stand.tone === 'critical' ? 'err' : stand.tone === 'idle' ? 'info' : 'warn'}
-          >
-            {stand.what} {stand.nextStep}
-            {stand.path === null ? null : (
-              <>
-                {' '}
-                <Link href={stand.path}>Otvoriť</Link>
-              </>
-            )}
-          </Note>
-          {alarming.length === 0 ? null : (
-            <div className="gap-t">
-              <BlockerList cards={alarming} title="Čo bráni zápisu" />
-            </div>
-          )}
-        </div>
+          Nie je to sekcia: kreslí sa len vtedy, keď niečo naozaj stojí.
+
+          Do 19. 8. 2026 to boli DVE farebné škatule pod sebou — vyplnený `Note`
+          so stojacou frontou a hneď pod ním `BlockerList` s vlastným nadpisom.
+          Nesú rôzne fakty, takže sa nesmú zliať do jednej vety, ale obe naraz
+          tlačili zoznam zliav pod prehyb. Je to tá istá chyba, akú mal detail
+          zľavy ako D16, preto to teraz kreslí ten istý `StandPanel`. */}
+      {showStand ? (
+        <StandPanel stand={stand} cards={alarming} testId="discounts-standing" />
       ) : null}
 
       {empty ? (
@@ -450,18 +453,18 @@ export function DiscountsList() {
       )}
 
       {/* Skončené — pod rozklikom, teda mimo počtu sekcií (P5). */}
-      {ordered.finished.length === 0 ? null : (
+      {finished.length === 0 ? null : (
         <details
           className={styles.fold}
           open={featured === null && rest.length === 0}
           data-testid="discounts-finished"
         >
-          <summary>Skončené ({formatCountSk(ordered.finished.length)})</summary>
+          <summary>Skončené ({formatCountSk(finished.length)})</summary>
           <div className={styles.foldBody}>
             <div className="zlist">
               <ListHeader />
               <div className={styles.listScroll}>
-                {ordered.finished.map((row) => (
+                {finished.map((row) => (
                   <DiscountRowView key={row.id} row={row} />
                 ))}
               </div>

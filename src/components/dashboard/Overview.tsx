@@ -14,12 +14,18 @@
  *      Kreslí sa LEN vtedy, keď niečo zastavuje alebo brzdí; inak mlčí a celou
  *      odpoveďou je zelená značka v stavovom pruhu (kontrakt, bod 3).
  *   3. ZĽAVY — vľavo čo beží, vpravo čo sa ponúka. `CampaignsSection`.
- *   4. PREDAJ — čo sa predáva. `SalesSection`.
+ *   4. PREDAJ — čo sa predáva. `SalesSection`. Sekciou je LEN vtedy, keď má
+ *      čísla; bez pokrytia je z nej jediný riadok (oprava D7), takže obrazovka
+ *      má v tom stave sekcie tri.
+ *
+ * Štyri je STROP, nie cieľ. P5 sa na tejto obrazovke neohýba a v zápisníku
+ * ohnutí v `ARCHITEKTURA.md` preto pre Prehľad NIE JE riadok. Kto sem pridá
+ * piatu kartu, musí ho dopísať — alebo niečo iné odtiaľto odobrať.
  *
  * Z pôvodných šiestich sekcií zmizli dve: „Živý stav" (opakoval štyri veci zo
  * stavového pruhu) a „Čaká na vás" (splynula so „Zľavami"). Prázdny stav
- * „Prvá zľava" už nie je sekcia — je to jedna veta a jedno tlačidlo vnútri
- * dominanty (bod 11).
+ * „Prvá zľava" už nie je sekcia — je to jedna tlmená veta na mieste čísel
+ * fronty a jedno tlačidlo v stĺpci akcií (bod 11, oprava D5).
  *
  * TVRDÁ HRANICA: Prehľad NIKDY neukazuje tabuľku produktov. Prehľad odpovedá
  * na „čo sa práve deje a ako sa darí"; „ktoré konkrétne kusy" patrí do

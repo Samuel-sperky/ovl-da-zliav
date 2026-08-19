@@ -30,6 +30,14 @@
  *    pohľad, vysvetlivka je DÔSLEDOK („produkty, ktoré ešte nie sú načítané, sa
  *    zatiaľ vybrať nedajú"). Kto by z dlaždíc urobil vety, dostane dva texty,
  *    ktoré sa raz rozídu.
+ * 3a. **`catalog_incomplete` sa TU nekreslí** (D4, od 19. 8. 2026). Je to jediná
+ *    prekážka, ktorú karta hovorí sama a úplnejšie: pilulka povie, čo sa
+ *    s načítaním deje, dlaždice koľko z koľkých a dokedy, a tlačidlo na ďalšiu
+ *    dávku stojí hneď vedľa. Prekážka k tomu pridávala TRETIU kópiu tej istej
+ *    vety (pilulka → žltý pás → prázdna tabuľka) a radu „spustite načítanie
+ *    katalógu v Produktoch" na obrazovke Produkty. Zoznam
+ *    `CATALOG_PANEL_BLOCKERS` sa NEMENÍ: je to zároveň zoznam toho, čo bočný
+ *    panel jedného kusu zahadzuje, a tam prekážka patrí ďalej.
  * 4. **Merací prúžok je len na ROZPOČET.** Meria sa ním spotreba čítaní (30/min
  *    a 300/deň bez kľúča), nikdy naplnenosť katalógu: pri katalógu je 100 %
  *    hotová práca, pri rozpočte vyčerpaný strop, a `BudgetMeter` by na dokončený
@@ -40,12 +48,14 @@
  * Vlastník: V10.
  */
 import BlockerNotes from '@/components/products/BlockerNotes';
+import CatalogTiles, { type CatalogTile } from '@/components/products/CatalogTiles';
 import type { CatalogRunView, CatalogStatusView } from '@/components/products/catalog-status';
 import {
   CATALOG_PANEL_BLOCKERS,
   catalogStateView,
   catalogWaitingNote,
   clockPhrase,
+  dropBlockers,
   finishTile,
   loadedTile,
   missingTile,
@@ -55,10 +65,16 @@ import {
 } from '@/components/products/catalog-status';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Note from '@/components/ui/Note';
-import StatTile from '@/components/ui/StatTile';
 import StatusPill from '@/components/ui/StatusPill';
-import type { Blocker } from '@/lib/status/blockers';
+import type { Blocker, BlockerId } from '@/lib/status/blockers';
 import { SURFACE_TERMS } from '@/lib/ui/vocabulary';
+
+/**
+ * Prekážky, ktoré karta povie sama a lepšie — pozri bod 3a v hlavičke. Nie je
+ * to zoznam „nepodstatných" prekážok: je to zoznam tých, ktoré by na TEJTO
+ * karte boli druhou kópiou vlastného obsahu.
+ */
+const SAID_BY_THE_CARD: readonly BlockerId[] = ['catalog_incomplete'];
 
 /* ═══════════════════════════ 1. Vstupy ════════════════════════════════════ */
 
@@ -93,7 +109,18 @@ export function CatalogStatusPanel({
   const finish = finishTile(status);
   const waiting = catalogWaitingNote(status);
   const run = lastRun === null ? null : runOutcomeNote(lastRun);
-  const panelBlockers = pickBlockers(blockers, CATALOG_PANEL_BLOCKERS);
+  const panelBlockers = dropBlockers(
+    pickBlockers(blockers, CATALOG_PANEL_BLOCKERS),
+    SAID_BY_THE_CARD,
+  );
+
+  /** Štyri dlaždice v poradí otázok: koľko · koľko chýba · kedy · dokedy. */
+  const tiles: readonly CatalogTile[] = [
+    { label: 'Načítaných z katalógu', view: loaded, testId: 'catalog-tile-loaded' },
+    { label: 'Zatiaľ chýba', view: missing, testId: 'catalog-tile-missing' },
+    { label: 'Ďalšia dávka', view: nextBatch, testId: 'catalog-tile-next' },
+    { label: 'Katalóg bude celý', view: finish, testId: 'catalog-tile-finish' },
+  ];
 
   const reads = status?.reads ?? null;
   // Strop čítaní sa obnovuje o polnoci UTC, nie o lokálnej — `resetAt` z route
@@ -147,32 +174,7 @@ export function CatalogStatusPanel({
         )}
       </div>
 
-      <div className="kpis">
-        <StatTile
-          label="Načítaných z katalógu"
-          value={loaded.value}
-          detail={loaded.detail}
-          testId="catalog-tile-loaded"
-        />
-        <StatTile
-          label="Zatiaľ chýba"
-          value={missing.value}
-          detail={missing.detail}
-          testId="catalog-tile-missing"
-        />
-        <StatTile
-          label="Ďalšia dávka"
-          value={nextBatch.value}
-          detail={nextBatch.detail}
-          testId="catalog-tile-next"
-        />
-        <StatTile
-          label="Katalóg bude celý"
-          value={finish.value}
-          detail={finish.detail}
-          testId="catalog-tile-finish"
-        />
-      </div>
+      <CatalogTiles tiles={tiles} />
 
       {failed ? (
         <div style={{ marginTop: '8px' }}>

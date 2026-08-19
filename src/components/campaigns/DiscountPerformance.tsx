@@ -15,9 +15,20 @@
  *   · mockup ukazuje porovnanie s vlaňajškom — synchronizácia predajov si
  *     okno dopĺňa postupne a rok dozadu nesiaha.
  *
- * Oba panely sú preto ZAMKNUTÉ a povedia prečo — rovnako ako zamknuté filtre
- * v Produktoch. Tretí panel ukazuje to, čo appka naozaj vie: kusy za okno
- * dlhé ako zľava, proti rovnako dlhému oknu tesne pred ním.
+ * Oba uhly sú preto ZAMKNUTÉ a povedia prečo — rovnako ako zamknuté filtre
+ * v Produktoch. Tretí ukazuje to, čo appka naozaj vie: kusy za okno dlhé ako
+ * zľava, proti rovnako dlhému oknu tesne pred ním.
+ *
+ * TRI KARTY SÚ ODTERAZ JEDNA A DVA RIADKY (D17, 19. 8. 2026)
+ * ---------------------------------------------------------
+ * Do 19. 8. boli všetky tri uhly rovnako veľké orámované karty vedľa seba a
+ * pri prázdnych dátach hovorili to isté trikrát: „dáta nie sú". Sekcia
+ * zaberala tretinu obrazovky, aby oznámila, že nemá čo povedať. Odteraz sú to
+ * dve rôzne veci: **čísla, ktoré appka má** (hore, bez vlastného rámu — nadpis
+ * sekcie ich už pomenoval) a **dva tiché riadky o tom, čo nemá** (dole).
+ * Nič sa neskrylo: zamknutý uhol naďalej povie svoj dôvod, len prestal
+ * vyzerať ako karta s dátami. Keby sa niektorý uhol raz odomkol, vráti sa
+ * hore k číslam — nie sem.
  *
  * Žiadny záver o príčine (P8): dve čísla vedľa seba, nikdy veta „zľava
  * priniesla +18 %". Sezónu od vplyvu zľavy appka oddeliť nevie.
@@ -39,11 +50,15 @@ function Bar({ units, max, strong }: { units: number; max: number; strong?: bool
   );
 }
 
-function LockedPanel({ title, reason }: { title: string; reason: string }) {
+/**
+ * Uhol, ktorý appka nemá — jeden riadok: názov a dôvod. Nie karta: karta
+ * sľubuje čísla a tu žiadne nie sú a ani nebudú, kým shop nedá viac (D17).
+ */
+function LockedAngle({ name, reason }: { name: string; reason: string }) {
   return (
-    <div className={`${styles.perfPanel} ${styles.perfLocked}`} data-testid="performance-locked">
-      <div className={styles.perfTitle}>{title}</div>
-      <p className="lvl-3">{reason}</p>
+    <div className={styles.perfLockedRow} data-testid="performance-locked">
+      <span className={styles.perfLockedName}>{name}</span>
+      <span className="lockline">{reason}</span>
     </div>
   );
 }
@@ -77,44 +92,48 @@ export function DiscountPerformance({ id }: { id: number }) {
         </div>
       </div>
 
-      <div className={styles.perfGrid}>
-        <div className={styles.perfPanel} data-testid="performance-units">
-          <div className={styles.perfTitle}>Pred zľavou a teraz</div>
-          {failed ? (
-            <p className="lvl-3">Čísla sa nepodarilo načítať.</p>
-          ) : view === null ? (
-            <p className="lvl-3">Načítavam…</p>
-          ) : recent === null ? (
-            /* Nula by tvrdila „nepredalo sa nič". Pomlčka tvrdí „nevieme". */
-            <p className="lvl-3">
-              Za toto obdobie zatiaľ nemáme dáta o predaji
-              {view.coverage.from === null ? '.' : ` — máme ich od ${formatDateSk(view.coverage.from)}.`}
-            </p>
-          ) : (
-            <div className={styles.perfPair}>
-              <span>
-                {formatDateSk(view.recent.from)} – {formatDateSk(view.recent.to)}
-              </span>
-              <Bar units={recent} max={max} />
-              <span className={styles.perfValue}>{formatCountSk(recent)} ks</span>
+      {/* Čísla, ktoré appka naozaj má. Nadpis sekcie ich už pomenoval, takže
+          vlastný nadpis ani rám nepotrebujú. */}
+      <div data-testid="performance-units">
+        {failed ? (
+          <p className="lvl-3">Čísla sa nepodarilo načítať.</p>
+        ) : view === null ? (
+          <p className="lvl-3">Načítavam…</p>
+        ) : recent === null ? (
+          /* Nula by tvrdila „nepredalo sa nič". Pomlčka tvrdí „nevieme". */
+          <p className="lvl-3">
+            Za toto obdobie zatiaľ nemáme dáta o predaji
+            {view.coverage.from === null ? '.' : ` — máme ich od ${formatDateSk(view.coverage.from)}.`}
+          </p>
+        ) : (
+          <div className={styles.perfPair}>
+            <span>
+              {formatDateSk(view.recent.from)} – {formatDateSk(view.recent.to)}
+            </span>
+            <Bar units={recent} max={max} />
+            <span className={styles.perfValue}>{formatCountSk(recent)} ks</span>
 
-              <span>
-                {formatDateSk(view.prior.from)} – {formatDateSk(view.prior.to)}
-              </span>
-              {prior === null ? <span /> : <Bar units={prior} max={max} strong />}
-              <span className={styles.perfValue}>
-                {prior === null ? '—' : `${formatCountSk(prior)} ks`}
-              </span>
-            </div>
-          )}
-        </div>
+            <span>
+              {formatDateSk(view.prior.from)} – {formatDateSk(view.prior.to)}
+            </span>
+            {prior === null ? <span /> : <Bar units={prior} max={max} strong />}
+            <span className={styles.perfValue}>
+              {prior === null ? '—' : `${formatCountSk(prior)} ks`}
+            </span>
+          </div>
+        )}
+      </div>
 
-        <LockedPanel
-          title="Tržby"
+      {/* Čo appka nemá — dva tiché riadky, nie dve prázdne karty (D17). */}
+      <div className={styles.perfLocked}>
+        <LockedAngle
+          name="Tržby"
           reason={view?.locked.revenue ?? 'Tržby v eurách shop cez API nevracia.'}
         />
-        <LockedPanel
-          title="Vlani rovnaké obdobie"
+        {/* D18 — „Vlani rovnaké obdobie" bola príslovka nalepená na podstatné
+            meno. Po slovensky sa to povie opačne. */}
+        <LockedAngle
+          name="Rovnaké obdobie vlani"
           reason={view?.locked.lastYear ?? 'Predaje zatiaľ rok dozadu nesiahajú.'}
         />
       </div>

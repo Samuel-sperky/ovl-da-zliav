@@ -271,6 +271,21 @@
   margin-left: auto;
 }
 
+/*
+ * D14 — prázdny stav ako JEDEN RIADOK. Predtým to bola vycentrovaná karta
+ * s ~300 px ničoho v ľavom stĺpci. Veta a tlačidlo zostávajú jedno a jedno
+ * (kontrakt UI, bod 11), len prestali stáť v prázdnej škatuli.
+ */
+.nzEmpty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 /* Tabuľka pásiem — hustá, bez rámu, s pravými číslami. */
 .tiers {
   width: 100%;
@@ -436,6 +451,22 @@
   display: block;
 }
 
+/*
+ * D11 — dominanta, ktorú appka NEVIE. Pravidlo „pomlčka, nikdy nula" platí,
+ * ale em pomlčka v 64 px a reze 660 nie je znak, je to čierny obdĺžnik: karta
+ * potvrdenia potom vyzerá ako chyba vykreslenia. Preto tu `.big` NIE JE — je
+ * to vlastný, čitateľný stupeň, v ktorom pomlčka ešte vyzerá ako pomlčka a
+ * stojí pri nej slovo. Nikdy sem nedávaj 64 px.
+ */
+.unknown {
+  display: block;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--dim);
+}
+
 .center {
   justify-content: center;
 }
@@ -450,24 +481,61 @@
   border-top: 1px solid var(--line);
 }
 
-.typein {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 10px;
-  flex-wrap: wrap;
+/* Prekážky v karte rozhodnutia (D13) — nie vlastná karta vedľa. */
+.confirmObstacles {
+  margin-top: 11px;
 }
 
-.typein :global(.inp.big) {
-  width: 150px;
+/* Krok 1 — skúška naprázdno. Celá šírka, aby kroky išli pod sebou. */
+.stepDry {
+  margin-top: 11px;
+}
+
+.wide {
+  width: 100%;
+  justify-content: center;
+}
+
+/*
+ * D12 — ručne vpísaný počet je povrchová podoba I3, takže je to najťažší
+ * prvok spodku karty: vlastný rám, vlastné pozadie a číslo väčšie než text
+ * ktoréhokoľvek tlačidla. Do 19. 8. 2026 to bolo úzke políčko vedľa popisku,
+ * zatiaľ čo plné teal tlačidlo hneď pod ním kričalo viac než poistka. Váhu nesie
+ * rám a veľkosť čísla, NIE farba: `--accent` patí akcii a aktívnemu stavu, stav
+ * potvrdenia ním kodovať nesmieme (vlna F). Čo je zamknuté a prečo, hovorí
+ * výhradne `blockedReason`.
+ */
+.gate {
+  margin-top: 11px;
+  padding: 11px 12px 12px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  background: var(--paper);
+  text-align: center;
+}
+
+.gateLabel {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
+  margin-bottom: 7px;
+}
+
+.gate :global(.inp).gateInput {
+  width: 100%;
+  max-width: 220px;
+  padding: 9px 12px;
+  font-size: 28px;
+  font-weight: 660;
+  letter-spacing: -0.02em;
   text-align: center;
 }
 
 .acts {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 11px;
 }
 
 .acts :global(.btn) {
@@ -599,6 +667,11 @@
   border-left-color: var(--st-good);
 }
 
+/* Dôvod, prečo fronta stojí, sa kľúčuje tónom — má aj `progress` (D16). */
+.blocker[data-tone='progress'] {
+  border-left-color: var(--st-progress);
+}
+
 .blockerGlyph {
   font-size: 12px;
   line-height: 1.5;
@@ -611,6 +684,14 @@
 
 .blocker[data-tone='critical'] .blockerGlyph {
   color: var(--st-critical);
+}
+
+.blocker[data-tone='progress'] .blockerGlyph {
+  color: var(--st-progress);
+}
+
+.blocker[data-tone='good'] .blockerGlyph {
+  color: var(--st-good);
 }
 
 .blockerBody {
@@ -682,6 +763,77 @@
   .scopeNumbers {
     grid-template-columns: 1fr;
   }
+}
+
+/* ───────────────── priebeh fronty: pruh a jeho legenda (D15) ──────────── */
+
+/*
+ * Pruh je rozdelený na tie isté štyri stavy, aké majú dlaždice pod ním —
+ * preto sú dlaždice legendou pruhu a nie druhým zoznamom tých istých čísel.
+ * Farby sú výhradne zo stavovej škály; `--accent` sem nepatrí, ten kóduje
+ * akciu, nie stav.
+ */
+.queueBar {
+  display: flex;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.queueBar i {
+  display: block;
+  height: 100%;
+}
+
+.queueBar i[data-state='ok'] {
+  background: var(--st-good);
+}
+
+.queueBar i[data-state='uncertain'] {
+  background: var(--st-attention);
+}
+
+.queueBar i[data-state='failed'] {
+  background: var(--st-critical);
+}
+
+.queueBar i[data-state='pending'] {
+  background: var(--st-progress);
+}
+
+/* Dlaždice nadväzujú priamo na pruh — je to jeden útvar, nie dva. */
+.queueTiles {
+  margin-top: 8px;
+}
+
+/*
+ * Prúžok stavu na dlaždici. `data-any='nie'` = číslo je nula, teda niet čo
+ * hlásiť: červený prúžok nad nulou zlyhaní by bol falošný poplach. Farba je
+ * tretí kanál — glyf a slovo sú v popisku dlaždice.
+ */
+.queueTile {
+  background: var(--paper2);
+  border-left: 3px solid transparent;
+  min-width: 0;
+}
+
+.queueTile[data-any='ano'][data-state='ok'] {
+  border-left-color: var(--st-good);
+}
+
+.queueTile[data-any='ano'][data-state='pending'] {
+  border-left-color: var(--st-progress);
+}
+
+.queueTile[data-any='ano'][data-state='failed'] {
+  border-left-color: var(--st-critical);
+}
+
+.queueTile[data-any='ano'][data-state='uncertain'] {
+  border-left-color: var(--st-attention);
 }
 
 /* ───────────────── poznámka pod akciou (štart, fronta, opakovanie) ─────── */
@@ -848,33 +1000,35 @@
   }
 }
 
-/* ═══════════════ Výkon výberu — tri uhly vedľa seba (§1 TAB 3) ═══════════ */
+/* ═══════════════ Výkon výberu — čísla hore, zámky dole (§1 TAB 3, D17) ═══ */
 
-.perfGrid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-
-.perfPanel {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 12px;
-  background: var(--paper2);
-}
-
-/* Zamknutý panel je tlmený, ale ČITATEĽNÝ — má povedať dôvod, nie zmiznúť. */
+/*
+ * Zamknuté uhly sú DVA RIADKY pod číslami, nie dve karty vedľa nich. Karta
+ * sľubuje dáta; tieto dva uhly žiadne nemajú a mať nebudú, kým shop nedá viac.
+ * Tlmené, ale ČITATEĽNÉ — majú povedať dôvod, nie zmiznúť.
+ */
 .perfLocked {
-  background: transparent;
-  border-style: dashed;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
-.perfTitle {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink3);
-  margin-bottom: 8px;
+.perfLockedRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.perfLockedName {
+  flex: 0 0 auto;
+  min-width: 148px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink2);
 }
 
 .perfPair {
@@ -910,8 +1064,9 @@
   white-space: nowrap;
 }
 
-@media (max-width: 1000px) {
-  .perfGrid {
-    grid-template-columns: 1fr;
+/* Na užšom okne (~720 px) sa názov zamknutého uhla zalomí nad svoj dôvod. */
+@media (max-width: 760px) {
+  .perfLockedName {
+    min-width: 0;
   }
 }

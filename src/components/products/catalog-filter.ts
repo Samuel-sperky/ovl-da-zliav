@@ -47,8 +47,17 @@ export const SOLD_WINDOWS = [30, 60, 90, 180, 360] as const;
 
 export type SoldWindow = (typeof SOLD_WINDOWS)[number];
 
-/** Stránkovanie po 50 alebo 100 riadkoch (architektúra §1). */
-export const PER_PAGE_CHOICES = [50, 100] as const;
+/**
+ * Stránkovanie po 50, 100 alebo 200 riadkoch (architektúra §1; tretia možnosť
+ * pribudla 19. 8. 2026 s D10).
+ *
+ * Dôvod je zmeraný, nie odhadnutý: katalóg má 41 220 riadkov, čo je po 50
+ * riadkoch 825 strán a po 200 riadkoch 207. Strop 200 nie je vec vkusu — je to
+ * `max(200)` z `GET /api/catalog/search`, väčšiu dávku by route odmietla.
+ * Predvolených zostáva 50: tabuľka skroluje vo vlastnom ráme (P4) a 200 je
+ * voľba pre toho, kto vyberá hromadne, nie pre toho, kto obrazovku otvoril.
+ */
+export const PER_PAGE_CHOICES = [50, 100, 200] as const;
 
 export type PerPage = (typeof PER_PAGE_CHOICES)[number];
 

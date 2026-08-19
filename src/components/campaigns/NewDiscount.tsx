@@ -5,10 +5,14 @@
  * architektúra §2, kontrakt V3 K1–K8, invarianty I3, I9, I11; kontrakt UI,
  * bod 24).
  *
- * Jedna obrazovka, TRI sekcie, dva stĺpce:
+ * Jedna obrazovka, najviac TRI sekcie, dva stĺpce:
  *
  *   VÝBER PRODUKTOV      ·  ZÁPIS A POTVRDENIE
  *   PÁSMA A OKNO         ·  (dominanta: koľko produktov zlacnie)
+ *
+ * Pri prázdnom výbere sú sekcie DVE: pásma a okno sa nekreslia vôbec a prázdny
+ * stav je jeden riadok v sekcii výberu (D14, 19. 8. 2026). Prekážky vlastnú
+ * kartu nemajú — sú v karte rozhodnutia, ktoré blokujú (D13).
  *
  * Prečo je to jedna obrazovka a nie sprievodca: rozhodnutie „zlacniť 8 000
  * ležiakov" nemá tri nezávislé kroky. Počet produktov, percentá a dátum štartu
@@ -74,7 +78,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import BlockerList, { BlockerRules } from '@/components/campaigns/BlockerList';
+import { BlockerRules } from '@/components/campaigns/BlockerList';
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import NewDiscountStart from '@/components/campaigns/NewDiscountStart';
 import ScopeRelease from '@/components/campaigns/ScopeRelease';
@@ -124,7 +128,6 @@ import {
   type StatusPayload,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
-import EmptyState from '@/components/ui/EmptyState';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import {
   SOLD_WINDOWS,
@@ -839,6 +842,30 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               </div>
             )}
 
+            {/*
+             * D14 — prázdny stav je JEDEN RIADOK v tejto karte, nie druhá
+             * karta pod ňou. Do 19. 8. 2026 mala sekcia pásiem pri prázdnom
+             * katalógu na svojom mieste vycentrovaný prázdny stav a s ním
+             * ~300 px ničoho: obrazovka pýtala rozhodnutie a pol ľavého
+             * stĺpca bolo prázdnych. Veta a tlačidlo zostávajú presne jedno
+             * a jedno (kontrakt UI, bod 11), len prestali potrebovať kartu.
+             */}
+            {emptySelection ? (
+              <div className={styles.nzEmpty} data-testid="new-discount-empty">
+                <span className="lvl-2">
+                  {catalogEmpty
+                    ? 'Zatiaľ nie je čo zlacniť — katalóg ešte nie je načítaný.'
+                    : 'Zatiaľ nie je čo zlacniť — filtru nevyhovuje ani jeden produkt.'}
+                </span>
+                <Link
+                  className={`btn primary sm ${styles.pushRight}`}
+                  href={`/produkty?${catalogSearchQuery(filter)}`}
+                >
+                  Otvoriť Produkty
+                </Link>
+              </div>
+            ) : null}
+
             <div className="fresh">
               {dataAsOf === null
                 ? 'Katalóg zatiaľ nie je načítaný'
@@ -846,36 +873,18 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
             </div>
           </section>
 
-          {/* SEKCIA 2 — PÁSMA A OKNO PLATNOSTI */}
-          <section className="sec" data-testid="new-discount-tiers">
-            <div className="sec-h">
-              <h2>Pásma a okno platnosti</h2>
-              {/* Pri prázdnom výbere vedie von JEDNO tlačidlo prázdneho stavu. */}
-              {emptySelection ? null : (
+          {/* SEKCIA 2 — PÁSMA A OKNO PLATNOSTI. Bez výberu sa nekreslí vôbec. */}
+          {emptySelection ? null : (
+            <section className="sec" data-testid="new-discount-tiers">
+              <div className="sec-h">
+                <h2>Pásma a okno platnosti</h2>
                 <div className="act">
                   <Link className="lvl-3" href={`/produkty?${catalogSearchQuery(filter)}`}>
                     Upraviť výber v Produktoch
                   </Link>
                 </div>
-              )}
-            </div>
+              </div>
 
-            {emptySelection ? (
-              <EmptyState
-                title="Zatiaľ nie je čo zlacniť"
-                description={
-                  catalogEmpty
-                    ? 'Katalóg ešte nie je načítaný.'
-                    : 'Filtru nevyhovuje ani jeden produkt.'
-                }
-                action={
-                  <Link className="btn primary sm" href={`/produkty?${catalogSearchQuery(filter)}`}>
-                    Otvoriť Produkty
-                  </Link>
-                }
-                testId="new-discount-empty"
-              />
-            ) : (
               <>
                 <table className={styles.tiers}>
                   <thead>
@@ -1038,30 +1047,25 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                 </div>
                 )}
               </>
-            )}
-          </section>
+            </section>
+          )}
         </div>
 
         {/* ── PRAVÝ STĹPEC ────────────────────────────────────────────── */}
         <div className={styles.nzCol}>
-          {alarming.length === 0 ? null : (
-            <section className="sec" data-testid="new-discount-blockers">
-              <div className="sec-h">
-                <h2>Čo teraz stojí v ceste</h2>
-              </div>
-              <BlockerList cards={alarming} />
-            </section>
-          )}
-
           {/*
-           * SEKCIA 3 — ROZHODNUTIE. Dominanta (počet produktov) a pod ňou dva
-           * dátumy zo `NewDiscountStart`; medzikroky výpočtu sú v jeho rozkliku.
+           * SEKCIA 2 (v pravom stĺpci) — ROZHODNUTIE. Dominanta (počet
+           * produktov) a pod ňou dva dátumy zo `NewDiscountStart`; medzikroky
+           * výpočtu sú v jeho rozkliku. Od 19. 8. 2026 sem patria aj prekážky
+           * (D13): mali vlastnú kartu vedľa, hoci to isté hlásil stavový pruh
+           * nad obrazovkou. Prekážka patrí k rozhodnutiu, ktoré blokuje.
            */}
           <NewDiscountConfirm
             itemsCount={itemsCount}
             countKnown={!(catalogEmpty && itemsCount === 0)}
             tiers={tiers}
             averagePrice={avgPrice}
+            obstacles={alarming}
             plan={
               <NewDiscountStart
                 itemsCount={itemsCount}

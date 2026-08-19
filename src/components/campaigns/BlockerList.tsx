@@ -35,7 +35,9 @@ import {
   RESOLUTION_TONE,
   RESOLUTION_WORD,
   type BlockerCard,
+  type StandSentence,
 } from '@/components/campaigns/queue-model';
+import { TONE_GLYPH } from '@/components/ui/ToneBadge';
 import { formatDateTimeSk } from '@/lib/ui/format';
 
 /** Kam vedie prekážka — popis odkazu podľa cesty, nikdy podľa kódu. */
@@ -98,6 +100,77 @@ export function BlockerRow({ card, testId }: BlockerRowProps) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Riadok o tom, prečo fronta stojí.
+ *
+ * Býval to vyplnený farebný `Note`, kým `BlockerList` vedľa neho kreslil
+ * vlastný rámik s nadpisom — obrazovka tak mala DVA poplachy tam, kde je jeden
+ * dôvod (D16 na detaile, tá istá chyba na zozname). Fakty sa nesmú zliať do
+ * jednej vety, lebo sú to naozaj dve rôzne veci, ale patria do jedného rámu.
+ *
+ * Býva to tu, a nie v každej obrazovke zvlášť, preto, že sa to už raz
+ * rozišlo. Detail aj zoznam teraz kreslia ten istý útvar.
+ */
+export function StandRow({ stand, testId }: { stand: StandSentence; testId?: string }) {
+  return (
+    <div
+      className={styles.blocker}
+      data-tone={stand.tone}
+      data-testid={testId}
+      role={stand.tone === 'critical' ? 'alert' : 'status'}
+    >
+      <span className={styles.blockerGlyph} aria-hidden="true">
+        {TONE_GLYPH[stand.tone]}
+      </span>
+      <div className={styles.blockerBody}>
+        <div className={styles.blockerWhat}>{stand.what}</div>
+        <div className={styles.blockerStep}>
+          {stand.nextStep}
+          {stand.path === null ? null : (
+            <>
+              {' '}
+              <Link href={stand.path}>{pathLabel(stand.path)}</Link>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Jeden rám pre všetko, čo bráni zápisu — stojaca fronta aj prekážky.
+ *
+ * Kreslí sa len vtedy, keď je čo povedať; prázdny rám by bol tvrdenie, že
+ * niečo stojí.
+ */
+export function StandPanel({
+  stand,
+  cards,
+  testId,
+  className,
+}: {
+  stand: StandSentence | null;
+  cards: readonly BlockerCard[];
+  testId?: string;
+  className?: string;
+}) {
+  if (stand === null && cards.length === 0) return null;
+
+  return (
+    <div
+      className={className === undefined ? styles.blockers : `${styles.blockers} ${className}`}
+      data-testid={testId}
+    >
+      <div className={styles.blockersTitle}>Prečo sa teraz nezapisuje</div>
+      {stand === null ? null : <StandRow stand={stand} testId="detail-stand" />}
+      {cards.map((card) => (
+        <BlockerRow key={card.id} card={card} />
+      ))}
     </div>
   );
 }
