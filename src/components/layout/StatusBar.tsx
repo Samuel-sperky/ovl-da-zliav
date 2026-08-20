@@ -144,11 +144,26 @@ function WhyDash({ chips }: { chips: readonly StatusChip[] }) {
   );
 }
 
+/**
+ * Kde sa pruh kreslí — a teda ktoré fakty nesie.
+ *
+ * Kostra z 19. 8. 2026 rozdelila chróm: prevádzkové fakty, ktoré sa menia
+ * počas práce (zápisy, katalóg), zostali v topbare nad obsahom. Trvalé
+ * fakty (dokedy platí kľúč, koľko zápisov dnes ostáva) odišli do päty
+ * ľavého panela, lebo to nie sú správy, ale stav nástroja — a v topbare
+ * spôsobovali, že sa štyri menovky na 1280 px navzájom odsekli.
+ *
+ * Je to JEDEN komponent a JEDNO čítanie stavu. Dve kópie pruhu by sa raz
+ * rozišli a appka by o tom istom fakte hovorila na dvoch miestach inak.
+ */
+export type StatusPlace = 'topbar' | 'side' | 'all';
+
 export interface StatusBarProps {
   state: StatusState;
+  place?: StatusPlace;
 }
 
-export function StatusBar({ state }: StatusBarProps) {
+export function StatusBar({ state, place = 'all' }: StatusBarProps) {
   // Bod 4: bez známeho stavu jedna pilulka a jedna veta prečo — a tlačidlo.
   if (state.kind !== 'ok' || state.payload === null) {
     const connection = connectionChip(state);
@@ -171,12 +186,15 @@ export function StatusBar({ state }: StatusBarProps) {
   }
 
   const payload = state.payload;
-  const facts: readonly { chip: StatusChip; testId: string }[] = [
-    { chip: writesChip(payload), testId: 'status-writes' },
-    { chip: keyChip(payload), testId: 'status-key' },
-    { chip: budgetChip(payload), testId: 'status-budget' },
-    { chip: catalogChip(payload), testId: 'status-catalog' },
+  /* `side` nesie trvalé fakty, `topbar` prevádzkové. Poradie sa nemení —
+     je súčasťou zvyku a mení sa len to, čo sa vynechá. */
+  const all: readonly { chip: StatusChip; testId: string; where: StatusPlace }[] = [
+    { chip: writesChip(payload), testId: 'status-writes', where: 'topbar' },
+    { chip: keyChip(payload), testId: 'status-key', where: 'side' },
+    { chip: budgetChip(payload), testId: 'status-budget', where: 'side' },
+    { chip: catalogChip(payload), testId: 'status-catalog', where: 'topbar' },
   ];
+  const facts = place === 'all' ? all : all.filter((f) => f.where === place);
   const dashes = facts.map((fact) => fact.chip).filter((chip) => chip.unknown === true);
 
   return (
@@ -188,7 +206,7 @@ export function StatusBar({ state }: StatusBarProps) {
           ))}
         </div>
         {dashes.length === 0 ? null : <WhyDash chips={dashes} />}
-        <Tail state={state} />
+        {place === 'side' ? null : <Tail state={state} />}
       </div>
     </section>
   );

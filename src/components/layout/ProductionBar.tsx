@@ -29,9 +29,24 @@ export function ProductionBar() {
       ? domain.replace(/^https:\/\//, '')
       : 'doména zatiaľ nenastavená';
 
+  /*
+   * ŠTÍTOK, NIE PÁS (kostra 19. 8. 2026).
+   *
+   * Do 19. 8. to bol pás cez celú šírku s vetou „každý zápis ide do ostrého
+   * shopu". V jednoriadkovom topbare zaberal ~440 px a odsekával menovky stavu
+   * vedľa seba — „Katalóg 41 220" sa skrátil na „Katalóg 41".
+   *
+   * Čo zostalo a je bezpečnostne podstatné: štítok je na KAŽDEJ obrazovke,
+   * NEDÁ SA zavrieť, je červený, má role="alert" a MENUJE DOMÉNU, do ktorej sa
+   * zapíše. Vymyslenú doménu nezobrazí nikdy.
+   *
+   * Čo sa presunulo: dôsledok („každý zápis ide do ostrého shopu") je v title.
+   * Nie je to strata — tá istá veta stojí celá na obrazovke potvrdenia zápisu,
+   * teda presne tam, kde na nej záleží.
+   */
   return (
-    <div className="ovl-production-bar" role="alert" data-testid="production-bar">
-      PRODUKCIA{loaded ? <> — <code>{label}</code></> : null} · každý zápis ide do ostrého shopu
+    <div className="ovl-production-bar" role="alert" title="Každý zápis ide do ostrého shopu." data-testid="production-bar">
+      PRODUKCIA{loaded ? <> · <code>{label}</code></> : null}
     </div>
   );
 }

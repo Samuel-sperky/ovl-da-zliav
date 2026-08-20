@@ -12,7 +12,7 @@
  * Nič iné do chrómu nepatrí — žiadne vyhľadávanie, žiadne notifikácie, žiadne
  * stavové badge (ARCHITEKTURA §0) a žiadny druhý nositeľ toho istého faktu.
  *
- * Celý chróm skladá `components/layout/AppHeader.tsx`, aby stav appky čítal
+ * Celý chróm skladá `components/layout/AppShell.tsx`, aby stav appky čítal
  * jeden dotaz pre celý shell. Čísla sa NEOBNOVUJÚ samy — obnoví ich tlačidlo
  * v stavovom pruhu (`components/layout/refresh.ts`).
  *
@@ -42,10 +42,9 @@ import type { Metadata } from 'next';
 import '@fontsource-variable/inter/wght.css';
 import '@fontsource-variable/inter/wght-italic.css';
 
-import AppHeader from '@/components/layout/AppHeader';
-import ProductionBar from '@/components/layout/ProductionBar';
+import AppShell from '@/components/layout/AppShell';
 import { THEME_BOOTSTRAP_SCRIPT } from '@/components/layout/theme';
-import { APP_DISPLAY_NAME, APP_VERSION } from '@/version';
+import { APP_DISPLAY_NAME } from '@/version';
 
 import './globals.css';
 
@@ -62,14 +61,7 @@ export default function RootLayout({
     <html lang="sk" suppressHydrationWarning>
       <body>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
-        <ProductionBar />
-        <AppHeader />
-        <main className="wrap">{children}</main>
-        <footer className="ovl-footer">
-          Aura Zľavy v{APP_VERSION} · beží výhradne lokálne na{' '}
-          <code>127.0.0.1:3070</code> · stavy zliav sú „posledný vlastný zápis“,
-          nie stav shopu
-        </footer>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

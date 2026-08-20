@@ -28,7 +28,7 @@
  *    vie. Appka zapisuje do produkčného shopu — vymyslené číslo by tu bolo
  *    tvrdenie, nie medzera.
  * 2. **Stav sa sem POSIELA, neťahá.** Hlavička aj pruh stoja na jednom čítaní
- *    `/api/status`, ktoré robí `AppHeader`. Vlastné čítanie by znamenalo druhý
+ *    `/api/status`, ktoré robí `AppShell`. Vlastné čítanie by znamenalo druhý
  *    dotaz na tú istú vec — a druhú predstavu o tom, čo je pravda.
  *
  * Vlastník: L1.
@@ -66,7 +66,7 @@ function QueueLink({ done, total }: { done: number | null; total: number | null 
 }
 
 export interface HeaderRightProps {
-  /** Stav appky z jediného čítania, ktoré robí `AppHeader`. */
+  /** Stav appky z jediného čítania, ktoré robí `AppShell`. */
   state: StatusState;
 }
 
