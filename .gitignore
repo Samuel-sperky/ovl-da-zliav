@@ -1,0 +1,52 @@
+# Aura Zľavy — .gitignore
+# Invariant I1: žiadne tajomstvo sa NESMIE dostať do repozitára.
+
+# Tajomstvá a kľúče (I1, D61, D89, D97)
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.hash
+*.pem
+*.crt
+
+# Zálohy (D90) — obsahujú DB dump
+backups/
+
+# Node / Next
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Testy a nástroje
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Editory a OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logy
+*.log
+npm-debug.log*
+
+# Vizuálne snímky UI — generovaný artefakt (Playwright proti mock shopu),
+# nie zdroj. Regenerujú sa na požiadanie, do repa nepatria (2,5 MB a starnú).
+/screenshots/
+
+# Živý lokálny override je strojovo špecifický — v repe žijú len *.example.yml (R1w).
+docker-compose.override.yml
+
+# Renderované PNG a ZIP dodávky návrhu — generované z design/mockups/,
+# do repa nepatria (binárne, znovuvytvoriteľné).
+design/png/
+*.zip

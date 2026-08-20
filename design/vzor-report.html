@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ovládač zliav — projektový report · Šperky Aura</title>
+<style>
+:root{
+  --teal:#05bcc4; --deep:#03797e; --teal3:#7fd0d4;
+  --gold:#d8b878; --gold2:#c9a869; --gold3:#8a6417;
+  --slate:#98a2b3;
+  --good:#3fbf7f; --warn:#c9a869; --risk:#e0554e;
+}
+:root[data-theme="dark"]{
+  --paper:#0e1413; --paper2:#131b1a; --ink:#e8f0ef; --ink2:#b9c9c7;
+  --dim:#829896; --line:#22302e; --track:#1b2523;
+}
+:root[data-theme="light"]{
+  --paper:#f8f4f7; --paper2:#ffffff; --ink:#131b1a; --ink2:#3b4a48;
+  --dim:#667574; --line:#e2dae0; --track:#ece6ea;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  font-size:15px;line-height:1.55;background:var(--paper);color:var(--ink);
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+  transition:background .25s,color .25s;
+}
+.prog{position:fixed;top:0;left:0;height:2px;background:var(--teal);width:0;z-index:99}
+.wrap{max-width:1140px;margin:0 auto;padding:0 26px}
+header.hero{padding:64px 0 40px;position:relative}
+.crown{font-size:22px;color:var(--gold);display:block;margin-bottom:10px}
+.eyebrow{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold2);font-weight:600;margin-bottom:16px}
+h1{font-size:clamp(28px,4.6vw,46px);font-weight:660;letter-spacing:-.025em;line-height:1.08;margin-bottom:14px}
+h1 em{font-style:normal;color:var(--teal)}
+.lede{font-size:16.5px;color:var(--ink2);max-width:720px;margin-bottom:22px}
+.meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--dim)}
+.meta b{color:var(--ink2);font-weight:600}
+.themes{position:absolute;top:26px;right:0;display:flex;gap:0;border:1px solid var(--line);border-radius:99px;overflow:hidden}
+.themes button{background:transparent;border:0;color:var(--dim);font:inherit;font-size:11.5px;padding:6px 14px;cursor:pointer;letter-spacing:.04em}
+.themes button.on{background:color-mix(in srgb,var(--teal) 16%,transparent);color:var(--teal)}
+section{border-top:1px solid var(--line);padding:46px 0 40px}
+.snum{color:var(--teal);font-weight:660;font-size:13px;letter-spacing:.08em;margin-right:10px}
+h2{font-size:clamp(20px,2.6vw,27px);font-weight:640;letter-spacing:-.015em;margin-bottom:8px}
+.sdesc{color:var(--ink2);max-width:760px;margin-bottom:26px;font-size:14.5px}
+.sub-h{font-size:9.5px;letter-spacing:.17em;text-transform:uppercase;color:var(--dim);font-weight:650;border-top:1px solid var(--line);padding-top:12px;margin:30px 0 14px}
+/* KPI strip */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.kpi{background:var(--paper2);padding:16px 16px 14px;position:relative;transition:transform .18s}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:transparent;transition:background .18s}
+.kpi:hover::before{background:var(--teal)}
+.kpi .k{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:650;margin-bottom:7px}
+.kpi .v{font-size:25px;font-weight:660;letter-spacing:-.02em;line-height:1.05}
+.kpi .v small{font-size:14px;color:var(--dim);font-weight:500}
+.kpi .s{font-size:11.5px;color:var(--dim);margin-top:5px}
+.kpi .v .g{color:var(--good)} .kpi .v .t{color:var(--teal)} .kpi .v .w{color:var(--gold)}
+/* two-col */
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:24px}
+.two>*{min-width:0}
+/* findings cards */
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px}
+.fcard{background:var(--paper2);border:1px solid var(--line);border-left-width:2px;border-radius:10px;padding:18px 18px 16px;position:relative;overflow:hidden}
+.fcard.tl{border-left-color:var(--teal)}
+.fcard.gd{border-left-color:var(--gold)}
+.fcard.rk{border-left-color:var(--risk)}
+.fcard .wm{position:absolute;top:-8px;right:8px;font-size:52px;font-weight:700;color:var(--ink);opacity:.05;letter-spacing:-.04em;pointer-events:none}
+.fcard h3{font-size:14.5px;font-weight:650;margin-bottom:7px;padding-right:44px}
+.fcard p{font-size:13px;color:var(--ink2)}
+.fcard .tag{margin-bottom:9px}
+/* tags */
+.tag{display:inline-block;font-size:10px;letter-spacing:.09em;text-transform:uppercase;font-weight:650;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+.tag.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+.tag.wr{color:var(--gold2);border-color:color-mix(in srgb,var(--gold) 45%,transparent)}
+.tag.rs{color:var(--risk);border-color:color-mix(in srgb,var(--risk) 45%,transparent)}
+.tag.tt{color:var(--teal);border-color:color-mix(in srgb,var(--teal) 45%,transparent)}
+/* bar rows */
+.brow{display:grid;grid-template-columns:190px 1fr 74px;gap:12px;align-items:center;padding:7px 0;font-size:13px}
+.brow .bl{color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brow .tr{height:8px;background:var(--track);border-radius:99px;overflow:hidden}
+.brow .fl{height:100%;width:0;border-radius:99px;background:var(--teal);transition:width .9s cubic-bezier(.2,.75,.2,1)}
+.brow .vl{text-align:right;font-weight:600;font-size:12.5px}
+/* tables */
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{width:100%;min-width:520px;border-collapse:collapse;background:var(--paper2);font-size:13px}
+th{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);font-weight:650;text-align:left;padding:11px 14px;border-bottom:1px solid var(--line)}
+td{padding:10px 14px;border-bottom:1px solid var(--line);color:var(--ink2);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td b{color:var(--ink);font-weight:600}
+td.num{text-align:right;font-weight:600;color:var(--ink)}
+/* chart shells */
+.chart{background:var(--paper2);border:1px solid var(--line);border-radius:10px;padding:18px}
+.chart .ct{font-size:12px;font-weight:650;color:var(--ink2);margin-bottom:4px}
+.chart .cs{font-size:11px;color:var(--dim);margin-bottom:12px}
+svg text{font-family:inherit}
+/* timeline */
+.tline{position:relative;padding-left:26px}
+.tline::before{content:"";position:absolute;left:7px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.tev{position:relative;padding:0 0 22px}
+.tev::before{content:"";position:absolute;left:-23px;top:6px;width:9px;height:9px;border-radius:50%;background:var(--paper);border:2px solid var(--teal)}
+.tev.gold::before{border-color:var(--gold)}
+.tev .td{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);font-weight:650;margin-bottom:3px}
+.tev .tt2{font-size:14.5px;font-weight:650;margin-bottom:4px}
+.tev p{font-size:13px;color:var(--ink2);max-width:640px}
+/* checklist */
+.clist{list-style:none}
+.clist li{display:flex;gap:11px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px;color:var(--ink2);align-items:baseline}
+.clist li:last-child{border-bottom:0}
+.clist .m{flex:0 0 auto;font-weight:700;font-size:12px;width:18px;text-align:center}
+.clist .m.done{color:var(--good)} .clist .m.todo{color:var(--gold2)} .clist .m.open{color:var(--risk)}
+.clist b{color:var(--ink);font-weight:600}
+/* state flow */
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.st{font-size:12px;font-weight:600;padding:6px 13px;border-radius:8px;border:1px solid var(--line);background:var(--paper2);color:var(--ink2)}
+.st.hot{border-color:color-mix(in srgb,var(--teal) 50%,transparent);color:var(--teal)}
+.st.end{border-style:dashed}
+.arr{color:var(--dim);font-size:13px}
+/* definitions */
+dl{display:grid;gap:0}
+dl div{padding:12px 0;border-bottom:1px solid var(--line)}
+dl div:last-child{border-bottom:0}
+dt{font-weight:650;font-size:13.5px;margin-bottom:3px}
+dd{font-size:13px;color:var(--ink2)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:var(--track);padding:1px 6px;border-radius:5px;color:var(--teal3)}
+:root[data-theme="light"] code{color:var(--deep)}
+footer{border-top:1px solid var(--line);padding:28px 0 56px;color:var(--dim);font-size:12px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+/* reveal */
+.rv{opacity:0;transform:translateY(16px);transition:opacity .55s,transform .55s}
+.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .rv{opacity:1;transform:none;transition:none}
+  .brow .fl,.kpi,.kpi::before{transition:none}
+}
+@media (max-width:700px){
+  .wrap{padding:0 18px}
+  header.hero{padding:46px 0 32px}
+  .themes{position:static;margin-bottom:18px;width:max-content}
+  .brow{grid-template-columns:130px 1fr 60px}
+}
+@media print{
+  body{background:#fff;color:#111}
+  .themes,.prog{display:none}
+  section,.fcard,.chart,.tw{break-inside:avoid}
+  :root{--paper:#fff;--paper2:#fff;--ink:#111;--ink2:#333;--dim:#666;--line:#ddd;--track:#eee}
+}
+</style>
+</head>
+<body>
+<div class="prog" id="prog"></div>
+<div class="wrap">
+
+<header class="hero">
+  <div class="themes" role="group" aria-label="Téma">
+    <button id="btnDark" class="on" type="button">Dark</button>
+    <button id="btnLight" type="button">Light</button>
+  </div>
+  <span class="crown">♛</span>
+  <div class="eyebrow">Šperky Aura · Projektový report</div>
+  <h1>Ovládač <em>zliav</em> — Aura Zľavy</h1>
+  <p class="lede">Lokálna Docker appka na riadenie percentuálnych zliav produkčného eshopu cez REST API. Od kontextových otázok po nasadenie a šprint predajnosti — 4 dni, 866 testov, 14 invariantov, nula zápisov bez potvrdenia.</p>
+  <div class="meta">
+    <span>Stav k <b>10. 8. 2026</b></span>
+    <span>Repo <b>Samuel-sperky/ovl-da-zliav</b></span>
+    <span>Beží na <b>127.0.0.1:3070</b></span>
+    <span>Stack <b>Next.js 16 · React 19 · MariaDB 11.4</b></span>
+  </div>
+</header>
+
+<section id="s1">
+  <h2 class="rv"><span class="snum">01</span>Prehľad</h2>
+  <p class="sdesc rv">Appka je postavená, otestovaná a nasadená lokálne na Windows PC (kontajnery <code>ovl-zliav-app</code> + <code>ovl-zliav-db</code> + <code>ovl-zliav-caddy</code>). Zápisy sú zatiaľ vypnuté (<code>WRITES_ENABLED=false</code>) — pred ostrým behom zostáva onboarding.</p>
+  <div class="kpis rv">
+    <div class="kpi"><div class="k">Vitest</div><div class="v"><span class="g">866</span></div><div class="s">testov po šprinte predajnosť</div></div>
+    <div class="kpi"><div class="k">Playwright e2e</div><div class="v"><span class="g">30<small>/30</small></span></div><div class="s">vrátane failing-first opráv</div></div>
+    <div class="kpi"><div class="k">Invarianty</div><div class="v"><span class="t">14<small>/14</small></span></div><div class="s">doložené testami + I8′</div></div>
+    <div class="kpi"><div class="k">Allowlist</div><div class="v">10 <small>produktov</small></div><div class="s">vynútené schémou (slot 1–10)</div></div>
+    <div class="kpi"><div class="k">Runaway strop</div><div class="v">60 <small>zápisov/h</small></div><div class="s">počítané nad audit logom</div></div>
+    <div class="kpi"><div class="k">DB tabuliek</div><div class="v">11</div><div class="s">+ migrácia 0009 (predajnosť)</div></div>
+    <div class="kpi"><div class="k">Zápisy</div><div class="v"><span class="w">OFF</span></div><div class="s">dry-run default, čaká onboarding</div></div>
+  </div>
+
+  <div class="sub-h rv">Rast testovacieho pokrytia po míľnikoch</div>
+  <div class="chart rv">
+    <div class="ct">Počet vitest testov</div>
+    <div class="cs">Každý míľnik pridával failing-first testy pred opravou — pokrytie rástlo s nálezmi, nie dopredu.</div>
+    <div id="chTests"></div>
+  </div>
+</section>
+
+<section id="s2">
+  <h2 class="rv"><span class="snum">02</span>Obmedzenia API — čo je vôbec možné</h2>
+  <p class="sdesc rv">Tri tvrdé obmedzenia eshop API určili celú architektúru. Appka nemôže vedieť viac, než si sama zapíše.</p>
+  <div class="fgrid rv">
+    <div class="fcard gd"><span class="wm">01</span><span class="tag wr">Jediný write</span><h3>setReduction je jediný zápis</h3><p><code>POST /api/products/setReduction</code> — len percentuálna zľava s časovým oknom. Strop <b>30 %</b>, okno max <b>3 mesiace</b>. Fixné <code>reduction_price</code> zápis naopak maže. Nie je batchable: 10 produktov = 10 requestov, pri chybe v strede kompenzácia, nie rollback.</p></div>
+    <div class="fcard rk"><span class="wm">02</span><span class="tag rs">Nezvratné</span><h3>Zľavu nie je možné zmazať</h3><p><code>reduction</code> musí byť &gt; 0 — jediné „zrušenie“ je nastaviť <code>to</code> do minulosti, čo je hack, nie API funkcia. Rozhodnutie: zľavy sa nerušia, len expirujú. Hack sa neimplementuje.</p></div>
+    <div class="fcard rk"><span class="wm">03</span><span class="tag rs">Slepé čítanie</span><h3>API nevracia aktuálnu zľavu</h3><p><code>GET /api/products</code> ani <code>/get</code> nevracajú stav zľavy. Appka pozná len to, čo sama zapísala — <b>audit log je jediný zdroj pravdy</b>. Čítacie endpointy sú verejné bez auth, takže read časť funguje aj po expirácii kľúča.</p></div>
+  </div>
+  <div class="sub-h rv">Limity a merania proti reálnemu shopu</div>
+  <div class="tw rv"><table>
+    <thead><tr><th>Parameter</th><th class="num" style="text-align:right">Hodnota</th><th>Dôsledok</th></tr></thead>
+    <tbody>
+      <tr><td><b>Rate limit</b></td><td class="num">300 req / 60 s</td><td>floor pauzy medzi requestami zvýšený na 250 ms — limit sa nedá prekročiť ani konfiguráciou</td></tr>
+      <tr><td><b>Objednávky v shope</b></td><td class="num">1 765 576</td><td>sync predajnosti beží po dňoch, intervalovo (20 h), nie nočne — PC je v noci vypnutý</td></tr>
+      <tr><td><b>Produkty v katalógu</b></td><td class="num">40 483</td><td>zľavy riadi allowlist 10 ID; predajnosť sa však ukladá pre celý katalóg (otvorená položka)</td></tr>
+      <tr><td><b>TTL API kľúča</b></td><td class="num">48 h</td><td>auto-wipe z disku; kampaň naplánovaná ďalej než 48 h končí v stave <code>needs_key</code></td></tr>
+      <tr><td><b>Vzorka syncu</b></td><td class="num">978 obj. / 3 dni</td><td>zmerané pri šprinte predajnosť proti produkčnému shopu</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s3">
+  <h2 class="rv"><span class="snum">03</span>Architektúra</h2>
+  <p class="sdesc rv">Kampaň JE job — jeden status s lifecycle hodnotami, „aktívna“ a „expirovaná“ sa derivujú z <code>done</code> + dátumov. Nosičom invariantu „žiadny zápis bez potvrdenia“ je jednorazový preview token.</p>
+
+  <div class="sub-h rv">Lifecycle kampane</div>
+  <div class="flow rv" aria-label="Stavy kampane">
+    <span class="st hot">scheduled</span><span class="arr">→</span>
+    <span class="st">needs_key</span><span class="arr">→</span>
+    <span class="st hot">running</span><span class="arr">→</span>
+    <span class="st end" style="color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,transparent)">done</span>
+    <span class="st end" style="color:var(--gold2)">partial</span>
+    <span class="st end" style="color:var(--risk)">failed</span>
+    <span class="st end">missed</span>
+    <span class="st end">cancelled</span>
+    <span class="st end">lapsed</span>
+  </div>
+
+  <div class="two" style="margin-top:26px">
+    <div class="rv">
+      <div class="sub-h" style="margin-top:0">Kľúčové invarianty</div>
+      <div class="tw"><table>
+        <thead><tr><th>Mechanizmus</th><th>Ako je vynútený</th></tr></thead>
+        <tbody>
+          <tr><td><b>Žiadny zápis bez potvrdenia (I3)</b></td><td>preview_token — HS256 JWT, TTL 15 min, SHA-256 hash kanonickej sady + cena pri preview per produkt, jednorazový</td></tr>
+          <tr><td><b>Max 10 produktov</b></td><td>stĺpec <code>slot</code> UNIQUE + CHECK 1–10 v schéme; obsadenie najnižšieho voľného slotu jediným INSERT..SELECT</td></tr>
+          <tr><td><b>Runaway strop 60/h</b></td><td>dotaz nad append-only <code>audit_log</code>, nie samostatná tabuľka — nedá sa obísť</td></tr>
+          <tr><td><b>Jediný volajúci setReduction</b></td><td>výhradne <code>src/lib/engine/executor.ts</code>, grep test to vynucuje</td></tr>
+          <tr><td><b>Objednávky len cez klienta (I8′)</b></td><td><code>orders-client.ts</code> jediný smie volať <code>/api/order</code>; grep zosilnený proti zlepeným reťazcom a podčiarkovníkom</td></tr>
+          <tr><td><b>API kľúč</b></td><td>AES-256-GCM na disku, master key mimo gitu, auto-wipe 48 h, UI odpočet</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="rv">
+      <div class="sub-h" style="margin-top:0">Vrstvy a UI</div>
+      <div class="tw"><table>
+        <thead><tr><th>Vrstva</th><th>Obsah</th></tr></thead>
+        <tbody>
+          <tr><td><b>UI — 6 tabov</b></td><td>Dashboard · Produkty · Kampane · Analytika (vrátane auditu) · Nastavenia · AI agent; nová kampaň = 2-krokový drawer</td></tr>
+          <tr><td><b>Dashboard KISS</b></td><td>3 KPI karty (Aktívne zľavy n/10, Vyžaduje zásah, TTL kľúča s oblúkom) + časová os kampaní</td></tr>
+          <tr><td><b>AI agent V1</b></td><td>deterministický pravidlový analytik — končiace kampane, produkty bez zľavy &gt;30 dní, needs_key/missed; nikdy nezapisuje sám</td></tr>
+          <tr><td><b>Sieťovanie</b></td><td>len 127.0.0.1, Caddy = basic auth + hlavičky, žiadny tunel</td></tr>
+          <tr><td><b>Middleware</b></td><td>default-deny brána pred renderom stránok (runtime nodejs), <code>/api/*</code> mimo matchera pre JSON 401</td></tr>
+          <tr><td><b>Farby stavov</b></td><td>merané cez validate_palette.js — stav nikdy nie je len farba (farba + glyf + text); teal nikdy ako stavová farba</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<section id="s4">
+  <h2 class="rv"><span class="snum">04</span>Časová os — 4 dni od otázok po predajnosť</h2>
+  <p class="sdesc rv">Číslovanie sekcie tu nesie skutočné poradie: každý míľnik podmieňoval nasledujúci.</p>
+  <div class="tline rv">
+    <div class="tev"><div class="td">5. 8. 2026</div><div class="tt2">Kontext a kontrakt</div><p>10 smerovacích otázok zodpovedaných, 100-otázkový dotazník (architekt + red-team → kritik). Rozhodnuté: allowlist 10 ID, kľúč AES-256-GCM s 48 h TTL, vetva B stacku, dry-run povinný default — ide o produkčný shop bez stagingu.</p></div>
+    <div class="tev"><div class="td">5. 8. 2026</div><div class="tt2">Sprint A0–A19 — postavené</div><p>620 testov, 14/14 invariantov, standalone artefakt overený proti reálnej MariaDB. Štyri chyby nájdené až pri overení — vrátane Turbopack miscompile null-guardov, ktorý by zhodil každé prvé spustenie.</p></div>
+    <div class="tev"><div class="td">6. 8. 2026</div><div class="tt2">KISS redizajn</div><p>2 audítori (21 + 39 zistení) → hybrid: štruktúra z používateľovej predlohy, farby Aura teal+gold. 650 testov, farby merané, nie odhadované.</p></div>
+    <div class="tev gold"><div class="td">6. 8. 2026</div><div class="tt2">Bug hunt — 23 nálezov</div><p>3 nezávislí lovci, každá oprava s failing-first testom. Najvážnejší: scheduler nikdy nezapisoval — fake executor v testoch maskoval produkčný wiring. 687 testov.</p></div>
+    <div class="tev"><div class="td">6. 8. 2026</div><div class="tt2">Lokálne nasadenie — Windows</div><p>Stack beží na 127.0.0.1:3070 za Caddy basic auth. Tri Windows pasce vyriešené (CRLF v .sh, práva bind mountov cez named volume, PowerShell 5.1 BOM).</p></div>
+    <div class="tev"><div class="td">6. 8. 2026</div><div class="tt2">Oprava prvého behu</div><p>Príčina všetkých „chýb“ v UI: users=0, žiadna session, všetko 401. Opravené 3 defekty, ktoré to maskovali: chýbajúca brána pred renderom, health miešajúci 401 s nedostupnosťou, tiché zlyhanie uloženia kľúča. 785 testov.</p></div>
+    <div class="tev gold"><div class="td">6. 8. 2026</div><div class="tt2">Šprint predajnosť</div><p>Čítanie objednávok druhým kľúčom, denný sync, insights. 6 nálezov review pred produkciou — vrátane blokujúceho: absolútny prepis dňa mazal už uložené kusy pri rate limite. 866 testov.</p></div>
+  </div>
+</section>
+
+<section id="s5">
+  <h2 class="rv"><span class="snum">05</span>Najvážnejšie nálezy a pasce</h2>
+  <p class="sdesc rv">Všetky nálezy nižšie by prežili do produkcie — testy ich maskovali alebo vznikli až v reálnom prostredí.</p>
+  <div class="fgrid rv">
+    <div class="fcard rk"><span class="wm">E1</span><span class="tag rs">Kritické</span><h3>Scheduler nikdy nezapisoval</h3><p>Executor zapojený cez <code>as</code> cast na nekompatibilnú signatúru + dynamický import, ktorý v standalone Node vrátil null. Každý automatický fire končil <code>needs_key</code>. Poučenie: aspoň jeden test s produkčným adaptérom, fake maskuje wiring.</p></div>
+    <div class="fcard rk"><span class="wm">E5</span><span class="tag rs">Pasca DB</span><h3>MariaDB potichu skráti dátumový sentinel</h3><p><code>new Date(8.64e15)</code> sa serializuje ako rok 275760 a MariaDB ho s warningom skráti — porovnanie <code>fire_at &lt;= ?</code> vracia vždy false, bez chyby. In-memory fake sentinel zvládol, reálna DB nie.</p></div>
+    <div class="fcard rk"><span class="wm">P1</span><span class="tag rs">Blokujúce</span><h3>Absolútny prepis mazal správne dáta</h3><p>Pri rate limite prvého requestu <code>replaceDayUnits(day, [])</code> zmazal už uložené kusy — appka by bola tichým generátorom nepravdivých núl. Upsert bez ochrany „nikdy nezhorš dáta“ je pasca.</p></div>
+    <div class="fcard gd"><span class="wm">TP</span><span class="tag wr">Kompilátor</span><h3>Turbopack zahodil null-guardy</h3><p><code>if (!row)</code> vyhodnotený ako compile-time falsy — <code>GET /api/key</code> padal na 500 pri každom prvom spustení. Fix: explicitné <code>row === null</code>. Rovnaká trieda chyby ako E1.</p></div>
+    <div class="fcard gd"><span class="wm">W</span><span class="tag wr">Windows</span><h3>Tri pasce nasadenia na Windows</h3><p>CRLF v <code>.sh</code> zhodí kontajner (shebang s \r nie je cesta); Docker Desktop hlási 777 na bind mountoch → tajomstvá do named volume, invariant sa neoslabuje; PowerShell 5.1 číta .ps1 bez BOM ako ANSI.</p></div>
+    <div class="fcard tl"><span class="wm">S</span><span class="tag tt">Čisté</span><h3>Bezpečnostná vrstva vyšla z honu čistá</h3><p>I1/I2/I3 centrálne fail-closed, jediný nález nízkej závažnosti (X-Forwarded-For — brať pravý token). Architektúra preview tokenu + guardov sa osvedčila.</p></div>
+  </div>
+
+  <div class="sub-h rv">Nálezy bug huntu podľa vrstvy</div>
+  <div class="two rv">
+    <div class="chart">
+      <div class="ct">23 potvrdených nálezov · 3 lovci</div>
+      <div class="cs">Bezpečnostná/HTTP vrstva mala jediný nález — dôkaz, že fail-closed jadro drží.</div>
+      <div class="brow"><span class="bl">Engine / scheduler</span><span class="tr"><span class="fl" data-w="100" style="background:var(--risk)"></span></span><span class="vl">ťažisko</span></div>
+      <div class="brow"><span class="bl">UI / grafy / drawer</span><span class="tr"><span class="fl" data-w="62" style="background:var(--gold)"></span></span><span class="vl">stredné</span></div>
+      <div class="brow"><span class="bl">Routes / security</span><span class="tr"><span class="fl" data-w="9"></span></span><span class="vl">1 nález</span></div>
+    </div>
+    <div class="chart">
+      <div class="ct">Metóda opráv</div>
+      <div class="cs">3 opravári s disjunktným vlastníctvom súborov, každá oprava začala padajúcim testom (overené git stash trikom: stash → 10/10 failed → pop → 10/10 passed).</div>
+      <div class="brow"><span class="bl">Failing-first testy</span><span class="tr"><span class="fl" data-w="100" style="background:var(--good)"></span></span><span class="vl">100 %</span></div>
+      <div class="brow"><span class="bl">Pridané testy (hunt)</span><span class="tr"><span class="fl" data-w="54" style="background:var(--teal)"></span></span><span class="vl">+47</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="s6">
+  <h2 class="rv"><span class="snum">06</span>Stav nasadenia — čo zostáva</h2>
+  <p class="sdesc rv">Appka beží, ale do ostrého režimu ju delí onboarding a jeden TTY krok. Postup s príkazmi je v <code>docs/13-OVERENIE.md §E</code> a runbooku R1w.</p>
+  <div class="two">
+    <div class="rv">
+      <div class="sub-h" style="margin-top:0">Zostáva Samuelovi</div>
+      <ul class="clist">
+        <li><span class="m todo">→</span><span><b>Seed admin účtu</b> — <code>scripts/seed-admin.ts</code> vyžaduje skutočné TTY, z agenta sa spustiť nedá</span></li>
+        <li><span class="m todo">→</span><span><b>Onboarding v UI</b> — doména shopu → API kľúč → allowlist 10 product ID → dry-run test</span></li>
+        <li><span class="m todo">→</span><span><b>Zapnúť zápisy</b> — <code>WRITES_ENABLED=true</code> až po úspešnom dry-rune</span></li>
+        <li><span class="m todo">→</span><span>Po každej rotácii kľúča znova spustiť <code>sync-secrets-volume.ps1</code></span></li>
+      </ul>
+    </div>
+    <div class="rv">
+      <div class="sub-h" style="margin-top:0">Otvorené položky (flagnuté)</div>
+      <ul class="clist">
+        <li><span class="m open">!</span><span>Konflikt <b>scheduler vs 48 h TTL kľúča</b> — kampaň naplánovaná ďalej narazí na vymazaný kľúč a čaká v <code>needs_key</code></span></li>
+        <li><span class="m open">!</span><span><b>Redaktor vrstva 3</b> — substring scan na skutočný kľúč nemá volajúceho, je fakticky vypnutý</span></li>
+        <li><span class="m open">!</span><span><code>api_key.id</code> je TINYINT AUTO_INCREMENT, store() maže+vkladá — 255 vložení bez reštartu vyčerpá rozsah</span></li>
+        <li><span class="m open">!</span><span><code>product_sales_daily</code> ukladá kusy pre celý katalóg (40 483 produktov), nie len allowlist</span></li>
+        <li><span class="m open">!</span><span>Rozdielny výpočet dňa v <code>insights.ts</code> (UTC) vs <code>sales.repo.ts</code> (lokálne) — zhodné len preto, že kontajner beží v UTC</span></li>
+        <li><span class="m open">!</span><span>10/687 vitest testov padá na Windows z prostredia (chmod 400 + lomky v cestách) — nie regresia kódu</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <h2 class="rv"><span class="snum">07</span>Definície a obmedzenia vzorky</h2>
+  <dl class="rv">
+    <div><dt>Invariant</dt><dd>Pravidlo vynútené schémou, kódom alebo grep testom, ktorého porušenie zhodí build alebo testy — nie konvencia. Appka ich má 14 + I8′ z predajnosti.</dd></div>
+    <div><dt>Preview token</dt><dd>Jednorazový HS256 JWT s TTL 15 minút, nesúci SHA-256 hash kanonickej sady produktov a cenu pri preview. Bez platného tokenu neexistuje zápis do shopu.</dd></div>
+    <div><dt>Dry-run</dt><dd>Povinný default: zápisy do produkčného shopu sú vypnuté, kým používateľ operáciu výslovne nepotvrdí a <code>WRITES_ENABLED</code> nie je true.</dd></div>
+    <div><dt>Failing-first test</dt><dd>Test napísaný tak, aby pred opravou padal a po nej prešiel — dôkaz, že oprava rieši reálny defekt, nie symptóm.</dd></div>
+    <div><dt>Runaway strop</dt><dd>Maximálne 60 zápisov za hodinu, počítané dotazom nad append-only audit logom — nedá sa obísť resetom počítadla.</dd></div>
+    <div><dt>Obmedzenia tohto reportu</dt><dd>Zdroj: pamäťové uzly Hades k 10. 8. 2026 (projektový mega-uzol OVL-DA-ZLIAV + kanonické technické uzly). Počty testov sú stavy po jednotlivých commitoch, nie kontinuálna metrika. Preklik v prehliadači za Caddy basic auth zostáva jediné neoverené akceptačné kritérium — z agenta sa auth dialóg vyplniť nedá.</dd></div>
+  </dl>
+</section>
+
+<footer>
+  <span>♛ Šperky Aura · Ovládač zliav — projektový report</span>
+  <span>Zdroj: Hades pamäť · vygenerované 10. 8. 2026</span>
+</footer>
+
+</div>
+<noscript><div class="wrap" style="padding:20px 26px;color:#c9a869">Bez JavaScriptu sa nezobrazí graf testov a animácie — obsah a tabuľky zostávajú čitateľné.</noscript>
+<script>
+(function(){
+  "use strict";
+  var root=document.documentElement;
+  var bD=document.getElementById('btnDark'),bL=document.getElementById('btnLight');
+  function setTheme(t){root.setAttribute('data-theme',t);bD.classList.toggle('on',t==='dark');bL.classList.toggle('on',t==='light');drawTests();}
+  bD.addEventListener('click',function(){setTheme('dark')});
+  bL.addEventListener('click',function(){setTheme('light')});
+
+  // scroll progress
+  var prog=document.getElementById('prog');
+  function onScroll(){
+    var h=document.documentElement.scrollHeight-window.innerHeight;
+    var p=h>0?(window.scrollY/h)*100:0;
+    prog.style.width=p+'%';
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});onScroll();
+
+  // reveal
+  var reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var rvs=Array.prototype.slice.call(document.querySelectorAll('.rv'));
+  if(reduced||!('IntersectionObserver' in window)){
+    rvs.forEach(function(el){el.classList.add('in')});
+  }else{
+    var io=new IntersectionObserver(function(es){
+      es.forEach(function(e,i){
+        if(e.isIntersecting){
+          var d=(i%3)*70;
+          setTimeout(function(){e.target.classList.add('in')},d);
+          io.unobserve(e.target);
+        }
+      });
+    },{threshold:.12});
+    rvs.forEach(function(el){io.observe(el)});
+  }
+
+  // bar fills
+  function fillBars(){
+    var fls=document.querySelectorAll('.fl[data-w]');
+    requestAnimationFrame(function(){
+      Array.prototype.forEach.call(fls,function(f){f.style.width=f.getAttribute('data-w')+'%'});
+    });
+  }
+  fillBars();
+
+  // tests chart — ručné SVG
+  var DATA=[
+    {l:'Sprint A0–A19', v:620},
+    {l:'KISS redizajn', v:650},
+    {l:'Bug hunt', v:687},
+    {l:'Oprava 1. behu', v:785},
+    {l:'Predajnosť', v:866}
+  ];
+  var fmt=new Intl.NumberFormat('sk-SK');
+  var box=document.getElementById('chTests');
+  function cssVar(n){return getComputedStyle(root).getPropertyValue(n).trim();}
+  function drawTests(){
+    if(!box)return;
+    var W=Math.max(320,box.clientWidth||box.parentNode.clientWidth||600);
+    var H=210,padL=44,padR=10,padT=14,padB=34;
+    var iw=W-padL-padR,ih=H-padT-padB;
+    var max=900,min=0;
+    var teal=cssVar('--teal'),dim=cssVar('--dim'),line=cssVar('--line'),ink=cssVar('--ink2'),track=cssVar('--track');
+    var n=DATA.length,bw=Math.min(64,iw/n*0.52);
+    var s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" role="img" aria-label="Rast počtu testov po míľnikoch">';
+    // gridlines
+    [0,300,600,900].forEach(function(g){
+      var y=padT+ih-(g-min)/(max-min)*ih;
+      s+='<line x1="'+padL+'" y1="'+y+'" x2="'+(W-padR)+'" y2="'+y+'" stroke="'+line+'" stroke-width="1"/>';
+      s+='<text x="'+(padL-8)+'" y="'+(y+3)+'" text-anchor="end" font-size="10" fill="'+dim+'">'+fmt.format(g)+'</text>';
+    });
+    DATA.forEach(function(d,i){
+      var cx=padL+iw*(i+0.5)/n;
+      var bh=(d.v-min)/(max-min)*ih;
+      var y=padT+ih-bh;
+      var last=i===n-1;
+      s+='<rect x="'+(cx-bw/2)+'" y="'+y+'" width="'+bw+'" height="'+bh+'" rx="4" fill="'+(last?teal:track)+'" stroke="'+(last?'none':line)+'"/>';
+      s+='<text x="'+cx+'" y="'+(y-6)+'" text-anchor="middle" font-size="11" font-weight="650" fill="'+(last?teal:ink)+'">'+fmt.format(d.v)+'</text>';
+      s+='<text x="'+cx+'" y="'+(H-10)+'" text-anchor="middle" font-size="9.5" fill="'+dim+'">'+d.l+'</text>';
+    });
+    s+='</svg>';
+    box.innerHTML=s;
+  }
+  drawTests();
+  var rT;
+  window.addEventListener('resize',function(){clearTimeout(rT);rT=setTimeout(drawTests,150)});
+})();
+</script>
+</body>
+</html>

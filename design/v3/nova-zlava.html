@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nová zľava · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  /* len drobná geometria, systém je v _v3.css */
+  .nz{display:grid;grid-template-columns:1fr 476px;gap:14px;align-items:start}
+  .nz-h{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+  .nz-h .ttl{font-size:17px;font-weight:660;letter-spacing:-.02em}
+  .nz-h .nm{width:300px}
+  .pasma{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+  .pasma th{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
+    font-weight:650;text-align:left;padding:0 10px 6px;border-bottom:1px solid var(--line2)}
+  .pasma td{padding:7px 10px;border-bottom:1px solid var(--line);color:var(--ink2)}
+  .pasma td:first-child,.pasma th:first-child{padding-left:0}
+  .pasma .n{text-align:right;font-variant-numeric:tabular-nums}
+  .pasma .pct{text-align:right}
+  .pasma .pct b{font-size:15px;color:var(--ink);font-weight:660}
+  .pasma tr.sum td{border-bottom:0;color:var(--ink);font-weight:640;padding-top:8px}
+  .pasma .band{display:inline-flex;align-items:center;gap:7px;font-weight:640;color:var(--ink)}
+  .pasma .band i{width:8px;height:8px;border-radius:2px;background:var(--deep);display:block}
+  .pasma .band.b i{opacity:.62} .pasma .band.c i{opacity:.34}
+  .win{display:flex;align-items:center;gap:8px}
+  .win .inp{width:132px}
+  .plan{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:13px;
+    color:var(--ink2);align-items:baseline}
+  .plan dt{color:var(--dim);font-size:12px;white-space:nowrap}
+  .plan dd{font-weight:600;color:var(--ink)}
+  .startline{margin-top:11px;padding-top:11px;border-top:1px solid var(--line);
+    display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+  .startline .d{font-size:30px;font-weight:660;letter-spacing:-.025em;line-height:1}
+  .confirm{text-align:center;padding:4px 0 2px}
+  .confirm .big{font-size:64px;font-weight:660;letter-spacing:-.035em;line-height:1;
+    display:block;color:var(--ink)}
+  .confirm .cap{font-size:13px;color:var(--dim);font-weight:600;letter-spacing:.04em;
+    text-transform:uppercase;margin-top:4px}
+  .marze{display:flex;align-items:baseline;justify-content:center;gap:8px;margin-top:12px;
+    padding-top:10px;border-top:1px solid var(--line)}
+  .marze .v{font-size:20px;font-weight:640}
+  .typein{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:12px}
+  .acts{display:flex;gap:8px;margin-top:12px}
+  .acts .btn.primary{flex:1;justify-content:center}
+  .vz td.name{max-width:290px}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a href="prehlad.html">Prehľad</a>
+      <a href="produkty.html">Produkty</a>
+      <a class="on" href="zlavy.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <span class="hmeter">Zápisy <b>100/200</b> dnes
+        <span class="hbar"><i style="width:50%"></i></span></span>
+      <span class="hsep"></span>
+      <a class="hqueue" href="zlavy.html">Fronta <b>3 420/8 000</b></a>
+      <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="nz-h">
+    <span class="ttl">Nová zľava</span>
+    <input class="inp nm" value="Ležiaky zlato — jeseň">
+    <a class="lvl-3" href="zlavy.html" style="margin-left:auto">Zrušiť</a>
+  </div>
+
+  <div class="nz">
+
+    <!-- ĽAVÝ STĹPEC ------------------------------------------------------- -->
+    <div>
+
+      <!-- SEKCIA 1: VÝBER -->
+      <section class="sec">
+        <div class="sec-h">
+          <h2>Výber produktov</h2>
+          <div class="act">
+            <button class="chip on">Z filtra</button>
+            <button class="chip">Z označených <span class="c">11 640</span></button>
+          </div>
+        </div>
+
+        <div class="row wrapx">
+          <span class="chip on">Ležiaky</span>
+          <span class="chip">0 predaných</span>
+          <span class="chip lock">kategória</span>
+          <span class="chip lock">kov</span>
+          <span class="lvl-3" style="margin-left:8px">Obdobie</span>
+          <span class="seg">
+            <button>30</button><button>60</button><button>90</button>
+            <button class="on">180</button><button>360</button>
+          </span>
+        </div>
+
+        <div class="spread gap-t">
+          <div class="lvl-2">Filtru vyhovuje <b>11 640</b> produktov</div>
+          <div class="row">
+            <span class="lvl-3">Najhoršie ležiaky prvé, strop</span>
+            <input class="inp" value="8 000" style="width:88px;text-align:right">
+          </div>
+        </div>
+        <div class="bar"><i style="width:68.7%"></i></div>
+        <div class="prog-meta">
+          <span>Vyberá sa <b>8 000</b> z 11 640</span>
+          <span class="sep-dot">·</span>
+          <span>Strop na jednu zľavu <b>10 000</b></span>
+          <span class="sep-dot">·</span>
+          <span class="flag neutral">312 už má rovnakú alebo vyššiu zľavu — vynechané</span>
+        </div>
+        <div class="fresh">Dáta k 10. 8. 03:00</div>
+      </section>
+
+      <!-- SEKCIA 2: PÁSMA + OKNO + VZORKA -->
+      <section class="sec">
+        <div class="sec-h">
+          <h2>Pásma a okno platnosti</h2>
+          <div class="act"><a class="lvl-3" href="nastavenia.html">Pravidlá</a></div>
+        </div>
+
+        <table class="pasma">
+          <thead>
+            <tr><th>Pásmo</th><th>Pravidlo</th><th class="n">Produktov</th><th class="pct">Zľava</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="band"><i></i>A</span></td>
+              <td>0 predaných za 360 dní</td>
+              <td class="n">6 940</td>
+              <td class="pct"><b>30 %</b></td>
+            </tr>
+            <tr>
+              <td><span class="band b"><i></i>B</span></td>
+              <td>0 predaných za 180 dní</td>
+              <td class="n">1 060 <span class="lvl-3">z 4 700</span></td>
+              <td class="pct"><b>20 %</b></td>
+            </tr>
+            <tr class="sum">
+              <td colspan="2">Spolu — najhoršie ležiaky prvé, po strop 8 000</td>
+              <td class="n">8 000</td>
+              <td class="pct"><span class="lvl-3">2 pásma</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="spread gap-t" style="border-top:1px solid var(--line);padding-top:11px">
+          <div class="win">
+            <span class="lvl-3">Platí od</span>
+            <input class="inp" value="20. 10. 2026">
+            <span class="lvl-3">do</span>
+            <input class="inp" value="3. 11. 2026">
+            <span class="lvl-3">14 dní</span>
+          </div>
+          <span class="lvl-3">Rovnaké okno pre všetkých 8 000</span>
+        </div>
+
+        <div class="tbl-frame gap-t vz">
+          <table class="tbl">
+            <thead>
+              <tr><th>Vzorka — 6 z 8 000</th><th class="n">Cena</th><th class="n">Predané 180 d</th>
+                  <th class="n">Sklad</th><th class="n">Pásmo</th><th class="n">Nová cena</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="name">Strieborné náušnice Lumen, kubický zirkón</td>
+                  <td class="n">34,90 €</td><td class="n">0</td><td class="n">12</td>
+                  <td class="n">A · 30 %</td><td class="n"><b>24,43 €</b></td></tr>
+              <tr><td class="name">Zlatý prsteň Verona 750, smaragd</td>
+                  <td class="n">742,00 €</td><td class="n">0</td><td class="n">1</td>
+                  <td class="n">A · 30 %</td><td class="n"><b>519,40 €</b></td></tr>
+              <tr><td class="name">Strieborný prívesok Nova, srdce</td>
+                  <td class="n">22,90 €</td><td class="n">0</td><td class="n">44</td>
+                  <td class="n">A · 30 %</td><td class="n"><b>16,03 €</b></td></tr>
+              <tr><td class="name">Strieborný náramok Vela, pletený</td>
+                  <td class="n">41,00 €</td><td class="n">0</td><td class="n">18</td>
+                  <td class="n">B · 20 %</td><td class="n"><b>32,80 €</b></td></tr>
+              <tr><td class="name">Zlaté náušnice Perla 585, sladkovodná perla</td>
+                  <td class="n">214,00 €</td><td class="n">0</td><td class="n">3</td>
+                  <td class="n">B · 20 %</td><td class="n"><b>171,20 €</b></td></tr>
+              <tr><td class="name">Strieborné náušnice Tara, visiace kvapky</td>
+                  <td class="n">29,90 €</td><td class="n">0</td><td class="n">20</td>
+                  <td class="n">B · 20 %</td><td class="n"><b>23,92 €</b></td></tr>
+            </tbody>
+          </table>
+          <div class="tbl-foot">
+            <span>Priemerná cena vo výbere 46,20 €</span>
+            <a href="produkty.html">Iná vzorka</a>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- PRAVÝ STĹPEC ------------------------------------------------------ -->
+    <div>
+
+      <!-- SEKCIA 3: PANEL ŠTARTU -->
+      <section class="sec">
+        <div class="sec-h">
+          <h2>Štart</h2>
+          <div class="act"><span class="state zapisuje"><span class="g"></span>zapisuje sa dopredu</span></div>
+        </div>
+
+        <dl class="plan">
+          <dt>Na zápis</dt><dd>8 000 produktov</dd>
+          <dt>Denne stihnem</dt><dd>200 zápisov</dd>
+          <dt>Pred tebou vo fronte</dt>
+          <dd>5 820 <span class="lvl-3">Ležiaky striebro 4 580 · Náušnice 1 240</span></dd>
+          <dt>Zapísané budú</dt><dd><span class="est">18. 10. 2026</span></dd>
+        </dl>
+
+        <div class="startline">
+          <div>
+            <div class="lvl-3">Navrhujem štart</div>
+            <div class="d">20. 10. 2026</div>
+          </div>
+          <div class="lvl-3" style="padding-bottom:3px">
+            2 dni rezerva<br>Všetky zľavy nabehnú naraz
+          </div>
+          <button class="btn sm ghost" style="margin-left:auto">Posunúť</button>
+        </div>
+
+        <div class="row wrapx gap-t" style="border-top:1px solid var(--line);padding-top:10px">
+          <span class="flag">Kľúč na zápis platí do 9. 9. — fronta dobehne 18. 10.</span>
+          <button class="btn sm" style="margin-left:auto">Obnoviť kľúč</button>
+        </div>
+
+        <details class="tech">
+          <summary>Ako to počítam</summary>
+          <div class="body">
+            <table>
+              <tr><td>Zostáva dnes</td><td>100 zápisov (5 dávok po 20)</td></tr>
+              <tr><td>Pred touto zľavou</td><td>4 580 + 1 240 = 5 820</td></tr>
+              <tr><td>Spolu</td><td>5 820 + 8 000 = 13 820 zápisov</td></tr>
+              <tr><td>Od 11. 8.</td><td>68 dní × 200 = 13 600</td></tr>
+              <tr><td>Zvyšok 120</td><td>18. 10. do 12:00</td></tr>
+              <tr><td>Pri sklze</td><td>štart sa posunie automaticky, so záznamom</td></tr>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <!-- SEKCIA 4: POTVRDENIE (DOMINANTA) -->
+      <section class="sec">
+        <div class="sec-h"><h2>Potvrdenie</h2></div>
+
+        <div class="confirm lvl-1">
+          <span class="big">8 000</span>
+          <span class="cap">produktov dostane zľavu</span>
+        </div>
+
+        <div class="prog-meta" style="justify-content:center">
+          <span>A <b>6 940</b> · 30 %</span>
+          <span class="sep-dot">·</span>
+          <span>B <b>1 060</b> · 20 %</span>
+          <span class="sep-dot">·</span>
+          <span>Priemerná cena <b>46,20 €</b></span>
+        </div>
+
+        <div class="marze">
+          <span class="lvl-3">Dopad na maržu</span>
+          <span class="lockline">odomkne sa po doplnení nákupných cien</span>
+        </div>
+
+        <div class="typein">
+          <span class="lvl-3">Napíšte počet produktov</span>
+          <input class="inp big" value="" placeholder="8000" inputmode="numeric">
+        </div>
+
+        <div class="acts">
+          <button class="btn primary lg off">Zaradiť do fronty</button>
+          <button class="btn lg">Skúška naprázdno</button>
+        </div>
+        <div class="hint" style="text-align:center">Skúška zapíše vzorku 10 produktov · minie 10 z dnešných 200 zápisov.</div>
+
+        <details class="tech">
+          <summary>Výsledok poslednej skúšky · 9. 8. 18:40</summary>
+          <div class="body">
+            <table>
+              <tr><td>Prepočítané u nás</td><td><b>8 000 produktov · bez problému</b></td></tr>
+              <tr><td>Zapísaná vzorka</td><td><b>10 z 10 prijatých shopom</b></td></tr>
+              <tr><td>Spotrebované</td><td><b>10 z 200 zápisov</b></td></tr>
+              <tr><td>Vzorka po skúške</td><td><b>vrátená na pôvodné ceny</b></td></tr>
+            </table>
+          </div>
+        </details>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

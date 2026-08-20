@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Produkty (mobil) · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  .p-card{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;padding:9px 0;
+    border-bottom:1px solid var(--line)}
+  .p-card:last-child{border-bottom:0}
+  .p-card .cb{grid-row:1 / span 2;align-self:start;margin-top:3px}
+  .p-card .nm{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .p-card .mt{font-size:12px;color:var(--dim);display:flex;gap:8px;flex-wrap:wrap}
+  .p-card .mt b{color:var(--ink2);font-weight:620}
+</style>
+</head>
+<body class="mob">
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a href="m-prehlad.html">Prehľad</a>
+      <a class="on" href="m-produkty.html">Produkty</a>
+      <a href="m-schvalenie.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <a class="hqueue" href="m-schvalenie.html">Fronta <b>3 420/8 000</b></a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="mbudget">Zápisy <b>100/200</b> dnes
+    <span class="hbar"><i style="width:50%"></i></span></div>
+
+  <!-- 1 · DOMINANTA: koľko vyhovuje filtru -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Ležiaky 180 dní</h2>
+      <div class="act"><button class="btn sm ghost">Filtre</button></div>
+    </div>
+    <div class="lvl-1"><span class="big sm">11 640</span>
+      <span class="sub">z 40 483 produktov</span></div>
+    <div class="row wrapx gap-t">
+      <span class="chip on">0 predaných</span>
+      <span class="chip">1–2 predané</span>
+      <span class="chip lock">kategória</span>
+      <span class="chip lock">kov</span>
+    </div>
+    <div class="row wrapx gap-t">
+      <span class="lvl-3">Obdobie</span>
+      <span class="seg"><button>30</button><button>90</button>
+        <button class="on">180</button><button>360</button></span>
+    </div>
+    <div class="fresh">Dáta k 10. 8. 03:00</div>
+  </section>
+
+  <!-- 2 · Zoznam -->
+  <section class="sec">
+    <div class="sec-h"><h2>Zoznam</h2>
+      <div class="act lvl-3">50 z 11 640</div></div>
+
+    <label class="p-card"><input class="cb" type="checkbox" checked>
+      <span class="nm">Strieborné náušnice Lumen, kubický zirkón</span>
+      <span class="mt"><b>34,90 €</b><span>predané 0</span><span>sklad 12</span></span></label>
+    <label class="p-card"><input class="cb" type="checkbox" checked>
+      <span class="nm">Strieborný prsteň Aurora, biely opál</span>
+      <span class="mt"><b>49,00 €</b><span>predané 0</span><span>sklad 7</span></span></label>
+    <label class="p-card"><input class="cb" type="checkbox" checked>
+      <span class="nm">Strieborný prívesok Nova, srdce</span>
+      <span class="mt"><b>22,90 €</b><span>predané 0</span><span>sklad 44</span></span></label>
+    <label class="p-card"><input class="cb" type="checkbox" checked>
+      <span class="nm">Strieborný náramok Vela, pletený</span>
+      <span class="mt"><b>41,00 €</b><span>predané 0</span><span>sklad 18</span></span></label>
+    <label class="p-card"><input class="cb" type="checkbox" checked>
+      <span class="nm">Zlaté náušnice Perla 585, sladkovodná perla</span>
+      <span class="mt"><b>214,00 €</b><span>predané 0</span><span>sklad 3</span></span></label>
+    <label class="p-card"><input class="cb" type="checkbox" checked>
+      <span class="nm">Zlatá retiazka Filo 585, 50 cm</span>
+      <span class="mt"><b>268,00 €</b><span>predané 0</span><span>sklad 1</span></span></label>
+    <label class="p-card"><input class="cb" type="checkbox">
+      <span class="nm">Strieborný prsteň Selene, mesačný kameň</span>
+      <span class="mt"><b>44,50 €</b><span>predané 0</span><span>sklad 14</span>
+        <span>zľava 10 %</span></span></label>
+    <label class="p-card"><input class="cb" type="checkbox">
+      <span class="nm">Strieborné náušnice Dune, matné kruhy 14 mm</span>
+      <span class="mt"><b>26,90 €</b><span>predané 0</span><span>sklad 33</span></span></label>
+  </section>
+
+</main>
+
+<div class="selbar">
+  <span class="cnt num">6<small>vybraných</small></span>
+  <a class="all">Vybrať všetkých 11 640 · do zľavy sa zmestí 10 000</a>
+  <div class="sp">
+    <button class="btn ghost">Zrušiť</button>
+    <a class="btn primary" href="m-nova-zlava.html">Zlacniť</a>
+  </div>
+</div>
+
+</body>
+</html>

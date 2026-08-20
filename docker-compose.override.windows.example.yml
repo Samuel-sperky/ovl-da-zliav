@@ -1,0 +1,28 @@
+# Aura Zľavy — PRÍKLAD override súboru pre Docker Desktop na WINDOWS.
+#
+# Skopíruj na `docker-compose.override.yml` (ten je mimo gitu) a potom spusti
+# `scripts\sync-secrets-volume.ps1`. Postup: docs/21-RUNBOOKY.md → R1w.
+#
+# DÔVOD: boot assertion (D61, I14) vyžaduje na súboroch s tajomstvami práva 400.
+# Docker Desktop na Windows u bind mountov unixové práva nevie preniesť a hlási
+# 777, takže appka v NODE_ENV=production odmietne nabootovať. Invariant sa
+# NEOSLABUJE — tajomstvá sa namiesto bind mountu čítajú z named volume
+# `ovl-zliav-secrets`, ktorý žije na linuxovom FS, kde práva 400 reálne platia.
+#
+# Volume sa plní jednorazovo (a znova po rotácii kľúča) skriptom
+# `scripts/sync-secrets-volume.ps1`.
+#
+# Cesty sú /run/keys, nie /run/secrets — compose zoznamy volumes zlučuje
+# pridávaním, takže bind mounty rodiča sa nedajú odstrániť a mount na to isté
+# miesto by 777 práva vrátil späť. Zodpovedajúce *_FILE premenné sú v `.env`.
+#
+# INVARIANT I5: žiadne `ports:` na ovl-zliav-app ani ovl-zliav-db.
+
+services:
+  ovl-zliav-app:
+    volumes:
+      - ovl-zliav-secrets:/run/keys:ro
+
+volumes:
+  ovl-zliav-secrets:
+    external: true

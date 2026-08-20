@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI agent · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria tejto stránky */
+  .fnd{margin-bottom:14px}
+  .fnd .fhead{display:flex;gap:12px;align-items:flex-start;justify-content:space-between}
+  .fnd .glyph{flex:0 0 auto;width:30px;height:30px;border-radius:8px;display:flex;
+    align-items:center;justify-content:center;font-size:14px;font-weight:700;
+    border:1px solid var(--line2);background:var(--track);color:var(--ink2)}
+  .fnd .glyph.at{color:var(--st-attention);border-color:color-mix(in srgb,var(--st-attention) 45%,transparent)}
+  .fnd .glyph.rk{color:var(--st-critical);border-color:color-mix(in srgb,var(--st-critical) 45%,transparent)}
+  .fnd .glyph.id{color:var(--st-idle)}
+  .fnd .body{display:flex;gap:13px;align-items:flex-start}
+  .fnd .why{font-size:12px;color:var(--dim);margin-top:8px;padding-left:13px;
+    border-left:2px solid var(--line2)}
+  .fnd .why b{color:var(--ink2)}
+  .fnd .frow{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    margin-top:13px;padding-top:11px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .formula{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+    background:var(--track);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:11px 13px;color:var(--teal3);text-align:center;letter-spacing:.01em}
+  :root[data-theme="light"] .formula{color:var(--deep)}
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="navbar"><div class="wrap">
+  <span class="brand"><span class="crown">♛</span>Aura Zľavy</span>
+  <nav class="navtabs">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="kampane.html">Kampane<span class="n">4</span></a>
+    <a href="produkty.html">Produkty<span class="n">10</span></a>
+    <a href="analytika.html">Analytika</a>
+    <a href="nastavenia.html">Nastavenia</a>
+    <a href="ai-agent.html" class="on">AI agent<span class="n">5</span></a>
+  </nav>
+  <div class="navmeta">
+    <span class="hbadge"><span class="g">⧗</span>Kľúč <b>31 h 12 m</b></span>
+    <span class="hbadge"><span class="g">◴</span>API <b>142/200</b></span>
+  </div>
+</div></div>
+
+<div class="page"><div class="wrap">
+
+  <div class="phead">
+    <div>
+      <div class="eyebrow">Pravidlový analytik</div>
+      <h1>AI agent <em>5 zistení</em></h1>
+      <div class="sub">Deterministický analytik nad vlastnou databázou, audit logom a agregovanými
+        štatistikami. Beží po každom syncu a po každom zápise. <b>Nikdy nezapisuje sám.</b>
+        V taboch je číslo <b>3</b> — toľko zistení má stav vyžadujúci pozornosť.</div>
+    </div>
+    <div class="pactions">
+      <span class="tiny muted">Posledná analýza 10.08.2026 14:15</span>
+      <button class="btn ghost"><span class="g">⟳</span>Spustiť analýzu</button>
+    </div>
+  </div>
+
+  <div class="note info"><span class="g">ⓘ</span><div>
+    <b>AI agent len navrhuje.</b> Každý návrh prejde dry-runom a ručným potvrdením ako každý iný
+    zápis (I3). Agent nepoužíva jazykový model — sú to pomenované pravidlá nad dátami, ktoré
+    už appka má, takže rovnaký vstup dá vždy rovnaký výstup.
+  </div></div>
+
+  <!-- 01 · ZISTENIA -->
+  <div class="sect">
+    <h2><span class="snum">01</span>Zistenia z pravidiel</h2>
+    <div class="sdesc">Zoradené podľa naliehavosti. Každé zistenie má pravidlo, ktoré ho vyvolalo,
+      a jednu konkrétnu akciu.</div>
+
+    <!-- 1 -->
+    <div class="fcard rk fnd">
+      <div class="wm">01</div>
+      <div class="body">
+        <div class="glyph rk">📉</div>
+        <div style="flex:1">
+          <span class="tag rs">marža</span> <span class="tag tt">order:stats</span>
+          <h3 style="margin-top:7px">Objednávky s maržou ≤ 30 % počas kampane K-118</h3>
+          <p>Dnes má <b>7 z 34 objednávok</b> maržu pod 30 % (najnižšia 15,2 %, obj. 48246).
+            Za dni mimo kampane to bolo priemerne 2,9 objednávky denne — počas kampaní 6,3.
+            Priemerná marža klesla z 34,1 % na 29,8 %, teda o <b>4,3 b. b.</b>, hoci tržby
+            stúpli o 52,8 %.</p>
+          <div class="why"><b>Pravidlo:</b> podiel nízkomaržových objednávok počas aktívnej
+            kampane prekročil 15 % · <b>Zdroj:</b> <code>GET /api/order-stats/lowProfit</code>
+            + <code>/margin</code>, agregované, bez zákazníckych dát.</div>
+          <div class="note attention mt14"><span class="g">▲</span><div>
+            <b>Návrh:</b> neísť s 20 % na zlate v kampani <b>K-124</b> (15.08.–17.08.). Pri 20 %
+            na 10809 a 10388 by sa priemerná marža stlačila <b>pod 25 %</b>. Skús <b>12 %</b> —
+            odhad udrží maržu na 29 %.
+          </div></div>
+          <div class="frow">
+            <span class="tiny muted">Dotknuté: K-124 · 10809, 10388 · dopad odhad −4,3 b. b.</span>
+            <div class="btnrow">
+              <button class="btn ghost">Odložiť</button>
+              <button class="btn"><span class="g">✎</span>Prepísať percento K-124 na 12 %</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 -->
+    <div class="fcard at fnd">
+      <div class="wm">02</div>
+      <div class="body">
+        <div class="glyph at">⧗</div>
+        <div style="flex:1">
+          <span class="tag wr">kľúč vs štart</span>
+          <h3 style="margin-top:7px">K-126 narazí na expirovaný kľúč</h3>
+          <p>Kampaň <b>K-126 — September, nová sezóna</b> má fire naplánovaný na <b>01.09.2026</b>,
+            ale zápisový kľúč platí len <b>31 h 12 m</b> (do 11.08.2026 21:32). TTL kľúča je 48 h,
+            takže žiadny dnes zadaný kľúč fire nedožije.</p>
+          <div class="why"><b>Pravidlo:</b> plánovaný fire je za horizontom TTL zápisového kľúča ·
+            <b>Zdroj:</b> plán kampaní + TTL <code>product:edit</code>.</div>
+          <div class="frow">
+            <span class="tiny muted">Stav kampane: <span class="badge s-needskey"><span class="g">⧗</span>vyžaduje kľúč</span></span>
+            <div class="btnrow">
+              <button class="btn ghost">Odložiť</button>
+              <button class="btn"><span class="g">◴</span>Nastaviť pripomienku rotácie na 31.08.</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="fcard at fnd">
+      <div class="wm">03</div>
+      <div class="body">
+        <div class="glyph at">◧</div>
+        <div style="flex:1">
+          <span class="tag wr">nedokončený zápis</span>
+          <h3 style="margin-top:7px">K-112 zostala čiastočná — druhý produkt spadol na 429</h3>
+          <p>Z dvoch produktov kampane <b>K-112 — Júlová dobierka</b> sa zapísal jeden.
+            Druhý (<b>10617 Prívesok Aura Aster</b>) skončil 06.08. o 11:42 na
+            <code>429 rate_limited</code> a odvtedy sa nedopísal. Okno kampane
+            (20.07.–27.07.2026) medzitým uplynulo, takže dopísanie by dnes už nemalo zmysel.</p>
+          <div class="why"><b>Pravidlo:</b> kampaň v stave <code>partial</code> staršia ako 7 dní ·
+            <b>Zdroj:</b> audit log.</div>
+          <div class="frow">
+            <span class="tiny muted">Stav: <span class="badge s-partial"><span class="g">◧</span>čiastočná</span> 1 z 2 zapísaný</span>
+            <div class="btnrow">
+              <button class="btn ghost">Odložiť</button>
+              <button class="btn"><span class="g">✓</span>Uzavrieť kampaň ako nedokončenú</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 -->
+    <div class="fcard gd fnd">
+      <div class="wm">04</div>
+      <div class="body">
+        <div class="glyph">◴</div>
+        <div style="flex:1">
+          <span class="tag gd">končiaca kampaň</span>
+          <h3 style="margin-top:7px">K-118 končí o 9 dní — 4 produkty stratia zľavu naraz</h3>
+          <p>Kampaň <b>K-118 — Letný výpredaj, striebro</b> (15 %) má okno
+            <b>05.08.2026 – 19.08.2026</b>. Po 19.08. zostane bez zľavy naraz 10241, 10388,
+            10455 a 10502 — teda aj dnešný najpredávanejší produkt (10241, 142 ks za 30 dní).
+            <span class="claim">podľa vlastného zápisu z 05.08.</span></p>
+          <div class="why"><b>Pravidlo:</b> aktívna kampaň končí do 10 dní a pokrýva ≥ 3 produkty ·
+            <b>Zdroj:</b> vlastný zápis, nie shop — appka zľavy zo shopu nečíta späť (I11).</div>
+          <div class="frow">
+            <span class="tiny muted">Nadväzujúca kampaň na 20.08. neexistuje.</span>
+            <div class="btnrow">
+              <button class="btn ghost">Odložiť</button>
+              <button class="btn"><span class="g">+</span>Vytvoriť nadväzujúcu kampaň od 20.08.</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 -->
+    <div class="fcard fnd" style="border-left-color:var(--st-idle)">
+      <div class="wm">05</div>
+      <div class="body">
+        <div class="glyph id">○</div>
+        <div style="flex:1">
+          <span class="tag">bez zľavy</span>
+          <h3 style="margin-top:7px">3 produkty dlho bez zľavy, jeden zľavu prepadol</h3>
+          <p><b>11056</b> Prsteň Aura Cielo, topás — <b>63 dní</b> bez zľavy ·
+            <b>10617</b> Prívesok Aura Aster, perleť — <b>41 dní</b> ·
+            <b>10809</b> Náhrdelník Aura Mira — 12 dní (pod prahom, len pre informáciu).
+            Navyše <b>11134</b> Náramok Aura Rosa má zľavu
+            <span class="badge s-lapsed"><span class="g">⊘</span>prepadnutú</span> od 02.08.
+            <span class="claim">podľa vlastného zápisu z 02.08.</span></p>
+          <div class="why"><b>Pravidlo:</b> produkt v allowliste bez zľavy dlhšie ako 30 dní ·
+            <b>Zdroj:</b> vlastný zápis + kalendár kampaní.</div>
+          <div class="frow">
+            <span class="tiny muted">Návrh: zaradiť 11056 a 10617 do septembrovej kampane K-126 (5 produktov).</span>
+            <div class="btnrow">
+              <button class="btn ghost">Odložiť</button>
+              <button class="btn"><span class="g">+</span>Vytvoriť kampaň z návrhu</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty mt14">
+      <span class="g">○</span>
+      <h4>Žiadne ďalšie zistenia</h4>
+      <p>Posledná analýza <b>10.08.2026 14:15</b>. Ďalšia po nočnom syncu predajnosti
+        (11.08.2026 02:00) alebo hneď po najbližšom zápise.</p>
+      <button class="btn sm ghost"><span class="g">⟳</span>Spustiť analýzu teraz</button>
+    </div>
+  </div>
+
+  <!-- 02 · OBRÁTKOVOSŤ -->
+  <div class="sect">
+    <h2><span class="snum">02</span>Obrátkovosť zásob <span class="tag wr" style="margin-left:10px">čiastočne odomknuté</span></h2>
+    <div class="sdesc">Metrika, ktorú si používateľ vyžiadal. So zapojením <code>order:stats</code>
+      sa odomkla menovateľová strana — chýbajú ešte dva vstupy, bez ktorých by číslo bolo výmysel.</div>
+
+    <div class="split-58">
+      <div class="card">
+        <div class="ct">Vzorec (dni zásoby)</div>
+        <div class="cs">Koľko dní by aktuálna zásoba vydržala pri súčasnom tempe predaja</div>
+        <div class="formula">obrátkovosť = (Ø zásoba × dni) / COGS</div>
+        <div class="hint">Ø zásoba = priemerná skladová hodnota v nákupných cenách za obdobie ·
+          dni = dĺžka obdobia · COGS = náklady na predaný tovar za to isté obdobie.
+          Nižšie číslo = rýchlejšia obrátka.</div>
+
+        <div class="sub-h">Stav vstupov</div>
+        <ul class="clist">
+          <li><span class="m done">✓</span><div><b>Tržby a objednávky</b> — agregované denné sumy
+            za 14 dní. <span class="muted">Odomklo <code>order:stats</code> → <code>/sales</code>.</span></div></li>
+          <li><span class="m done">✓</span><div><b>Marža a expenses</b> — <code>order_income</code>
+            mínus <code>expenses</code>, dnes 31,4 %.
+            <span class="muted">Odomklo <code>order:stats</code> → <code>/margin</code>.</span></div></li>
+          <li><span class="m done">✓</span><div><b>Predané kusy na produkt</b> — 30-dňové počty
+            z nočného syncu. <span class="muted">Zo <code>orders:read</code>.</span></div></li>
+          <li><span class="m open">✕</span><div><b>COGS na položku</b> — nákupná cena tovaru.
+            <span class="muted">API ju nevracia v žiadnom scope. Bez nej sa dá počítať len
+            obrátka v kusoch, nie v peniazoch.</span></div></li>
+          <li><span class="m open">✕</span><div><b>Zásoba nevariantných produktov</b> —
+            <code>/api/products</code> vracia stav skladu spoľahlivo len pre varianty;
+            pri nevariantných je pole prázdne. <span class="muted">Týka sa 6 z 10 produktov allowlistu.</span></div></li>
+          <li><span class="m todo">◐</span><div><b>História zásoby</b> — appka si zásobu zatiaľ
+            neukladá do denných snímok, takže „Ø zásoba" sa nemá z čoho počítať.
+            <span class="muted">Riešiteľné bez API: doplniť denný snapshot.</span></div></li>
+        </ul>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="ct">Čo sa už dá povedať dnes</div>
+          <div class="cs">Náhrada, kým chýba COGS — obrátka v kusoch za 30 dní</div>
+          <div class="brow"><div class="bl">10241 Aura Luna</div>
+            <div class="tr"><div class="fl" style="width:100%"></div></div><div class="vl">142 ks</div></div>
+          <div class="brow"><div class="bl">10502 Aura Tide</div>
+            <div class="tr"><div class="fl" style="width:83%"></div></div><div class="vl">118 ks</div></div>
+          <div class="brow"><div class="bl">10923 Aura Petra</div>
+            <div class="tr"><div class="fl" style="width:68%"></div></div><div class="vl">96 ks</div></div>
+          <div class="brow"><div class="bl">10388 Aura Solis</div>
+            <div class="tr"><div class="fl" style="width:52%"></div></div><div class="vl">74 ks</div></div>
+          <div class="brow"><div class="bl">10744 Aura Vesper</div>
+            <div class="tr"><div class="fl" style="width:43%"></div></div><div class="vl">61 ks</div></div>
+          <div class="hint">Posledný sync 10.08.2026 06:00 · 978 objednávok za 3 dni.</div>
+        </div>
+        <div class="note attention"><span class="g">▲</span><div>
+          <b>Prečo appka číslo nezobrazí.</b> Bez COGS a bez zásoby nevariantných produktov by
+          obrátkovosť bola dopočítaná odhadom. Radšej ju nechávame prázdnu, než aby sa podľa
+          nej rozhodovalo o zľavách.
+        </div></div>
+        <div class="note info"><span class="g">ⓘ</span><div>
+          Odomknúť to vie <b>jedna zmena na strane shopu</b>: vrátiť nákupnú cenu a stav skladu
+          v <code>/api/products</code>. Denný snapshot zásoby si appka doplní sama.
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 03 · LLM -->
+  <div class="sect">
+    <h2><span class="snum">03</span>Jazykový model</h2>
+    <div class="sdesc">Voliteľná nadstavba nad pravidlami — zhrnutia a odpovede na otázky nad
+      vlastnými dátami. Zatiaľ nenakonfigurovaná.</div>
+    <div class="fcard gd">
+      <div class="wm">LLM</div>
+      <span class="tag wr">vyžaduje konfiguráciu</span>
+      <h3 style="margin-top:7px">LLM agent — nenakonfigurovaný</h3>
+      <p style="max-width:820px">Zistenia vyššie sú <b>pravidlá, nie model</b>. Jazykový model by
+        pridal voľné zhrnutia a otázky typu „prečo klesla marža v prvom augustovom týždni".
+        Chýba poskytovateľ, model a limit na tokeny. Kým sa nenastaví, appka funguje plne bez neho.</p>
+      <div class="grid3 mt14">
+        <div><div class="lbl">Poskytovateľ</div><span class="badge idle"><span class="g">○</span>nenastavený</span></div>
+        <div><div class="lbl">Prístup k dátam</div><span class="badge idle"><span class="g">○</span>len agregáty, bez zákazníckych dát</span></div>
+        <div><div class="lbl">Právo zápisu</div><span class="badge critical"><span class="g">✕</span>nikdy — návrh vždy cez dry-run</span></div>
+      </div>
+      <div class="frow" style="display:flex;justify-content:space-between;align-items:center;gap:14px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <span class="tiny muted">Aj po zapnutí platí I3 — model smie navrhnúť, potvrdzuje človek.</span>
+        <div class="btnrow">
+          <button class="btn ghost">Zistiť viac</button>
+          <button class="btn">Nakonfigurovať</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div></div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>

@@ -1,0 +1,2 @@
+# Next.js statické súbory. Priečinok musí existovať — Dockerfile ho kopíruje
+# do runner stage (COPY --from=build /app/public ./public).

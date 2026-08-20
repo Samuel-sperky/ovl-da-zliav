@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nastavenia · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  /* iba drobná geometria stránky, nie nové komponenty */
+  .sec + .sec{margin-top:14px}
+  .sec[id]{scroll-margin-top:72px}
+  .kv{display:grid;grid-template-columns:150px 1fr auto;gap:6px 14px;
+    align-items:center;font-size:13px}
+  .kv .k{color:var(--dim);font-size:12px}
+  .kv .v{color:var(--ink);font-weight:600}
+  table.tbl.plain td{white-space:normal}
+  table.tbl td.act{text-align:right;white-space:nowrap}
+  .split{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+  .stack{display:flex;flex-direction:column;gap:8px}
+  .rule-n{font-weight:660;color:var(--ink)}
+  .danger-zone{border-color:var(--st-critical)}
+  .danger-zone .sec-h h2{color:var(--st-critical)}
+  .dz-row{display:flex;align-items:center;gap:12px;padding:8px 0;
+    border-top:1px solid var(--line);font-size:13px;color:var(--ink2)}
+  .dz-row:first-of-type{border-top:0}
+  .dz-row .btn{margin-left:auto}
+  .audit-scroll{max-height:300px}
+  h1.page{font-size:15px;font-weight:640;margin-bottom:10px}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a href="prehlad.html">Prehľad</a>
+      <a href="produkty.html">Produkty</a>
+      <a href="zlavy.html">Zľavy</a>
+      <a class="on" href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <span class="hmeter">Zápisy <b>100/200</b> dnes
+        <span class="hbar"><i style="width:50%"></i></span></span>
+      <span class="hsep"></span>
+      <a class="hqueue" href="zlavy.html">Fronta <b>3 420/8 000</b></a>
+      <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="layout-anchors">
+
+    <!-- KOTVY = dominanta stránky (navigačná, viď §1 TAB 4) -->
+    <nav class="anchors">
+      <a class="on" href="#pripojenie">Pripojenie</a>
+      <a href="#kluce">Kľúče</a>
+      <a href="#rozpocet">Rozpočet</a>
+      <a href="#pravidla">Pravidlá a poistky</a>
+      <a href="#zariadenia">Povolené zariadenia</a>
+      <a href="#zalohy">Zálohy</a>
+      <a href="#audit">Audit</a>
+      <a href="#diagnostika">Diagnostika</a>
+      <a href="#zamknute">Zamknuté funkcie</a>
+      <a href="#cervena">Červená zóna</a>
+    </nav>
+
+    <div>
+      <h1 class="page">Nastavenia</h1>
+
+      <!-- 1 ------------------------------------------------------------ -->
+      <section class="sec" id="pripojenie">
+        <div class="sec-h">
+          <h2>Pripojenie</h2>
+          <div class="act"><span class="sig ok">Spojenie funguje</span></div>
+        </div>
+        <div class="kv">
+          <span class="k">Eshop</span>
+          <span class="v">sperky-eshop.sk</span>
+          <span><button class="btn sm">Zmeniť</button></span>
+
+          <span class="k">Katalóg</span>
+          <span class="v">40 483 produktov · načítanie každý deň o 03:00</span>
+          <span><button class="btn sm">Načítať teraz</button></span>
+
+          <span class="k">Zápisy do eshopu</span>
+          <span class="v">zapnuté</span>
+          <span class="lvl-3">mení sa na serveri, nie tu</span>
+
+          <span class="k">Appka beží na</span>
+          <span class="v">192.168.1.14:3070</span>
+          <span class="lvl-3">len povolené zariadenia v domácej sieti</span>
+        </div>
+        <p class="fresh">Dáta k 10. 8. 03:00</p>
+        <details class="tech">
+          <summary>Technický detail</summary>
+          <div class="body">
+            <table>
+              <tr><td>Adresa v sieti</td><td class="mono">192.168.1.14:3070 · lokálne aj 127.0.0.1:3070</td></tr>
+              <tr><td>Základ adresy</td><td class="mono">https://sperky-eshop.sk/api</td></tr>
+              <tr><td>Posledná odpoveď</td><td class="mono">200 OK · 10. 8. 2026 11:38:04 · 214 ms</td></tr>
+              <tr><td>Limit shopu</td><td class="mono">20/min · 200/UTC deň (setReduction)</td></tr>
+              <tr><td>Prepínač ostrého zápisu</td><td class="mono">WRITES_ENABLED=1 v .env na serveri</td></tr>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <!-- 2 ------------------------------------------------------------ -->
+      <section class="sec" id="kluce">
+        <div class="sec-h">
+          <h2>Kľúče</h2>
+          <div class="act lvl-3">Platnosť 30 dní</div>
+        </div>
+        <div class="tbl-frame">
+          <table class="tbl plain">
+            <thead>
+              <tr><th>Kľúč</th><th>Platí do</th><th>Dnes</th><th>Stav</th><th class="act"></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="name">Zápis zliav</td>
+                <td>9. 9. 2026</td>
+                <td class="num">100 / 200</td>
+                <td><span class="sig ok">zapnutý</span></td>
+                <td class="act">
+                  <button class="btn sm">Obnoviť</button>
+                  <button class="btn sm ghost">Vypnúť</button>
+                </td>
+              </tr>
+              <tr>
+                <td class="name">Objednávky</td>
+                <td>2. 9. 2026</td>
+                <td class="num">14 / 1 000</td>
+                <td><span class="sig ok">zapnutý</span></td>
+                <td class="act">
+                  <button class="btn sm">Obnoviť</button>
+                  <button class="btn sm ghost">Vypnúť</button>
+                </td>
+              </tr>
+              <tr>
+                <td class="name">Štatistiky</td>
+                <td>2. 9. 2026</td>
+                <td class="num">0</td>
+                <td><span class="sig idle">zatiaľ nepoužitý</span></td>
+                <td class="act">
+                  <button class="btn sm">Obnoviť</button>
+                  <button class="btn sm ghost">Vypnúť</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="tbl-foot">
+            <span>Kľúče sú uložené zašifrované. Nikdy sa nezobrazujú ani nezapisujú do záznamov.</span>
+            <span><button class="btn sm">Pridať kľúč</button></span>
+          </div>
+        </div>
+        <details class="tech">
+          <summary>Technický detail</summary>
+          <div class="body">
+            <table>
+              <tr><td>shop_write</td><td class="mono">kind=shop_write · vložený 10. 8. 2026 09:12 · exp 9. 9. 2026 09:12</td></tr>
+              <tr><td>orders_read</td><td class="mono">kind=orders_read · vložený 3. 8. 2026 20:40 · exp 2. 9. 2026 20:40</td></tr>
+              <tr><td>stats_read</td><td class="mono">kind=stats_read · vložený 3. 8. 2026 20:41 · exp 2. 9. 2026 20:41</td></tr>
+              <tr><td>Šifrovanie</td><td class="mono">AES-256-GCM, master key v samostatnom zväzku</td></tr>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <!-- 3 ------------------------------------------------------------ -->
+      <section class="sec" id="rozpocet">
+        <div class="sec-h">
+          <h2>Rozpočet</h2>
+          <div class="act lvl-3">Reset o 02:00 · zápisy majú prednosť</div>
+        </div>
+        <div class="split">
+          <div>
+            <div class="kpis">
+              <div class="kpi">
+                <div class="k">Zápisy zliav</div>
+                <div class="v">100 <span class="lvl-3">/ 200</span></div>
+                <div class="s">zostáva 100 dnes</div>
+              </div>
+              <div class="kpi">
+                <div class="k">Objednávky</div>
+                <div class="v">14 <span class="lvl-3">/ 1 000</span></div>
+                <div class="s">načítanie predajov</div>
+              </div>
+              <div class="kpi">
+                <div class="k">Štatistiky</div>
+                <div class="v">0</div>
+                <div class="s">zatiaľ nevyužité</div>
+              </div>
+            </div>
+            <div class="bar"><i style="width:50%"></i></div>
+            <div class="prog-meta">
+              <span>Ďalšia dávka <b>12:00</b></span>
+              <span class="sep-dot">·</span>
+              <span>Zvyšné dávky dnes <b>5 × 20</b></span>
+              <span class="sep-dot">·</span>
+              <span>Koniec dňa <b>200 / 200</b></span>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="lvl-3"><b>Spotreba zápisov dnes</b> — rozpočet sa delí medzi zľavy vo fronte</div>
+            <table class="tbl plain">
+              <tbody>
+                <tr><td class="name">Ležiaky striebro — jeseň</td><td class="n"><b>100</b></td></tr>
+                <tr><td class="name">Náušnice bez pohybu</td><td class="n">0</td></tr>
+                <tr><td class="name">Ručné zásahy</td><td class="n">0</td></tr>
+                <tr class="muted"><td>Voľná rezerva</td><td class="n">100</td></tr>
+              </tbody>
+            </table>
+            <div class="locked-note">Vyšší denný limit vyžaduje súhlas dodávateľa shopu</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 ------------------------------------------------------------ -->
+      <section class="sec" id="pravidla">
+        <div class="sec-h">
+          <h2>Pravidlá a poistky</h2>
+          <div class="act"><button class="btn sm">Pridať pásmo</button></div>
+        </div>
+        <div class="tbl-frame">
+          <table class="tbl plain">
+            <thead>
+              <tr><th>Pásmo</th><th>Podmienka</th><th class="n">Produktov dnes</th><th class="n">Zľava</th><th class="act"></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="name">A</td>
+                <td>0 predaných za 360 dní</td>
+                <td class="n">6 940</td>
+                <td class="n"><b class="rule-n">30 %</b></td>
+                <td class="act"><button class="btn sm ghost">Upraviť</button></td>
+              </tr>
+              <tr>
+                <td class="name">B</td>
+                <td>0 predaných za 180 dní</td>
+                <td class="n">4 700</td>
+                <td class="n"><b class="rule-n">20 %</b></td>
+                <td class="act"><button class="btn sm ghost">Upraviť</button></td>
+              </tr>
+              <tr>
+                <td class="name">C</td>
+                <td>1–2 predané za 180 dní</td>
+                <td class="n">7 564</td>
+                <td class="n"><b class="rule-n">15 %</b></td>
+                <td class="act"><button class="btn sm ghost">Upraviť</button></td>
+              </tr>
+              <tr class="muted">
+                <td class="name">D</td>
+                <td class="locked">Obrátkovosť pod prahom <span class="lockcell"></span></td>
+                <td class="n locked">—</td>
+                <td class="n locked">—</td>
+                <td class="act lvl-3">čaká na nákupné ceny</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="tbl-foot">
+            <span>Podľa týchto pásiem appka navrhuje percentá pri novej zľave.</span>
+            <span>Produkt v zľave sa vynechá, ak už má rovnaké alebo vyššie percento.</span>
+          </div>
+        </div>
+
+        <div class="kv gap-t">
+          <span class="k">Strop na jednu zľavu</span>
+          <span class="v">10 000 produktov</span>
+          <span><button class="btn sm">Zmeniť</button></span>
+
+          <span class="k">Potvrdenie zápisu</span>
+          <span class="v">počet sa píše ručne</span>
+          <span class="lvl-3">nedá sa vypnúť</span>
+
+          <span class="k">Poradie zápisu</span>
+          <span class="v">najhoršie ležiaky prvé</span>
+          <span><button class="btn sm">Zmeniť</button></span>
+
+          <span class="k">Sklz fronty</span>
+          <span class="v">posunúť štart zľavy automaticky</span>
+          <span><input class="cb" type="checkbox" checked></span>
+        </div>
+      </section>
+
+      <!-- 5 ------------------------------------------------------------ -->
+      <section class="sec" id="zariadenia">
+        <div class="sec-h">
+          <h2>Povolené zariadenia</h2>
+          <div class="act"><button class="btn sm">Pridať zariadenie</button></div>
+        </div>
+        <div class="tbl-frame">
+          <table class="tbl plain">
+            <thead>
+              <tr><th>Zariadenie</th><th>Naposledy</th><th>Prístup</th><th class="act"></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="name">Pracovný počítač</td>
+                <td>práve teraz</td>
+                <td><span class="sig ok">všetko</span></td>
+                <td class="act lvl-3">toto zariadenie</td>
+              </tr>
+              <tr>
+                <td class="name">Mobil — Zuzana</td>
+                <td>9. 8. 18:22</td>
+                <td><span class="sig ok">všetko</span></td>
+                <td class="act"><button class="btn sm ghost">Odobrať</button></td>
+              </tr>
+              <tr>
+                <td class="name">Notebook — sklad</td>
+                <td>1. 8. 09:05</td>
+                <td><span class="sig idle">len čítanie</span></td>
+                <td class="act"><button class="btn sm ghost">Odobrať</button></td>
+              </tr>
+              <tr class="muted">
+                <td class="name">Tablet — predajňa</td>
+                <td>nikdy</td>
+                <td><span class="sig warn">čaká na schválenie</span></td>
+                <td class="act"><button class="btn sm">Povoliť</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="tbl-foot">
+            <span>Prístup len z domácej siete. Zariadenie mimo zoznamu sa nedostane dnu.</span>
+          </div>
+        </div>
+        <details class="tech">
+          <summary>Technický detail</summary>
+          <div class="body">
+            <table>
+              <tr><td>Pracovný počítač</td><td class="mono">192.168.1.14 · a4:83:e7:1c:9d:02</td></tr>
+              <tr><td>Mobil — Zuzana</td><td class="mono">192.168.1.51 · 8c:85:90:44:11:b7</td></tr>
+              <tr><td>Notebook — sklad</td><td class="mono">192.168.1.23 · 3c:22:fb:70:aa:19</td></tr>
+              <tr><td>Tablet — predajňa</td><td class="mono">192.168.1.68 · f0:18:98:2e:64:cd</td></tr>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <!-- 6 ------------------------------------------------------------ -->
+      <section class="sec" id="zalohy">
+        <div class="sec-h">
+          <h2>Zálohy</h2>
+          <div class="act"><span class="sig ok">Posledná 10. 8. 03:12</span></div>
+        </div>
+        <div class="kv">
+          <span class="k">Denná záloha</span>
+          <span class="v">každý deň o 03:10</span>
+          <span><input class="cb" type="checkbox" checked></span>
+
+          <span class="k">Kópia do OneDrive</span>
+          <span class="v">Aura Zľavy / zálohy</span>
+          <span><input class="cb" type="checkbox" checked></span>
+
+          <span class="k">Uchovať</span>
+          <span class="v">30 posledných záloh · 412 MB</span>
+          <span><button class="btn sm">Zmeniť</button></span>
+
+          <span class="k">Obnova</span>
+          <span class="v">zo zálohy 10. 8. 03:12</span>
+          <span><button class="btn sm">Obnoviť zo zálohy</button></span>
+        </div>
+        <div class="row gap-t">
+          <button class="btn sm">Zálohovať teraz</button>
+          <span class="lvl-3">Kópia do OneDrive prebehla 10. 8. 03:14</span>
+        </div>
+      </section>
+
+      <!-- 7 ------------------------------------------------------------ -->
+      <section class="sec" id="audit">
+        <div class="sec-h">
+          <h2>Audit</h2>
+          <div class="act">
+            <div class="chips">
+              <button class="chip on">Všetko</button>
+              <button class="chip">Zápisy</button>
+              <button class="chip">Kľúče</button>
+              <button class="chip">Prístup</button>
+            </div>
+            <button class="btn sm ghost">Stiahnuť</button>
+          </div>
+        </div>
+        <div class="tbl-frame">
+          <div class="tbl-scroll audit-scroll">
+            <table class="tbl">
+              <thead>
+                <tr><th>Kedy</th><th>Čo sa stalo</th><th>Kto</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>10. 8. 11:38</td><td class="name">Fronta zapísala 20 produktov · Ležiaky striebro — jeseň</td><td>appka</td></tr>
+                <tr><td>10. 8. 10:02</td><td class="name">Fronta zapísala 20 produktov · Ležiaky striebro — jeseň</td><td>appka</td></tr>
+                <tr><td>10. 8. 09:12</td><td class="name">Obnovený kľúč na zápis zliav</td><td>marketing</td></tr>
+                <tr><td>10. 8. 03:14</td><td class="name">Záloha skopírovaná do OneDrive</td><td>appka</td></tr>
+                <tr><td>10. 8. 03:00</td><td class="name">Načítaný katalóg · 40 483 produktov</td><td>appka</td></tr>
+                <tr><td>9. 8. 18:22</td><td class="name">Prihlásenie z Mobil — Zuzana</td><td>marketing</td></tr>
+                <tr><td>9. 8. 16:41</td><td class="name">3 produkty sa nepodarilo zapísať ani po treťom pokuse</td><td>appka</td></tr>
+                <tr><td>8. 8. 14:05</td><td class="name">Štart zľavy posunutý na 4. 9. pre sklz fronty</td><td>appka</td></tr>
+                <tr><td>7. 8. 11:20</td><td class="name">Zmenené pásmo A z 25 % na 30 %</td><td>marketing</td></tr>
+                <tr><td>5. 8. 09:33</td><td class="name">Zapísaná zľava 35 % · Prstene 2024 — dopredaj</td><td>marketing</td></tr>
+                <tr><td>3. 8. 20:41</td><td class="name">Pridaný kľúč na štatistiky</td><td>marketing</td></tr>
+                <tr><td>3. 8. 20:40</td><td class="name">Obnovený kľúč na objednávky</td><td>marketing</td></tr>
+                <tr><td>1. 8. 09:05</td><td class="name">Povolené zariadenie Notebook — sklad</td><td>marketing</td></tr>
+                <tr><td>24. 7. 09:47</td><td class="name">Zaradená do fronty zľava Ležiaky striebro — jeseň · 8 000 produktov</td><td>marketing</td></tr>
+                <tr><td>15. 7. 23:59</td><td class="name">Skončila zľava Jarná obnova skladu</td><td>appka</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="tbl-foot">
+            <span>2 184 záznamov · uchovávané 24 mesiacov</span>
+            <div class="pager"><span class="cur">1</span><a href="#audit">2</a><a href="#audit">3</a><a href="#audit">…</a><a href="#audit">146</a></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8 ------------------------------------------------------------ -->
+      <section class="sec" id="diagnostika">
+        <div class="sec-h"><h2>Diagnostika</h2></div>
+        <div class="spread">
+          <div class="lvl-2">Súbor so stavom appky pre riešenie problému. Bez kľúčov a hesiel.</div>
+          <button class="btn primary">Stiahnuť diagnostiku</button>
+        </div>
+        <details class="tech">
+          <summary>Čo súbor obsahuje</summary>
+          <div class="body">
+            <table>
+              <tr><td>Verzia</td><td class="mono">aura-zlavy 3.0.0 · node 22.14 · mariadb 11.4</td></tr>
+              <tr><td>Zoznam migrácií</td><td class="mono">0001–0047, checksumy OK</td></tr>
+              <tr><td>Stav fronty</td><td class="mono">queue_id=Z-1 · processed=3420 · failed=12 · next_slot=12:00</td></tr>
+              <tr><td>Posledné odpovede shopu</td><td class="mono">200 ×98 · 404 ×3 · timeout ×2 (bez tiel odpovedí)</td></tr>
+              <tr><td>Vynechané</td><td class="mono">kľúče, heslá, master key, obsah objednávok</td></tr>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <!-- 9 ------------------------------------------------------------ -->
+      <section class="sec" id="zamknute">
+        <div class="sec-h">
+          <h2>Zamknuté funkcie</h2>
+          <div class="act"><button class="btn sm">Skopírovať zoznam pre dodávateľa shopu</button></div>
+        </div>
+        <div class="tbl-frame">
+          <table class="tbl plain">
+            <thead><tr><th>Funkcia</th><th>Chýba</th><th>Vyžiadané</th></tr></thead>
+            <tbody>
+              <tr><td class="name">Filter podľa kategórie a kovu</td><td class="locked">zoznam kategórií a kovov</td><td>28. 7. 2026</td></tr>
+              <tr><td class="name">Marža a odhad dopadu</td><td class="locked">nákupné ceny</td><td>28. 7. 2026</td></tr>
+              <tr><td class="name">Obrátkovosť</td><td class="locked">nákupné ceny</td><td>28. 7. 2026</td></tr>
+              <tr><td class="name">Sklad nevariantných</td><td class="locked">stavy skladu</td><td>28. 7. 2026</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 10 ----------------------------------------------------------- -->
+      <section class="sec danger-zone" id="cervena">
+        <div class="sec-h"><h2>Červená zóna</h2></div>
+        <div class="dz-row">
+          <span>Zastaviť frontu — už zapísané produkty zostanú zapísané</span>
+          <button class="btn sm danger">Zastaviť</button>
+        </div>
+        <div class="dz-row">
+          <span>Zmazať všetky kľúče — appka prestane pracovať s eshopom</span>
+          <button class="btn sm danger">Zmazať kľúče</button>
+        </div>
+        <div class="dz-row">
+          <span>Vymazať lokálne dáta a načítať katalóg nanovo</span>
+          <button class="btn sm danger">Vymazať a načítať</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+</body>
+</html>

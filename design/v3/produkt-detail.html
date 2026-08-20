@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Strieborný prsteň Aurora — Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  .ptop{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+  .ptop .inp.search{width:340px}
+  .ptop .sp{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .res{font-size:22px;font-weight:660;letter-spacing:-.02em;line-height:1.05;white-space:nowrap}
+  .res small{font-size:12px;font-weight:500;color:var(--dim);margin-left:6px;letter-spacing:0}
+  table.tbl td.name{max-width:340px}
+  table.tbl th.w-s,table.tbl td.w-s{width:86px}
+  /* stránka pod panelom je stlmená — panel je dominanta */
+  .under{filter:saturate(.7);opacity:.5}
+  .drawer .dgroup{border-top:1px solid var(--line);padding:12px 0 4px}
+  .drawer .dgroup > h3{font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--dim);font-weight:650;margin-bottom:8px}
+  .drawer .hist{display:flex;align-items:baseline;gap:10px;font-size:13px;
+    padding:5px 0;border-bottom:1px solid var(--line)}
+  .drawer .hist:last-child{border-bottom:0}
+  .drawer .hist b{font-weight:640;color:var(--ink);width:44px}
+  .drawer .hist .d{color:var(--ink2)}
+  .drawer .hist .s{margin-left:auto;color:var(--dim);font-size:11.5px}
+</style>
+</head>
+<body>
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a href="prehlad.html">Prehľad</a>
+      <a class="on" href="produkty.html">Produkty</a>
+      <a href="zlavy.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <span class="hmeter">Zápisy <b>100/200</b> dnes
+        <span class="hbar"><i style="width:50%"></i></span></span>
+      <span class="hsep"></span>
+      <a class="hqueue" href="zlavy.html">Fronta <b>3 420/8 000</b></a>
+      <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap under">
+  <div class="layout-filters">
+    <aside class="filters">
+      <div class="fgroup">
+        <h3>Uložené filtre</h3>
+        <div class="chips">
+          <span class="chip on">Ležiaky 180 dní <span class="x">×</span></span>
+          <span class="chip">Striebro nad 40 €</span>
+        </div>
+      </div>
+      <div class="fgroup">
+        <h3>Obdobie</h3>
+        <div class="seg">
+          <button>30</button><button>60</button><button>90</button>
+          <button class="on">180</button><button>360</button>
+        </div>
+      </div>
+      <div class="fgroup">
+        <h3>Predajnosť</h3>
+        <label class="fopt"><input class="cb" type="checkbox" checked> 0 predaných <span class="c">11 640</span></label>
+        <label class="fopt"><input class="cb" type="checkbox"> 1–2 predané <span class="c">7 564</span></label>
+        <label class="fopt"><input class="cb" type="checkbox"> 3–9 predaných <span class="c">12 918</span></label>
+        <label class="fopt"><input class="cb" type="checkbox"> 10 a viac <span class="c">8 361</span></label>
+        <div class="fopt locked">Obrátkovosť pod prahom</div>
+      </div>
+      <div class="fgroup">
+        <h3>Sklad</h3>
+        <label class="fopt"><input class="cb" type="checkbox"> 1–5 ks <span class="c">6 205</span></label>
+        <label class="fopt"><input class="cb" type="checkbox"> 6–20 ks <span class="c">18 470</span></label>
+        <label class="fopt"><input class="cb" type="checkbox"> viac ako 20 ks <span class="c">14 112</span></label>
+      </div>
+      <div class="fgroup">
+        <h3>Zatiaľ nedostupné</h3>
+        <div class="fopt locked">Kategória</div>
+        <div class="fopt locked">Kov</div>
+        <div class="fopt locked">Typ šperku</div>
+        <div class="fopt locked">Marža</div>
+      </div>
+    </aside>
+
+    <main>
+      <div class="ptop">
+        <input class="inp search" placeholder="Hľadať názov, ID alebo SKU" value="">
+        <div class="sp"><span class="res num">11 640<small>z 40 483 produktov</small></span></div>
+      </div>
+
+      <div class="tbl-frame">
+        <div class="tbl-scroll" style="max-height:none">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th class="sel"><input class="cb" type="checkbox"></th>
+                <th>Názov</th>
+                <th class="n w-s">Predané 180 d</th>
+                <th class="n w-s">Sklad</th>
+                <th class="n w-s">Cena</th>
+                <th class="n w-s">Zľava teraz</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Strieborné náušnice Lumen, kubický zirkón</td><td class="n"><b>0</b></td><td class="n">12</td>
+                <td class="n">34,90 €</td><td class="n">—</td>
+              </tr>
+              <tr class="on">
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Strieborný prsteň Aurora, biely opál</td><td class="n"><b>0</b></td><td class="n">7</td>
+                <td class="n">49,00 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Strieborný prívesok Nova, srdce</td><td class="n"><b>0</b></td><td class="n">44</td>
+                <td class="n">22,90 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Strieborný náramok Vela, pletený</td><td class="n"><b>0</b></td><td class="n">18</td>
+                <td class="n">41,00 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Zlaté náušnice Perla 585, sladkovodná perla</td><td class="n"><b>0</b></td><td class="n">3</td>
+                <td class="n">214,00 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Strieborný prsteň Mira, ametyst</td><td class="n"><b>0</b></td><td class="n">9</td>
+                <td class="n">38,50 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Zlatá retiazka Filo 585, 50 cm</td><td class="n"><b>0</b></td><td class="n">1</td>
+                <td class="n">268,00 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Strieborná súprava Elyra, náušnice + prívesok</td><td class="n"><b>0</b></td><td class="n">6</td>
+                <td class="n">62,00 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Zlatý prsteň Verona 750, smaragd</td><td class="n"><b>0</b></td><td class="n">1</td>
+                <td class="n">742,00 €</td><td class="n">—</td>
+              </tr>
+              <tr>
+                <td class="sel"><input class="cb" type="checkbox"></td>
+                <td class="name">Strieborné náušnice Tara, visiace kvapky</td><td class="n"><b>0</b></td><td class="n">20</td>
+                <td class="n">29,90 €</td><td class="n">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="tbl-foot">
+          <span>Zobrazených 50 z <b class="num">11 640</b></span>
+          <nav class="pager"><span class="cur">1</span><a>2</a><a>3</a><a>4</a><span>…</span><a>233</a></nav>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- BOČNÝ PANEL — DETAIL PRODUKTU -->
+<aside class="drawer">
+  <div class="drawer-h">
+    <div>
+      <div class="t">Strieborný prsteň Aurora, biely opál</div>
+      <div class="lvl-3" style="margin-top:3px">49,00 € · sklad 7 ks · bez zľavy</div>
+      <div class="flag" style="margin-top:4px">Zápis sa nepodaril — shop produkt nenašiel</div>
+    </div>
+    <a class="close" href="produkty.html" aria-label="Zavrieť">✕</a>
+  </div>
+
+  <div class="lvl-1" style="margin-bottom:2px">
+    <span class="big sm num">0</span>
+    <span class="sub">predaných za posledných 180 dní · za 360 dní 11</span>
+  </div>
+  <div class="fresh">Dáta k 10. 8. 03:00</div>
+
+  <div class="dgroup">
+    <h3>Predaje po mesiacoch</h3>
+    <div class="chart" style="padding:8px 10px">
+      <svg viewBox="0 0 360 84" role="img" aria-label="Predané kusy po mesiacoch">
+        <line class="ax" x1="0" y1="62" x2="360" y2="62"></line>
+        <rect class="barcol" x="4"   y="14" width="18" height="48"></rect>
+        <rect class="barcol" x="33"  y="30" width="18" height="32"></rect>
+        <rect class="barcol" x="62"  y="-2" width="18" height="64"></rect>
+        <rect class="barcol" x="91"  y="46" width="18" height="16"></rect>
+        <rect class="barcol" x="120" y="46" width="18" height="16"></rect>
+        <rect class="barcol" x="149" y="60" width="18" height="2" opacity=".28"></rect>
+        <rect class="barcol" x="178" y="60" width="18" height="2" opacity=".28"></rect>
+        <rect class="barcol" x="207" y="60" width="18" height="2" opacity=".28"></rect>
+        <rect class="barcol" x="236" y="60" width="18" height="2" opacity=".28"></rect>
+        <rect class="barcol" x="265" y="60" width="18" height="2" opacity=".28"></rect>
+        <rect class="barcol" x="294" y="60" width="18" height="2" opacity=".28"></rect>
+        <rect class="barcol" x="323" y="60" width="18" height="2" opacity=".28"></rect>
+        <text x="4"   y="76">9/25</text>
+        <text x="120" y="76">1/26</text>
+        <text x="236" y="76">5/26</text>
+        <text x="323" y="76">8/26</text>
+      </svg>
+    </div>
+    <div class="lvl-3" style="margin-top:6px">Posledný predaj 14. 1. 2026</div>
+  </div>
+
+  <div class="dgroup">
+    <h3>História zliav</h3>
+    <div class="hist"><b>15 %</b><span class="d">12. 5. – 26. 5. 2026</span><span class="s">predané 0 ks</span></div>
+    <div class="hist"><b>20 %</b><span class="d">15. 6. – 15. 7. 2026</span><span class="s">predané 0 ks</span></div>
+    <div class="hist"><b>10 %</b><span class="d">2. 12. – 24. 12. 2025</span><span class="s">predané 2 ks</span></div>
+    <div class="lvl-3" style="margin-top:8px">Naposledy sme zapisovali 20 % dňa 15. 6.</div>
+  </div>
+
+  <div class="dgroup">
+    <h3>Zaradenie</h3>
+    <dl class="dl">
+      <dt>V pripravovanej zľave</dt><dd>Ležiaky striebro — jeseň</dd>
+      <dt>Pásmo</dt><dd>A · 30 %</dd>
+      <dt>Cena po zľave</dt><dd>34,30 €</dd>
+      <dt>Kategória a kov</dt><dd class="lockcell">—</dd>
+      <dt>Marža</dt><dd class="lockcell">—</dd>
+    </dl>
+  </div>
+
+  <details class="tech">
+    <summary>Technický detail</summary>
+    <div class="body">
+      <table>
+        <tr><td>ID produktu</td><td><b>21170</b></td></tr>
+        <tr><td>SKU</td><td><b>STR-PRS-1188</b></td></tr>
+        <tr><td>Posledné načítanie</td><td><b>10. 8. 2026 03:00</b></td></tr>
+        <tr><td>Posledný zápis</td><td><b>15. 6. 2026 08:12 · prijaté</b></td></tr>
+        <tr><td>Odpoveď shopu</td><td><b>reduction=20, valid_from=2026-06-15</b></td></tr>
+      </table>
+    </div>
+  </details>
+
+  <div class="row" style="margin-top:14px">
+    <button class="btn primary">Zlacniť tento produkt</button>
+    <button class="btn ghost">Otvoriť v shope</button>
+  </div>
+</aside>
+</body>
+</html>

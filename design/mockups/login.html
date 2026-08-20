@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prihlásenie · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria tejto stránky */
+  .loginwrap{min-height:calc(100vh - 26px);display:flex;align-items:center;justify-content:center;
+    padding:70px 22px 90px}
+  .loginbox{width:100%;max-width:380px}
+  .lmark{text-align:center;margin-bottom:22px}
+  .lmark .crown{font-size:30px;color:var(--gold);line-height:1;display:block;margin-bottom:9px}
+  .lmark h1{font-size:20px;font-weight:660;letter-spacing:-.01em}
+  .lmark .sub{font-size:12.5px;color:var(--dim);margin-top:4px}
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="loginwrap">
+  <div class="loginbox">
+
+    <div class="lmark">
+      <span class="crown">♛</span>
+      <h1>Aura Zľavy</h1>
+      <div class="sub">Správa zliav pre sperky-eshop.sk</div>
+    </div>
+
+    <div class="card">
+      <div class="field">
+        <label>Meno</label>
+        <input class="input" value="Samuel" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>Heslo</label>
+        <input class="input" type="password" value="••••••••••••" autocomplete="current-password">
+      </div>
+      <button class="btn primary block lg">Prihlásiť sa</button>
+    </div>
+
+    <div class="tiny muted" style="text-align:center;margin-top:14px;line-height:1.5">
+      Lokálny prístup 127.0.0.1:3070 · za Caddy basic auth · jediný admin.<br>
+      Obnova hesla nie je — heslo mení správca inštancie priamo na serveri.
+    </div>
+
+  </div>
+</div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>

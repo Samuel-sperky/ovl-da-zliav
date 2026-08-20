@@ -3,7 +3,7 @@
 **Projekt:** lokálna Docker appka na ovládanie zliav v eshope Šperky cez API
 **Dátum:** 2026-08-05
 **Branch:** `claude/local-eshop-discount-app-yqxkpg`
-**Stav:** čaká na odpovede → potom 2 agenti generujú 100 otázok v 5 oblastiach
+**Stav:** ZODPOVEDANÉ 2026-08-05 → beží fáza 100 otázok (2 generátori → kritik → dotazník s návrhmi)
 
 ---
 
@@ -56,7 +56,7 @@ Toto je najdôležitejšia otázka, určuje celý bezpečnostný model.
 - **(d) Max 10 zmien na jeden beh** — limit len na počet volaní v jednej operácii.
   Chráni pred hromadnou nehodou, nie pred zásahom do zlého produktu.
 
-**Odpoveď:**
+**Odpoveď:** **(a) Allowlist 10 konkrétnych ID + strop na dávku.** Fail-closed, dvojitá poistka.
 
 ---
 
@@ -76,7 +76,7 @@ Napísal si, že tam nesmie ostať — ideálne rotovať alebo po 48 h vymazať.
 - **(d) Docker secret (file mount, nie env) + nočný TTL job** — po 48 h appka spadne
   do read-only režimu. Rotácia je manuálna operácia na hoste.
 
-**Odpoveď:**
+**Odpoveď:** **(a) Zadanie v UI + šifrovaný na disku (AES-256-GCM) + 48 h auto-wipe.** Master key mimo gitu, UI s odpočtom.
 
 ---
 
@@ -95,7 +95,7 @@ interný nástroj.
 - **(c) Minimal — jeden kontajner, Node + SQLite** — najrýchlejší štart, ale vypadáva
   z rodiny (iný backup mechanizmus, iné migrácie) a horšie sa z toho rastie.
 
-**Odpoveď:**
+**Odpoveď:** **(a) Vetva B** — Node 22 + Next.js 16 standalone + React 19 + TS + MariaDB 11.4, fork infra zo sperky-ai.
 
 ---
 
@@ -112,7 +112,7 @@ interný nástroj.
   Zapadá do plánu Aura Suite F2–F6, ale viaže projekt na hotovosť gateway.
 - **(d) Čisto lokálne, bez Caddy** — zahodí to bod „Caddy" zo zadania.
 
-**Odpoveď:**
+**Odpoveď:** **(a) Lokálne only** — port len na 127.0.0.1, Caddy ako TLS + basic auth + hlavičky, žiadny tunel.
 
 ---
 
@@ -126,7 +126,7 @@ Dokumentácia hovorí „keys are issued out-of-band — contact the shop mainta
   o produkčný shop s reálnymi zákazníkmi? ← toto rozhoduje, či bude dry-run režim
   povinný default alebo len voliteľný prepínač.
 
-**Odpoveď:**
+**Odpoveď:** **(a) Kľúč `product:edit` už mám. Ide o PRODUKČNÝ shop** (staging nie je) → dry-run/potvrdenie pred zápisom je povinný default. Doména sa nezapisuje do repa — zadá sa v UI/configu.
 
 ---
 
@@ -143,7 +143,7 @@ Dokumentácia hovorí „keys are issued out-of-band — contact the shop mainta
 A doplňujúca: **má appka vedieť zľavu skrátiť/upraviť** po nasadení, alebo je zápis
 jednorazový?
 
-**Odpoveď:**
+**Odpoveď:** **(c) Zrušenie neriešime** — zľavy len prirodzene expirujú; appka vie zakladať a predlžovať. (Hack s `to` do minulosti sa neimplementuje.)
 
 ---
 
@@ -157,7 +157,7 @@ jednorazový?
 - **(c) Manuálne + šablóny** — pripravené sady (napr. „Vianoce -20 %, 1.12.–31.12.")
   na jedno kliknutie, ale spúšťa ich vždy človek. ← *odporúčam ako kompromis*
 
-**Odpoveď:**
+**Odpoveď:** **(b) Manuálne + plánované kampane so schedulerom.** ⚠️ Napätie s odpoveďou 2 (48 h TTL kľúča) — rieši sa v 100-otázkovom dotazníku.
 
 ---
 
@@ -171,7 +171,7 @@ jednorazový?
   dátam, a spadá to pod GDPR úvahy (čo sa loguje, ako dlho).
 - **(c) Áno, ale ako druhý oddelený kľúč**, ktorý sa dá vypnúť nezávisle.
 
-**Odpoveď:**
+**Odpoveď:** **(a) Nie, len `product:edit`.** Least privilege, bez zákazníckych dát.
 
 ---
 
@@ -187,7 +187,7 @@ jednorazový?
 Doplňujúca: **kto sa do appky prihlasuje** — len ty, alebo aj niekto z tímu?
 Ak aj niekto ďalší, treba roly (kto smie zapisovať vs. len pozerať).
 
-**Odpoveď:**
+**Odpoveď:** **(a) Plný audit log + snapshot pred/po + allowlist v DB.** Prihlasuje sa **len Samuel** — jeden admin účet, bez rolí.
 
 ---
 
@@ -206,7 +206,7 @@ inak koliduje network alias s iným stackom a Caddy začne servírovať cudziu a
 A ešte: **má názov appky zostať `ovl-da-zliav`**, alebo to premenovať na rodinné
 (napr. `aura-zlavy`)? Repo názov je daný, ide o zobrazovaný názov v UI.
 
-**Odpoveď:**
+**Odpoveď:** **(a)** `C:\\Aura\\ovl-da-zliav`, port **3050**, kontajnery `ovl-zliav-app` + `ovl-zliav-db`, DB `ovl_zliav`, cookie `ovl_zliav_session`. Zobrazovaný názov v UI: **Aura Zľavy**.
 
 ---
 

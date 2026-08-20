@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prázdne stavy · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  .es{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;align-items:start}
+  .es .sec{min-height:260px;display:flex;flex-direction:column}
+  .es .empty{margin:auto 0}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a class="on" href="prehlad.html">Prehľad</a>
+      <a href="produkty.html">Produkty</a>
+      <a href="zlavy.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <span class="hmeter">Zápisy <b>0/200</b> dnes
+        <span class="hbar"><i style="width:0%"></i></span></span>
+      <span class="hsep"></span>
+      <a class="hqueue off" href="zlavy.html">Fronta <b>prázdna</b></a>
+      <button class="tglt" aria-label="Prepnúť tému">&#9790;</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="es">
+
+    <!-- 1 · Prvé spustenie -->
+    <section class="sec">
+      <div class="sec-h"><h2>Prehľad — prvé spustenie</h2></div>
+      <div class="empty">
+        <div class="t">Zatiaľ nemáme katalóg</div>
+        <div>Načítanie 40 483 produktov trvá pár minút.</div>
+        <div class="a">
+          <a class="btn primary" href="nastavenia.html#kluce">Pridať kľúč</a>
+          <a class="btn" href="nastavenia.html#pripojenie">Načítať katalóg</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2 · Zľavy bez zliav -->
+    <section class="sec">
+      <div class="sec-h"><h2>Zľavy</h2></div>
+      <div class="empty">
+        <div class="t">Žiadna zľava</div>
+        <div>Začnite tým, čo sa nepredáva.</div>
+        <div class="a">
+          <a class="btn primary" href="nova-zlava.html">Nová zľava</a>
+          <a class="btn" href="produkty.html">Nájsť ležiaky</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 · Hľadanie bez výsledku -->
+    <section class="sec">
+      <div class="sec-h"><h2>Produkty — hľadanie</h2></div>
+      <div class="ptop" style="display:flex;gap:12px;margin-bottom:10px">
+        <input class="inp search" placeholder="Hľadať názov, ID alebo SKU" value="STR-XXX-9999">
+      </div>
+      <div class="empty">
+        <div class="t">Nič sa nenašlo</div>
+        <div>Skúste iný názov, ID alebo SKU.</div>
+        <div class="a">
+          <button class="btn">Zrušiť hľadanie</button>
+          <button class="btn ghost">Zrušiť filtre</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+</body>
+</html>

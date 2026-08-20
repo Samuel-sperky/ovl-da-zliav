@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nová zľava (mobil) · Aura Zľavy</title>
+<link rel="stylesheet" href="_v3.css">
+<style>
+  .m-row{display:flex;align-items:baseline;gap:10px;padding:7px 0;
+    border-bottom:1px solid var(--line);font-size:13px}
+  .m-row:last-child{border-bottom:0}
+  .m-row .k{color:var(--dim);font-size:12px}
+  .m-row .v{margin-left:auto;font-weight:620;color:var(--ink)}
+  .m-band{display:grid;grid-template-columns:auto 1fr auto;gap:3px 10px;
+    padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .m-band:last-child{border-bottom:0}
+  .m-band .p{font-weight:640;color:var(--ink)}
+  .m-band .r{color:var(--dim);font-size:12px;grid-column:2}
+  .m-band .q{text-align:right;font-weight:640;color:var(--ink)}
+</style>
+</head>
+<body class="mob">
+
+<header class="hdr">
+  <div class="hdr-in">
+    <span class="brand">Aura <b>Zľavy</b></span>
+    <nav class="tabs">
+      <a href="m-prehlad.html">Prehľad</a>
+      <a href="m-produkty.html">Produkty</a>
+      <a class="on" href="m-schvalenie.html">Zľavy</a>
+      <a href="nastavenia.html">Nastavenia</a>
+    </nav>
+    <div class="hdr-r">
+      <a class="hqueue" href="m-schvalenie.html">Fronta <b>3 420/8 000</b></a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="mbudget">Zápisy <b>100/200</b> dnes
+    <span class="hbar"><i style="width:50%"></i></span></div>
+
+  <div class="steps" style="margin-bottom:10px">
+    <span class="s done"><i class="i">1</i>Výber</span>
+    <span class="sep-dot">·</span>
+    <span class="s done"><i class="i">2</i>Pásma</span>
+    <span class="sep-dot">·</span>
+    <span class="s on"><i class="i">3</i>Potvrdenie</span>
+  </div>
+
+  <!-- 1 · DOMINANTA: počet produktov -->
+  <section class="sec">
+    <div class="sec-h">
+      <h2>Nová zľava</h2>
+      <div class="act"><span class="state zapisuje"><span class="g"></span>zapisuje sa dopredu</span></div>
+    </div>
+    <input class="inp" value="Ležiaky zlato — jeseň" style="margin-bottom:10px">
+    <div class="lvl-1"><span class="big">8 000</span>
+      <span class="sub">produktov dostane zľavu</span></div>
+    <div class="prog-meta">
+      <span>Z filtra <b>11 640</b></span>
+      <span class="sep-dot">·</span>
+      <span>strop <b>10 000</b></span>
+    </div>
+    <div class="fresh">Dáta k 10. 8. 03:00</div>
+  </section>
+
+  <!-- 2 · Pásma -->
+  <section class="sec">
+    <div class="sec-h"><h2>Pásma</h2>
+      <div class="act lvl-3">najhoršie ležiaky prvé</div></div>
+    <div class="m-band">
+      <span class="p">A</span><span class="q">6 940 · 30 %</span>
+      <span class="r">0 predaných za 360 dní</span>
+    </div>
+    <div class="m-band">
+      <span class="p">B</span><span class="q">1 060 · 20 %</span>
+      <span class="r">0 predaných za 180 dní · z 4 700 po strop</span>
+    </div>
+    <div class="m-row"><span class="k">Priemerná cena</span><span class="v">46,20 €</span></div>
+    <div class="m-row"><span class="k">Dopad na maržu</span>
+      <span class="v lockline">odomkne sa po doplnení nákupných cien</span></div>
+  </section>
+
+  <!-- 3 · Štart -->
+  <section class="sec">
+    <div class="sec-h"><h2>Štart</h2></div>
+    <div class="m-row"><span class="k">Pred touto zľavou</span>
+      <span class="v">5 820 <span class="lvl-3">Ležiaky 4 580 · Náušnice 1 240</span></span></div>
+    <div class="m-row"><span class="k">Zapísané budú</span>
+      <span class="v est">18. 10. 2026</span></div>
+    <div class="m-row"><span class="k">Navrhujem štart</span>
+      <span class="v">20. 10. – 3. 11. 2026</span></div>
+    <div class="row wrapx gap-t">
+      <span class="flag">Kľúč na zápis platí do 9. 9. — fronta dobehne 18. 10.</span>
+      <button class="btn sm" style="margin-left:auto">Obnoviť kľúč</button>
+    </div>
+  </section>
+
+  <!-- 4 · Potvrdenie -->
+  <section class="sec">
+    <div class="sec-h"><h2>Potvrdenie</h2></div>
+    <label class="field">
+      <span class="lb">Napíšte počet produktov</span>
+      <input class="inp big" value="" placeholder="8000" inputmode="numeric">
+    </label>
+    <div class="hint">Skúška zapíše vzorku 10 · minie 10 z dnešných 200 zápisov.</div>
+  </section>
+
+</main>
+
+<div class="stepbar">
+  <button class="btn">Skúška naprázdno</button>
+  <button class="btn primary off">Zaradiť do fronty</button>
+</div>
+
+</body>
+</html>

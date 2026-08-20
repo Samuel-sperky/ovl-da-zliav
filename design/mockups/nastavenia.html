@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="sk" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nastavenia · Aura Zľavy</title>
+<link rel="stylesheet" href="_system.css">
+<style>
+  /* unikátna geometria tejto stránky */
+  .keycard{display:grid;grid-template-columns:1fr 210px 210px 168px;gap:18px;align-items:center;
+    padding:14px 16px;border-bottom:1px solid var(--line)}
+  .keycard:last-child{border-bottom:0}
+  .keycard .kname{font-size:13.5px;font-weight:650;color:var(--ink);margin-bottom:4px}
+  .keycard .kmeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .mlbl{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-bottom:5px}
+  .mlbl b{color:var(--ink);font-weight:650}
+  .kacts{display:flex;flex-direction:column;gap:7px;align-items:flex-end}
+  /* červená zóna pre panic button */
+  .danger-zone{border:1px solid color-mix(in srgb,var(--st-critical) 55%,transparent);
+    border-radius:var(--r);background:color-mix(in srgb,var(--st-critical) 7%,var(--paper2));padding:16px}
+  .danger-zone h3{font-size:14px;font-weight:660;color:var(--st-critical);margin-bottom:4px;
+    display:flex;align-items:center;gap:8px}
+  .allowgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 22px}
+  .allowgrid .arow{display:grid;grid-template-columns:26px 58px 1fr auto;gap:10px;align-items:center;
+    padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink2)}
+  .allowgrid .arow .sl{font-size:10px;font-weight:650;letter-spacing:.1em;color:var(--dim)}
+</style>
+</head>
+<body>
+
+<div class="topbar-production"><div class="wrap">
+  <span><span class="dot"></span>Produkcia — sperky-eshop.sk</span>
+  <span class="note">Zápisy sú nevratné. Zľavu nie je možné zrušiť, len nechať expirovať.</span>
+</div></div>
+
+<div class="navbar"><div class="wrap">
+  <span class="brand"><span class="crown">♛</span>Aura Zľavy</span>
+  <nav class="navtabs">
+    <a href="dashboard.html">Dashboard</a>
+    <a href="kampane.html">Kampane<span class="n">4</span></a>
+    <a href="produkty.html">Produkty<span class="n">10</span></a>
+    <a href="analytika.html">Analytika</a>
+    <a href="nastavenia.html" class="on">Nastavenia</a>
+    <a href="ai-agent.html">AI agent<span class="n">5</span></a>
+  </nav>
+  <div class="navmeta">
+    <span class="hbadge"><span class="g">⧗</span>Kľúč <b>31 h 12 m</b></span>
+    <span class="hbadge"><span class="g">◴</span>API <b>142/200</b></span>
+  </div>
+</div></div>
+
+<div class="page"><div class="wrap">
+
+  <div class="phead">
+    <div>
+      <div class="eyebrow">Konfigurácia inštancie</div>
+      <h1>Nastavenia <em>sperky-eshop.sk</em></h1>
+      <div class="sub">Doména, tri oddelené API kľúče, rozpočet requestov, poistky zápisu a vzhľad.
+        Kľúče sa ukladajú šifrovane a <b>nikdy sa nezobrazujú</b> — ani skrátene (I1).</div>
+    </div>
+    <div class="pactions">
+      <span class="badge good"><span class="g">✓</span>WRITES_ENABLED=true</span>
+    </div>
+  </div>
+
+  <!-- 01 · DOMÉNA -->
+  <div class="sect">
+    <h2><span class="snum">01</span>Doména shopu</h2>
+    <div class="sdesc">Base URL, proti ktorej appka volá API. Zmena domény zneplatní všetky tri kľúče
+      a vypne zápisy, kým sa nezadajú nové.</div>
+    <div class="card">
+      <div class="split-58">
+        <div>
+          <div class="field">
+            <label>Doména shopu</label>
+            <input class="input" value="sperky-eshop.sk" readonly>
+            <div class="hint">Base URL API: <code>https://sperky-eshop.sk/api</code> · overené 10.08.2026 o 09:00.</div>
+          </div>
+          <div class="btnrow">
+            <button class="btn sm ghost"><span class="g">✎</span>Zmeniť doménu</button>
+            <span class="tiny muted">Vyžaduje opätovné zadanie kľúčov.</span>
+          </div>
+        </div>
+        <div>
+          <dl class="kv">
+            <dt>Verzia API dokumentácie</dt><dd>v4 (08.2026)</dd>
+            <dt>Katalóg produktov</dt><dd>40 483</dd>
+            <dt>Allowlist</dt><dd>10 / 10</dd>
+            <dt>Časové pásmo shopu</dt><dd>Europe/Bratislava</dd>
+            <dt>Reset denného limitu</dt><dd>00:00 UTC</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 · API KĽÚČE -->
+  <div class="sect">
+    <h2><span class="snum">02</span>API kľúče <span class="tag tt" style="margin-left:10px">tri oddelené</span></h2>
+    <div class="sdesc">Každý scope má <b>vlastný kľúč, vlastné TTL a vlastný denný rozpočet</b>.
+      Kľúče sa dajú zapínať a vypínať nezávisle — vypnutie <code>order:stats</code> nemá žiadny
+      vplyv na zápis zliav. Hodnota kľúča sa nikde nezobrazuje (I1).</div>
+
+    <div class="card pad0">
+      <!-- product:edit -->
+      <div class="keycard">
+        <div>
+          <div class="kname">Zápisový kľúč</div>
+          <div class="kmeta">
+            <code>product:edit</code>
+            <span class="badge good"><span class="g">✓</span>aktívny</span>
+            <span class="tag rs">povinný</span>
+          </div>
+          <div class="tiny muted" style="margin-top:6px">Jediný kľúč, ktorý smie zapisovať zľavu.
+            Bez neho appka beží v núdzovom dry-run režime.</div>
+        </div>
+        <div>
+          <div class="mlbl"><span>Platnosť (TTL)</span><b>31 h 12 m</b></div>
+          <div class="meter"><span style="width:65%"></span></div>
+          <div class="tiny muted" style="margin-top:5px">do 11.08.2026 21:32</div>
+        </div>
+        <div>
+          <div class="mlbl"><span>Rozpočet dnes</span><b>142 / 200</b></div>
+          <div class="meter"><span style="width:71%"></span></div>
+          <div class="tiny muted" style="margin-top:5px">minúta: 20 / 20 voľných · dnes max 9/min</div>
+        </div>
+        <div class="kacts">
+          <span class="sw on"><span class="tr"></span>zapnutý</span>
+          <div class="btnrow">
+            <button class="btn sm ghost">Overiť (sonda)</button>
+            <button class="btn sm">Nahradiť</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- orders:read -->
+      <div class="keycard">
+        <div>
+          <div class="kname">Kľúč predajnosti</div>
+          <div class="kmeta">
+            <code>orders:read</code>
+            <span class="badge good"><span class="g">✓</span>aktívny</span>
+            <span class="tag">voliteľný</span>
+          </div>
+          <div class="tiny muted" style="margin-top:6px">Nočný sync predaných kusov za 30 dní.
+            Vypnutím zmizne stĺpec „Predaj 30 dní" na Produktoch.</div>
+        </div>
+        <div>
+          <div class="mlbl"><span>Platnosť (TTL)</span><b>19 h 04 m</b></div>
+          <div class="meter attn"><span style="width:40%"></span></div>
+          <div class="tiny muted" style="margin-top:5px">do 11.08.2026 09:24</div>
+        </div>
+        <div>
+          <div class="mlbl"><span>Rozpočet dnes</span><b>168 / 200</b></div>
+          <div class="meter"><span style="width:84%"></span></div>
+          <div class="tiny muted" style="margin-top:5px">posledný sync 10.08. 06:00 · 978 objednávok</div>
+        </div>
+        <div class="kacts">
+          <span class="sw on"><span class="tr"></span>zapnutý</span>
+          <div class="btnrow">
+            <button class="btn sm ghost">Overiť (sonda)</button>
+            <button class="btn sm">Nahradiť</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- order:stats -->
+      <div class="keycard">
+        <div>
+          <div class="kname">Kľúč štatistík</div>
+          <div class="kmeta">
+            <code>order:stats</code>
+            <span class="badge good"><span class="g">✓</span>aktívny</span>
+            <span class="tag tt">vypnuteľný nezávisle</span>
+          </div>
+          <div class="tiny muted" style="margin-top:6px">Agregované tržby, marža, dobierky a
+            <code>lowProfit</code> — <b>bez zákazníckych dát</b>. Vypnutím zmizne Analytika §01–03
+            a jedno zistenie AI agenta; zápis zliav beží ďalej nedotknutý.</div>
+        </div>
+        <div>
+          <div class="mlbl"><span>Platnosť (TTL)</span><b>43 h 51 m</b></div>
+          <div class="meter"><span style="width:91%"></span></div>
+          <div class="tiny muted" style="margin-top:5px">do 12.08.2026 10:11</div>
+        </div>
+        <div>
+          <div class="mlbl"><span>Rozpočet dnes</span><b>186 / 200</b></div>
+          <div class="meter"><span style="width:93%"></span></div>
+          <div class="tiny muted" style="margin-top:5px">14 requestov dnes · sales, margin, lowProfit</div>
+        </div>
+        <div class="kacts">
+          <span class="sw on"><span class="tr"></span>zapnutý</span>
+          <div class="btnrow">
+            <button class="btn sm ghost">Overiť (sonda)</button>
+            <button class="btn sm">Vypnúť</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note info mt14"><span class="g">ⓘ</span><div>
+      Kľúč sa v appke nikdy nezobrazí ani skrátene (I1) — vidíš len <b>stav, TTL a rozpočet</b>.
+      Nový kľúč sa zadáva do prázdneho poľa a hneď sa šifruje; späť ho už nevytiahneš.
+      Sonda platnosti je <b>ručná akcia</b>, nie periodický poll — každé kliknutie minie 1 request z rozpočtu.
+    </div></div>
+  </div>
+
+  <!-- 03 · ROZPOČET API -->
+  <div class="sect">
+    <h2><span class="snum">03</span>Rozpočet API</h2>
+    <div class="sdesc">Shop povoľuje <b>20 requestov za minútu</b> a <b>200 requestov za UTC deň
+      na jeden kľúč</b>. Appka si vedie vlastný rozpočet nad audit logom a zastaví sa skôr,
+      než ho vyčerpá.</div>
+
+    <div class="split-58">
+      <div class="card">
+        <div class="ct">Zápisový kľúč <code>product:edit</code> — dnes</div>
+        <div class="cs">Reset o 00:00 UTC · zostáva 9 h 40 m do resetu</div>
+
+        <div class="brow wide"><div class="bl">Denný rozpočet — zostáva</div>
+          <div class="tr"><div class="fl" style="width:71%"></div></div><div class="vl">142 / 200</div></div>
+        <div class="brow wide"><div class="bl">Minútový rozpočet — zostáva</div>
+          <div class="tr"><div class="fl good" style="width:100%"></div></div><div class="vl">20 / 20</div></div>
+        <div class="brow wide"><div class="bl">Minúta so špičkou dnes</div>
+          <div class="tr"><div class="fl idle" style="width:45%"></div></div><div class="vl">9 / 20</div></div>
+
+        <div class="sub-h">Kam išlo dnešných 58 requestov</div>
+        <div class="brow wide"><div class="bl">Zápisy zliav (setReduction)</div>
+          <div class="tr"><div class="fl" style="width:52%"></div></div><div class="vl">30</div></div>
+        <div class="brow wide"><div class="bl">Canary pred zápisom</div>
+          <div class="tr"><div class="fl gold" style="width:24%"></div></div><div class="vl">14</div></div>
+        <div class="brow wide"><div class="bl">Sonda platnosti kľúča (ručná)</div>
+          <div class="tr"><div class="fl gold" style="width:7%"></div></div><div class="vl">4</div></div>
+        <div class="brow wide"><div class="bl">Čítanie produktov</div>
+          <div class="tr"><div class="fl idle" style="width:17%"></div></div><div class="vl">10</div></div>
+      </div>
+
+      <div class="stack">
+        <div class="note attention"><span class="g">▲</span><div>
+          <b>Canary aj sonda míňajú rozpočet.</b> Canary je jeden GET tesne pred každým zápisom
+          (overí, že kľúč ešte žije) a sonda je ručné „Overiť kľúč". Ani jedno nie je zadarmo —
+          preto je sonda tlačidlo a nie automatika na pozadí.
+        </div></div>
+        <div class="note critical"><span class="g">✕</span><div>
+          <b>Batch nešetrí rozpočet.</b> 25 položiek v jednom batch volaní = <b>25 hitov</b> limitu,
+          nie jeden. Appka preto počíta položky, nie volania.
+        </div></div>
+        <div class="card">
+          <div class="ct">Poistky rozpočtu</div>
+          <dl class="kv mt8">
+            <dt>Pauza medzi zápismi</dt><dd>3 s</dd>
+            <dt>Mäkký prah (varovanie)</dt><dd>170 / 200</dd>
+            <dt>Tvrdý prah (stop zápisov)</dt><dd>190 / 200</dd>
+            <dt>Rezerva na canary</dt><dd>10 requestov</dd>
+            <dt>Správanie pri 429</dt><dd>stop, čakanie 10 min</dd>
+          </dl>
+          <div class="hint">Pri tvrdom prahu sa naplánované kampane odložia na ďalší UTC deň
+            a označia sa ako <span class="badge s-missed"><span class="g">⧗</span>zmeškaná</span>.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 04 · ALLOWLIST -->
+  <div class="sect">
+    <h2><span class="snum">04</span>Allowlist produktov <span class="tag tt" style="margin-left:10px">10 / 10</span></h2>
+    <div class="sdesc">Appka smie zapísať zľavu výhradne na týchto 10 product ID. Strop 10 je vynútený
+      schémou databázy (I2) — nie je to nastavenie, ktoré by sa dalo zdvihnúť z UI.</div>
+    <div class="card">
+      <div class="allowgrid">
+        <div class="arow"><span class="sl">01</span><code>10241</code><span>Náhrdelník Aura Luna, striebro 925</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">06</span><code>10744</code><span>Set Aura Vesper, striebro 925</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">02</span><code>10388</code><span>Náušnice Aura Solis, zlato 585</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">07</span><code>10809</code><span>Náhrdelník Aura Mira, zlato 585</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">03</span><code>10455</code><span>Prsteň Aura Nova, zirkón</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">08</span><code>10923</code><span>Náušnice Aura Petra, riečna perla</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">04</span><code>10502</code><span>Náramok Aura Tide, chirurgická oceľ</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">09</span><code>11056</code><span>Prsteň Aura Cielo, topás</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">05</span><code>10617</code><span>Prívesok Aura Aster, perleť</span><button class="btn sm ghost">Nahradiť</button></div>
+        <div class="arow"><span class="sl">10</span><code>11134</code><span>Náramok Aura Rosa, ružové zlato</span><button class="btn sm ghost">Nahradiť</button></div>
+      </div>
+      <div class="hint mt8">Slot sa dá <b>nahradiť</b>, nie pridať. Produkt vyradený zo slotu si v shope
+        ponechá zľavu až do jej expirácie — appka ju nevie vziať späť (I7).</div>
+    </div>
+  </div>
+
+  <!-- 05 · ZÁPISY A LIMITY -->
+  <div class="sect">
+    <h2><span class="snum">05</span>Zápisy a limity</h2>
+    <div class="sdesc">Dve env poistky (I13), globálny mutex a runaway strop (I12). Všetko fail-closed —
+      pri pochybnosti sa zapisovať nezačne.</div>
+    <div class="grid2">
+      <div class="card">
+        <div class="ct">Poistky ostrého zápisu</div>
+        <div class="cs">Obe musia platiť naraz, inak je vynútený dry-run (I13)</div>
+        <div class="row between" style="padding:9px 0;border-bottom:1px solid var(--line)">
+          <div><b>WRITES_ENABLED</b><div class="tiny muted">hlavný vypínač ostrých zápisov</div></div>
+          <span class="sw on"><span class="tr"></span><code>true</code></span>
+        </div>
+        <div class="row between" style="padding:9px 0;border-bottom:1px solid var(--line)">
+          <div><b>NODE_ENV</b><div class="tiny muted">nemenné za behu, číta sa pri boote</div></div>
+          <code>production</code>
+        </div>
+        <div class="row between" style="padding:9px 0">
+          <div><b>Globálny mutex zápisu</b><div class="tiny muted">nikdy dve zápisové operácie naraz (I12)</div></div>
+          <span class="badge good"><span class="g">✓</span>voľný</span>
+        </div>
+        <div class="note attention mt14"><span class="g">▲</span><div>
+          Prepnutím <b>WRITES_ENABLED</b> na <code>false</code> sa všetky naplánované kampane
+          prepnú do dry-run režimu. Už zapísané zľavy v shope <b>ostávajú</b> a dobehnú do expirácie.
+        </div></div>
+      </div>
+
+      <div class="card">
+        <div class="ct">Runaway strop a tempo</div>
+        <div class="cs">Prekročenie stropu zamkne zápisy fail-closed (I12)</div>
+        <div class="brow"><div class="bl">Zápisy za poslednú hodinu</div>
+          <div class="tr"><div class="fl good" style="width:10%"></div></div><div class="vl">6 / 60</div></div>
+        <div class="brow"><div class="bl">Zápisy dnes celkom</div>
+          <div class="tr"><div class="fl" style="width:30%"></div></div><div class="vl">30</div></div>
+        <dl class="kv mt14">
+          <dt>Pauza medzi zápismi</dt><dd>3 s</dd>
+          <dt>Poradie zápisov</dt><dd>sekvenčné, deterministické</dd>
+          <dt>Súbežnosť</dt><dd>zakázaná (I10)</dd>
+          <dt>Canary pred sériou</dt><dd>zapnutý</dd>
+          <dt>Platnosť dry-run tokenu</dt><dd>15 min</dd>
+        </dl>
+        <div class="hint">Pauza 3 s je dôsledok limitu 20 req/min — pri 25 položkách trvá séria
+          zhruba 75 s. Skrátiť sa nedá bez rizika <code>429</code>.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 06 · VZHĽAD -->
+  <div class="sect">
+    <h2><span class="snum">06</span>Vzhľad</h2>
+    <div class="sdesc">Téma sa ukladá lokálne v prehliadači, netýka sa servera.</div>
+    <div class="card">
+      <div class="row between">
+        <div>
+          <div class="lbl">Téma rozhrania</div>
+          <div class="seg"><span class="on">Dark</span><span>Light</span><span>Podľa systému</span></div>
+        </div>
+        <div>
+          <div class="lbl">Hustota tabuliek</div>
+          <div class="seg"><span class="on">Hustá</span><span>Pohodlná</span></div>
+        </div>
+        <div>
+          <div class="lbl">Formát čísel</div>
+          <div class="seg"><span class="on">1 284,50 €</span><span>1284.50 €</span></div>
+        </div>
+      </div>
+      <div class="hint mt8">Stavy sa nikdy nerozlišujú len farbou — každý stav má vlastný glyf aj slovo,
+        takže rozhranie zostáva čitateľné aj pri poruche farbocitu.</div>
+    </div>
+  </div>
+
+  <!-- 07 · SERVIS -->
+  <div class="sect">
+    <h2><span class="snum">07</span>Servis a prevádzka</h2>
+    <div class="sdesc">Beh inštancie, zálohy a verzia. Slúži na diagnostiku, nie na dennú prácu.</div>
+    <div class="grid3">
+      <div class="card">
+        <div class="ct">Beh</div>
+        <dl class="kv mt8">
+          <dt>Adresa</dt><dd>127.0.0.1:3070</dd>
+          <dt>Kontajnery</dt><dd>3 bežia</dd>
+          <dt>app</dt><dd><span class="badge good"><span class="g">✓</span>ovl-zliav-app</span></dd>
+          <dt>db</dt><dd><span class="badge good"><span class="g">✓</span>ovl-zliav-db</span></dd>
+          <dt>proxy</dt><dd><span class="badge good"><span class="g">✓</span>ovl-zliav-caddy</span></dd>
+          <dt>Uptime</dt><dd>6 d 4 h</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <div class="ct">Zálohy</div>
+        <dl class="kv mt8">
+          <dt>Posledná záloha DB</dt><dd>10.08.2026 03:00</dd>
+          <dt>Veľkosť</dt><dd>18,4 MB</dd>
+          <dt>Retencia</dt><dd>14 dní</dd>
+          <dt>Šifrovanie</dt><dd>áno, master key</dd>
+          <dt>Overenie obnovy</dt><dd>04.08.2026 ✓</dd>
+        </dl>
+        <div class="btnrow mt14">
+          <button class="btn sm ghost">Zálohovať teraz</button>
+          <button class="btn sm ghost">Stiahnuť audit log</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ct">Verzia</div>
+        <dl class="kv mt8">
+          <dt>Aplikácia</dt><dd>2.0.0-rc.1</dd>
+          <dt>Schéma DB</dt><dd>migrácia 41</dd>
+          <dt>API kontrakt</dt><dd>sperky v4</dd>
+          <dt>Admin</dt><dd>Samuel</dd>
+          <dt>Sync predajnosti</dt><dd>11.08.2026 02:00</dd>
+        </dl>
+        <div class="hint">Pri nekonzistentnom ENV alebo neúspešnej migrácii sa appka nespustí vôbec —
+          nikdy nebeží v degradovanom režime (I14).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 08 · ČERVENÁ ZÓNA -->
+  <div class="sect">
+    <h2><span class="snum">08</span>Červená zóna</h2>
+    <div class="sdesc">Nevratné a rušivé akcie. Vykonaj len vtedy, keď vieš, prečo.</div>
+    <div class="danger-zone">
+      <h3><span>⚠</span>Kľúč unikol</h3>
+      <p style="font-size:12.5px;color:var(--ink2);max-width:760px">
+        Okamžite <b>zahodí všetky tri uložené kľúče</b>, prepne <code>WRITES_ENABLED</code> na
+        <code>false</code>, zruší platné dry-run tokeny a zastaví bežiaci zápis po dokončení
+        aktuálnej položky. Naplánované kampane prejdú do stavu
+        <span class="badge s-needskey"><span class="g">⧗</span>vyžaduje kľúč</span>.
+      </p>
+      <div class="note critical mt14"><span class="g">✕</span><div>
+        <b>Čo to NEurobí:</b> už zapísané zľavy v shope zostanú aktívne až do svojej expirácie —
+        appka ich nevie stiahnuť späť (I7). Po stlačení <b>zneplatni kľúče aj na strane shopu</b>,
+        inak tam ostávajú funkčné.
+      </div></div>
+      <div class="row between mt14">
+        <span class="tiny muted">Vyžiada potvrdenie napísaním slova <code>UNIKOL</code>.</span>
+        <button class="btn lg danger"><span class="g">⚠</span>Kľúč unikol — zneplatniť všetko a zastaviť zápisy</button>
+      </div>
+    </div>
+    <div class="row between mt14">
+      <span class="tiny muted">Stav zápisov: <b class="ink2">WRITES_ENABLED=true</b> ·
+        NODE_ENV=production · runaway 6/60 za hodinu · mutex voľný (I13).</span>
+      <span class="tiny muted">Konfigurácia naposledy zmenená 05.08.2026 09:04 · Samuel</span>
+    </div>
+  </div>
+
+</div></div>
+
+<div class="wrap"><div class="mockfoot">
+  <span>♛ Aura Zľavy · redizajn V2 — návrh</span>
+  <span>Mockup · 10. 8. 2026</span>
+</div></div>
+</body>
+</html>
