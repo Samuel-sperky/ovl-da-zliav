@@ -42,15 +42,18 @@ Predpoklady: Docker + Docker Compose v2, Node 22 (na generovanie kľúčov).
    nechaj na `false`, kým neprebehne celý onboarding (I13). Doména shopu do
    `.env` NEPATRÍ — zadáva sa v UI (R5, D80).
 
-5. **Priprav Caddy (D94, D97):**
+5. **Priprav Caddy (D97):**
    ```sh
    cp Caddyfile.example secrets/Caddyfile
-   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'TVOJE-BASICAUTH-HESLO' > secrets/basicauth.hash
-   chmod 600 secrets/Caddyfile secrets/basicauth.hash
+   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'TVOJE-BASICAUTH-HESLO'
+   # výstup VLOŽ do secrets/Caddyfile namiesto reťazca NAHRAD-BCRYPT-HASHOM
+   chmod 600 secrets/Caddyfile
    ```
-   V `secrets/Caddyfile` nastav, aby sa hash načítal (env `OVL_ZLIAV_BASICAUTH_HASH`
-   naplň z `/etc/caddy/basicauth.hash`, alebo hash vlož priamo do
-   `secrets/Caddyfile` — ten je mimo gitu, takže je to povolené).
+   **Hash musí byť v `secrets/Caddyfile` priamo.** Caddy nevie načítať súbor do
+   placeholdera `{$PREMENNA}` — skoršia verzia tohto runbooku odporúčala
+   samostatný `secrets/basicauth.hash` a env placeholder, po ktorom Caddy
+   nenaštartoval (a keďže je to jediný publikovaný port, appka bola nedostupná).
+   Celý tento krok za teba urobí `scripts/setup-local.sh`.
 
 6. **Spusti stack:**
    ```sh
@@ -70,12 +73,22 @@ Predpoklady: Docker + Docker Compose v2, Node 22 (na generovanie kľúčov).
 
 9. **Smoke test:**
    ```sh
-   curl -k https://localhost:3070/api/health    # očakávaj 200 (po basic auth)
-   curl http://127.0.0.1:3000                   # MUSÍ zlyhať — app port nie je publikovaný (I5)
+   curl -u samuel:HESLO http://localhost:3070/api/health   # očakávaj 200
+   curl http://127.0.0.1:3000                              # MUSÍ zlyhať — app port nie je publikovaný (I5)
    ```
+   **HTTP, nie HTTPS.** Stack beží od 6. 8. 2026 bez TLS (vedomé rozhodnutie,
+   viď Caddyfile.example) — `curl https://…` skončí chybou spojenia a budeš
+   ladiť neexistujúci problém. Krok „trust root certifikátu" (R2) je preto
+   pri tejto konfigurácii ZBYTOČNÝ.
 
-10. **Trust root certu** (nižšie R2), prihlás sa a prejdi onboardingom:
-    doména → API kľúč → allowlist → testovací dry-run (D20).
+10. **Prihlás sa a rozbehni appku:**
+    1. onboarding: adresa shopu → kľúč na zápis,
+    2. **Nastavenia → Katalóg → „Načítať katalóg"** — bez toho nemáš z čoho
+       zľavu vybrať (automatické nočné načítanie beží až po 21:00),
+    3. appka štartuje v **pilotnom rozsahu**: zapíše len produktom vypísaným
+       v Nastavenia → Rozsah zliav → Povolené produkty (max 10). Na tisíce
+       produktov prepni rozsah na plný — vyžaduje heslo a ide do auditu (K1),
+    4. skúška naprázdno a až potom zaradenie do fronty (I3).
 
 11. **Nastav denné zálohy** (host cron, D90):
     ```
@@ -182,6 +195,10 @@ preto meria výhradne kusy.
 ---
 
 ## R2. Trust root certifikátu Caddy (D94)
+> **NEPLATÍ pri aktuálnej konfigurácii.** Stack beží na HTTP bez TLS
+> (rozhodnutie 6. 8. 2026), takže žiadny certifikát netreba dôverovať. Tento
+> runbook zostáva pre prípad, že sa TLS niekedy vráti.
+
 
 Caddy používa `tls internal` — vlastnú lokálnu CA. Aby prehliadač neprotestoval:
 
@@ -213,7 +230,7 @@ Zápisy MUSIA byť počas migrácie blokované — postup drž presne v tomto po
    ```
    Entrypoint spustí migrácie fail-fast (D88); ak zlyhajú, appka nenabehne —
    NEOPAKUJ up naslepo, pozri logy a rieš manuálne (rollback je vždy manuálny).
-5. **Smoke test:** `curl -k https://localhost:3070/api/health` → 200 a
+5. **Smoke test:** `curl -u samuel:HESLO http://localhost:3070/api/health` → 200 a
    `scheduler.heartbeat` čerstvý.
 6. Pri zlyhaní: obnov zálohu (R4) a vráť sa na predchádzajúci git tag.
 

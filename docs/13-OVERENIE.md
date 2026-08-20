@@ -569,7 +569,7 @@ docker compose config                        # už validované, ale nech si potv
 docker compose build ovl-zliav-app           # NIKDY neoverené — pozor na §D.1
 docker compose up -d
 docker compose ps                            # všetky healthy
-curl -k https://localhost:3070/api/health    # 200 + {"status":"ok"}  (po basic auth)
+curl -u samuel:HESLO http://localhost:3070/api/health    # 200 + {"status":"ok"}  (po basic auth)
 curl http://127.0.0.1:3000                   # MUSÍ zlyhať (I5)
 docker compose logs ovl-zliav-app | head -30 # boot_ok, žiadne boot_assertions_failed
 docker inspect ovl-zliav-app | grep -i -E 'master|password|api.?key'   # nesmie nič vypísať (I1)
@@ -815,7 +815,7 @@ nespustí (D88, I14).
 ### 7. Overiť bind (I5) a health
 
 ```sh
-curl -k https://localhost:3070/api/health     # 200, {"status":"ok","db":true,…} (po basic auth)
+curl -u samuel:HESLO http://localhost:3070/api/health     # 200, {"status":"ok","db":true,…} (po basic auth)
 curl http://127.0.0.1:3000                    # MUSÍ zlyhať — connection refused
 docker inspect ovl-zliav-app | grep -iE 'master|password|api.?key'   # nesmie nič vypísať (I1)
 ```
@@ -852,7 +852,7 @@ git status --short          # secrets/ ani .env sa NESMÚ objaviť
 
 ### 11. Nastaviť doménu shopu (D55, D80) a vložiť API kľúč
 
-V UI (`https://localhost:3070`, prihlás sa) prejdi **onboarding**:
+V UI (`http://localhost:3070`, prihlás sa) prejdi **onboarding**:
 
 1. **Doména** — len `https://`, vyžaduje heslo, pred uložením prebehne
    **canary GET**. Bez úspešného canary sa doména neuloží (D55).
@@ -862,7 +862,12 @@ V UI (`https://localhost:3070`, prihlás sa) prejdi **onboarding**:
    `setReduction reduction=0` (nikdy nič nezapíše, D53) a uloží zašifrovaný
    s **TTL 48 h** (R2). Po expirácii ho vložíš znova — to je zámer, nie chyba.
    Skontroluj, že `verifyStatus` je `valid`, nie `unverified` (§D.5).
-3. **Allowlist — 10 product ID.** Zadáš ich v UI (v repe žiadne nie sú, §F.3).
+3. **Katalóg — „Načítať katalóg"** v Nastaveniach → Katalóg. Bez načítaného
+   katalógu nemáš z čoho zľavu vybrať; automatické nočné načítanie beží až
+   po 21:00.
+4. **Povolené produkty (pilotný rozsah, K1).** Appka štartuje v režime `pilot`
+   a zapíše VÝHRADNE produktom vypísaným v Nastavenia → Rozsah zliav →
+   Povolené produkty (max 10). Zadáš ich v UI (v repe žiadne nie sú, §F.3).
    Jedenásty produkt appka odmietne na troch úrovniach (I2). Product ID si
    pred zadaním over v shope — appka ich nevie uhádnuť a `not_found` zablokuje
    len daný produkt.
@@ -875,7 +880,7 @@ V UI (`https://localhost:3070`, prihlás sa) prejdi **onboarding**:
 ```sh
 # v .env:  WRITES_ENABLED=true
 docker compose up -d ovl-zliav-app
-curl -k https://localhost:3070/api/health     # "writesEnabled": true
+curl -u samuel:HESLO http://localhost:3070/api/health     # "writesEnabled": true
 ```
 Prvý ostrý zápis urob na **jednom** produkte, s malou zľavou a krátkym oknom,
 a hneď skontroluj shop ručne. Appka ti nikdy nepovie, aký je skutočný stav

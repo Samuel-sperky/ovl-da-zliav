@@ -32,6 +32,7 @@ import Button from '@/components/ui/Button';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import { formatCountSk } from '@/lib/ui/vocabulary';
+import PilotAllowlist from '@/components/settings/PilotAllowlist';
 import {
   SCOPE_MODE_LABELS,
   SUDO_REQUIRED_CODE,
@@ -216,6 +217,13 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
           }}
         />
       ) : null}
+
+      {/*
+        Povolené produkty majú význam LEN v pilotnom režime — tam ich guard
+        vyžaduje (K1). V plnom režime rozsah drží katalóg a strop, takže by
+        zoznam len mätúco visel na obrazovke.
+      */}
+      {full ? null : <PilotAllowlist />}
     </section>
   );
 }

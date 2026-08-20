@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import BudgetSection from '@/components/settings/BudgetSection';
+import CatalogSection from '@/components/settings/CatalogSection';
 import DomainForm from '@/components/settings/DomainForm';
 import KeysSection from '@/components/settings/KeysSection';
 import LockedFeatures from '@/components/settings/LockedFeatures';
@@ -50,6 +51,7 @@ import {
 export const SETTINGS_ANCHORS: readonly { id: string; label: string }[] = [
   { id: 'pripojenie', label: 'Pripojenie' },
   { id: 'kluce', label: 'Kľúče' },
+  { id: 'katalog', label: 'Katalóg' },
   { id: 'rozpocet', label: 'Rozpočet' },
   { id: 'rozsah', label: 'Rozsah zliav' },
   { id: 'poistky', label: 'Poistky' },
@@ -153,6 +155,8 @@ export function SettingsPanel() {
             ordersKey={ordersKeyMeta}
             onStored={() => void load()}
           />
+
+          <CatalogSection />
 
           <BudgetSection settings={settings} queue={queue} />
 

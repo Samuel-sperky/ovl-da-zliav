@@ -41,6 +41,8 @@ import LockedFeatures, {
   LOCKED_FEATURES,
   lockedFeaturesText,
 } from '@/components/settings/LockedFeatures';
+import CatalogSection from '@/components/settings/CatalogSection';
+import PilotAllowlist from '@/components/settings/PilotAllowlist';
 import SafeguardsSection from '@/components/settings/SafeguardsSection';
 import SignOut from '@/components/settings/SignOut';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
@@ -111,6 +113,7 @@ describe('Nastavenia — kotvy a sekcie', () => {
     expect(ids).toEqual([
       'pripojenie',
       'kluce',
+      'katalog',
       'rozpocet',
       'rozsah',
       'poistky',
@@ -420,5 +423,64 @@ describe('Mobil — nič neskroluje doboku', () => {
     // ale bez neho by pevná šírka vytlačila stránku doboku.
     expect(LOGIN_CSS).toContain('.login .sec{width:100%;max-width:360px;');
     expect(LOGIN_CSS).toMatch(/\.login\{[^}]*padding:24px 4px\}/);
+  });
+});
+
+/* ═══ I. Prvý beh sa dá dokončiť — katalóg a povolené produkty ═════════════ */
+
+describe('Prvý beh: katalóg a povolené produkty', () => {
+  /*
+   * Dve regresie z prestavby, obe zistené až prechodom celej Samuelovej cesty:
+   *
+   *  1. Výber produktov stojí na zrkadle katalógu, ale tlačidlo, ktoré ho
+   *     naplní, v UI nebolo — `POST /api/catalog/sync` nemal volajúceho a
+   *     automatický beh je len 21:00–07:00. Produkty teda cez deň zostali
+   *     prázdne a zľava sa nedala vybrať vôbec.
+   *  2. Predvolený režim je `pilot` a guard v ňom vyžaduje allowlist, ale
+   *     obrazovka allowlistu zanikla. Prvá zľava spadla na „aspoň jeden
+   *     produkt nie je v aktívnom allowliste" a nebolo to ako napraviť.
+   *
+   * Tieto testy držia obe cesty otvorené.
+   */
+  it('Nastavenia majú tlačidlo na načítanie katalógu', () => {
+    const markup = renderToStaticMarkup(createElement(CatalogSection));
+    expect(markup).toContain('id="katalog"');
+    expect(markup).toContain('data-testid="catalog-sync"');
+    expect(markup).toContain('Načítať katalóg');
+  });
+
+  it('katalóg povie, načo je — bez neho sa zľava nedá vybrať', () => {
+    const markup = renderToStaticMarkup(createElement(CatalogSection));
+    expect(markup).toContain('nedá vybrať produkt do zľavy');
+  });
+
+  it('povolené produkty sa dajú pridať aj odobrať, so stropom 10', () => {
+    const markup = renderToStaticMarkup(createElement(PilotAllowlist));
+    expect(markup).toContain('data-testid="pilot-allowlist"');
+    expect(markup).toContain('data-testid="allow-input"');
+    expect(markup).toContain('data-testid="allow-add"');
+    expect(markup).toContain('z 10');
+  });
+
+  it('prázdny zoznam prizná, že appka nezapíše nič — netvári sa, že je to v poriadku', () => {
+    const markup = renderToStaticMarkup(createElement(PilotAllowlist));
+    // Pred načítaním je stav „Načítavam…"; veta o prázdnom zozname musí byť
+    // v komponente prítomná ako text, nie dopočítaná až za behu.
+    expect(markup).toContain('Načítavam…');
+  });
+
+  it('povolené produkty sa v PLNOM rozsahu nezobrazujú', () => {
+    const plny = renderToStaticMarkup(
+      createElement(ScopeModeForm, {
+        settings: { ...SETTINGS, scopeMode: 'plny', maxProducts: 10_000 },
+        onChanged: noop,
+      }),
+    );
+    expect(plny).not.toContain('data-testid="pilot-allowlist"');
+
+    const pilot = renderToStaticMarkup(
+      createElement(ScopeModeForm, { settings: SETTINGS, onChanged: noop }),
+    );
+    expect(pilot).toContain('data-testid="pilot-allowlist"');
   });
 });

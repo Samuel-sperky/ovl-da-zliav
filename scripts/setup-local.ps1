@@ -148,7 +148,12 @@ Príprava hotová. Ďalej:
      - potom login do appky (účet z bodu 2)
      (HTTP bez TLS je vedomá voľba — appka žije len na 127.0.0.1 za basic auth;
       Secure cookie na localhoste funguje, prehliadače mu dôverujú)
-  4. V appke prejdi onboarding: doména shopu -> API kľúč -> allowlist (max 10 ID).
+  4. V appke prejdi onboarding: adresa shopu -> kľúč na zápis.
+  5. Nastavenia -> Katalóg -> „Načítať katalóg". BEZ TOHTO nemáš z čoho zľavu
+     vybrať (automatické nočné načítanie beží až po 21:00).
+  6. Appka štartuje v PILOTNOM rozsahu: zapíše len produktom, ktoré vypíšeš
+     v Nastavenia -> Rozsah zliav -> Povolené produkty (max 10). Na tisíce
+     produktov prepni rozsah na plný — vyžaduje heslo a zapíše sa do auditu.
 
 ZÁPISY SÚ ZATIAĽ VYPNUTÉ (WRITES_ENABLED=false v .env) — appka fyzicky nemôže
 zmeniť cenu v shope. Preklikaj si dry-run naprázdno; zápisy zapni až vtedy, keď

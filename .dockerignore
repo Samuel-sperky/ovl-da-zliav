@@ -1,0 +1,60 @@
+# Aura Zľavy — čo NESMIE ísť do build kontextu (I1, D98).
+#
+# Dockerfile robí v build stage `COPY . .`. Bez tohto súboru to malo dva
+# následky a oba boli vážne:
+#
+#  1. TAJOMSTVÁ V OBRAZE. `secrets/` (master.key, session.key, DB heslá) a
+#     `.env` sa skopírovali do build vrstvy. Tá sa síce do finálneho obrazu
+#     neprenáša (runner kopíruje len vymenované cesty), ale zostáva ležať v
+#     lokálnej vrstve a v histórii obrazu. Hlavička Dockerfile pritom hovorí
+#     jasne: „Žiadne tajomstvo sa NESMIE dostať do obrazu (I1)."
+#
+#  2. ROZBITÉ NATÍVNE MODULY. `COPY --from=deps /app/node_modules` prinesie
+#     musl build pre alpine — a hneď nasledujúce `COPY . .` ho PREPÍŠE
+#     hostiteľským `node_modules`. Kto si spustil `npm ci` na Windows alebo
+#     na glibc Linuxe (a runbook R1 to výslovne žiada kvôli `gen-master-key`),
+#     dostal do obrazu `argon2` a `mariadb` skompilované pre iný systém.
+#
+# Pravidlo: do build kontextu patrí ZDROJOVÝ KÓD, nič iné.
+
+# ── tajomstvá a konfigurácia prostredia (I1) ──────────────────────────────
+secrets/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+backups/
+
+# ── závislosti a build výstupy — vyrába ich obraz sám ─────────────────────
+node_modules/
+.next/
+out/
+dist/
+
+# ── git, testy a vývojové nástroje: v produkčnom obraze nemajú čo robiť ───
+.git/
+.gitignore
+.github/
+.claude/
+test/
+test-results/
+playwright-report/
+playwright.config.ts
+vitest.config.ts
+coverage/
+
+# ── návrhy a dokumentácia: 4,5 MB PNG do obrazu nepatrí ───────────────────
+design/
+docs/
+
+# ── lokálne prepisy compose a alternatívny Dockerfile ─────────────────────
+docker-compose.override*.yml
+Dockerfile
+Dockerfile.local
+.dockerignore
+
+# ── drobnosti ─────────────────────────────────────────────────────────────
+*.log
+.DS_Store
+npm-debug.log*

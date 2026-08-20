@@ -3,9 +3,17 @@
 # Aura Zľavy — orientácia
 
 Lokálna appka na časovo obmedzené percentuálne zľavy v eshope Šperky.
-**Píše do PRODUKČNÉHO shopu bez stagingu.** Invarianty I1–I14 v
-`docs/10-KONTRAKT.md` sú nadradené všetkému ostatnému; keď si nie si istý,
-invariant vyhráva.
+**Píše do PRODUKČNÉHO shopu bez stagingu.**
+
+**Zdroj pravdy je `docs/50-KONTRAKT-V3.md` (K1–K12).** Mení `docs/10-KONTRAKT.md`
+v dvanástich bodoch, zvyšok invariantov I1–I14 platí ďalej. Keď si nie si istý,
+invariant vyhráva nad pohodlím aj nad mockupom.
+
+Po prestavbe V3 platí: zľava sa zadáva nad tisícami produktov, **zápis nie je
+akcia, ale fronta** bežiaca v rámci denného rozpočtu 200 zápisov, a spúšťa sa
+k budúcemu dátumu, aby všetko nabehlo naraz. Strop 10 produktov nezanikol —
+stal sa z neho **režim rozsahu** (`pilot` 10 / `plny` 10 000, prepnutie len so
+sudo, pri pochybnosti vždy `pilot`).
 
 Beží na `http://127.0.0.1:3070` za Caddy s basic auth (HTTP bez TLS je vedomá
 voľba, 6. 8. 2026). Prvý setup: `docs/21-RUNBOOKY.md` → R1, na Windows **R1w**

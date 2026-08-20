@@ -211,3 +211,101 @@ export function validateApiKey(raw: string): string | null {
   if (value.length > 256) return 'Kľúč je príliš dlhý (maximum 256 znakov).';
   return null;
 }
+
+/* ══════════════════════════ Katalóg (K7) ═════════════════════════════════ */
+
+/** Odpoveď `POST /api/catalog/sync`, zúžená na to, čo Nastavenia zobrazujú. */
+export interface CatalogSyncView {
+  /** Výsledok behu; slovenskú vetu k nemu skladá `CatalogSection`. */
+  outcome: string;
+  /** Koľko riadkov je v zrkadle katalógu. `null` = nedozvedeli sme sa to. */
+  products: number | null;
+  /** Kedy beh dokončil. `null` = nikdy nebežal. */
+  lastRunAt: string | null;
+}
+
+/** Surový tvar, ktorý vracia route — plochý na `CatalogSyncView` ho dá `flatten`. */
+interface CatalogSyncRaw {
+  outcome?: unknown;
+  sync?: { products?: unknown; finishedAt?: unknown } | null;
+  lastRun?: { outcome?: unknown; sync?: { products?: unknown; finishedAt?: unknown } | null } | null;
+}
+
+function flattenCatalog(raw: CatalogSyncRaw): CatalogSyncView {
+  // Keď tento beh nič nezapísal (`already_running`, `peak_hours`), čísla berieme
+  // z posledného známeho behu — inak by UI tvrdilo „0 produktov", čo je
+  // tvrdenie, nie „neviem".
+  const sync = raw.sync ?? raw.lastRun?.sync ?? null;
+  const products = typeof sync?.products === 'number' ? sync.products : null;
+  const finished = typeof sync?.finishedAt === 'string' ? sync.finishedAt : null;
+  return {
+    outcome: typeof raw.outcome === 'string' ? raw.outcome : 'unknown',
+    products,
+    lastRunAt: finished,
+  };
+}
+
+/** Spustí načítanie katalógu. ČÍTANIE — nekonzumuje zápisový rozpočet (K7). */
+export async function syncCatalog(): Promise<Envelope<CatalogSyncView>> {
+  const res = await postJson<CatalogSyncRaw>('/api/catalog/sync');
+  return res.ok ? { ok: true, data: flattenCatalog(res.data) } : res;
+}
+
+/**
+ * Stav katalógu bez spúšťania synchronizácie — koľko produktov appka pozná.
+ * Ťahá jednu stranu vyhľadávania a berie z nej len celkový počet a čerstvosť.
+ */
+export async function catalogStatus(): Promise<Envelope<CatalogSyncView>> {
+  const res = await getJson<{ total?: unknown; dataAsOf?: unknown }>(
+    '/api/catalog/search?page=1&perPage=1',
+  );
+  if (!res.ok) return res;
+  return {
+    ok: true,
+    data: {
+      outcome: 'ok',
+      products: typeof res.data.total === 'number' ? res.data.total : null,
+      lastRunAt: typeof res.data.dataAsOf === 'string' ? res.data.dataAsOf : null,
+    },
+  };
+}
+
+/* ═════════════════ Povolené produkty pilotného režimu (K1) ════════════════ */
+
+export interface AllowedProductView {
+  productId: number;
+  slot: number | null;
+  label: string | null;
+  name: string | null;
+  price: string | null;
+}
+
+/**
+ * Zoznam povolených produktov. V pilotnom režime je to jediná sada, do ktorej
+ * appka smie zapísať zľavu — preto sa nedopĺňa ani neodhaduje: čo príde
+ * z databázy, to sa zobrazí.
+ */
+export async function listAllowedProducts(): Promise<Envelope<AllowedProductView[]>> {
+  const res = await getJson<unknown>('/api/allowlist');
+  if (!res.ok) return res;
+  const raw = Array.isArray(res.data) ? res.data : [];
+  const rows: AllowedProductView[] = [];
+  for (const item of raw) {
+    const r = item as Record<string, unknown>;
+    if (typeof r.productId !== 'number') continue;
+    rows.push({
+      productId: r.productId,
+      slot: typeof r.slot === 'number' ? r.slot : null,
+      label: typeof r.label === 'string' ? r.label : null,
+      name: typeof r.name === 'string' ? r.name : null,
+      price: typeof r.price === 'string' ? r.price : null,
+    });
+  }
+  return { ok: true, data: rows };
+}
+
+export const addAllowedProduct = (productId: number) =>
+  postJson<{ productId: number; slot: number | null }>('/api/allowlist', { productId });
+
+export const removeAllowedProduct = (productId: number) =>
+  sendJson<Record<string, never>>(`/api/allowlist/${productId}`, 'DELETE');
