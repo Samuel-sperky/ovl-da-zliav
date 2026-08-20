@@ -32,7 +32,7 @@
 import Link from 'next/link';
 
 import styles from '@/components/campaigns/zlavy.module.css';
-import { productCount, type BlockerCard } from '@/components/campaigns/queue-model';
+import { type BlockerCard } from '@/components/campaigns/queue-model';
 import LockBadge from '@/components/ui/LockBadge';
 import Note from '@/components/ui/Note';
 import { formatCountSk } from '@/lib/ui/vocabulary';
@@ -56,11 +56,23 @@ export function ScopeRelease({ wanted, allowed, blocker, testId }: ScopeReleaseP
 
   return (
     <div className={styles.scopeRelease} data-testid={testId ?? 'scope-release'}>
-      <Note variant="warn">
-        {blocker === null
-          ? `Výberu vyhovuje ${productCount(wanted)}, ale na jednu zľavu teraz prejde len ${productCount(allowed)} — ${formatCountSk(dropped)} sa nezapíše.`
-          : blocker.what}
-      </Note>
+      {/*
+       * Note nesie LEN dôvod prekážky — nikdy tie tri čísla pod ňou.
+       *
+       * Do 20. 8. 2026 mala vetva `blocker === null` vlastnú vetu „Výberu
+       * vyhovuje N, ale prejde len M — K sa nezapíše." Boli to presne tie tri
+       * čísla, ktoré stoja hneď pod ňou v `scopeNumbers`, každé s vlastným
+       * popiskom a vo veľkom reze. Jantárová škatuľa nad nimi hovorila to isté
+       * slovami, takže obrazovka mala jeden fakt trikrát.
+       *
+       * Zmazať sa smela LEN tá vetva. `blocker.what` nesie DÔVOD prekážky
+       * z jediného zdroja pravdy (`lib/status/blockers.ts`) a nikde inde na
+       * tejto obrazovke nie je — bez neho panel povie, že sa niečo nezapíše,
+       * a zamlčí prečo. Pri chýbajúcej prekážke sa preto Note nekreslí vôbec:
+       * prázdna jantárová škatuľa je poplach bez obsahu, a čísla aj cestu von
+       * povedia `scopeNumbers` a `scopeStep` samy.
+       */}
+      {blocker === null ? null : <Note variant="warn">{blocker.what}</Note>}
 
       <div className={styles.scopeNumbers}>
         <div>

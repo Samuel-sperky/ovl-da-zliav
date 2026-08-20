@@ -178,10 +178,28 @@ describe('zdravý snapshot nič neblokuje', () => {
     expect(byId(blockers, 'scope_pilot_cap').severity).toBe('informuje');
   });
 
-  it('veta o strope nesie obe čísla — strop aj výber', () => {
+  /**
+   * ZMENA 20. 8. 2026 (šprint dokončenia, W2, body 5 a 7): informatívna veta
+   * nesie už len STROP. Druhé číslo tam bolo tretí raz to isté — na Produktoch
+   * ho hovorí lišta výberu, na Prehľade výber neexistuje. Tvrdenie „nesie obe
+   * čísla" sa NERUŠÍ, len sa presúva tam, kde platí: na vetu, ktorá BLOKUJE.
+   */
+  it('informatívna veta o strope nesie strop a NIE počet vybraných', () => {
     const scope = byId(blockers, 'scope_pilot_cap');
+    expect(scope.severity).toBe('informuje');
     expect(scope.what).toContain('10 produktov');
-    expect(scope.what).toContain('5 produktov');
+    expect(scope.what).not.toContain('vo výbere');
+    expect(scope.what).not.toContain('5 produktov');
+  });
+
+  it('veta, ktorá BLOKUJE, nesie obe čísla aj zvyšok', () => {
+    const over = byId(
+      collectOperationBlockers(healthy({ selection: { selectedCount: 150 } })),
+      'scope_pilot_cap',
+    );
+    expect(over.severity).toBe('blokuje');
+    expect(over.what).toContain('10 produktov');
+    expect(over.what).toContain('150 produktov');
   });
 });
 
@@ -439,15 +457,34 @@ describe('režim rozsahu — pilot stropuje na 10, plny na uložený strop', () 
     );
     expect(blocker.severity).toBe('informuje');
     expect(blocker.assumed).toBe(true);
-    expect(blocker.what).toContain('nevie');
+    // Od 20. 8. 2026 veta o výbere nehovorí — na Prehľade výber neexistuje.
+    // Záruka je tým silnejšia, nie slabšia: nesmie tam byť ŽIADNE druhé číslo,
+    // ani nula, ani priznanie neznáma, ktoré by výber vôbec pripomenulo.
+    expect(blocker.what).toBe('Na jednu zľavu prejde najviac 10 produktov.');
+    expect(blocker.what).not.toContain('vo výbere');
   });
 
+  /**
+   * Dopočet zo zoznamu ID sa už z vety prečítať nedá (nesie len strop), takže
+   * sa meria tam, kde ten počet stále rozhoduje: na ZÁVAŽNOSTI. Tri produkty
+   * sú pod stropom desiatich (`informuje`), pätnásť nad ním (`blokuje`) — a to
+   * sa dá odvodiť jedine z dopočítaného počtu.
+   */
   it('počet sa dopočíta zo zoznamu ID, keď chýba', () => {
-    const blocker = byId(
+    const pod = byId(
       collectOperationBlockers(healthy({ selection: { productIds: [1, 2, 3] } })),
       'scope_pilot_cap',
     );
-    expect(blocker.what).toContain('vo výbere sú 3 produkty');
+    expect(pod.severity).toBe('informuje');
+
+    const nad = byId(
+      collectOperationBlockers(
+        healthy({ selection: { productIds: Array.from({ length: 15 }, (_, i) => i + 1) } }),
+      ),
+      'scope_pilot_cap',
+    );
+    expect(nad.severity).toBe('blokuje');
+    expect(nad.what).toContain('15 produktov');
   });
 });
 
@@ -829,7 +866,9 @@ describe('prečo neprejde PRÁVE TENTO produkt', () => {
     const single = collectProductBlockers(7, healthy({ selection: { selectedCount: 150 } }));
     expect(byId(operation, 'scope_pilot_cap').severity).toBe('blokuje');
     expect(byId(single, 'scope_pilot_cap').severity).toBe('informuje');
-    expect(byId(single, 'scope_pilot_cap').what).toContain('vo výbere je 1 produkt');
+    // Veta pri jednom produkte nesie len strop (od 20. 8. 2026); že sa počítalo
+    // voči JEDNOTKE a nie voči výberu 150, dokazuje závažnosť `informuje`.
+    expect(byId(single, 'scope_pilot_cap').what).not.toContain('150');
   });
 
   it('bez katalógovej sekcie zostáva fail-closed aj pre jeden produkt', () => {

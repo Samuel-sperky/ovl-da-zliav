@@ -48,8 +48,9 @@ import styles from '@/components/campaigns/zlavy.module.css';
 import { judgeStart, type AheadView } from '@/components/campaigns/queue-model';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Note from '@/components/ui/Note';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk } from '@/lib/ui/format';
-import { dayMonthSk, formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 export interface QueueAheadName {
   readonly name: string;
@@ -163,9 +164,10 @@ export function NewDiscountStart({
       {keyTooShort ? (
         <div className="row wrapx" data-testid="key-warning">
           <span className="flag">
+            <FlagMark />
             {keyDay === null
-              ? `Kľúč na zápis chýba — fronta dobehne ${dayMonthSk(finishDay ?? '')}`
-              : `Kľúč na zápis platí do ${dayMonthSk(keyDay)} — fronta dobehne ${dayMonthSk(finishDay ?? '')}`}
+              ? `Kľúč na zápis chýba — fronta dobehne ${formatDateSk(finishDay ?? '')}`
+              : `Kľúč na zápis platí do ${formatDateSk(keyDay)} — fronta dobehne ${formatDateSk(finishDay ?? '')}`}
           </span>
           <Link className="btn sm" href="/nastavenia#kluce" style={{ marginLeft: 'auto' }}>
             Obnoviť kľúč

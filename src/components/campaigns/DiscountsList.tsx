@@ -73,7 +73,9 @@ import {
 import { useRefreshable } from '@/components/layout/refresh';
 import EmptyState from '@/components/ui/EmptyState';
 import Note from '@/components/ui/Note';
-import { dayMonthSk, formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+import { FlagMark } from '@/components/ui/StatusMark';
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+import { formatDateSk } from '@/lib/ui/format';
 
 /* ═══════════════════════════ malé diely ═══════════════════════════════════ */
 
@@ -203,6 +205,7 @@ function DiscountRowView({ row, today }: { row: DiscountRow; today?: string }) {
               ·
             </span>
             <span className="flag">
+              <FlagMark />
               {formatCountSk(row.itemsUncertain)} nevieme, či sa zapísalo
             </span>
           </span>
@@ -212,7 +215,7 @@ function DiscountRowView({ row, today }: { row: DiscountRow; today?: string }) {
       <div className={`${styles.cCount} num lvl-2`}>{formatCountSk(row.itemsTotal)}</div>
 
       <div className={`${styles.cWindow} lvl-3`}>
-        {dayMonthSk(row.dateFrom)} – {dayMonthSk(row.dateTo)}
+        {formatDateSk(row.dateFrom)} – {formatDateSk(row.dateTo)}
       </div>
 
       <div className={`${styles.cWritten} lvl-3`}>
@@ -220,7 +223,7 @@ function DiscountRowView({ row, today }: { row: DiscountRow; today?: string }) {
         {row.estimate === null ? null : (
           <>
             {' · '}
-            <span className="est">{dayMonthSk(row.estimate.date)}</span>
+            <span className="est">{formatDateSk(row.estimate.date)}</span>
           </>
         )}
       </div>
@@ -382,7 +385,7 @@ export function DiscountsList() {
                     {formatCountSk(featured.itemsTotal)}{' '}
                     {pluralSk(featured.itemsTotal, 'produkt', 'produkty', 'produktov')}
                     <Dot />
-                    zľava svieti {dayMonthSk(featured.dateFrom)} – {dayMonthSk(featured.dateTo)}
+                    zľava svieti {formatDateSk(featured.dateFrom)} – {formatDateSk(featured.dateTo)}
                   </div>
                 </div>
               </div>
@@ -413,7 +416,7 @@ export function DiscountsList() {
                   <>
                     <Dot />
                     <span>
-                      hotové <b className="est">{dayMonthSk(featured.estimate.date)}</b>
+                      hotové <b className="est">{formatDateSk(featured.estimate.date)}</b>
                     </span>
                   </>
                 )}
@@ -421,6 +424,7 @@ export function DiscountsList() {
                   <>
                     <Dot />
                     <span className="flag">
+                      <FlagMark />
                       {formatCountSk(featured.itemsUncertain)} nevieme, či sa zapísalo
                     </span>
                   </>

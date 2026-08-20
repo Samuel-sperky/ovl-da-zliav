@@ -85,7 +85,15 @@ export type { BlockerLook, BlockerLook as ResolutionLook } from '@/components/ui
  */
 export type SigTone = 'ok' | 'warn' | 'bad' | 'progress' | 'idle' | 'lock';
 
-/** Trieda značky pre `className`. Jediné miesto, kde sa `.sig` skladá. */
+/**
+ * Trieda značky pre `className`. Jediné miesto, kde sa `.sig` skladá.
+ *
+ * Trieda nesie IBA farbu — značku treba dokresliť `<SigMark variant={tone} />`
+ * (`ui/StatusMark.tsx`) do toho istého uzla, kde stojí slovo. Platí to aj pre
+ * `lock`: `scopeCheck()` (`overview-verdict.ts`) ho vracia v pilotnom rozsahu,
+ * takže `class="sig lock"` reálne vzniká, hoci ten literál v `src/` nikde
+ * nestojí. Mŕtvosť tejto rodiny sa grepom na literál dokázať NEDÁ.
+ */
 export function sigClass(tone: SigTone): string {
   return `sig ${tone}`;
 }

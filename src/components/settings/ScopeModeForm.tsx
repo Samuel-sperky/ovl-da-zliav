@@ -40,6 +40,7 @@ import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
 import SudoPrompt from '@/components/ui/SudoPrompt';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
+import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 import {
   SCOPE_MODE_LABELS,
@@ -63,6 +64,9 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
 
   const mode = settings.scopeMode;
   const full = mode === 'plny';
+  /* Trieda aj značka z jednej hodnoty (pozri DiscountDetail) — plný rozsah je
+     jantárové upozornenie, pilotný zelené potvrdenie. */
+  const scopeSig: SigVariant = full ? 'warn' : 'ok';
 
   async function switchTo(next: ScopeModeValue) {
     setFailure(null);
@@ -91,7 +95,8 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
       <div className="sec-h">
         <h2>Rozsah zliav</h2>
         <div className="act">
-          <span className={`sig ${full ? 'warn' : 'ok'}`} data-testid="scope-mode-current">
+          <span className={`sig ${scopeSig}`} data-testid="scope-mode-current">
+            <SigMark variant={scopeSig} />
             {full ? 'plný rozsah' : 'pilotný rozsah'}
           </span>
         </div>
@@ -99,9 +104,8 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
 
       <Note testId="scope-intro">
         Toto je jediné miesto, kde sa mení, <b>koľko produktov smie mať jedna zľava</b>.
-        Strop desiatich produktov nie je hranica appky — je to prepínač, ktorý brzdil
-        pilotnú prevádzku. Strop plného rozsahu je už uložený na{' '}
-        {formatCountSk(settings.maxProductsPerCampaign)} produktoch; treba ho iba uvoľniť.
+        Strop plného rozsahu je uložený na {formatCountSk(settings.maxProductsPerCampaign)}{' '}
+        produktoch, treba ho uvoľniť.
       </Note>
 
       <div className="kpis">
@@ -141,6 +145,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
                 pilotný{' '}
                 {full ? null : (
                   <span className="sig ok" data-testid="scope-row-pilot">
+                    <SigMark variant="ok" />
                     teraz platí
                   </span>
                 )}
@@ -156,6 +161,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
                 plný{' '}
                 {full ? (
                   <span className="sig ok" data-testid="scope-row-full">
+                    <SigMark variant="ok" />
                     teraz platí
                   </span>
                 ) : null}

@@ -87,9 +87,9 @@ describe('B — kedy sa zapíše a kedy nabehne (P6, P7)', () => {
   it('na povrchu sú oba dni', () => {
     const html = renderToStaticMarkup(createElement(NewDiscountStart, START_PROPS));
     expect(html).toContain('Zapísané budú');
-    expect(html).toContain('02.09.2026');
+    expect(html).toContain('2. 9. 2026');
     expect(html).toContain('Zľava nabehne');
-    expect(html).toContain('04.09.2026');
+    expect(html).toContain('4. 9. 2026');
   });
 
   it('P7 — deň dobehnutia je označený ako odhad, deň nábehu zľavy nie', () => {

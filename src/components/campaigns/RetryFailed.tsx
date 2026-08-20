@@ -55,6 +55,7 @@ import {
 } from '@/components/campaigns/zlavy-api';
 import Note from '@/components/ui/Note';
 import SudoPrompt from '@/components/ui/SudoPrompt';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk } from '@/lib/ui/format';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 
@@ -352,6 +353,7 @@ export function RetryFailed({ campaignId, onCreated, testId }: RetryFailedProps)
               {previewBlockers.map((blocker, index) => (
                 <div key={`${blocker.code}-${index}`} className="row wrapx">
                   <span className="flag">
+                    <FlagMark />
                     {previewBlockerText(blocker.code, blocker.message)}
                   </span>
                 </div>

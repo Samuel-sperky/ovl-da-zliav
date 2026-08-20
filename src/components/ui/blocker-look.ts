@@ -53,7 +53,11 @@
  *    závažnosti, a preto je v tomto slovníku samostatné pole `locked` a
  *    samostatná ikona zámku. Tón `sudo` je `attention` ako pri `sam`, lebo
  *    používateľ s tým TERAZ vie pohnúť. Trieda `.sig.lock` v `globals.css`
- *    zostáva, ale patrí trvalému obmedzeniu (pilotný strop), nie prekážke.
+ *    zostáva, ale patrí trvalému obmedzeniu (pilotný strop), nie prekážke —
+ *    kreslí ju `scopeCheck()` (`dashboard/overview-verdict.ts`) na Prehľade.
+ *    Od 19. 8. 2026 nesie už len FARBU: zámok kreslí `<Icon name="lock">`
+ *    (`ui/StatusMark.tsx`), nie CSS maska v `::before`. Tá maska bola druhou
+ *    kópiou cesty ikony v repe a zanikla s ňou.
  *
  * 5. **Červená je vyhradená pre zastavený zápis a stratu dát.** `mimo_appky`
  *    znamená, že zápis stojí a z obrazovky sa s tým nedá urobiť nič — presne
@@ -101,15 +105,6 @@ export interface BlockerLook {
    * vždy vedľa neho.
    */
   readonly icon: IconName;
-  /**
-   * @deprecated Textová podoba druhého kanála. Zostáva PRÁZDNA a je to zámer.
-   *
-   * `campaigns/BlockerList.tsx` ju ešte vypisuje do vlastného spanu; kým
-   * prejde na `icon`, musí pole existovať, ale nesmie vrátiť znak — symbolové
-   * glyfy sa kreslili iným písmom než zvyšok appky a `sudo` malo dokonca
-   * FAREBNÚ emodži. Značku na tom mieste kreslí CSS maska
-   * (`campaigns/zlavy.module.css`, `.blockerGlyph::before`).
-   */
   /** Tretí kanál — kto a ako to vyrieši. Neosobne, bez oslovenia. */
   readonly word: string;
   /**
@@ -229,8 +224,11 @@ export function severityWord(severity: BlockerSeverityCode): string {
  * Tón → trieda `.sig` z `globals.css`.
  *
  * `.sig.*` sú mená TRIED, nie druhý slovník stavov: nesú tú istú päticu
- * `--st-*` pod historickými menami (`ok`, `warn`, `bad`) a cez masku v
- * `::before` aj ikonu, takže sa značka nedá zredukovať na samotnú farbu.
+ * `--st-*` pod historickými menami (`ok`, `warn`, `bad`). Od 19. 8. 2026 nesú
+ * už IBA farbu a typografiu — značku kreslí `<ToneSigMark>`
+ * (`ui/StatusMark.tsx`) ako `<Icon>` v tom istom uzle, kde stojí slovo. Kto
+ * pridá triedu a zabudne na značku, stav sa zredukuje na farbu a slovo, a nič
+ * nespadne; preto to počíta `test/unit/ikony.spec.ts`, nie oko.
  *
  * `progress` tu do 19. 8. mapoval na `sig idle`, lebo `.sig` variantu
  * `progress` nemal — piaty stav tým prestal existovať a „prebieha" splynulo

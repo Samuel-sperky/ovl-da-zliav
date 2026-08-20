@@ -301,7 +301,11 @@ describe('V10 — prázdna tabuľka hovorí, ako ju naplniť', () => {
   it('neúplný katalóg prizná, že hľadaný kus môže byť medzi nenačítanými', () => {
     const empty = catalogEmptyView({ narrowed: true, status: STATUS });
     expect(empty.description).toContain('38 182');
-    expect(empty.description).toContain('môže byť medzi nimi');
+    expect(empty.description).toContain('môže byť medzi');
+    // Prázdny stav je od 20. 8. 2026 JEDNA veta (kontrakt UI bod 11) a nikoho
+    // neoslovuje — pôvodné znenie malo 234 znakov a dva pokyny v druhej osobe.
+    expect(empty.description).not.toContain('Uvoľnite');
+    expect(String(empty.description).split('. ').length).toBeLessThan(3);
     expect(empty.offerLoad).toBe(true);
   });
 

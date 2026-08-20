@@ -65,7 +65,9 @@ import { sigClass } from '@/components/dashboard/live-status-model';
 import type { QueueProgress } from '@/components/dashboard/overview-model';
 import type { CheckMark, Verdict } from '@/components/dashboard/overview-verdict';
 import Note from '@/components/ui/Note';
-import { dayMonthSk, formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+import { SigMark } from '@/components/ui/StatusMark';
+import { formatDateSk } from '@/lib/ui/format';
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 export interface StatusSectionProps {
   verdict: Verdict;
@@ -205,7 +207,7 @@ function RunningBody({
           <span className="lvl-3">Odhad dokončenia zatiaľ nevieme</span>
         ) : (
           <span>
-            Hotové <b className="est">{dayMonthSk(progress.finishDay)}</b>
+            Hotové <b className="est">{formatDateSk(progress.finishDay)}</b>
           </span>
         )}
         {progress.dateFrom === null || progress.dateTo === null ? null : (
@@ -214,7 +216,7 @@ function RunningBody({
             <span>
               Okno{' '}
               <b>
-                {dayMonthSk(progress.dateFrom)} – {dayMonthSk(progress.dateTo)}
+                {formatDateSk(progress.dateFrom)} – {formatDateSk(progress.dateTo)}
               </b>
             </span>
           </>
@@ -232,14 +234,14 @@ function RunningBody({
   );
 }
 
-/** Nič sa nezapisuje: žiadny pruh na nule, len čísla, ktoré appka naozaj má. */
-function CalmBody({
-  calm,
-  budget,
-}: {
-  calm: StatusSectionProps['calm'];
-  budget: StatusSectionProps['budget'];
-}) {
+/**
+ * Nič sa nezapisuje: žiadny pruh na nule, len čísla, ktoré appka naozaj má.
+ *
+ * Rozpočet sem NEPATRÍ. „Voľných zápisov dnes 200" tu bol stavový pruh
+ * v hlavičke druhýkrát — a keď sa tie dve čísla rozišli o jedno kolo fronty,
+ * obrazovka si protirečila sama so sebou o dva riadky nižšie.
+ */
+function CalmBody({ calm }: { calm: StatusSectionProps['calm'] }) {
   return (
     <div className="prog-meta" data-testid="queue-calm">
       <span>
@@ -256,14 +258,6 @@ function CalmBody({
         <b>{formatCountSk(calm.discounted)}</b> zlacnených{' '}
         <span className="lvl-3">podľa vlastných zápisov</span>
       </span>
-      {budget === null ? null : (
-        <>
-          <Dot />
-          <span>
-            Voľných zápisov dnes <b>{formatCountSk(budget.remaining)}</b>
-          </span>
-        </>
-      )}
     </div>
   );
 }
@@ -312,6 +306,7 @@ export function StatusSection({
         <h2>Stav</h2>
         <div className="act">
           <span className={sigClass(verdict.tone)} data-testid="verdict-word">
+            <SigMark variant={verdict.tone} />
             {verdict.word}
           </span>
         </div>
@@ -330,7 +325,7 @@ export function StatusSection({
 
           <div className={styles.queueBody}>
             {progress.mode === 'unknown' ? <UnknownBody /> : null}
-            {progress.mode === 'calm' ? <CalmBody calm={calm} budget={budget} /> : null}
+            {progress.mode === 'calm' ? <CalmBody calm={calm} /> : null}
             {running ? <RunningBody progress={progress} budget={budget} /> : null}
             {/*
               D5 — prázdny stav je jeden tlmený riadok na mieste čísel fronty,
@@ -382,6 +377,7 @@ export function StatusSection({
         {checks.map((check) => {
           const mark = (
             <span className={sigClass(check.tone)} data-check={check.id}>
+              <SigMark variant={check.tone} />
               {check.text}
             </span>
           );

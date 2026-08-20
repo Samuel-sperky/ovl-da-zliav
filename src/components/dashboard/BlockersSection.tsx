@@ -64,6 +64,7 @@ import {
 import type { BlockerRow } from '@/components/dashboard/status-api';
 import { resolutionLook, severityWord, toneSigClass } from '@/components/ui/blocker-look';
 import LockBadge from '@/components/ui/LockBadge';
+import { ToneSigMark } from '@/components/ui/StatusMark';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 export interface BlockersSectionProps {
@@ -84,6 +85,7 @@ function Row({ row }: { row: BlockerRow }) {
       {/* Značka so stavom — vlastný stĺpec, rovnaké x na každom riadku (D6). */}
       <div className={styles.reasonMark}>
         <span className={toneSigClass(look.tone)} data-testid="blocker-severity">
+          <ToneSigMark tone={look.tone} />
           {severityWord(row.severity)}
         </span>
       </div>

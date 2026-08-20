@@ -19,6 +19,7 @@ import { useState } from 'react';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import SudoPrompt from '@/components/ui/SudoPrompt';
+import { SigMark } from '@/components/ui/StatusMark';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
@@ -108,10 +109,12 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
         <div className="act">
           {connection === null ? null : connection.ok ? (
             <span className="sig ok" data-testid="domain-connection">
+              <SigMark variant="ok" />
               Spojenie funguje
             </span>
           ) : (
             <span className="sig bad" data-testid="domain-connection">
+              <SigMark variant="bad" />
               Eshop neodpovedal
             </span>
           )}

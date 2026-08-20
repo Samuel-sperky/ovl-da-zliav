@@ -27,9 +27,28 @@
  * so skúškou naprázdno a potvrdením (I3).
  * Analytik sám nikdy nič nezapisuje a ani nemá čím — nedostáva žiadny klient.
  *
+ * TEXT ZISTENIA JE POVRCH APPKY — TRI VECI SA V ŇOM SMÚ TICHO POKAZIŤ
+ * -------------------------------------------------------------------
+ * Do 20. 8. 2026 mala veta pravidla `ending_soon` v sebe všetky tri naraz
+ * a nikto si to nevšimol, lebo nič nespadlo:
+ *
+ * 1. **Interný názov entity na povrchu.** V kóde je entita `campaign` a tak
+ *    sa aj menuje v typoch, `id` a `kind` — to je správne a nemení sa. Do
+ *    VETY ale patrí slovo, ktorým appka hovorí s používateľom, a to je
+ *    **„zľava"**. Slovo „kampaň" v `text` ani v `action.label` nesmie byť.
+ * 2. **ISO dátum.** `${c.dateTo}` je `YYYY-MM-DD`. Vypísaný priamo dá
+ *    `2026-08-26` — tvar, ktorý sa po slovensky nepíše. Každý dátum ide cez
+ *    `formatDateSk` (jediný formátovač dátumu, kontrakt UI bod 10).
+ * 3. **Relatívny čas.** „o 7 dní" sa čítalo inak ráno a inak o týždeň, keď
+ *    ostala veta v cache. Na povrchu je vždy konkrétny deň.
+ *
+ * Stráži to `test/unit/datumy-povrch.spec.ts` — pravidlá spustí naprázdno
+ * a číta, čo z nich vyšlo, nie ako je to napísané.
+ *
  * Vlastník: C3.
  */
 import { fireAtUtc, todayInZone } from '@/lib/domain/dates';
+import { formatDateSk } from '@/lib/ui/format';
 
 /* ═══════════════════════════════ 1. Vstup ═════════════════════════════════ */
 
@@ -235,15 +254,14 @@ function findEndingSoon(s: RuleSnapshot): Finding[] {
     );
     if (hasFollowUp) continue;
 
-    const days = daysBetween(s.today, c.dateTo);
     out.push({
       id: `ending_soon:${c.id}`,
       kind: 'ending_soon',
       tone: 'info',
-      text: `Kampaň „${c.name}" končí ${days === 0 ? 'dnes' : `o ${days} ${pluralSk(days, 'deň', 'dni', 'dní')}`} (${c.dateTo}) a na jej produkty nenadväzuje žiadna ďalšia kampaň.`,
+      text: `„${c.name}" končí ${formatDateSk(c.dateTo)}. Nenadväzuje žiadna ďalšia zľava.`,
       href: `/zlavy/${c.id}`,
       action: {
-        label: 'Pripraviť nadväzujúcu kampaň',
+        label: 'Pripraviť nadväzujúcu zľavu',
         href: drawerHref(c.productIds, c.percent, addDaysOnly(c.dateTo, 1)),
       },
     });
@@ -262,7 +280,7 @@ function findStaleProducts(s: RuleSnapshot): Finding[] {
         tone: 'info',
         text: `${productLabel(p)} (#${p.productId}) nemá žiadny vlastný zápis zľavy — appka o jeho zľavách nič nevie.`,
         href: '/produkty',
-        action: { label: 'Navrhnúť kampaň', href: drawerHref([p.productId]) },
+        action: { label: 'Navrhnúť zľavu', href: drawerHref([p.productId]) },
       });
       continue;
     }
@@ -273,10 +291,10 @@ function findStaleProducts(s: RuleSnapshot): Finding[] {
       id: `stale_product:${p.productId}`,
       kind: 'stale_product',
       tone: 'info',
-      text: `${productLabel(p)} (#${p.productId}) je podľa vlastných zápisov bez zľavy už ${daysSince} dní (posledné okno skončilo ${p.lastOwnWrite.to}).`,
+      text: `${productLabel(p)} (#${p.productId}) je podľa vlastných zápisov bez zľavy od ${formatDateSk(p.lastOwnWrite.to)}.`,
       href: '/produkty',
       action: {
-        label: 'Navrhnúť kampaň',
+        label: 'Navrhnúť zľavu',
         href: drawerHref([p.productId], p.lastOwnWrite.percent),
       },
     });
@@ -294,7 +312,7 @@ function findPartialCampaigns(s: RuleSnapshot): Finding[] {
         id: `partial_campaign:${c.id}`,
         kind: 'partial_campaign' as const,
         tone: 'attention' as const,
-        text: `Kampaň „${c.name}" je čiastočná — ${missing} z ${c.itemsTotal} ${pluralSk(c.itemsTotal, 'produktu', 'produktov', 'produktov')} sa nezapísalo.`,
+        text: `Zľava „${c.name}" je čiastočná — ${missing} z ${c.itemsTotal} ${pluralSk(c.itemsTotal, 'produktu', 'produktov', 'produktov')} sa nezapísalo.`,
         href: `/zlavy/${c.id}`,
         action: { label: 'Otvoriť detail a zopakovať zlyhané', href: `/zlavy/${c.id}` },
       };
@@ -311,10 +329,10 @@ function findNeedsIntervention(s: RuleSnapshot): Finding[] {
       tone: 'attention' as const,
       text:
         c.status === 'needs_key'
-          ? `Kampaň „${c.name}" čaká na API kľúč — bez neho sa okno ${c.dateFrom} – ${c.dateTo} nezapíše.`
-          : `Kampaň „${c.name}" sa zmeškala — plánovaný zápis pre okno ${c.dateFrom} – ${c.dateTo} neprebehol.`,
+          ? `Zľava „${c.name}" čaká na kľúč na zápis — bez neho sa okno ${formatDateSk(c.dateFrom)} – ${formatDateSk(c.dateTo)} nezapíše.`
+          : `Zľava „${c.name}" sa zmeškala — plánovaný zápis pre okno ${formatDateSk(c.dateFrom)} – ${formatDateSk(c.dateTo)} neprebehol.`,
       href: `/zlavy/${c.id}`,
-      action: { label: 'Otvoriť detail kampane', href: `/zlavy/${c.id}` },
+      action: { label: 'Otvoriť detail zľavy', href: `/zlavy/${c.id}` },
     }));
 }
 
@@ -340,7 +358,7 @@ function findKeyBeforeStart(s: RuleSnapshot): Finding[] {
         id: `key_before_start:${c.id}:missing`,
         kind: 'key_before_start',
         tone: 'attention',
-        text: `Kampaň „${c.name}" štartuje ${c.dateFrom}, ale API kľúč nie je uložený — zápis by skončil v stave „vyžaduje kľúč".`,
+        text: `Zľava „${c.name}" štartuje ${formatDateSk(c.dateFrom)}, ale kľúč na zápis nie je uložený — zľava by sa nezapísala.`,
         href: `/zlavy/${c.id}`,
         action: { label: 'Vložiť kľúč v Nastaveniach', href: '/nastavenia' },
       });
@@ -352,7 +370,7 @@ function findKeyBeforeStart(s: RuleSnapshot): Finding[] {
         id: `key_before_start:${c.id}`,
         kind: 'key_before_start',
         tone: 'attention',
-        text: `API kľúč expiruje ${expiresDayLocal}, teda pred štartom kampane „${c.name}" (${c.dateFrom}) — bez nového kľúča sa zápis nevykoná.`,
+        text: `Kľúč na zápis platí len do ${formatDateSk(expiresDayLocal)}, teda pred štartom zľavy „${c.name}" (${formatDateSk(c.dateFrom)}) — bez nového kľúča sa zápis nevykoná.`,
         href: `/zlavy/${c.id}`,
         action: { label: 'Vložiť nový kľúč v Nastaveniach', href: '/nastavenia' },
       });
@@ -372,7 +390,7 @@ function findLowVariantStock(s: RuleSnapshot): Finding[] {
       id: `low_variant_stock:${v.productId}`,
       kind: 'low_variant_stock',
       tone: 'info',
-      text: `${v.name ?? `Produkt #${v.productId}`} má ${low.length} ${pluralSk(low.length, 'variant', 'varianty', 'variantov')} so zásobou ≤ ${LOW_STOCK_THRESHOLD} ks (najmenej ${min} ks) — údaj platí len pre variantné produkty a pochádza z poslednej obnovy katalógu${v.fetchedAt ? ` (${v.fetchedAt.slice(0, 10)})` : ''}.`,
+      text: `${v.name ?? `Produkt #${v.productId}`} má ${low.length} ${pluralSk(low.length, 'variant', 'varianty', 'variantov')} so zásobou ≤ ${LOW_STOCK_THRESHOLD} ks (najmenej ${min} ks) — údaj platí len pre variantné produkty a pochádza z poslednej obnovy katalógu${v.fetchedAt ? ` (${formatDateSk(v.fetchedAt)})` : ''}.`,
       href: '/produkty',
     });
   }
@@ -383,8 +401,8 @@ function findLowVariantStock(s: RuleSnapshot): Finding[] {
 function salesPeriodSk(sales: RuleSalesWindow): string {
   const span =
     sales.from === sales.to
-      ? sales.from
-      : `${sales.from} – ${sales.to}`;
+      ? formatDateSk(sales.from)
+      : `${formatDateSk(sales.from)} – ${formatDateSk(sales.to)}`;
   return `${span}, ${sales.daysCovered} ${pluralSk(sales.daysCovered, 'sledovaný deň', 'sledované dni', 'sledovaných dní')}`;
 }
 
@@ -407,7 +425,7 @@ function findNoUnitsSold(s: RuleSnapshot): Finding[] {
       tone: 'info',
       text: `${productLabel(p)} (#${p.productId}) sa za sledované obdobie (${salesPeriodSk(sales)}) nepredal ani raz. Obdobie je krátke — produkt s predajom raz za týždeň tu vyzerá rovnako, história sa dopĺňa ďalšími behmi synchronizácie.`,
       href: '/produkty',
-      action: { label: 'Navrhnúť kampaň', href: drawerHref([p.productId]) },
+      action: { label: 'Navrhnúť zľavu', href: drawerHref([p.productId]) },
     });
   }
   return out;
@@ -434,7 +452,7 @@ function findSalesDeclining(s: RuleSnapshot): Finding[] {
       tone: 'info',
       text: `${productLabel(p)} (#${p.productId}) predal v novšej polovici sledovaného obdobia ${recentUnits} ${pluralSk(recentUnits, 'kus', 'kusy', 'kusov')} proti ${previousUnits} v staršej (${salesPeriodSk(sales)}) — predajnosť klesla. Ide o počet kusov, nie o obrat.`,
       href: '/produkty',
-      action: { label: 'Navrhnúť kampaň', href: drawerHref([p.productId]) },
+      action: { label: 'Navrhnúť zľavu', href: drawerHref([p.productId]) },
     });
   }
   return out;

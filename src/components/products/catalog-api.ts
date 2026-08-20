@@ -340,3 +340,47 @@ export function runCatalogBatch(signal?: AbortSignal): Promise<Result<CatalogBat
 export function appStatus(signal?: AbortSignal): Promise<Result<StatusPayload>> {
   return readJson<StatusPayload>('/api/status', signal);
 }
+
+/* ═════════════ 6. Rozdelenie cien — podklad pre histogram ════════════════ */
+
+/**
+ * Odpoveď `GET /api/insights/catalog-prices`.
+ *
+ * PREČO SA VOLÁ ENDPOINT Z `insights`, A NIE Z `catalog`
+ * ------------------------------------------------------
+ * Agregácia cien nad `catalog_cache` už existuje (`app/api/insights/_prices.ts`)
+ * a šírku aj počet pásiem tam fixujú `PRICE_BIN_WIDTH` / `PRICE_BIN_COUNT`,
+ * ktoré si priamo odtiaľ importuje `test/unit/grafy-ceny.spec.ts`. Druhý dotaz
+ * pod `/api/catalog/**` by bol DRUHÝ ZDROJ PRAVDY o tom istom čísle — dve
+ * rozdelenia tej istej tabuľky, obe dôveryhodné. Preto sa tu žiadny nový
+ * endpoint nezakladá.
+ *
+ * `bins` sa preberajú TAK, AKO PRIŠLI. Prázdne pásmo má nulu zámerne (dotaz
+ * prešiel celú tabuľku, takže „nič v tomto pásme" je meraný fakt) a posledné
+ * pásmo je ZBERNÉ (`to: null`). Klient ich nedopočítava ani nezlučuje.
+ *
+ * Odpoveď nesie aj `selection` (ceny POVOLENÝCH produktov) a `today`. Tab
+ * Produkty ani jedno nečíta, preto to tu ani nie je v type: značky pod osou
+ * majú na tejto obrazovke ukazovať to, čo si používateľ naklikal PRÁVE TERAZ,
+ * nie obsah allowlistu — inak by graf odpovedal na inú otázku, než ktorú si
+ * pri výbere kladie.
+ */
+export interface CatalogPricesView {
+  readonly bins: ReadonlyArray<{ from: number; to: number | null; count: number }>;
+  /** Koľko riadkov má zrkadlo katalógu spolu. */
+  readonly rows: number;
+  /** Z toho bez ceny — do pásiem nevstupujú a graf ich musí priznať. */
+  readonly withoutPrice: number;
+  readonly minPrice: number | null;
+  readonly maxPrice: number | null;
+  readonly oldestFetchedAt: string | null;
+  readonly newestFetchedAt: string | null;
+}
+
+/**
+ * Rozdelenie cien v zrkadle katalógu. Na shop neodíde ani jeden request — je to
+ * čisto `SELECT` nad `catalog_cache`, takže volanie nemíňa rozpočet čítaní.
+ */
+export function catalogPrices(signal?: AbortSignal): Promise<Result<CatalogPricesView>> {
+  return readJson<CatalogPricesView>('/api/insights/catalog-prices', signal);
+}

@@ -26,9 +26,15 @@ export const SETTINGS_CSS = `
 .set-page .sec + .sec{margin-top:14px}
 .set-page .sec[id]{scroll-margin-top:72px}
 /* Nadpis skupiny sekcií. Nie je to karta — je to popiska nad kartami, preto
-   nemá rám ani pozadie; jediné, čo robí, je oddelenie otázok od seba. */
+   nemá rám ani pozadie; jediné, čo robí, je oddelenie otázok od seba.
+   Farba je var(--ink), nie var(--dim). Pod týmto nadpisom stojí popisok sekcie
+   (.sec-h h2 v globals.css, D2) a ten má var(--ink2) — s var(--dim) bol
+   NADRADENÝ popisok tlmenejší než podradený a hierarchia sa čítala opačne.
+   Tri roly popiskov idú od najsilnejšej: var(--ink), var(--ink2), var(--dim).
+   Ticho sa tu pokazí presne toto: obe farby sú sivé, rozdiel je len v jase,
+   takže zámena nič nezhodí a nikto si ju nevšimne inak než porovnaním. */
 .set-page .set-grp{font-size:11px;font-weight:700;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--dim);margin:22px 0 8px}
+  text-transform:uppercase;color:var(--ink);margin:22px 0 8px}
 .set-page .set-grp:first-of-type{margin-top:14px}
 .set-page .anchor-grp{display:flex;flex-direction:column;gap:1px}
 .set-page .anchor-grp + .anchor-grp{margin-top:8px}

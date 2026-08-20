@@ -271,7 +271,7 @@ export function SalesSection({ sales }: SalesSectionProps) {
 
       <div className="fresh">
         {sales.coverage.lastSyncedAt === null
-          ? 'Predaj sme zatiaľ nesťahovali'
+          ? 'Predaj sa zatiaľ nesťahoval'
           : `Dáta k ${formatDateTimeSk(sales.coverage.lastSyncedAt)}`}{' '}
         · appka pozná predané kusy, nie sumu v eurách
       </div>

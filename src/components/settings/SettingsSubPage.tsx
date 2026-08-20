@@ -147,8 +147,10 @@ export function SettingsSubPage({ slug }: SettingsSubPageProps) {
       <Link className="sub-back" href="/nastavenia">
         ← Nastavenia
       </Link>
+      {/* `page.lead` sa TU nekreslí zámerne — používateľ ho práve prečítal na
+          karte rozcestníka, na ktorú klikol, a `h1` nad tým ho hovorí tretí
+          raz. Pole samo zostáva: `SettingsIndex.tsx` ho na tej karte kreslí. */}
       <h1 className="page">{page.title}</h1>
-      <p className="set-lead">{page.lead}</p>
       {body()}
     </div>
   );

@@ -188,8 +188,8 @@ const VIEW: PerformanceView = {
   prior: { from: '2026-07-23', to: '2026-08-05', units: 74 },
   coverage: { from: '2026-05-01', to: '2026-08-19', syncEnabled: true },
   locked: {
-    revenue: 'Tržby v eurách shop cez API nevracia.',
-    lastYear: 'Predaje zatiaľ rok dozadu nesiahajú.',
+    revenue: 'shop ich cez API nevracia',
+    lastYear: 'dáta zatiaľ tak ďaleko nesiahajú',
   },
 };
 
@@ -216,8 +216,10 @@ describe('C — výkon výberu nie sú tri karty s tou istou správou (D17)', ()
 
   it('zamknutý uhol naďalej povie dôvod — nie je skrytý (K8)', () => {
     expect(WITH_DATA).toContain('Tržby');
-    expect(WITH_DATA).toContain('Tržby v eurách shop cez API nevracia.');
-    expect(WITH_DATA).toContain('Predaje zatiaľ rok dozadu nesiahajú.');
+    // Dôvod bez mena uhla — meno kreslí `LockedAngle` vedľa (20. 8. 2026).
+    expect(WITH_DATA).toContain('shop ich cez API nevracia');
+    expect(WITH_DATA).toContain('dáta zatiaľ tak ďaleko nesiahajú');
+    expect(WITH_DATA).not.toContain('Tržby v eurách shop');
   });
 
   /*

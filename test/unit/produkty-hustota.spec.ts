@@ -270,12 +270,13 @@ describe('D9 — zamknuté filtre sú v paneli práve raz', () => {
     expect(kolkokrat(html, 'Čaká na dáta zo shopu ·')).toBe(1);
   });
 
-  it('rozdiel „vlastný zápis vs. eshop" drží ďalej nadpis skupiny a jej veta', () => {
+  it('rozdiel „vlastný zápis vs. eshop" drží ďalej SÁM nadpis skupiny', () => {
     expect(html).toContain('Zľavy podľa vlastných zápisov');
-    expect(html).toContain('Appka vidí len to, čo sama zapísala.');
     expect(html.indexOf('Zľavy podľa vlastných zápisov')).toBeLessThan(
       html.indexOf('Práve v zľave'),
     );
+    // ZMENA 20. 8. 2026 (bod 16): druhá veta o tom istom pod políčkami padla.
+    expect(html).not.toContain('Appka vidí len to, čo sama zapísala.');
   });
 
   it('keď API prestane hlásiť zamknuté filtre, skupina zostane len so zľavou', () => {

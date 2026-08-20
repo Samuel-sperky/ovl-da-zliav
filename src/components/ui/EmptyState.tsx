@@ -17,11 +17,23 @@
  *
  * 1. **`description` je POVINNÝ.** Prázdny stav bez vysvetlenia sa v tejto
  *    appke nekreslí. Keby bol voliteľný, o mesiac by ho polovica volajúcich
- *    vynechala a vzniklo by „žiadne dáta" zadnými dverami.
- * 2. **Prázdno nie je chyba.** Žiadna červená, žiadny výkričník. Keď je
+ *    vynechala a vzniklo by „žiadne dáta" zadnými dverami. Toto sa 20. 8. 2026
+ *    znovu preverilo a NEMENÍ sa: povinný zostáva.
+ * 2. **A je to JEDNA VETA.** Kontrakt UI bod 11 predpisuje „jedna veta + jedno
+ *    tlačidlo". S bodom 1 si to neprotirečí — spor bol vždy len o DĹŽKE, nikdy
+ *    o tom, či tam veta má byť. Rozhodnuté v prospech kontraktu: povinná áno,
+ *    dlhá nie.
+ *
+ *    Dĺžka je presne to, čo sa tu smie ticho nazbierať, lebo typ o nej nič
+ *    netvrdí a nikdy tvrdiť nebude: `products/catalog-status.ts` mal v jednom
+ *    `description` 234 znakov v štyroch vetách, z toho dva pokyny v druhej
+ *    osobe („Uvoľnite…", „počkajte…"). Prázdny stav je potom najdlhší text na
+ *    obrazovke, na ktorej nič nie je, a jediné tlačidlo v ňom zapadne. Kto
+ *    tu potrebuje druhú vetu, potrebuje `Note` vedľa, nie dlhší prázdny stav.
+ * 3. **Prázdno nie je chyba.** Žiadna červená, žiadny výkričník. Keď je
  *    prázdno DÔSLEDKOM chyby, patrí tam `Note variant="err"`, nie zafarbený
  *    prázdny stav.
- * 3. **Akcia je voliteľná, ale ak je, má byť tá jedna správna.** Nie tri
+ * 4. **Akcia je voliteľná, ale ak je, má byť tá jedna správna.** Nie tri
  *    tlačidlá — jedna cesta von.
  *
  * Vzhľad dedí `.ovl-empty` z `globals.css` (vycentrovaný stĺpec s tlmeným
@@ -36,7 +48,10 @@ import type { ReactNode } from 'react';
 export interface EmptyStateProps {
   /** Nadpis — čo tu má byť. Krátko, slovensky. */
   title: string;
-  /** Vysvetlenie — ako sa to sem dostane. Povinné, pozri hlavičku modulu. */
+  /**
+   * Vysvetlenie — ako sa to sem dostane. **Jedna veta.** Povinné aj krátke;
+   * dôvody oboch podmienok sú v hlavičke modulu, body 1 a 2.
+   */
   description: ReactNode;
   /** Jedna akcia, ktorá prázdno vyrieši (tlačidlo, odkaz). Voliteľné. */
   action?: ReactNode;

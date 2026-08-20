@@ -71,6 +71,7 @@ import type { TierPlan } from '@/components/campaigns/discounts-model';
 // panel opakovania a dve kópie toho istého prekladu by sa časom rozišli (K10).
 import { previewBlockerText, type BlockerCard } from '@/components/campaigns/queue-model';
 import type { CreateResult, PreviewData } from '@/components/campaigns/zlavy-api';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -160,7 +161,10 @@ export function NewDiscountConfirm({
               <span className="sep-dot" aria-hidden="true">
                 ·
               </span>
-              <span className="flag">Kľúč na zápis vyprší skôr, než fronta dobehne</span>
+              <span className="flag">
+                <FlagMark />
+                Kľúč na zápis vyprší skôr, než fronta dobehne
+              </span>
             </>
           ) : null}
         </div>
@@ -224,7 +228,7 @@ export function NewDiscountConfirm({
       {/* K8 — dopad na maržu sa NIKDY neukáže ako číslo, ani odhadom. */}
       <div className={styles.margin}>
         <span className="lvl-3">Dopad na maržu</span>
-        <span className="lockline">odomkne sa po doplnení nákupných cien</span>
+        <span className="lockline">zamknuté</span>
       </div>
 
       {/*
@@ -319,7 +323,10 @@ export function NewDiscountConfirm({
         <div className="gap-t" data-testid="preview-blockers">
           {blockers.map((blocker, index) => (
             <div key={`${blocker.code}-${index}`} className="row wrapx">
-              <span className="flag">{previewBlockerText(blocker.code, blocker.message)}</span>
+              <span className="flag">
+                <FlagMark />
+                {previewBlockerText(blocker.code, blocker.message)}
+              </span>
             </div>
           ))}
           <details className="tech">

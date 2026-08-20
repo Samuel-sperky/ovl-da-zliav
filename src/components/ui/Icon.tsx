@@ -34,8 +34,9 @@
  *    serverové primitíva (`LockBadge.tsx`, `primitives.ts` — pozri ich
  *    hlavičky). Jeden import knižnice by z každého badge, každej vysvetlivky
  *    a každého riadku prekážky spravil klientsky komponent.
- * 2. **Mriežka.** Sloty na značky sú v tejto appke 10–12,5 px
- *    (`globals.css`: `.sig::before` 10 px, `.state .g` 11 px, `.sig.lock` 12 px).
+ * 2. **Mriežka.** Značky stoja v tejto appke pri texte 11,5–12,5 px
+ *    (`globals.css`: `.sig`, `.flag`, `.state`) a veľkosť si berú z neho
+ *    (`size` v `em`); do 19. 8. 2026 to boli pixelové sloty v `::before`.
  *    Lucide kreslí na mriežku 24 s hrúbkou ťahu 2; zmenšené na 11 px z toho
  *    ostane kaša. **Tu sa kreslí na mriežku 16 s hrúbkou 1,5** — a nič iné.
  *    Kto pridá cestu, prepočíta ju na 16-mriežku, inak sa sada rozíde.
@@ -58,11 +59,16 @@
  *     textu meno nesie `aria-label` TLAČIDLA — nikdy oboje naraz, čítačka by
  *     to prečítala dvakrát.
  *
- * `ICON_PATHS` je zároveň jediný zdroj tvarov pre CSS: `globals.css` má tie
- * isté cesty zapečené do `--ic-*` masiek (pseudo-prvky sa inak nakresliť
- * nedajú) a `test/unit/ikony.spec.ts` porovnáva, či sa obe kópie zhodujú.
+ * `ICON_PATHS` je JEDINÝ zdroj tvarov v celom repe — a to od 19. 8. 2026 platí
+ * doslova. Predtým mal `globals.css` v `.sig.lock::before` tú istú cestu zámoku
+ * zapečenú do CSS masky, pretože pseudo-prvok sa inak nakresliť nedá a `🔒` bolo
+ * farebné. Bola to jediná duplicita tvaru v projekte a pri zmene by sa ticho
+ * rozišla: obrazovka by kreslila starý zámok, komponent nový. Zanikla tým, že
+ * rodina `.sig` prestala kresliť značky cez `::before` a začala ich kresliť
+ * komponentom (`ui/StatusMark.tsx`). **Kto sem vráti CSS masku, vráti aj tú
+ * duplicitu** — stráži to `test/unit/ikony.spec.ts`.
  *
- * Vlastník: I1, vlna „bez emoji" 19. 8. 2026.
+ * Vlastník: I1, vlna „bez emoji" 19. 8. 2026; dokončenie W1, šprint 19. 8. 2026.
  */
 import type { SVGProps } from 'react';
 
@@ -75,8 +81,8 @@ export const ICON_STROKE = 1.5;
 /**
  * Tvary. Kľúč je meno ikony, hodnota sú `d` jednotlivých ciest.
  *
- * Všetko sú ťahy (`fill="none"`), aj kruhy — jednotný tvar dát je to, čo
- * dovoľuje CSS maskám a `<Icon>` zdieľať jeden zdroj. Kto sem pridá výplň,
+ * Všetko sú ťahy (`fill="none"`), aj kruhy — jeden tvar dát pre celú sadu je
+ * to, čo drží hrúbku ťahu rovnakú na každej značke. Kto sem pridá výplň,
  * rozbije `test/unit/ikony.spec.ts`.
  */
 export const ICON_PATHS = {

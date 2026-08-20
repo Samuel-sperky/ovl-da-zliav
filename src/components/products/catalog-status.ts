@@ -41,6 +41,16 @@
  *  5. **Formátovače `Intl` sa vyrábajú vo funkcii, nie na module scope.**
  *     `next build` volá modul pri kompilácii a formátovač na module scope by si
  *     zapamätal zónu build stroja.
+ *  6. **Prázdny stav je JEDNA VETA a nikoho neoslovuje.** Do 20. 8. 2026 mal
+ *     `emptyStateFor()` v jednom `description` 234 znakov v štyroch vetách,
+ *     z toho dva pokyny v druhej osobe („Uvoľnite niektorú podmienku vľavo",
+ *     „počkajte, kým sa katalóg dočíta"). Kontrakt UI bod 11 hovorí „jedna
+ *     veta + jedno tlačidlo" a `ui/EmptyState.tsx` to má v hlavičke, bod 2.
+ *     Práve tu sa to smie TICHO pokaziť: `description` je `ReactNode`, takže
+ *     typ o dĺžke ani o tóne nepovie nič a odstavec sa nazbiera po vetách.
+ *     Veta o tom, že zoznam je NEÚPLNÝ, zostať musí — bez nej si používateľ
+ *     myslí, že produkt neexistuje (bod 4). Druhá veta patrí do `Note` vedľa,
+ *     nie do prázdneho stavu.
  *
  * Vlastník: V10.
  */
@@ -450,13 +460,9 @@ export function nextBatchTile(
   if (status === null) return { value: '—', detail: 'stav sa načítava' };
   if (status.complete) return { value: '—', detail: 'netreba, katalóg je celý' };
   const phrase = clockPhrase(status.nextBatchAt, now);
-  return {
-    value: phrase ?? 'hneď',
-    detail:
-      phrase === null
-        ? 'appka si vypýta ďalšiu stránku pri najbližšom kole'
-        : 'kedy si appka vypýta ďalšie stránky',
-  };
+  // Jeden popisok pre obe hodnoty. Vetva pre „hneď" hovorila to isté dlhšie:
+  // „appka si vypýta ďalšiu stránku pri najbližšom kole" JE „hneď".
+  return { value: phrase ?? 'hneď', detail: 'kedy si appka vypýta ďalšie stránky' };
 }
 
 /**
@@ -618,8 +624,8 @@ export function catalogEmptyView(opts: {
         ? 'Medzi načítanými produktmi nič takéto nie je'
         : 'Tu zatiaľ nie je čo ukázať',
       description: narrowed
-        ? `Appka má načítaných ${formatCountSk(loaded ?? 0)} z ${productsPhrase(total ?? 0)} a ${formatCountSk(missing)} ešte nevidí — to, čo hľadáte, môže byť medzi nimi. Uvoľnite niektorú podmienku vľavo, alebo počkajte, kým sa katalóg dočíta.`
-        : `Appka má načítaných ${formatCountSk(loaded ?? 0)} z ${productsPhrase(total ?? 0)}. Zvyšok si doberá sama; skúste to o chvíľu znova.`,
+        ? `Načítaných je ${formatCountSk(loaded ?? 0)} z ${productsPhrase(total ?? 0)}, hľadané môže byť medzi ${formatCountSk(missing)} nenačítanými.`
+        : `Načítaných je ${formatCountSk(loaded ?? 0)} z ${productsPhrase(total ?? 0)}, zvyšok si appka doberá sama.`,
       offerLoad: true,
     };
   }
@@ -627,16 +633,14 @@ export function catalogEmptyView(opts: {
   if (narrowed) {
     return {
       title: 'Filtru nevyhovuje ani jeden produkt',
-      description:
-        'Katalóg je načítaný celý, takže to nie je neúplnými dátami. Uvoľnite niektorú podmienku vľavo alebo vymažte text v hľadaní.',
+      description: 'Katalóg je načítaný celý, takže to nie je neúplnými dátami.',
       offerLoad: false,
     };
   }
 
   return {
     title: 'Tu zatiaľ nie je čo ukázať',
-    description:
-      'Katalóg sa načítava. Keď v ňom pribudnú produkty, objavia sa v tejto tabuľke samy.',
+    description: 'Katalóg sa načítava; produkty sa v tabuľke objavia samy.',
     offerLoad: true,
   };
 }

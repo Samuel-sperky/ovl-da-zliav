@@ -19,6 +19,7 @@ import { useState } from 'react';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import SudoPrompt from '@/components/ui/SudoPrompt';
+import { SigMark } from '@/components/ui/StatusMark';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import { SUDO_REQUIRED_CODE, unlockWrites } from '@/components/settings/api';
 
@@ -80,7 +81,10 @@ export function UnlockWritesForm({
   return (
     <div className="stack" data-testid="unlock-writes-form">
       <div className="row">
-        <span className="sig bad">Zápisy sú zastavené</span>
+        <span className="sig bad">
+          <SigMark variant="bad" />
+          Zápisy sú zastavené
+        </span>
       </div>
       <p className="set-note">
         Dôvod: {writesLockedReason ?? 'appka zapisovala rýchlejšie, než je bezpečné'}. Kým

@@ -144,8 +144,9 @@ import {
 } from '@/components/products/catalog-filter';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
 import { collectOperationBlockers } from '@/lib/status/blockers';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { statusSnapshotFromPayload } from '@/lib/status/snapshot';
-import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
+import { formatDateSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, guardSentence, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ konštanty ════════════════════════════════════ */
@@ -199,7 +200,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
    * dozvedieť, že zľavu nedostanú (K7).
    */
   const [notInCatalog, setNotInCatalog] = useState(0);
-  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
   /** Koľko riadkov má zrkadlo katalógu vôbec; `0` = ešte sa nesynchronizovalo. */
   const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(0);
@@ -332,7 +332,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     const seen = new Set<number>();
     let dropped = 0;
     let total: number | null = null;
-    let asOf: string | null = null;
     let mirrorRows: number | null = null;
     let failure: string | null = null;
 
@@ -379,7 +378,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
           failure = res.error.message;
           break;
         }
-        asOf = res.data.dataAsOf;
         mirrorRows = res.data.catalogTotal;
         take(res.data.data);
         setLoaded(collected.length);
@@ -401,7 +399,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         }
         if (page === 1) {
           total = res.data.total;
-          asOf = res.data.dataAsOf;
           mirrorRows = res.data.catalogTotal;
         }
         take(res.data.data);
@@ -430,7 +427,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         ? (initial.productIds ?? []).filter((id) => !seen.has(id)).length
         : 0,
     );
-    setDataAsOf(asOf);
     setCatalogTotal(mirrorRows);
     setLoadError(failure);
 
@@ -810,11 +806,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               <div className="prog-meta">
                 {skipped === 0 ? null : (
                   <span className="flag neutral" data-testid="skipped-discounted">
+                    <FlagMark tone="neutral" />
                     {formatCountSk(skipped)} už má zľavu podľa vlastných zápisov — vynechané
                   </span>
                 )}
                 {notInCatalog === 0 ? null : (
                   <span className="flag" data-testid="missing-in-catalog">
+                    <FlagMark />
                     {formatCountSk(notInCatalog)} označených appka v katalógu nevidí — zľavu
                     nedostanú
                   </span>
@@ -865,11 +863,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               </div>
             ) : null}
 
-            <div className="fresh">
-              {dataAsOf === null
-                ? 'Katalóg zatiaľ nie je načítaný'
-                : `Dáta k ${formatDateTimeSk(dataAsOf)}`}
-            </div>
           </section>
 
           {/* SEKCIA 2 — PÁSMA A OKNO PLATNOSTI. Bez výberu sa nekreslí vôbec. */}
@@ -988,11 +981,11 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                     Rovnaké okno pre všetkých {formatCountSk(itemsCount)}
                   </span>
                 </div>
+                {/* Dátumy stoja v poliach hneď nad tým. V nápovede zostáva len
+                    to, čo sa z nich vyčítať nedá: že koniec je VRÁTANE a že je
+                    to čas shopu, nie tohto počítača. */}
                 {windowError === null ? (
-                  <div className="hint">
-                    Platí od 00:00 dňa {formatDateSk(from)} do 23:59 dňa {formatDateSk(to)}, čas
-                    shopu.
-                  </div>
+                  <div className="hint">00:00 – 23:59, čas shopu.</div>
                 ) : (
                   <div className={styles.note} role="alert" data-testid="window-error">
                     {windowError}

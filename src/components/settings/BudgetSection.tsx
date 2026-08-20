@@ -35,8 +35,8 @@
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
-import { formatDateTimeSk } from '@/lib/ui/format';
-import { dayMonthSk, formatCountSk } from '@/lib/ui/vocabulary';
+import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
+import { formatCountSk } from '@/lib/ui/vocabulary';
 import type { CatalogView, QueueView, SettingsView } from '@/components/settings/api';
 
 export interface BudgetSectionProps {
@@ -98,10 +98,12 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
         <div className="act lvl-3">Deň sa počíta podľa eshopu</div>
       </div>
 
+      {/* Zostáva JEDINÁ veta, ktorú nehovorí nič iné na tejto obrazovke: že sú
+          to dva oddelené rozpočty. Prečo je zľava fronta na dni, povie dlaždica
+          „Fronta hotová ≈" vedľa. */}
       <Note testId="budget-intro">
-        Eshop pustí za jeden deň obmedzený počet volaní, preto je zľava na tisíce
-        produktov fronta na dni, nie jedna akcia. <b>Zápisy a čítania majú oddelené
-        rozpočty</b> — načítavanie katalógu neuberá zo zliav a naopak.
+        <b>Zápisy a čítania majú oddelené rozpočty</b> — načítavanie katalógu neuberá
+        zo zliav a naopak.
       </Note>
 
       <div className="set-meters" data-testid="budget-meters">
@@ -122,10 +124,6 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
               strop eshopu.
             </Note>
           )}
-          <div className="lvl-3">
-            Zapisuje sa jeden produkt za druhým, s pauzou. Keď sa strop minie, fronta
-            počká do obnovy a pokračuje presne tam, kde skončila.
-          </div>
         </div>
 
         <div className="stack">
@@ -145,10 +143,7 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
               rozpočet.
             </Note>
           )}
-          <div className="lvl-3">
-            Z toho appka číta katalóg aj predajnosť. Strop je nižší než ten, čo eshop
-            pustí — zvyšok je rezerva pre ostatné volania z tohto počítača.
-          </div>
+          <div className="lvl-3">Z toho appka číta katalóg aj predajnosť.</div>
         </div>
       </div>
 
@@ -184,10 +179,15 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
           label="Fronta hotová"
           value={
             queue?.estimate != null ? (
-              // Krátky tvar `2. 9.` — dlhý dátum sa v úzkej dlaždici zlomí
-              // a znak odhadu by zostal visieť na samostatnom riadku.
+              // Jediný formátovač dátumu (kontrakt UI bod 10). Do 20. 8. 2026
+              // tu bol krátky tvar `2. 9.` kvôli šírke dlaždice — bol to ale
+              // druhý tvar toho istého dňa, takže `≈ 2. 9.` v Nastaveniach
+              // a `02.09.2026` v detaile zľavy vyzerali ako dva rôzne údaje.
+              // Čo sa tým smie ticho pokaziť: `.est` je v úzkej dlaždici a
+              // dlhší dátum sa v nej môže zlomiť tak, že znak `≈` zostane
+              // visieť sám na riadku. Kontrolovať treba pri 1440×900.
               <span className="est" data-testid="budget-estimate">
-                {dayMonthSk(queue.estimate.date)}
+                {formatDateSk(queue.estimate.date)}
               </span>
             ) : (
               '—'

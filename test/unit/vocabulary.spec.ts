@@ -63,7 +63,6 @@ import {
   SURFACE_TERMS,
   campaignModeSentence,
   campaignSentence,
-  dayMonthSk,
   formatCountSk,
   guardSentence,
   itemSentence,
@@ -72,6 +71,7 @@ import {
   todayHere,
   writeBudgetSentence,
 } from '@/lib/ui/vocabulary';
+import { formatDateSk } from '@/lib/ui/format';
 import type { ItemStatus } from '@/contracts';
 
 /* ═══════════════════════ 0. Zakázané výrazy (K10, §4) ═════════════════════ */
@@ -573,7 +573,10 @@ describe('K10 — slovník prekladá každý vnútorný kód', () => {
     expect(pluralSk(0, 'produkt', 'produkty', 'produktov')).toBe('produktov');
     expect(pluralSk(22, 'produkt', 'produkty', 'produktov')).toBe('produktov');
     expect(formatCountSk(40483)).toBe('40 483');
-    expect(dayMonthSk('2026-09-04')).toBe('4. 9.');
+    // Jediný formátovač dátumu v UI je `formatDateSk` (kontrakt UI bod 10).
+    // `dayMonthSk` (`4. 9.`) aj `formatDayMonthSk` (`04.09.`) sú od 20. 8. 2026
+    // zmazané — tvar dátumu na povrchu stráži `test/unit/datumy-povrch.spec.ts`.
+    expect(formatDateSk('2026-09-04')).toBe('4. 9. 2026');
     expect(queueSentence(3420, 8000)).toBe('Fronta 3 420/8 000');
     expect(queueSentence(0, 0)).toBe('Fronta prázdna');
   });

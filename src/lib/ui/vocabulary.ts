@@ -31,6 +31,7 @@
  */
 import type { CampaignMode, CampaignStatus, DateOnly, ItemStatus } from '@/contracts';
 import { LOGIC_TIME_ZONE, isAfter, isBefore, isDateOnly, todayInZone } from '@/lib/domain/dates';
+import { formatDateSk } from '@/lib/ui/format';
 
 /* ════════════════════════ 1. Slová, ktoré smieme povedať ═══════════════════ */
 
@@ -96,13 +97,6 @@ export function formatCountSk(count: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
-/** `2026-09-06` → `6. 9.` — krátky tvar do príznakov a jednoriadkových zhrnutí. */
-export function dayMonthSk(date: DateOnly): string {
-  if (!isDateOnly(date)) return '—';
-  const day = Number(date.slice(8, 10));
-  const month = Number(date.slice(5, 7));
-  return `${day}. ${month}.`;
-}
 
 /* ═══════════════════════ 3. Stavy zľavy (kampane) ═════════════════════════ */
 
@@ -257,7 +251,7 @@ export function campaignSentence(input: CampaignVocabInput): CampaignSentence {
   if (input.budgetExhausted === true) flags.push({ text: 'pokračujem zajtra', tone: 'neutral' });
 
   if (input.startShiftedTo !== undefined && input.startShiftedTo !== null) {
-    flags.push({ text: `štart posunutý na ${dayMonthSk(input.startShiftedTo)}`, tone: 'attention' });
+    flags.push({ text: `štart posunutý na ${formatDateSk(input.startShiftedTo)}`, tone: 'attention' });
   }
 
   const late = input.lateCount !== undefined && input.lateCount !== null ? input.lateCount : 0;
@@ -511,5 +505,5 @@ export function queueSentence(done: number, total: number): string {
  * (napr. „Dáta k 10. 8. 03:00") značku NEMÁ.
  */
 export function estimateSentence(finishDay: DateOnly): string {
-  return `Hotové ≈ ${dayMonthSk(finishDay)}`;
+  return `Hotové ≈ ${formatDateSk(finishDay)}`;
 }

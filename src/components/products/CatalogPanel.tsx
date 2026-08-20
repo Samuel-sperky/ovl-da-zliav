@@ -67,19 +67,47 @@
  * (P7); keď ho ešte niet, obrazovka to povie, nedopočíta. Karta stavu katalógu
  * hovorí o POKROKU načítania, nie o čase — sú to dve rôzne veci.
  *
+ * Graf rozdelenia cien je POD ROZKLIKOM — čo sa na ňom smie ticho pokaziť
+ * ─────────────────────────────────────────────────────────────────────────
+ *  1. **Rozklik sa zmení na sekciu.** Sekcie sú na tejto obrazovke štyri (stav
+ *     katalógu, filtre, tabuľka, lišta výberu) a P5 povoľuje štyri. Piata sa
+ *     nepridáva tým, že sa `<details>` „len otvorí natvrdo" — vtedy padne aj
+ *     P4 (1,5 obrazovky pri 1440×900). Graf je technika, technika ide pod
+ *     rozklik (P6).
+ *  2. **Dotaz sa presunie do `useEffect` pri otvorení obrazovky.** Rozdelenie
+ *     cien sa žiada AŽ pri prvom otvorení rozkliku. Kto to prevedie na efekt
+ *     nad `[]`, pošle dotaz každému, kto na Produkty len nakukne.
+ *  3. **Prázdny stav sa zamení za prázdny rám.** Kým `prices` nie sú, kreslí sa
+ *     VETA. Osi bez stĺpcov tvrdia, že katalóg je prázdny — a `PriceHistogram`
+ *     preto pri nulovom súčte vracia vetu, nie graf. Kto sem vloží graf
+ *     s nulami, obíde to.
+ *  4. **Značky pod osou začnú niečo dopočítavať.** Do grafu ide cena len tých
+ *     vybraných kusov, ktoré sú na načítanej stránke (`priceMarks`). Vybraný
+ *     kus z inej stránky cenu nemá a nesmie ju dostať domyslenú — a pri výbere
+ *     „všetkých zhôd" sa značky nekreslia vôbec.
+ *  5. **`complete` sa začne posielať ako `false`, keď stav katalógu chýba.**
+ *     „Zrkadlo nie je celé" je meraný fakt, „nevieme, či je celé" je priznanie.
+ *     Zliať ich znamená tvrdiť viac, než appka vie.
+ *
  * Vlastník: V10.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import PriceHistogram from '@/components/charts/PriceHistogram';
 import BlockerNotes from '@/components/products/BlockerNotes';
 import CatalogFilters from '@/components/products/CatalogFilters';
 import CatalogStatusPanel from '@/components/products/CatalogStatusPanel';
 import CatalogTable from '@/components/products/CatalogTable';
 import ProductDetailPanel from '@/components/products/ProductDetailPanel';
 import SelectionBar from '@/components/products/SelectionBar';
-import type { CatalogSearchView, ShopStatus } from '@/components/products/catalog-api';
+import type {
+  CatalogPricesView,
+  CatalogSearchView,
+  ShopStatus,
+} from '@/components/products/catalog-api';
 import {
   appStatus,
+  catalogPrices,
   catalogSyncStatus,
   isAborted,
   runCatalogBatch,
@@ -114,6 +142,7 @@ import { readSavedFilters, removeFilter, saveFilter } from '@/components/product
 import EmptyState from '@/components/ui/EmptyState';
 import Note from '@/components/ui/Note';
 import { LOGIC_TIME_ZONE } from '@/lib/domain/dates';
+import { formatDateTimeSk } from '@/lib/ui/format';
 import type { Blocker } from '@/lib/status/blockers';
 import { collectOperationBlockers, collectProductBlockers } from '@/lib/status/blockers';
 import type { StatusPayload, StatusSnapshotOverlay } from '@/lib/status/snapshot';
@@ -131,18 +160,10 @@ function dataAsOfSentence(iso: string | null): string {
   if (iso === null) return 'Katalóg sa zatiaľ nenačítal.';
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return 'Katalóg sa zatiaľ nenačítal.';
-  const day = new Intl.DateTimeFormat('sk-SK', {
-    timeZone: LOGIC_TIME_ZONE,
-    day: 'numeric',
-    month: 'numeric',
-  }).format(at);
-  const time = new Intl.DateTimeFormat('sk-SK', {
-    timeZone: LOGIC_TIME_ZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(at);
-  return `Dáta k ${day} ${time}`;
+  // JEDEN tvar dátumu (kontrakt UI bod 10). Do 20. 8. 2026 si táto veta
+  // skladala vlastný `Intl` bez roku (`Dáta k 10. 8. 03:00`), takže riadok
+  // „Dáta k" mal na štyroch miestach štyri tvary. Teraz ho nesie `formatDateTimeSk`.
+  return `Dáta k ${formatDateTimeSk(at)}`;
 }
 
 /**
@@ -212,6 +233,20 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   const [lookingUp, setLookingUp] = useState(false);
   /** Prepočíta stav po dávke, bez toho, aby sa dotkol filtra. */
   const [statusTick, setStatusTick] = useState(0);
+
+  /**
+   * ROZDELENIE CIEN (graf pod rozklikom).
+   *
+   * Načítava sa AŽ PRI PRVOM OTVORENÍ rozkliku, nie pri otvorení obrazovky.
+   * Dôvod nie je výkon endpointu (je to jeden `GROUP BY` nad `catalog_cache`,
+   * bez shopu), ale to, že graf je technika: kto ho neotvorí, nemá dôvod na
+   * ďalší dotaz. `pricesAsked` drží, že sa už žiadalo — bez neho by každé
+   * zavretie a otvorenie rozkliku poslalo dotaz znova.
+   */
+  const [prices, setPrices] = useState<CatalogPricesView | null>(null);
+  const [pricesAsked, setPricesAsked] = useState(false);
+  const [pricesLoading, setPricesLoading] = useState(false);
+  const [pricesFailed, setPricesFailed] = useState(false);
 
   /** Filter bez stránkovania — dve stránky tej istej otázky sú tá istá otázka. */
   const filterKey = catalogFilterKey(filter);
@@ -336,6 +371,49 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   }, [filter, reloadTick, restored]);
 
   const rows = useMemo(() => (view === null ? [] : view.data), [view]);
+
+  /**
+   * Načítanie rozdelenia cien — spúšťa ho výhradne otvorenie rozkliku.
+   *
+   * Nie je to `useEffect` nad `pricesAsked`: efekt by pri zlyhaní a ďalšom
+   * otvorení už nikdy nezbehol. Takto je „skúsiť znova" to isté volanie.
+   */
+  const loadPrices = useCallback((): void => {
+    setPricesAsked(true);
+    setPricesLoading(true);
+    void catalogPrices().then((res) => {
+      setPricesLoading(false);
+      if (res.ok) {
+        setPrices(res.data);
+        setPricesFailed(false);
+        return;
+      }
+      // Zrušený dotaz nie je chyba; všetko ostatné obrazovka prizná.
+      if (!isAborted(res.error)) setPricesFailed(true);
+    });
+  }, []);
+
+  /**
+   * Značky pod osou = ceny VYBRANÝCH produktov, a to len tých, ktorých cenu
+   * appka naozaj vidí na načítanej stránke.
+   *
+   * Výber prežije stránkovanie, takže vybraný kus z inej stránky tu cenu nemá —
+   * a dopočítať sa nedá. Značka „na nule" alebo domyslená cena by tvrdila niečo
+   * o produkte, na ktorý sa nikto nepozeral. Preto sem ide len to, čo je merané,
+   * a graf sa nesnaží tváriť, že pozná celý výber. Pri hromadnom výbere podľa
+   * filtra (`allMatching`) sa značky nekreslia vôbec: desaťtisíce čiarok pod
+   * osou nie sú informácia, sú to plný pás.
+   */
+  const priceMarks = useMemo(() => {
+    if (allMatching || selected.size === 0) return [];
+    const marks: Array<{ productId: number; price: number }> = [];
+    for (const row of rows) {
+      if (!selected.has(row.productId) || row.price === null) continue;
+      const price = Number(row.price);
+      if (Number.isFinite(price)) marks.push({ productId: row.productId, price });
+    }
+    return marks;
+  }, [rows, selected, allMatching]);
 
   /**
    * Dohľadá v eshope to, čo zrkadlo nemá. Výhradne na kliknutie.
@@ -672,7 +750,11 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                   riadkov, ktoré appka má — nie veľkosť eshopu, a bez toho slova
                   by neúplný katalóg vyzeral ako celý. Keď je zrkadlo dočítané,
                   klame to opačným smerom: úplný katalóg by vyzeral ako výsek. */}
-              {view === null ? null : (
+              {/* BOD 17 (W2, 20. 8. 2026): keď sa druhé číslo rovná prvému,
+                  veta „41 220 z 41 220 načítaných" hovorí to isté dvakrát.
+                  Pri neúplnom zrkadle sa NEskrýva ani pri rovnosti — vtedy
+                  slovo „načítaných" nesie, že to nie je veľkosť eshopu. */}
+              {view === null || (matching === catalogTotal && catalogIsComplete) ? null : (
                 <small
                   style={{
                     fontSize: '12px',
@@ -805,6 +887,78 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
               </div>
             </section>
           )}
+
+          {/*
+            ROZDELENIE CIEN — POD ROZKLIKOM, A TO ZÁMERNE.
+            ─────────────────────────────────────────────
+            Graf odpovedá na otázku PRED zľavou: „leží môj výber v tučnej časti
+            cenníka, alebo v chvoste?" Zľava na desiatich kusoch z pásma, kde má
+            eshop tisíce položiek, znamená niečo iné než zľava na desiatich
+            kusoch z okraja.
+
+            Prečo `<details>` a nie piata sekcia: P5 dovoľuje na obrazovke štyri
+            sekcie a Produkty ich už majú (stav katalógu, filtre, tabuľka, lišta
+            výberu). Graf je navyše TECHNIKA — pomáha rozhodnúť, ale bez neho sa
+            výber urobiť dá — a technika patrí pod rozklik (P6). Zavretý rozklik
+            stojí jeden riadok, takže obrazovka zostáva v 1,5 obrazovky (P4).
+
+            Stojí POD tabuľkou, nie nad ňou: dominanta obrazovky je tabuľka (P1)
+            a graf je poznámka k výberu, ktorý sa v nej práve robí.
+          */}
+          <details
+            className="tech"
+            style={{ marginTop: '10px' }}
+            onToggle={(event) => {
+              if (!event.currentTarget.open) return;
+              if (pricesAsked) return;
+              loadPrices();
+            }}
+            data-testid="catalog-prices-fold"
+          >
+            <summary>Rozdelenie cien v katalógu</summary>
+            <div className="body">
+              {pricesFailed ? (
+                <Note variant="warn" testId="catalog-prices-failed">
+                  Rozdelenie cien sa nepodarilo načítať — graf preto nie je čím nakresliť.{' '}
+                  <button
+                    type="button"
+                    className="btn sm ghost"
+                    onClick={loadPrices}
+                    disabled={pricesLoading}
+                    data-testid="catalog-prices-retry"
+                  >
+                    Skúsiť znova
+                  </button>
+                </Note>
+              ) : prices === null ? (
+                /* Kým dáta nie sú, NEKRESLÍ sa prázdny rám s osou — ten by
+                   tvrdil, že katalóg je prázdny. Je tu jedna veta.
+
+                   Trieda je `lvl-3`, nie `fresh`: `.fresh` je podľa
+                   architektúry §0 vyhradená pre JEDEN riadok „Dáta k …" na
+                   obrazovku a `produkty-v10.spec.ts` to počíta. */
+                <div className="lvl-3" data-testid="catalog-prices-loading">
+                  {pricesLoading
+                    ? 'Načítavam rozdelenie cien…'
+                    : 'Rozdelenie cien sa načíta pri otvorení.'}
+                </div>
+              ) : (
+                <PriceHistogram
+                  bins={prices.bins}
+                  selection={priceMarks}
+                  rows={prices.rows}
+                  withoutPrice={prices.withoutPrice}
+                  maxPrice={prices.maxPrice}
+                  oldestFetchedAt={prices.oldestFetchedAt}
+                  newestFetchedAt={prices.newestFetchedAt}
+                  /* Stav katalógu si obrazovka už načítala. Keď sa ho zistiť
+                     nepodarilo (`catalog === null`), ide dnu `undefined` —
+                     graf potom povie „nevieme", nie „zrkadlo nie je celé". */
+                  complete={catalog === null ? undefined : catalog.complete}
+                />
+              )}
+            </div>
+          </details>
 
           {showBar ? (
             <SelectionBar

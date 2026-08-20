@@ -596,8 +596,8 @@ describe('H — prvý render bez dát nespadne a nič si nevymyslí (P7, C4)', (
       }),
     );
     expect(html).toContain('17 dní');
-    expect(html).toContain('29.08.2026');
-    expect(html).toContain('31.08.2026');
+    expect(html).toContain('29. 8. 2026');
+    expect(html).toContain('31. 8. 2026');
     expect(html).toContain('160/200');
     expect(html).toContain('presný počet z fronty');
   });

@@ -132,13 +132,13 @@ export function PerformanceCard({ view, failed }: PerformanceCardProps) {
       <div className={styles.perfLocked}>
         <LockedAngle
           name="Tržby"
-          reason={view?.locked.revenue ?? 'Tržby v eurách shop cez API nevracia.'}
+          reason={view?.locked.revenue ?? 'shop ich cez API nevracia'}
         />
         {/* D18 — „Vlani rovnaké obdobie" bola príslovka nalepená na podstatné
             meno. Po slovensky sa to povie opačne. */}
         <LockedAngle
           name="Rovnaké obdobie vlani"
-          reason={view?.locked.lastYear ?? 'Predaje zatiaľ rok dozadu nesiahajú.'}
+          reason={view?.locked.lastYear ?? 'dáta zatiaľ tak ďaleko nesiahajú'}
         />
       </div>
     </section>

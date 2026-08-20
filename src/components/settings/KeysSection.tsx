@@ -31,6 +31,7 @@ import { useState } from 'react';
 import ApiKeyForm from '@/components/settings/ApiKeyForm';
 import OrdersKeyForm from '@/components/settings/OrdersKeyForm';
 import { TONE_SIG_CLASS } from '@/components/settings/blockers-view';
+import { ToneSigMark } from '@/components/ui/StatusMark';
 import Button from '@/components/ui/Button';
 import Countdown from '@/components/ui/Countdown';
 import Note from '@/components/ui/Note';
@@ -102,7 +103,10 @@ function KeyRow({ label, purpose, meta, open, onToggle, testId }: KeyRowProps) {
         )}
       </td>
       <td data-l="Stav">
-        <span className={TONE_SIG_CLASS[state.tone]}>{state.label}</span>
+        <span className={TONE_SIG_CLASS[state.tone]}>
+          <ToneSigMark tone={state.tone} />
+          {state.label}
+        </span>
         {present && meta?.last4 !== null && meta?.last4 !== undefined ? (
           <div className="lvl-3">končí na {meta.last4}</div>
         ) : null}

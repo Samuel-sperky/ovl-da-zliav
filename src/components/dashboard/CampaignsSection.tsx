@@ -37,7 +37,9 @@ import StateLine from '@/components/dashboard/StateLine';
 import styles from '@/components/dashboard/overview.module.css';
 import type { InsightRow } from '@/components/dashboard/api';
 import type { LiveCampaign } from '@/components/dashboard/overview-model';
-import { dayMonthSk, formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+import { FlagMark } from '@/components/ui/StatusMark';
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+import { formatDateSk } from '@/lib/ui/format';
 
 export interface CampaignsSectionProps {
   /** Bežiace a pripravené zľavy; `null` = nepodarilo sa načítať. */
@@ -100,7 +102,7 @@ function CampaignRow({ item }: { item: LiveCampaign }) {
           ·
         </span>
         <span className="lvl-3">
-          {dayMonthSk(item.row.dateFrom)} – {dayMonthSk(item.row.dateTo)}
+          {formatDateSk(item.row.dateFrom)} – {formatDateSk(item.row.dateTo)}
         </span>
         <span className="sep-dot" aria-hidden="true">
           ·
@@ -116,7 +118,10 @@ function InsightLine({ row }: { row: InsightRow }) {
   return (
     <div className="suggest">
       {row.tone === 'attention' ? (
-        <span className="flag">{row.text}</span>
+        <span className="flag">
+          <FlagMark />
+          {row.text}
+        </span>
       ) : (
         <span>{row.text}</span>
       )}

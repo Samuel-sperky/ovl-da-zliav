@@ -22,6 +22,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 export interface SelectionBarProps {
@@ -96,6 +97,7 @@ export function SelectionBar({
 
       {overCap && maxProducts !== null ? (
         <span className="flag" data-testid="selection-over-cap">
+          <FlagMark />
           do jednej zľavy sa zmestí {formatCountSk(maxProducts)}{' '}
           {pluralSk(maxProducts, 'produkt', 'produkty', 'produktov')}
         </span>

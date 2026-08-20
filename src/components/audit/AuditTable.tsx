@@ -12,6 +12,7 @@
  * ktorá by riadok zmenila alebo zmazala.
  */
 import Button from '@/components/ui/Button';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import {
   AUDIT_ACTOR_LABELS,
@@ -69,7 +70,12 @@ export function AuditTable({ rows, onSelect }: AuditTableProps) {
             <td data-l="Kedy">{formatDateTimeSk(row.ts)}</td>
             <td className="name" data-l="Čo sa stalo">
               {auditRowText(row)}
-              {showsFailureFlag(row) ? <div className="flag">nepodarilo sa</div> : null}
+              {showsFailureFlag(row) ? (
+                <div className="flag">
+                  <FlagMark />
+                  nepodarilo sa
+                </div>
+              ) : null}
             </td>
             <td data-l="Kto">{AUDIT_ACTOR_LABELS[row.actor] ?? 'appka'}</td>
             <td className="act">

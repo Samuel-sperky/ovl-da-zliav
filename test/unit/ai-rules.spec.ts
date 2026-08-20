@@ -203,7 +203,8 @@ describe('kľúč vs. štart naplánovanej kampane', () => {
       }),
     ).find((x) => x.kind === 'key_before_start');
     expect(f).toBeDefined();
-    expect(f!.text).toContain('kľúč nie je uložený');
+    // „API kľúč" bol žargón (P3); povrch appky hovorí „kľúč na zápis".
+    expect(f!.text).toContain('kľúč na zápis nie je uložený');
   });
 });
 

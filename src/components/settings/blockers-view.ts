@@ -105,8 +105,10 @@ export function pickBlocker(
 }
 
 /**
- * Trieda signálnej značky (`.sig`) pre tón. Značka nesie okrem farby aj znak
- * cez `::before`, takže sa nedá zredukovať na samotnú farbu.
+ * Trieda signálnej značky (`.sig`) pre tón. Nesie IBA farbu a typografiu —
+ * značku kreslí `<ToneSigMark>` (`ui/StatusMark.tsx`) ako `<Icon>` v tom istom
+ * uzle, kde stojí slovo. Do 19. 8. 2026 ju kreslil znak v `::before`; kto sem
+ * pridá triedu bez značky, zredukuje stav na farbu a slovo a NIČ nespadne.
  *
  * Prevod žije v `ui/blocker-look.ts` — do 19. 8. 2026 tu mapoval `progress` na
  * `sig idle`, lebo `.sig` variantu `progress` nemal, a piaty stav appky tým

@@ -1,32 +1,55 @@
 /**
  * Aura Zľavy — formátovacie utility pre UI (§8, D13).
  *
- * Jazyk UI je slovenčina: dátumy `DD.MM.YYYY`, desatinná čiarka, mena EUR.
- * Čisté funkcie bez závislostí — bezpečné pre client aj server komponenty.
+ * Jazyk UI je slovenčina: dátumy `14. 8. 2026` (kontrakt UI bod 10), desatinná
+ * čiarka, mena EUR. Čisté funkcie bez závislostí — bezpečné pre client aj
+ * server komponenty.
+ *
+ * DÁTUM MÁ V UI JEDEN TVAR A JEDEN FORMÁTOVAČ
+ * -------------------------------------------
+ * Do 20. 8. 2026 boli v `lib/ui/` formátovače dátumu TRI: `formatDateSk`
+ * (`14.08.2026`), `formatDayMonthSk` (`14.08.`) a `dayMonthSk` z
+ * `lib/ui/vocabulary.ts` (`14. 8.`). Tri tvary toho istého dňa na jednej
+ * obrazovke vyzerajú ako tri rôzne údaje — a `formatDayMonthSk` navyše
+ * nekreslil NIKTO, takže sa jeho tvar nedal ani vidieť, ani opraviť.
+ * Odteraz je formátovač jeden: `formatDateSk`.
+ *
+ * ČO SA TU SMIE TICHO POKAZIŤ
+ * ---------------------------
+ * 1. **ISO dátum na povrchu.** Keby sa `${c.dateTo}` dostalo do vety bez
+ *    prechodu cez `formatDateSk`, appka napíše `2026-08-26`. Nič nespadne,
+ *    nikto to nenahlási — a používateľ číta tvar, ktorý sa po slovensky
+ *    nepíše. Stráži to `test/unit/datumy-povrch.spec.ts`.
+ * 2. **Nula alebo dnešok namiesto pomlčky.** Neznámy dátum je `—`, nikdy
+ *    dnešný deň ani `1. 1. 1970`. Vymyslený dátum je tvrdenie, pomlčka je
+ *    priznanie.
+ * 3. **Relatívny čas.** „pred 3 minútami" sa na povrch nepíše; `formatAgoSk`
+ *    je preto určený VÝHRADNE do technických rozklikov.
+ *
+ * Štvrtý formátovač `formatDateOnlySk` žije v `lib/domain/dates.ts` a stále
+ * vracia `05.08.2026`. Slúži hláškam odmietnutých zápisov (`domain/campaign-rules.ts`),
+ * ktoré sa podľa šprintu 19. 8. 2026 nesmú skracovať ani prepisovať — jeho
+ * zjednotenie je samostatné rozhodnutie, nie vedľajší účinok tohto súboru.
  */
 
-/** `YYYY-MM-DD` alebo ISO datetime alebo `Date` → `DD.MM.YYYY`. */
+/**
+ * `YYYY-MM-DD` alebo ISO datetime alebo `Date` → `14. 8. 2026`.
+ *
+ * Jediný formátovač dátumu v UI. Bez vodiacich núl a s medzerou po bodke —
+ * tak sa dátum po slovensky píše a tak ho predpisuje kontrakt UI bod 10.
+ */
 export function formatDateSk(value: string | Date | null | undefined): string {
   if (value == null || value === '') return '—';
   if (typeof value === 'string') {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-    if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+    if (m) return `${Number(m[3])}. ${Number(m[2])}. ${m[1]}`;
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? '—' : formatDateSk(d);
   }
-  const dd = String(value.getDate()).padStart(2, '0');
-  const mm = String(value.getMonth() + 1).padStart(2, '0');
-  return `${dd}.${mm}.${value.getFullYear()}`;
+  return `${value.getDate()}. ${value.getMonth() + 1}. ${value.getFullYear()}`;
 }
 
-/** Skrátený tvar `DD.MM.` pre badge „podľa vlastného zápisu z DD.MM." (D7). */
-export function formatDayMonthSk(value: string | Date | null | undefined): string {
-  const full = formatDateSk(value);
-  if (full === '—') return full;
-  return full.slice(0, 6); // "DD.MM."
-}
-
-/** ISO datetime / Date → `DD.MM.YYYY HH:MM` (lokálny čas prehliadača/servera). */
+/** ISO datetime / Date → `14. 8. 2026 12:53` (lokálny čas prehliadača/servera). */
 export function formatDateTimeSk(value: string | Date | null | undefined): string {
   if (value == null || value === '') return '—';
   const d = typeof value === 'string' ? new Date(value) : value;

@@ -21,6 +21,7 @@ import { useState } from 'react';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import SudoPrompt from '@/components/ui/SudoPrompt';
+import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
   SUDO_REQUIRED_CODE,
@@ -29,7 +30,7 @@ import {
   type KeyMetaView,
 } from '@/components/settings/api';
 
-const VERIFY_LABELS: Record<string, { label: string; tone: string }> = {
+const VERIFY_LABELS: Record<string, { label: string; tone: SigVariant }> = {
   valid: { label: 'overený čítaním objednávok', tone: 'ok' },
   unverified: { label: 'neoverený', tone: 'idle' },
   invalid: { label: 'eshop ho neprijal', tone: 'bad' },
@@ -93,7 +94,10 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
           {verify ? (
             <>
               {' · '}
-              <span className={`sig ${verify.tone}`}>{verify.label}</span>
+              <span className={`sig ${verify.tone}`}>
+                <SigMark variant={verify.tone} />
+                {verify.label}
+              </span>
             </>
           ) : null}
         </div>
@@ -145,6 +149,7 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
       {failure ? (
         <div className="stack">
           <p className="sig bad" data-testid="orders-key-not-stored">
+            <SigMark variant="bad" />
             Kľúč sa NEULOŽIL — v appke zostáva pôvodný stav a do eshopu sa nič
             nezapísalo.
           </p>

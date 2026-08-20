@@ -249,7 +249,7 @@ describe('stav karty', () => {
   it('zelená je len tam, kde appka niečo naozaj overila', () => {
     const good = cardState('napojenie', { ...EMPTY_FACTS, writeKey: KEY });
     expect(good.tone).toBe('good');
-    expect(good.sentence).toBe('Kľúč na zápis platí do 20.08.2026.');
+    expect(good.sentence).toBe('Kľúč na zápis platí do 20. 8. 2026.');
 
     // Uložený kľúč bez známej platnosti NIE JE dôvod na zelenú.
     const noExpiry = cardState('napojenie', {
@@ -274,7 +274,7 @@ describe('stav karty', () => {
 
   it('história hovorí meraný čas, alebo priznanie — nikdy „pred chvíľou"', () => {
     const known = cardState('historia', { ...EMPTY_FACTS, queue: QUEUE });
-    expect(known.sentence).toContain('18.08.2026 14:11');
+    expect(known.sentence).toContain('18. 8. 2026 14:11');
     expect(known.sentence).not.toMatch(/pred |chvíľou|nedávno/i);
 
     expect(cardState('historia', EMPTY_FACTS).sentence).toBe(

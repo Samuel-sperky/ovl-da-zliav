@@ -285,7 +285,12 @@ describe('F — potvrdenie: dominanta, zámok marže a poistka I3', () => {
   it('K8 — dopad na maržu nie je číslo, je to veta o tom, čo chýba', () => {
     const html = renderToStaticMarkup(createElement(NewDiscountConfirm, CONFIRM_PROPS));
     expect(html).toContain('Dopad na maržu');
-    expect(html).toContain('odomkne sa po doplnení nákupných cien');
+    // ZMENA 20. 8. 2026 (šprint dokončenia, bod 19 — návrat ku kontraktu):
+    // riadok priznáva, že je zamknutý, a NIČ nevysvetľuje. Rozširovať
+    // vysvetlenia o chýbajúcich dátach mimo `LockedFeatures.tsx` je zakázané,
+    // inak tá istá výhrada žije v appke na piatich miestach a rozídu sa.
+    expect(html).toContain('<span class="lockline">zamknuté</span>');
+    expect(html).not.toContain('nákupných cien');
 
     // Blok marže končí svojím `</div>`; ďalej už je pole na vpísanie počtu.
     const start = html.indexOf('Dopad na maržu');

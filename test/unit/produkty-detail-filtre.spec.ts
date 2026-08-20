@@ -131,7 +131,7 @@ describe('detail produktu — všetky údaje aj s pôvodom', () => {
 
   it('pri údajoch je ČAS načítania práve tohto riadku, konkrétny a nie relatívny', () => {
     const html = renderPanel(ROW);
-    expect(html).toContain('10.08.2026');
+    expect(html).toContain('10. 8. 2026');
     // Kontrakt UI, bod 10: nikdy „pred 3 minútami".
     expect(html).not.toMatch(/pred \d+ (min|h)/);
   });
@@ -323,7 +323,11 @@ describe('filtre — zľava je vlastný zápis', () => {
     expect(html.indexOf('Zľavy podľa vlastných zápisov')).toBeLessThan(
       html.indexOf('Práve v zľave'),
     );
-    expect(html).toContain('Appka vidí len to, čo sama zapísala.');
+    // ZMENA 20. 8. 2026 (bod 16): veta „Appka vidí len to, čo sama zapísala."
+    // pod políčkami zmizla — nadpis skupiny hovorí presne to isté a stojí NAD
+    // nimi, teda skôr. Tvrdenie sa tým nezoslabuje: overuje sa, že tú prácu
+    // odvádza nadpis, a že sa tá istá veta pod políčkami nevrátila.
+    expect(html).not.toContain('Appka vidí len to, čo sama zapísala.');
   });
 
   it('skutočná zľava v eshope je vidieť ako zamknutá, nie zamlčaná', () => {

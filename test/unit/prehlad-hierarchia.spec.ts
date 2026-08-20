@@ -284,16 +284,21 @@ describe('D6 — závažnosť prekážky sa dá prejsť očami po stĺpci', () =
   it('slovo o závažnosti je slovom ZNAČKY, nie začiatkom vety o ďalšom kroku', () => {
     const html = renderBlockers();
 
-    // Značka nesie všetky tri kanály naraz: farbu, glyf (oboje `.sig`) a slovo.
-    expect(html).toMatch(
-      /<span class="sig \w+" data-testid="blocker-severity">zastavuje zápis<\/span>/,
-    );
-    expect(html).toMatch(
-      /<span class="sig \w+" data-testid="blocker-severity">nezastavuje nič<\/span>/,
-    );
-    expect(html).toMatch(
-      /<span class="sig \w+" data-testid="blocker-severity">spomaľuje zápis<\/span>/,
-    );
+    // Značka nesie všetky tri kanály naraz: farbu (trieda `.sig …`), ZNAČKU a
+    // slovo — a všetky tri v JEDNOM uzle, aby sa nemohli rozísť.
+    //
+    // Od 19. 8. 2026 je značka `<svg class="ovl-ic">`, nie znak v `::before`:
+    // rodina `.sig` prestala kresliť glyfy cez CSS a začala ich kresliť
+    // komponentom (`ui/StatusMark.tsx`), čím zanikla aj CSS maska zámoku, teda
+    // druhá kópia cesty ikony v repe. Vzor to preto berie ako povinné —
+    // `[^<]*` by prešlo aj vtedy, keby značka vypadla a zostala len farba.
+    for (const slovo of ['zastavuje zápis', 'nezastavuje nič', 'spomaľuje zápis']) {
+      expect(html, slovo).toMatch(
+        new RegExp(
+          `<span class="sig \\w+" data-testid="blocker-severity"><svg[^>]*class="ovl-ic"[^>]*>.*?</svg>${slovo}</span>`,
+        ),
+      );
+    }
 
     // Starý tvar — holé `<b>` na začiatku tlmeného riadku — sa nesmie vrátiť.
     expect(html).not.toContain('<b>zastavuje zápis</b>');

@@ -22,6 +22,7 @@ import { useState } from 'react';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import SudoPrompt from '@/components/ui/SudoPrompt';
+import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
 import {
   SUDO_REQUIRED_CODE,
@@ -31,7 +32,7 @@ import {
 } from '@/components/settings/api';
 
 /** Výsledok overenia kľúča → veta. Kód overenia na povrch nepatrí. */
-const VERIFY_LABELS: Record<string, { label: string; tone: string }> = {
+const VERIFY_LABELS: Record<string, { label: string; tone: SigVariant }> = {
   valid: { label: 'overený u eshopu', tone: 'ok' },
   unverified: { label: 'neoverený', tone: 'idle' },
   invalid: { label: 'eshop ho neprijal', tone: 'bad' },
@@ -99,7 +100,10 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
           {verify ? (
             <>
               {' · '}
-              <span className={`sig ${verify.tone}`}>{verify.label}</span>
+              <span className={`sig ${verify.tone}`}>
+                <SigMark variant={verify.tone} />
+                {verify.label}
+              </span>
             </>
           ) : null}
         </div>
@@ -152,6 +156,7 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
       {failure ? (
         <div className="stack">
           <p className="sig bad" data-testid="api-key-not-stored">
+            <SigMark variant="bad" />
             Kľúč sa NEULOŽIL — v appke zostáva pôvodný stav a do eshopu sa nič
             neposlalo.
           </p>

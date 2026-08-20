@@ -97,6 +97,7 @@ import { useRefreshable } from '@/components/layout/refresh';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
+import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -114,18 +115,6 @@ function isProblem(item: DiscountItemView): boolean {
   // D39c — rozhodovalo sa nad inou cenou. Nie je to chyba zápisu, ale
   // zamlčať sa to nesmie.
   return item.priceMismatch;
-}
-
-/**
- * Čas posledného načítania — vždy konkrétny, nikdy „pred 3 minútami"
- * (kontrakt UI, bod 10). V rámci dňa stačí `HH:MM`.
- */
-function clockSk(at: number | null): string {
-  if (at === null) return '—';
-  const when = new Date(at);
-  const stamp = formatDateTimeSk(when);
-  if (stamp === '—') return '—';
-  return formatDateSk(when) === formatDateSk(new Date()) ? stamp.slice(-5) : stamp;
 }
 
 /* ═══════════════════ zastavenie fronty a zrušenie zľavy ═══════════════════ */
@@ -480,7 +469,11 @@ export function DiscountDetail({ id }: { id: number }) {
                 <StatTile
                   label={`Zapísané`}
                   value={formatCountSk(campaign.itemsOk)}
-                  detail={`z ${formatCountSk(campaign.itemsTotal)} produktov tejto zľavy`}
+                  detail={
+                    campaign.itemsOk === 0
+                      ? null
+                      : `z ${formatCountSk(campaign.itemsTotal)} produktov tejto zľavy`
+                  }
                   testId="tile-ok"
                 />
               </div>
@@ -492,11 +485,7 @@ export function DiscountDetail({ id }: { id: number }) {
                 <StatTile
                   label={`Čaká na zápis`}
                   value={formatCountSk(campaign.itemsPending)}
-                  detail={
-                    campaign.itemsPending === 0
-                      ? 'fronta má túto zľavu vybavenú'
-                      : 'fronta na ne ešte nedošla'
-                  }
+                  detail={campaign.itemsPending === 0 ? null : 'fronta na ne ešte nedošla'}
                   testId="tile-pending"
                 />
               </div>
@@ -510,7 +499,7 @@ export function DiscountDetail({ id }: { id: number }) {
                   value={formatCountSk(campaign.itemsFailed)}
                   detail={
                     campaign.itemsFailed === 0
-                      ? 'nič sa nepokazilo'
+                      ? null
                       : 'tieto produkty zlacnené nie sú — dajú sa zopakovať'
                   }
                   testId="tile-failed"
@@ -525,9 +514,7 @@ export function DiscountDetail({ id }: { id: number }) {
                   label={`Nevieme, či sa zapísalo`}
                   value={formatCountSk(campaign.itemsUncertain)}
                   detail={
-                    campaign.itemsUncertain === 0
-                      ? 'každý zápis dostal odpoveď'
-                      : 'zápis odišiel, odpoveď nedorazila'
+                    campaign.itemsUncertain === 0 ? null : 'zápis odišiel, odpoveď nedorazila'
                   }
                   testId="tile-uncertain"
                 />
@@ -586,11 +573,7 @@ export function DiscountDetail({ id }: { id: number }) {
                     Koľko zápisov dnes ostáva, sa nedá prečítať — odhad preto nedopočítavame.
                   </span>
                 ) : (
-                  <span className="lvl-3">
-                    Dnes ostáva {formatCountSk(budget.remaining)}{' '}
-                    {pluralSk(budget.remaining, 'zápis', 'zápisy', 'zápisov')} z{' '}
-                    {formatCountSk(budget.budget)}. Rozpočet sa delí medzi všetky zľavy vo fronte.
-                  </span>
+                  <span className="lvl-3">Rozpočet sa delí medzi všetky zľavy vo fronte.</span>
                 )}
               </div>
             </div>
@@ -612,7 +595,8 @@ export function DiscountDetail({ id }: { id: number }) {
             />
 
             <div className="fresh">
-              Podľa vlastných zápisov appky · dáta k {clockSk(at)}
+              Podľa vlastných zápisov appky · Dáta k{' '}
+              {formatDateTimeSk(at === null ? null : new Date(at))}
             </div>
           </div>
 
@@ -685,10 +669,11 @@ export function DiscountDetail({ id }: { id: number }) {
       <section className="sec" data-testid="detail-items">
         <div className="sec-h">
           <h2>Položky</h2>
+          {/* Štyri čísla tu boli tie isté štyri dlaždice o sekciu vyššie,
+              napísané slovami. Zostáva jediné, ktoré dlaždice nemajú. */}
           <div className="act lvl-3">
-            {formatCountSk(campaign.itemsTotal)} celkom · {formatCountSk(campaign.itemsOk)}{' '}
-            zapísaných · {formatCountSk(campaign.itemsPending)} čaká ·{' '}
-            {formatCountSk(campaign.itemsFailed)} sa nepodarilo
+            {formatCountSk(campaign.itemsTotal)}{' '}
+            {pluralSk(campaign.itemsTotal, 'položka', 'položky', 'položiek')}
           </div>
         </div>
 
@@ -716,6 +701,10 @@ export function DiscountDetail({ id }: { id: number }) {
                 ) : (
                   shown.map((item) => {
                     const say = itemSentence(item.status);
+                    /* Trieda aj značka z JEDNEJ hodnoty — dve kópie tej istej
+                       podmienky by sa časom rozišli a farba by hovorila iné
+                       než tvar. */
+                    const itemSig: SigVariant = item.status === 'ok' ? 'ok' : 'warn';
                     return (
                       <tr key={item.id}>
                         <td className="name">{item.nameAtWrite ?? 'bez názvu'}</td>
@@ -728,7 +717,8 @@ export function DiscountDetail({ id }: { id: number }) {
                             : `${item.percent} %`}
                         </td>
                         <td data-l="Zapísané">
-                          <span className={item.status === 'ok' ? 'sig ok' : 'sig warn'}>
+                          <span className={`sig ${itemSig}`}>
+                            <SigMark variant={itemSig} />
                             {say.label}
                           </span>
                         </td>
@@ -751,7 +741,7 @@ export function DiscountDetail({ id }: { id: number }) {
               {scanned < campaign.itemsTotal
                 ? `, prezretých bolo prvých ${formatCountSk(scanned)} z ${formatCountSk(campaign.itemsTotal)}`
                 : ''}
-              . Ak niekto zmení percentá v administrácii shopu, appka o tom nevie.
+              .
             </span>
           </div>
         </div>

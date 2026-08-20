@@ -360,9 +360,6 @@ export function CatalogFilters({
           Nikdy nezlacnené
           <Count value={counts === null ? null : counts.neverDiscounted} />
         </label>
-        <div className="lvl-3" style={{ marginTop: '4px' }}>
-          Appka vidí len to, čo sama zapísala.
-        </div>
       </div>
 
       {/* Stav v eshope je fail-closed: predvolene sa neponúkajú kusy, ktoré

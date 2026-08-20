@@ -89,6 +89,7 @@ import type { CatalogSort, PerPage } from '@/components/products/catalog-filter'
 import { DEFAULT_CATALOG_FILTER, PER_PAGE_CHOICES } from '@/components/products/catalog-filter';
 import { formatEur } from '@/lib/ui/format';
 import Icon from '@/components/ui/Icon';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Pomôcky ═══════════════════════════════════ */
@@ -401,6 +402,7 @@ export function CatalogTable({
                           className={reason.tone === 'attention' ? 'flag' : 'flag neutral'}
                           data-testid={`row-reason-${reason.id}`}
                         >
+                          <FlagMark tone={reason.tone === 'attention' ? 'attention' : 'neutral'} />
                           {reason.short}
                         </div>
                       )}
@@ -411,6 +413,7 @@ export function CatalogTable({
                           stupne istoty a vyzerali by rovnako. */}
                       {row.origin === 'shop' ? (
                         <div className="flag neutral" data-testid="row-origin-shop">
+                          <FlagMark tone="neutral" />
                           dohľadané v eshope
                         </div>
                       ) : null}

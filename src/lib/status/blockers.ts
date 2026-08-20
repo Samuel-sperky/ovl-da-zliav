@@ -33,8 +33,19 @@
  *
  * ČO SA V TOMTO MODULE NESMIE POKAZIŤ
  * -----------------------------------
- *  1. **Veta musí niesť čísla.** Nie „limit prekročený", ale „v pilotnom režime
- *     prejde 10 produktov, vo výbere je 150". Bez čísel je to zase log.
+ *  1. **Veta, ktorá BLOKUJE, musí niesť obe čísla.** Nie „limit prekročený",
+ *     ale „Na jednu zľavu prejde najviac 10 produktov, vo výbere je 150 —
+ *     140 sa nezapíše". Bez čísel je to zase log.
+ *
+ *     Veta, ktorá len INFORMUJE (`severity: 'informuje'`, výber je pod stropom
+ *     alebo neexistuje), nesie od 20. 8. 2026 už len samotný strop. Druhé
+ *     číslo tam bolo tretí raz to isté: na Produktoch ho hovorí lišta výberu,
+ *     na Prehľade výber vôbec neexistuje a na Novej zľave stojí v dominante.
+ *     Slovo „režim" z tej vety zmizlo tiež — `pilot`/`plny` je vnútorný kód,
+ *     nie pojem povrchu (P3). Čo sa tým smie TICHO pokaziť: keby sem niekto
+ *     vrátil počet vybraných produktov, tá istá veta na Produktoch povie
+ *     číslo, ktoré je o dva riadky vyššie, a používateľ začne hľadať, čím sa
+ *     tie dve od seba líšia. Nič nespadne, len sa prestane veriť obom.
  *  2. **`severity` NIE JE farba.** `blokuje` znamená „teraz cez to nič
  *     neprejde", nie „červená". Vyčerpaný denný rozpočet je `blokuje` +
  *     `resolution: 'cakanie'`, a `ui/vocabulary.ts` mu dáva neutrálny tón (K2,
@@ -481,8 +492,7 @@ function writesBlockers(snapshot: StatusSnapshot): Blocker[] {
       what: assumed
         ? 'Nevieme overiť, či má appka zápisy do shopu vôbec zapnuté — kým to nevieme, počíta s tým, že sú vypnuté, a nezapíše ani jeden produkt.'
         : 'Zápisy do shopu sú vypnuté — appka teraz nezapíše ani jeden produkt, nech je vo výbere čokoľvek.',
-      nextStep:
-        'Zapnúť ich môže len správca počítača v konfigurácii appky; z obrazovky sa to prepnúť nedá.',
+      nextStep: 'Zapnúť ich môže len správca počítača v konfigurácii appky.',
       path: null,
       resolution: 'mimo_appky',
       passableNow: true,
@@ -705,9 +715,7 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
    * 10 vtedy neplatí preto, že je to nastavené, ale preto, že sa nevie nič iné.
    */
   const capAssumed = !scope.known || scope.capAssumed;
-  const capText = pilot
-    ? `V pilotnom režime prejde na jednu zľavu najviac ${products(cap)}`
-    : `V plnom režime prejde na jednu zľavu najviac ${products(cap)}`;
+  const capText = `Na jednu zľavu prejde najviac ${products(cap)}`;
 
   // Strop platí aj vtedy, keď ho výber neprekročil — je to trvalé pravidlo appky
   // a používateľ ho má vidieť skôr, než doň narazí. Nad stropom `blokuje`,
@@ -719,9 +727,9 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
       severity: 'informuje',
       subject: 'operacia',
       productIds: [],
-      what: `${capText}. Koľko ich je vo výbere, appka teraz nevie.`,
+      what: `${capText}.`,
       nextStep: pilot
-        ? 'Ak potrebujete viac, prepnite rozsah na plný v Nastaveniach — prepnutie si vyžiada heslo.'
+        ? 'Rozsah sa prepína v Nastaveniach.'
         : `Strop sa dá zmeniť v Nastaveniach, najviac na ${products(HARD_MAX_PRODUCTS)}.`,
       path: BLOCKER_PATHS.settings,
       resolution: pilot ? 'sudo' : 'sam',
@@ -739,9 +747,9 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
       severity: 'informuje',
       subject: 'operacia',
       productIds: [],
-      what: `${capText}, vo výbere ${isAre(selected)} ${products(selected)}.`,
+      what: `${capText}.`,
       nextStep: pilot
-        ? 'Ak potrebujete viac, prepnite rozsah na plný v Nastaveniach — prepnutie si vyžiada heslo.'
+        ? 'Rozsah sa prepína v Nastaveniach.'
         : `Strop sa dá zmeniť v Nastaveniach, najviac na ${products(HARD_MAX_PRODUCTS)}.`,
       path: BLOCKER_PATHS.settings,
       resolution: pilot ? 'sudo' : 'sam',

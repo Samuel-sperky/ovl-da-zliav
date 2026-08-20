@@ -89,9 +89,15 @@ export function createInsightsCampaignPerformanceGet(
           prior: { from: priorFrom, to: priorTo, units: prior },
           coverage: { from: coverage.from, to: coverage.to, syncEnabled: coverage.syncEnabled },
           /** Panely, ktoré appka dnes naplniť nevie (K8) — UI ich zamkne. */
+          /*
+           * Dôvod je LEN dôvod, bez mena uhla. `LockedAngle` kreslí
+           * „Tržby — {reason}", takže „Tržby v eurách…" bolo meno druhýkrát
+           * a „appka pozná len počty kusov" hovorí pätka `SalesSection`.
+           * Fallbacky v `DiscountPerformance.tsx` majú ten istý tvar.
+           */
           locked: {
-            revenue: 'Tržby v eurách shop cez API nevracia — appka pozná len počty kusov.',
-            lastYear: 'Predaje sa dopĺňajú postupne a rok dozadu zatiaľ nesiahajú.',
+            revenue: 'shop ich cez API nevracia',
+            lastYear: 'dáta zatiaľ tak ďaleko nesiahajú',
           },
         };
       },

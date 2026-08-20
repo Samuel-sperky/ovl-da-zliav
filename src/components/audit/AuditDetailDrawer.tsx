@@ -21,6 +21,7 @@ import { useEffect, useState } from 'react';
 import Button from '@/components/ui/Button';
 import Drawer from '@/components/ui/Drawer';
 import ErrorMessage from '@/components/ui/ErrorMessage';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import {
   AUDIT_ACTOR_LABELS,
@@ -93,6 +94,7 @@ export function AuditDetailDrawer({ auditId, onClose }: AuditDetailDrawerProps) 
           <div className="stack">
             {detail.priceMismatch ? (
               <p className="flag" data-testid="audit-price-mismatch">
+                <FlagMark />
                 Rozhodoval si nad inou cenou — cena produktu sa medzi potvrdením
                 a zápisom zmenila. Percento sa zapísalo správne, ale výsledná
                 zľavnená cena je iná, než akú si videl pri potvrdení.

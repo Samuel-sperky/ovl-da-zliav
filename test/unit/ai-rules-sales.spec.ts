@@ -112,8 +112,10 @@ describe('no_units_sold — za sledované obdobie ani jeden kus', () => {
 
   it('text uvádza obdobie aj to, že je krátke (P3)', () => {
     const text = findings.find((f) => f.kind === 'no_units_sold')?.text ?? '';
-    expect(text).toContain('2026-08-02');
-    expect(text).toContain('2026-08-05');
+    // Obdobie sa uvádzať MUSÍ (P3) — už nie v ISO, ale v jedinom tvare
+    // dátumu, ktorý appka na povrchu používa (kontrakt UI bod 10).
+    expect(text).toContain('2. 8. 2026');
+    expect(text).toContain('5. 8. 2026');
     expect(text).toContain('4 sledované dni');
     expect(text).toContain('krátke');
   });
@@ -140,7 +142,7 @@ describe('sales_declining — novšia polovica obdobia proti staršej', () => {
     const text = findings.find((f) => f.kind === 'sales_declining')?.text ?? '';
     expect(text).toContain('2 kusy');
     expect(text).toContain('7');
-    expect(text).toContain('2026-08-02');
+    expect(text).toContain('2. 8. 2026');
     // P4 — merajú sa kusy, nikdy obrat.
     expect(text).toContain('nie o obrat');
   });

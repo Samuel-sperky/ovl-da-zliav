@@ -504,15 +504,6 @@ hr {
 }
 
 
-/* Glyfy stavov (§3.3) používajú znaky mimo základnej latinky — fallback na
-   systémové symbolové fonty, aby sa nekreslil prázdny rámik. Text stavu je
-   pri glyfe VŽDY, takže význam nesie aj keď glyf font nepokrýva. */
-.ovl-badge-glyph,
-.ovl-note-glyph {
-  font-family:
-    'Segoe UI Symbol', 'Apple Symbols', 'Noto Sans Symbols 2', 'Noto Sans Symbols',
-    'DejaVu Sans', var(--ovl-font);
-}
 
 /* Read-only výzva (D10) — full-bleed pás pod hlavičkou, nenápadný:
    bez veľkej plochy, len hairline v tóne attention. */
@@ -2034,8 +2025,24 @@ b.lvl-2 {
    o riadok nižšie, a ukrajoval z výšky obrazovky, ktorú obmedzuje P4. Fakt
    nesie `writesChip()` v `components/layout/status.ts`. */
 
-/* ---------- 14.4 Stavy: farba + GLYF + text -------------------------------
-   Glyf je súčasť značky, nie dekorácia. Samotná farebná bodka sa nepoužíva.
+/* ---------- 14.4 Stavy: farba + ZNAČKA + text -----------------------------
+   Značka je súčasť stavu, nie dekorácia — samotná farebná bodka sa nepoužíva.
+
+   ČO SA TU SMIE TICHO POKAZIŤ (19. 8. 2026, dokončenie vlny ikon):
+   tieto triedy nesú už LEN farbu a typografiu. Značku kreslí komponent
+   (`<SigMark>`, `<FlagMark>`, `<StateMark>` z `ui/StatusMark.tsx`) ako
+   `<Icon>` v tom istom DOM uzle, kde stojí slovo. Predtým ju kreslil
+   `content:` v `::before` — a keďže zámok sa znakom nakresliť nedal bez
+   farebnej emodži, musela preň vzniknúť CSS maska s DRUHOU kópiou cesty
+   ikony. Kto sem vráti `content:` s glyfom, dostane značku dvakrát (raz
+   ikonu, raz znak) a na obrazovke to vyzerá ako preklep, nie ako chyba.
+   Stráži to `test/unit/ikony.spec.ts`.
+
+   Mŕtvosť týchto tried sa NEDÁ dokázať grepom na literál: `sigClass()`
+   (`dashboard/live-status-model.ts`) a `toneSigClass()`
+   (`ui/blocker-look.ts`) ich skladajú za behu. `.sig.lock` napríklad nemá v
+   celom `src/` ani jeden literálny výskyt, a pritom ho kreslí každý Prehľad
+   v pilotnom rozsahu (`overview-verdict.ts` → `scopeCheck`).
    ------------------------------------------------------------------------- */
 .state {
   display: inline-flex;
@@ -2046,17 +2053,8 @@ b.lvl-2 {
   color: var(--ink2);
   white-space: nowrap;
 }
-.state .g {
-  font-size: 11px;
-  line-height: 1;
-  width: 11px;
-  text-align: center;
-}
 .state.pripravena {
   color: var(--st-idle);
-}
-.state.pripravena .g::before {
-  content: '○';
 }
 /*
  * STAVY ZLAVY (19. 8. 2026, oprava po nezavislom review).
@@ -2073,21 +2071,12 @@ b.lvl-2 {
 .state.zapisuje {
   color: var(--st-progress);
 }
-.state.zapisuje .g::before {
-  content: '◆';
-}
 .state.bezi {
   color: var(--st-good);
-}
-.state.bezi .g::before {
-  content: '●';
 }
 .state.skoncila {
   color: var(--dim);
   font-weight: 500;
-}
-.state.skoncila .g::before {
-  content: '·';
 }
 
 /* Príznak — vždy ZA stavom, menším písmom, jantárový. Nikdy nie stav. */
@@ -2097,16 +2086,17 @@ b.lvl-2 {
   font-weight: 600;
   white-space: nowrap;
 }
-.flag::before {
-  content: '▲ ';
-  font-size: 9px;
+/* Značka príznaku je IKONA (`<FlagMark>`, `ui/StatusMark.tsx`), nie znak v
+   `::before`. Odstup nesie margin, a nie `gap`: `.flag` musí zostať inline,
+   lebo stojí aj v odstavci s dlhým textom (`audit/AuditDetailDrawer.tsx`) a
+   `inline-flex` by tam zrušil zalamovanie. */
+.flag > .ovl-ic {
+  margin-right: 3px;
+  vertical-align: -0.12em;
 }
 .flag.neutral {
   color: var(--dim);
   font-weight: 500;
-}
-.flag.neutral::before {
-  content: '· ';
 }
 .sep-dot {
   color: var(--line2);
@@ -2121,86 +2111,26 @@ b.lvl-2 {
   font-size: 11.5px;
   font-weight: 600;
 }
-.sig::before {
-  width: 10px;
-  text-align: center;
-}
 .sig.ok {
   color: var(--st-good);
-}
-.sig.ok::before {
-  content: '✓';
 }
 .sig.warn {
   color: var(--st-attention);
 }
-.sig.warn::before {
-  content: '▲';
-}
 .sig.bad {
   color: var(--st-critical);
-}
-.sig.bad::before {
-  content: '✕';
 }
 /* "Prebieha" bol jediny stav bez vlastnej varianty .sig, takze sa mapoval
    na idle a splynul s "necinny". Vlna F ho pritom zmerala (12,18:1). */
 .sig.progress {
   color: var(--st-progress);
 }
-.sig.progress::before {
-  content: '◆';
-}
 .sig.idle {
   color: var(--st-idle);
-}
-.sig.idle::before {
-  content: '○';
 }
 .sig.lock {
   color: var(--dim);
   font-weight: 500;
-}
-.sig.lock::before {
-  /*
-   * Zámok, NIE pomlčka (D21, nález agenta O1 pri oprave D6).
-   *
-   * Predtým tu stálo '–'. V stĺpci značiek prekážok stojí vedľa ✕ ▲ ○, kde je
-   * najslabším glyfom práve pri riadku, ktorý ako jediný má cestu von (heslo).
-   * Horšie: '–' je na oko nerozoznateľné od '—', ktorým appka všade inde hovorí
-   * „toto nevieme" (pravidlo „pomlčka, nikdy nula"). Jeden znak niesol dva
-   * úplne rozdielne významy.
-   *
-   * 🔒 je zavedený zámok tejto appky — Nav.tsx aj queue-model.ts ho už
-   * používajú, takže sa tým slovník zjednocuje, nie rozširuje.
-   */
-  /*
-   * ŽIADNE EMOJI (19. 8. 2026). Bolo tu 🔒 zo Segoe UI Emoji — jediná FAREBNÁ
-   * vec v appke, ktorá má inak celú paletu zmeranú a monochromatickú.
-   *
-   * Zámok kreslí MASKA z tej istej cesty, akú má ikona `lock` v Icon.tsx:
-   * maskovaná plocha sa vyfarbí `currentColor`, takže značka dedí farbu textu
-   * a v tmavej téme sa nemusí riešiť zvlášť.
-   *
-   * Prečo maska a nie `<Icon>`: rodina `.sig` kreslí značky cez `::before`
-   * na 27 miestach a jej prechod na komponent je samostatná úloha. Kým
-   * neprebehne, je toto JEDINÉ miesto, kde sa cesta ikony opakuje — pri jej
-   * zmene treba upraviť obe. Po prechode toto pravidlo zanikne.
-   */
-  content: '';
-  width: 11px;
-  height: 11px;
-  background-color: currentColor;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2016%2016%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%271.5%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.3%207.2h9.4a1.1%201.1%200%200%201%201.1%201.1v4.9a1.1%201.1%200%200%201-1.1%201.1H3.3a1.1%201.1%200%200%201-1.1-1.1V8.3a1.1%201.1%200%200%201%201.1-1.1Z%27%2F%3E%3Cpath%20d%3D%27M4.8%207.2V5a3.2%203.2%200%200%201%206.4%200v2.2%27%2F%3E%3C%2Fsvg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2016%2016%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%271.5%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.3%207.2h9.4a1.1%201.1%200%200%201%201.1%201.1v4.9a1.1%201.1%200%200%201-1.1%201.1H3.3a1.1%201.1%200%200%201-1.1-1.1V8.3a1.1%201.1%200%200%201%201.1-1.1Z%27%2F%3E%3Cpath%20d%3D%27M4.8%207.2V5a3.2%203.2%200%200%201%206.4%200v2.2%27%2F%3E%3C%2Fsvg%3E");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  /* Emoji je širšie než 10 px vyhradených pre ✓ ▲ ✕ ○ — bez toho by značku
-     orezalo. Veľkosť sa mierne sťahuje, aby riadok nenarástol. */
-  width: 12px;
-  font-size: 10px;
 }
 
 /* Odhad — znak ≈ + tlmenejší odtieň (P7). Meraný fakt ho NIKDY nemá. */

@@ -13,7 +13,7 @@
  *  3. **Neznáme sa nedopĺňa.** Chýbajúca sekcia payloadu skončí ako POMLČKA
  *     s príznakom `unknown` (kontrakt UI, bod 5), nikdy ako nula alebo pokojný
  *     stav. Nula je tvrdenie, pomlčka je priznaná medzera.
- *  4. **Dátum a čas sú konkrétne.** Kontrakt UI, bod 10: „platí do 14.08.2026",
+ *  4. **Dátum a čas sú konkrétne.** Kontrakt UI, bod 10: „platí do 14. 8. 2026",
  *     nie „ešte 48 h"; „Stav k 12:53", nie „pred 3 minútami". Odpočet sa pri
  *     fronte bežiacej týždne nedá s ničím porovnať.
  *
@@ -168,7 +168,7 @@ describe('connectionChip — appka netvrdí, čo nezmerala', () => {
   it('čerstvé čítanie katalógu je dôkaz, že shop odpovedá', () => {
     const chip = connectionChip(ok(payload()));
     expect(chip.tone).toBe('good');
-    expect(chip.title).toContain('12.08.2026');
+    expect(chip.title).toContain('12. 8. 2026');
   });
 
   it('staré čítanie sa neháda na „pripojené“ — prizná, že sa shop dlho neozval', () => {
@@ -200,7 +200,7 @@ describe('keyChip — dokedy kľúč platí, konkrétnym dátumom', () => {
   it('platný kľúč ukáže DÁTUM, nie odpočet (bod 10)', () => {
     const chip = keyChip(payload());
     expect(chip.tone).toBe('good');
-    expect(chip.label).toBe('Kľúč do 14.08.2026');
+    expect(chip.label).toBe('Kľúč do 14. 8. 2026');
     // Odpočet by sa pri fronte bežiacej týždne nedal s ničím porovnať.
     expect(chip.label).not.toMatch(/\bh\b|\bmin\b/);
   });
@@ -209,7 +209,7 @@ describe('keyChip — dokedy kľúč platí, konkrétnym dátumom', () => {
     const chip = keyChip(payload({ apiKey: { present: true, expiresAt: '2026-08-01T00:00:00.000Z' } }));
     expect(chip.tone).toBe('attention');
     expect(chip.label).toBe('Kľúč vypršal');
-    expect(chip.title).toContain('01.08.2026');
+    expect(chip.title).toContain('1. 8. 2026');
   });
 
   it('chýbajúci kľúč je jantárový a vysvetlenie berie z prekážky', () => {

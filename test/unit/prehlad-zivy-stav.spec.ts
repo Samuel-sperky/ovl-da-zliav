@@ -419,7 +419,7 @@ describe('Prehľad — verdikt', () => {
     const verdict = overviewVerdict(input({ progress: paused() }));
     expect(verdict.kind).toBe('stopped');
     expect(verdict.headline).toBe('Fronta stojí');
-    expect(verdict.detail).toContain('11.08.2026');
+    expect(verdict.detail).toContain('11. 8. 2026');
   });
 
   it('nečitateľná fronta je „nevieme", nikdy nula', () => {

@@ -200,11 +200,24 @@
 
 /* ── Histogram ─────────────────────────────────────────────────────────── */
 
+/*
+ * Stĺpec histogramu. Farba je z NAJTMAVŠIEHO kroku sekvenčnej rampy, nie
+ * z `--accent`: rampa je jediná škála, ktorou sa v tejto appke smie kresliť
+ * veľkosť, a `--seq-teal-5` je jej koniec, teda „plná hodnota". Veľkosť ale aj
+ * tak nesie VÝŠKA stĺpca, takže sú všetky stĺpce rovnaké a rampa sa po nich
+ * NEROZVÍJA — kto ju rozvinie, povie tú istú informáciu druhýkrát a farba
+ * prestane znamenať čokoľvek. Stavová škála `--st-*` je tu zakázaná
+ * (`grafy-paleta.spec.ts`): cenové pásmo nie je stav.
+ */
 .bar {
-  fill: var(--accent);
+  fill: var(--seq-teal-5);
 }
 
-/* Referenčná značka (napr. cena vybraného produktu) je NEUTRÁLNA. */
+/*
+ * Referenčná značka (cena vybraného produktu) je NEUTRÁLNA a preto zámerne
+ * MIMO rampy: je to jednotlivý bod na osi cien, nie hodnota série. Kto jej dá
+ * `--seq-teal-*`, spraví z výberu druhú sériu v tom istom ráme.
+ */
 .refMark {
   stroke: var(--ink);
   stroke-width: 1.5;
@@ -213,4 +226,17 @@
 .refLabel {
   fill: var(--ink2);
   font-size: 10px;
+}
+
+/*
+ * Priznanie o zdroji dát pod grafom (napr. že zrkadlo katalógu nemusí byť
+ * úplné). Vyzerá ako `.fresh` z `globals.css` a zámerne ňou NIE JE: `.fresh`
+ * je podľa architektúry §0 vyhradená pre JEDEN riadok „Dáta k …" na obrazovku
+ * a na Produktoch to stráži počítadlo v `produkty-v10.spec.ts`. Toto je iná
+ * veta o inej veci — patrí ku grafu, nie k obrazovke.
+ */
+.sourceNote {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  margin-top: 6px;
 }

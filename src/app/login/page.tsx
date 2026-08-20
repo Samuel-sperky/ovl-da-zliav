@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 
 import Button from '@/components/ui/Button';
 import ErrorMessage from '@/components/ui/ErrorMessage';
+import { SigMark } from '@/components/ui/StatusMark';
 import { LOGIN_CSS } from '@/app/login/styles';
 import {
   SEED_ADMIN_COMMAND,
@@ -199,7 +200,10 @@ export default function LoginPage() {
             <span className="mark">
               Aura <b>Zľavy</b>
             </span>
-            <span className="sig warn">bez účtu</span>
+            <span className="sig warn">
+              <SigMark variant="warn" />
+              bez účtu
+            </span>
           </div>
           <div className="lvl-2">
             Appka je čerstvo nainštalovaná a nemá ešte ani jeden účet, takže sa
@@ -299,6 +303,7 @@ export default function LoginPage() {
 
           {locked ? (
             <p className="sig bad" style={{ marginTop: '10px' }} data-testid="login-locked">
+              <SigMark variant="bad" />
               Uzamknuté
               {lockSeconds !== null ? ` — skús znova o ${lockSeconds} s` : ' — skús to neskôr'}
             </p>

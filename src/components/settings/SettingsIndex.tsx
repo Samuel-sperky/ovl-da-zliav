@@ -43,6 +43,7 @@ import {
   type StatusPayload,
 } from '@/components/settings/api';
 import { TONE_SIG_CLASS } from '@/components/settings/blockers-view';
+import { ToneSigMark } from '@/components/ui/StatusMark';
 import { cardState, type CardFacts } from '@/components/settings/index-cards';
 import { SETTINGS_CSS } from '@/components/settings/styles';
 import { INDEX_PAGES, subPagePath, subPagePathForAnchor } from '@/components/settings/sub-pages';
@@ -94,11 +95,9 @@ export function SettingsIndex() {
       <style>{SETTINGS_CSS}</style>
 
       <h1 className="page">Nastavenia</h1>
-      <p className="set-lead">
-        Štyri otázky, štyri stránky. Pod každou kartou je napísané, čo sa za ňou
-        práve deje — nie je nutné ich otvárať všetky. Nič na tejto stránke
-        nezapisuje do eshopu.
-      </p>
+      {/* Že je pod každou kartou napísané, čo sa za ňou deje, je vidieť na
+          kartách samých — bol to popis obrazovky na obrazovke. */}
+      <p className="set-lead">Štyri otázky, štyri stránky. Nič sa tu nezapisuje do eshopu.</p>
 
       <div className="set-cards" data-testid="settings-cards">
         {INDEX_PAGES.map((page) => {
@@ -123,6 +122,7 @@ export function SettingsIndex() {
                   className={TONE_SIG_CLASS[state.tone]}
                   data-testid={`settings-card-state-${page.slug}`}
                 >
+                  <ToneSigMark tone={state.tone} />
                   {state.sentence}
                 </span>
                 {state.word !== null ? <span className="card-word">{state.word}</span> : null}

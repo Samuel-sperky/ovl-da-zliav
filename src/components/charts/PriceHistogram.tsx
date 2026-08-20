@@ -1,17 +1,3 @@
-/**
- * !!! TENTO GRAF ZATIAĽ ŽIADNA OBRAZOVKA NEKRESLÍ (19. 8. 2026) !!!
- *
- * Komponent aj jeho výpočet (price-bins.ts) sú hotové a otestované
- * (test/unit/grafy-ceny.spec.ts), ale chýba im dátový zdroj: rozdelenie cien
- * naprieč 41 220 produktmi sa nikde nepočíta. Treba dotaz do catalog_cache,
- * ktorý ceny nabinuje, a miesto na Produktoch — pod rozklikom, aby nepribudla
- * piata sekcia (P5).
- *
- * Je to tu napísané preto, že mŕtvy kód sa v tomto projekte už raz tváril ako
- * živý: oprava rol popiskov siahla na tri selektory, ktoré nikto nekreslil,
- * a test bol pritom zelený. Kým sa graf nezapojí, musí to byť vidieť na prvom
- * riadku súboru.
- */
 'use client';
 
 /**
@@ -59,6 +45,16 @@
  *     drahšie produkty neexistujú.
  *  3. **Značka výberu stratí popis „pripnutá".** Cena nad hranicou osi sedí
  *     na okraji; bez slova o tom graf tvrdí, že produkt za 900 € stojí 200 €.
+ *  4. **Riadok o úplnosti zrkadla vypadne.** `complete` je JEDINÝ kanál, ktorým
+ *     graf priznáva, že tvar rozdelenia je tvar KÓPIE, nie eshopu. Chýbajúce
+ *     produkty sa z počtu riadkov nedajú zistiť — histogram nad polovicou
+ *     katalógu vyzerá presne ako histogram nad celým. Preto je `complete`
+ *     zámerne NEPOVINNÝ a `undefined` znamená „nevieme": kto ho zabudne
+ *     poslať, dostane opatrnejšie tvrdenie, nie tichý predpoklad úplnosti.
+ *  5. **Farba stĺpca odíde z rampy.** Stĺpce aj šrafovanie zberného pásma sú
+ *     výhradne zo sekvenčnej rampy `--seq-teal-*`. Stavová škála `--st-*` sú
+ *     ZMERANÉ stavy, nie voľné odtiene — kto ňou vyplní stĺpec, začne cenovým
+ *     pásmom tvrdiť „v poriadku" alebo „problém". Stráži to `grafy-paleta.spec.ts`.
  *
  * Vlastník: V1.
  */
@@ -77,7 +73,11 @@ import { formatDateTimeSk, formatEur } from '@/lib/ui/format';
 
 export interface PriceHistogramProps {
   bins: readonly PriceBinInput[];
-  /** Ceny povolených produktov — referenčné značky, nie druhá séria. */
+  /**
+   * Ceny VYBRANÝCH produktov — referenčné značky pod osou, nie druhá séria.
+   * Prázdne pole je legitímny stav: vtedy graf ukáže len rozdelenie a značky
+   * ani ich legendu nekreslí.
+   */
   selection: ReadonlyArray<{ productId: number; price: number }>;
   /** Koľko riadkov má miestna kópia katalógu spolu. */
   rows: number;
@@ -86,6 +86,16 @@ export interface PriceHistogramProps {
   maxPrice: number | null;
   oldestFetchedAt: string | null;
   newestFetchedAt: string | null;
+  /**
+   * Dočítalo posledné kolo zrkadlo katalógu po koniec (`catalog.complete`)?
+   *
+   * Sú to TRI stavy, nie dva, a graf ich rozlišuje: `true` = dočítalo,
+   * `false` = zrkadlo celé nie je, `undefined` = stav katalógu sa nepodarilo
+   * zistiť. Posledné dva sa nesmú zliať — „nie je celé" je meraný fakt,
+   * „nevieme" je priznanie. Fail-closed: ani jeden z nich nedostane tvrdenie
+   * „takto vyzerá cenník eshopu".
+   */
+  complete?: boolean;
 }
 
 function binLabel(from: number, to: number | null): string {
@@ -97,6 +107,20 @@ function products(value: number): string {
   return `${formatCountSk(value)} ${pluralSk(value, 'produkt', 'produkty', 'produktov')}`;
 }
 
+/**
+ * Veta o úplnosti zrkadla. Tvar rozdelenia je tvar KÓPIE, nie eshopu, a je to
+ * jediné miesto, kde to graf povie — z výšok stĺpcov sa to zistiť nedá.
+ */
+function mirrorSentence(complete: boolean | undefined): string {
+  if (complete === true) {
+    return 'Zrkadlo katalógu bolo pri poslednom prechode dočítané po koniec; eshop odvtedy mohol produkty pridať aj zmazať.';
+  }
+  if (complete === false) {
+    return 'Zrkadlo katalógu nie je celé — produkty, ktoré sa ešte nestiahli, v grafe nie sú a z výšok stĺpcov sa to nedá zistiť.';
+  }
+  return 'Či je zrkadlo katalógu celé, sa nepodarilo zistiť — nestiahnuté produkty by v grafe chýbali bez toho, aby to bolo vidieť.';
+}
+
 export function PriceHistogram({
   bins,
   selection,
@@ -105,6 +129,7 @@ export function PriceHistogram({
   maxPrice,
   oldestFetchedAt,
   newestFetchedAt,
+  complete,
 }: PriceHistogramProps) {
   const geometry = priceHistogramGeometry(bins, selection);
   const hatchId = `price-hatch-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -115,6 +140,11 @@ export function PriceHistogram({
         <div className="empty">
           <div className="t">Rozdelenie cien zatiaľ nemáme</div>
           <div>Graf sa objaví, keď bude v miestnej kópii katalógu aspoň jedna cena.</div>
+        </div>
+        {/* Priznanie patrí AJ sem: prázdny graf je práve ten stav, v ktorom je
+            neúplné zrkadlo najpravdepodobnejšie vysvetlenie. */}
+        <div className={styles.sourceNote} data-testid="price-histogram-mirror">
+          {mirrorSentence(complete)}
         </div>
       </div>
     );
@@ -135,7 +165,10 @@ export function PriceHistogram({
         <defs>
           <pattern id={hatchId} width="6" height="6" patternUnits="userSpaceOnUse">
             <rect width="6" height="6" fill="none" />
-            <path className={styles.gapHatch} d="M0,6 L6,0" stroke="var(--accent)" />
+            {/* Šrafovanie zberného pásma je O KROK SVETLEJŠIE než stĺpec — ten
+                istý rad rampy, takže sa číta ako tá istá séria, len zhrnutá.
+                Iná farba by z chvosta urobila druhú veličinu. */}
+            <path className={styles.gapHatch} d="M0,6 L6,0" stroke="var(--seq-teal-3)" />
           </pattern>
         </defs>
 
@@ -199,12 +232,22 @@ export function PriceHistogram({
           </svg>
           zberné pásmo, chvost je zhrnutý
         </span>
-        <span className={styles.legendItem}>
-          <svg className={styles.legendMark} width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-            <line className={styles.refMark} x1="6" y1="1" x2="6" y2="11" />
-          </svg>
-          ceny povolených produktov
-        </span>
+        {/* Legenda značiek stojí a padá s tým, či sa nejaká kreslí. Popis marky,
+            ktorú v ráme nikto nevidí, je návod na hľadanie neexistujúcej veci. */}
+        {geometry.marks.length === 0 ? null : (
+          <span className={styles.legendItem}>
+            <svg
+              className={styles.legendMark}
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              aria-hidden="true"
+            >
+              <line className={styles.refMark} x1="6" y1="1" x2="6" y2="11" />
+            </svg>
+            ceny vybraných produktov
+          </span>
+        )}
       </div>
 
       <ChartTable
@@ -219,13 +262,18 @@ export function PriceHistogram({
       <div className="fresh" data-testid="price-histogram-note">
         {`${products(rows)} v miestnej kópii`}
         {withoutPrice === 0 ? null : `, z toho ${formatCountSk(withoutPrice)} bez ceny`}
-        {maxPrice === null ? null : ` · najvyššia cena ${formatEur(maxPrice)}`}
+        {/* Pomlčka, nikdy nula: „0 €" by tvrdilo, že najdrahší produkt je
+            zadarmo, a vynechanie riadku by zamlčalo, že tá otázka existuje. */}
+        {maxPrice === null ? ' · najvyššia cena —' : ` · najvyššia cena ${formatEur(maxPrice)}`}
         {clamped === 0 ? null : ` · ${formatCountSk(clamped)} značiek pripnutých na okraj`}
       </div>
       <div className="fresh">
         {oldestFetchedAt === null || newestFetchedAt === null
           ? 'Ceny sú kópia, nie dnešný cenník'
           : `Ceny stiahnuté od ${formatDateTimeSk(oldestFetchedAt)} do ${formatDateTimeSk(newestFetchedAt)}`}
+      </div>
+      <div className={styles.sourceNote} data-testid="price-histogram-mirror">
+        {mirrorSentence(complete)}
       </div>
     </div>
   );

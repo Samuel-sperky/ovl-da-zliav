@@ -80,7 +80,7 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
       await expect(panel.getByTestId('detail-discount-now')).toContainText('15 %', {
         timeout: 15_000,
       });
-      await expect(panel).toContainText('01.08.2026');
+      await expect(panel).toContainText('1. 8. 2026');
       await expect(panel).toContainText('Appka vidí len to, čo sama zapísala');
 
       /* 3. Zamknuté údaje sú VIDIEŤ, prázdne, so zámkom — nie vynechané. */

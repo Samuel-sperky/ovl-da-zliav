@@ -78,6 +78,7 @@ import { newDiscountHref, SOLD_WINDOWS } from '@/components/products/catalog-fil
 import { productReasons } from '@/components/products/catalog-status';
 import Icon from '@/components/ui/Icon';
 import type { Blocker } from '@/lib/status/blockers';
+import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk, formatDateTimeSk, formatEur, formatPercentSk } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, SURFACE_TERMS } from '@/lib/ui/vocabulary';
 
@@ -363,11 +364,13 @@ export function ProductDetailPanel({
           </div>
           {row.discountedNow ? (
             <div className="flag neutral" style={{ marginTop: '4px' }} data-testid="detail-own-write">
+              <FlagMark tone="neutral" />
               v zľave podľa vlastného zápisu
             </div>
           ) : null}
           {row.shopStatus === 'not_found' ? (
             <div className="flag" style={{ marginTop: '4px' }}>
+              <FlagMark />
               {SHOP_STATUS_TEXT.not_found}
             </div>
           ) : null}
@@ -411,6 +414,7 @@ export function ProductDetailPanel({
                 data-testid={`product-reason-${reason.id}`}
               >
                 <div className={reason.tone === 'attention' ? 'flag' : 'flag neutral'}>
+                  <FlagMark tone={reason.tone === 'attention' ? 'attention' : 'neutral'} />
                   {reason.short}
                 </div>
                 <div className="lvl-2" style={{ marginTop: '3px' }}>

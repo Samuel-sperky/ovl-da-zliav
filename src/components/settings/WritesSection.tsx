@@ -31,6 +31,7 @@
 import Note from '@/components/ui/Note';
 import StatusPill from '@/components/ui/StatusPill';
 import Icon from '@/components/ui/Icon';
+import { ToneSigMark } from '@/components/ui/StatusMark';
 import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import {
@@ -210,12 +211,9 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
 
       {enabled === false ? (
         <Note variant="warn" testId="writes-disabled-note">
-          <b>Nie je to chyba.</b> Appka sa dodáva s vypnutým zápisom zámerne, aby prvý
-          ostrý zápis do eshopu nikdy nevznikol náhodou. Povolenie žije v konfigurácii
-          appky na tomto počítači, nie v jej nastaveniach — <b>z tejto obrazovky sa
-          prepnúť nedá a ani nemá</b>. Prepne ho ten, kto appku na počítači spustil:
-          v konfiguračnom súbore povolí zápis a appku reštartuje. Presné názvy sú
-          v technickom detaile nižšie.
+          <b>Nie je to chyba</b> — appka sa dodáva s vypnutým zápisom zámerne.{' '}
+          <b>Prepnúť sa to dá len v konfigurácii appky</b>, ktorú opisuje technický
+          detail nižšie.
         </Note>
       ) : null}
 
@@ -233,7 +231,10 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
               <tr key={condition.key} data-testid={`writes-condition-${condition.key}`}>
                 <td className="name">{condition.label}</td>
                 <td data-l="Stav">
-                  <span className={TONE_SIG_CLASS[condition.tone]}>{condition.state}</span>
+                  <span className={TONE_SIG_CLASS[condition.tone]}>
+                    <ToneSigMark tone={condition.tone} />
+                    {condition.state}
+                  </span>
                 </td>
                 <td data-l="Čo s tým">
                   {condition.what === null ? (

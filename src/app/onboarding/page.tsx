@@ -21,6 +21,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+import { SigMark } from '@/components/ui/StatusMark';
+
 import {
   getKeyMeta,
   getSettings,
@@ -32,11 +34,23 @@ import {
 type Ready = boolean | null;
 
 function Sig({ ready, doneLabel, todoLabel }: { ready: Ready; doneLabel: string; todoLabel: string }) {
-  if (ready === null) return <span className="sig idle">zisťujem</span>;
+  if (ready === null)
+    return (
+      <span className="sig idle">
+        <SigMark variant="idle" />
+        zisťujem
+      </span>
+    );
   return ready ? (
-    <span className="sig ok">{doneLabel}</span>
+    <span className="sig ok">
+      <SigMark variant="ok" />
+      {doneLabel}
+    </span>
   ) : (
-    <span className="sig warn">{todoLabel}</span>
+    <span className="sig warn">
+      <SigMark variant="warn" />
+      {todoLabel}
+    </span>
   );
 }
 
