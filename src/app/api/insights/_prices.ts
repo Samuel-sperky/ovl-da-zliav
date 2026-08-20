@@ -2,13 +2,20 @@
  * Aura Zľavy — PODKLAD PRE HISTOGRAM CIEN KATALÓGU (V1).
  * NIE JE to route — Next.js registruje výhradne `route.ts`.
  *
- * PREČO SA POČÍTA V SQL A NIE V PREHLIADAČI
- * ─────────────────────────────────────────
+ * KDE SA POČÍTA ČO
+ * ────────────────
  *
  * Miestna kópia katalógu má rádovo 40 000 riadkov. Poslať ich do prehliadača,
  * aby si tam narátal dvadsať stĺpcov, znamená prejsť 40 000 cien cez sieť pri
  * každom otvorení obrazovky. Zaraďovanie do pásiem preto robí databáza a von
  * ide dvadsaťjeden čísel.
+ *
+ * SQL tu ale NEŽIJE. Nad `catalog_cache` má dotazy `catalog.repo.ts` a je to
+ * jediné miesto, ktoré tú tabuľku pozná — presne ako `counts()` pre bočný
+ * panel. `_shared.ts` to pre čítacie route-y grafov vyžaduje bez výnimky
+ * („jediné, čo robí, je SELECT cez repozitár"). Tento modul je nad repozitárom
+ * len TVAR PRE GRAF: dá mu rozmery pásiem, riedke počty rozloží na súvislý rad
+ * a časy preloží do ISO pre drôt.
  *
  * ČO SA TU SMIE TICHO POKAZIŤ
  * ───────────────────────────
@@ -40,9 +47,9 @@
  *
  * Vlastník: V1.
  */
-import type { DbRow, Queryable } from '@/contracts';
+import type { Queryable } from '@/contracts';
 
-import { query as poolQuery } from '@/db/pool';
+import { catalogRepo } from '@/lib/repo/catalog.repo';
 
 /* ═══════════════════════════ 1. Rozmery pásiem ════════════════════════════ */
 
@@ -74,49 +81,7 @@ export interface CatalogPrices {
   newestFetchedAt: string | null;
 }
 
-/* ═══════════════════════════════ 3. SQL ═══════════════════════════════════ */
-
-/*
- * `LEAST(FLOOR(price / w), n)` posadí všetko nad hranicou do zberného pásma.
- * Robí to databáza, nie appka: 40 000 cien cez sieť je zbytočná záťaž
- * a zaraďovanie v prehliadači by sa nedalo otestovať bez prehliadača.
- */
-const SQL_BUCKETS =
-  'SELECT LEAST(FLOOR(price / ?), ?) AS bucket, COUNT(*) AS n ' +
-  'FROM catalog_cache WHERE price IS NOT NULL GROUP BY bucket ORDER BY bucket ASC';
-
-const SQL_TOTALS =
-  'SELECT COUNT(*) AS rows_total, ' +
-  'SUM(CASE WHEN price IS NULL THEN 1 ELSE 0 END) AS rows_without_price, ' +
-  'MIN(price) AS min_price, MAX(price) AS max_price, ' +
-  'MIN(fetched_at) AS oldest, MAX(fetched_at) AS newest ' +
-  'FROM catalog_cache';
-
-/* ═══════════════════════════ 4. Pomocníci ═════════════════════════════════ */
-
-async function run<T>(conn: Queryable | undefined, sql: string, values: unknown[]): Promise<T> {
-  if (conn) return conn.query<T>(sql, values);
-  return poolQuery<T>(sql, values);
-}
-
-const num = (value: unknown): number => {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : 0;
-};
-
-const numOrNull = (value: unknown): number | null => {
-  if (value == null) return null;
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
-};
-
-function toIsoOrNull(value: unknown): string | null {
-  if (value == null) return null;
-  const date = value instanceof Date ? value : new Date(String(value));
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-/* ═══════════════════════════ 5. Čistá časť ════════════════════════════════ */
+/* ═══════════════════════════ 3. Čistá časť ════════════════════════════════ */
 
 /**
  * Riedke počty z databázy → súvislý rad pásiem.
@@ -144,27 +109,29 @@ export function foldBuckets(counts: ReadonlyMap<number, number>): PriceBin[] {
   return bins;
 }
 
-/* ═══════════════════════════ 6. Čítanie ═══════════════════════════════════ */
+/* ═══════════════════════════ 4. Čítanie ═══════════════════════════════════ */
 
+/**
+ * Rozdelenie cien pre graf. `conn` je výhradne pre testy — bez neho ide dotaz
+ * cez pool, ako všade inde.
+ */
 export async function catalogPrices(conn?: Queryable): Promise<CatalogPrices> {
-  const bucketRows = await run<DbRow[]>(conn, SQL_BUCKETS, [PRICE_BIN_WIDTH, PRICE_BIN_COUNT]);
-  const counts = new Map<number, number>();
-  for (const row of Array.isArray(bucketRows) ? bucketRows : []) {
-    const bucket = Math.trunc(num(row.bucket));
-    if (bucket < 0 || bucket > PRICE_BIN_COUNT) continue;
-    counts.set(bucket, (counts.get(bucket) ?? 0) + num(row.n));
-  }
+  const raw = await catalogRepo.priceBuckets(PRICE_BIN_WIDTH, PRICE_BIN_COUNT, conn);
 
-  const totalRows = await run<DbRow[]>(conn, SQL_TOTALS, []);
-  const totals = (Array.isArray(totalRows) ? totalRows[0] : undefined) ?? {};
+  const counts = new Map<number, number>();
+  for (const bucket of raw.buckets) {
+    counts.set(bucket.bucket, (counts.get(bucket.bucket) ?? 0) + bucket.count);
+  }
 
   return {
     bins: foldBuckets(counts),
-    rows: num(totals.rows_total),
-    withoutPrice: num(totals.rows_without_price),
-    minPrice: numOrNull(totals.min_price),
-    maxPrice: numOrNull(totals.max_price),
-    oldestFetchedAt: toIsoOrNull(totals.oldest),
-    newestFetchedAt: toIsoOrNull(totals.newest),
+    rows: raw.rows,
+    withoutPrice: raw.withoutPrice,
+    minPrice: raw.minPrice,
+    maxPrice: raw.maxPrice,
+    /* Na drôt idú ISO stringy, nie `Date`. Repozitár vracia domáci typ,
+       preklad je práca tejto vrstvy — a `null` musí prežiť ako `null`. */
+    oldestFetchedAt: raw.oldestFetchedAt?.toISOString() ?? null,
+    newestFetchedAt: raw.newestFetchedAt?.toISOString() ?? null,
   };
 }

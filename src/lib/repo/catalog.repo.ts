@@ -221,6 +221,37 @@ export interface CatalogCounts {
   lockedFilters: LockedCatalogFilter[];
 }
 
+/**
+ * Rozdelenie cien v zrkadle katalógu (V1 — podklad histogramu cien).
+ *
+ * Je to DB-tvar, nie tvar grafu, a rozdiel je zámerný:
+ *
+ *  · `buckets` sú RIEDKE — pásmo, v ktorom nie je ani jeden riadok, tu
+ *    CHÝBA. Dopĺňanie núl je práca čítacej strany (`foldBuckets`), lebo tá
+ *    vie, koľko pásiem graf kreslí. Repozitár hovorí len to, čo dotaz naozaj
+ *    našiel.
+ *  · Čísla pásiem sú indexy (`0` = najlacnejšie), nie eurá. Šírku pásma
+ *    pozná volajúci — on ju poslal.
+ *
+ * `rows` je CELÉ zrkadlo vrátane riadkov bez ceny, `withoutPrice` je z nich
+ * podmnožina. Súčet `buckets` je preto `rows - withoutPrice`, nikdy `rows`;
+ * kto to zamení, začne grafom tvrdiť, že produkty bez ceny sú zadarmo.
+ */
+export interface CatalogPriceBuckets {
+  /** Riedke počty: len pásma, v ktorých dotaz našiel aspoň jeden riadok. */
+  buckets: Array<{ bucket: number; count: number }>;
+  /** Koľko riadkov má zrkadlo spolu — aj tie bez ceny. */
+  rows: number;
+  /** Z toho `price IS NULL`. Do pásiem NEVSTUPUJÚ (viď `priceBuckets`). */
+  withoutPrice: number;
+  minPrice: number | null;
+  /** Kam siaha chvost za posledným pásmom. `null` = zrkadlo nemá ani jednu cenu. */
+  maxPrice: number | null;
+  /** Najstarší a najnovší čas stiahnutia riadku — ceny sú KÓPIA, nie cenník. */
+  oldestFetchedAt: UtcDate | null;
+  newestFetchedAt: UtcDate | null;
+}
+
 /** Vstup upsertu — `shopStatus` je voliteľný, default `ok` (viď `upsertMany`). */
 export type CatalogUpsertInput = Omit<CatalogCacheRecord, 'fetchedAt'> & {
   fetchedAt?: UtcDate;
@@ -419,6 +450,37 @@ const SQL_MARK_SHOP_STATUS = 'UPDATE catalog_cache SET shop_status = ? WHERE pro
 
 const SQL_TOTAL_ROWS = 'SELECT COUNT(*) AS total FROM catalog_cache';
 const SQL_LAST_FETCHED = 'SELECT MAX(fetched_at) AS last_fetched FROM catalog_cache';
+
+/*
+ * Rozdelenie cien (V1). Zaraďovanie do pásiem robí DATABÁZA, nie prehliadač:
+ * 41 220 cien cez sieť pri každom otvorení rozkliku je záťaž, ktorú si nikto
+ * nevyžiadal, a von takto ide dvadsaťjeden čísel.
+ *
+ * `LEAST(…, ?)` posadí všetko nad hranicou do ZBERNÉHO pásma — ceny idú po
+ * 1 758 €, ale drvivá väčšina katalógu leží pod 200 €, takže bez zberného
+ * pásma je histogram jeden stĺpec vľavo a 170 prázdnych vpravo.
+ *
+ * `GREATEST(…, 0)` je poistka na poškodený riadok: `price` je DECIMAL BEZ
+ * `UNSIGNED`, takže záporná cena je v schéme možná. Bez nej by taký riadok
+ * vypadol z pásiem, ale zostal v `rows` — a súčet stĺpcov by prestal sedieť
+ * s číslom pod grafom bez toho, aby to bolo na čomkoľvek vidieť. Radšej ho
+ * vidieť v najlacnejšom pásme než ho stratiť.
+ */
+const SQL_PRICE_BUCKETS =
+  'SELECT GREATEST(LEAST(FLOOR(price / ?), ?), 0) AS bucket, COUNT(*) AS n ' +
+  'FROM catalog_cache WHERE price IS NOT NULL GROUP BY bucket ORDER BY bucket ASC';
+
+/*
+ * Čísla, ktoré graf MUSÍ priznať: koľko riadkov zrkadlo pozná, koľko z nich je
+ * bez ceny, kam siaha chvost a odkedy dokedy sú ceny stiahnuté. Jeden dotaz,
+ * nie päť — a nad tou istou tabuľkou ako pásma, takže si čísla neodskočia.
+ */
+const SQL_PRICE_TOTALS =
+  'SELECT COUNT(*) AS rows_total, ' +
+  'SUM(CASE WHEN price IS NULL THEN 1 ELSE 0 END) AS rows_without_price, ' +
+  'MIN(price) AS min_price, MAX(price) AS max_price, ' +
+  'MIN(fetched_at) AS oldest, MAX(fetched_at) AS newest ' +
+  'FROM catalog_cache';
 
 /* Pokrok dvojdňového behu (`catalog_sync_state`, migrácia 0013). */
 
@@ -791,6 +853,12 @@ export interface CatalogRepoExt extends CatalogRepo {
   search(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogSearchResult>;
   counts(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogCounts>;
   /**
+   * V1 — rozdelenie cien pre histogram. `binWidth` je šírka pásma v eurách,
+   * `binCount` index ZBERNÉHO pásma (všetko nad ním sa doň zhrnie). Oboje
+   * prichádza zvonku: repozitár o geometrii grafu nevie nič.
+   */
+  priceBuckets(binWidth: number, binCount: number, conn?: Queryable): Promise<CatalogPriceBuckets>;
+  /**
    * Predajnosť a vlastné zľavy pre konkrétne ID — aj pre produkty, ktoré
    * zrkadlo katalógu ešte nemá (kontrakt UI, bod 26). Čisto čítacie.
    */
@@ -1002,6 +1070,74 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         soldFrom: window.from,
         soldTo: window.to,
         lockedFilters: [...LOCKED_FILTERS],
+      };
+    },
+
+    /**
+     * Rozdelenie cien pre histogram (V1). Dva dotazy PO SEBE, nie `Promise.all`
+     * — rovnaký dôvod ako v `factsFor()`: dve súbežné spojenia z jedného
+     * čítania nemajú čo zrýchliť a rozbíjajú poradie chýb.
+     *
+     * ČO SA TU SMIE TICHO POKAZIŤ
+     *
+     *  1. **Riadok bez ceny sa započíta ako nula.** `price` je `NULL`, kým sa
+     *     produkt nestiahol. Nula by ho posadila do najlacnejšieho pásma a
+     *     vyrobila neexistujúci vrchol pri nule — preto `WHERE price IS NOT
+     *     NULL` a preto sa tie riadky vracajú ZVLÁŠŤ (`withoutPrice`), aby ich
+     *     graf priznal a nezamlčal.
+     *  2. **Rozmery pásiem sa dostanú do textu dotazu.** Idú výhradne ako `?`
+     *     parametre, ako všetko ostatné v tomto súbore. Nezmysel (nula, zápor,
+     *     necelé číslo) by v `FLOOR(price / ?)` znamenal delenie nulou, preto
+     *     má šírka aj index zberného pásma dolný strop `1`.
+     */
+    async priceBuckets(
+      binWidth: number,
+      binCount: number,
+      conn?: Queryable,
+    ): Promise<CatalogPriceBuckets> {
+      const width = Math.max(1, Math.trunc(binWidth));
+      const lastBucket = Math.max(1, Math.trunc(binCount));
+
+      const bucketRows = await run<Array<{ bucket: number | string | null; n: number | bigint }>>(
+        conn,
+        SQL_PRICE_BUCKETS,
+        [width, lastBucket],
+      );
+
+      const buckets: Array<{ bucket: number; count: number }> = [];
+      for (const row of Array.isArray(bucketRows) ? bucketRows : []) {
+        const bucket = toCount(typeof row.bucket === 'bigint' ? Number(row.bucket) : row.bucket, -1);
+        // Pásmo mimo rozsahu nevie vzniknúť (SQL ho zovrie), ale ak by prišlo,
+        // je to poškodená odpoveď — nie tichý stĺpec na neexistujúcom mieste.
+        if (bucket < 0 || bucket > lastBucket) continue;
+        buckets.push({ bucket, count: toCount(Number(row.n), 0) });
+      }
+
+      const totalRows = await run<Array<Record<string, number | bigint | string | Date | null>>>(
+        conn,
+        SQL_PRICE_TOTALS,
+        [],
+      );
+      const totals = (Array.isArray(totalRows) ? totalRows[0] : undefined) ?? {};
+
+      /* Cena je DECIMAL — driver ju podáva ako string. `null` musí prežiť ako
+         `null`: pod grafom je z nej POMLČKA, nikdy nula. */
+      const money = (value: unknown): number | null => {
+        if (value == null) return null;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      };
+      const stamp = (value: unknown): UtcDate | null =>
+        value == null ? null : toDateOrNull(value as Date | string);
+
+      return {
+        buckets,
+        rows: toCount(Number(totals.rows_total ?? 0), 0),
+        withoutPrice: toCount(Number(totals.rows_without_price ?? 0), 0),
+        minPrice: money(totals.min_price),
+        maxPrice: money(totals.max_price),
+        oldestFetchedAt: stamp(totals.oldest),
+        newestFetchedAt: stamp(totals.newest),
       };
     },
 
