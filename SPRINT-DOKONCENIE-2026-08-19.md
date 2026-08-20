@@ -276,6 +276,44 @@ záverečnej správy ako presný návrh pre koordinátora.
 
 ---
 
-## Výsledok
+## Výsledok (19. 8. 2026)
 
-*(dopĺňa koordinátor)*
+Všetky tri balíky dokončené. Koordinátor spadol na limite session pri
+záverečnom overovaní; tú časť dobehol hlavný agent.
+
+| Balík | Výsledok |
+|---|---|
+| **W1** značky | Glyfy 37 → 7, maska zámku zrušená, cesta ikony je v repe raz. `ikony.spec.ts` vznikol a chytá mutáciu. |
+| **W2** text | Odstavce pod rozklik, duplicitné `lead` vety zmazané, jeden formátovač dátumu, ISO dátum a „kampaň" von. |
+| **W3** graf | Agregácia cien presunutá do `catalog.repo.ts`; zapojenie dokončila samostatná session, ktorú spustil používateľ. |
+
+### Päť chýb, ktoré koordinátor našiel v tomto pláne
+
+Plán písal hlavný agent a v piatich bodoch sa mýlil. Koordinátor ich našiel
+čítaním repa **skôr**, než ktorýkoľvek pracovník niečo nahlásil:
+
+1. `test/unit/ikony.spec.ts` bol v pláne uvedený ako hotový strážca emoji.
+   Neexistoval — agent, ktorý ho mal napísať, spadol na limite tesne pred ním.
+2. `src/app/api/insights/_prices.ts` s agregáciou cien už existoval. Plán
+   posielal W3 napísať ju odznova, teda vyrobiť presne tú duplicitu, ktorú
+   tento šprint odstraňuje.
+3. Päť volaní `.sig` v `app/login` a `app/onboarding` v pláne chýbalo a pri
+   zmazaní CSS by dve živé obrazovky prišli o značku.
+4. Tón `warn` v pláne nebol vôbec.
+5. **Jeden jeho nález bol naopak falošný poplach**, a stálo to za korekciu:
+   `.sig.lock` vyhlásil za mŕtvy kód na základe grepu na literál `"sig lock"`.
+   Tá trieda sa ale skladá až za behu (`sigClass(tone)` z `` `sig ${tone}` ``),
+   a `overview-verdict.ts:160` posiela `tone: 'lock'` pre pilotný rozsah.
+   Keby ju W1 zmazal, značka „Rozsah pilotný" zmizne z Prehľadu.
+
+Z bodu 5 vyplynulo povinné poradie, ktoré plán pôvodne nemal: **ikona do
+markupu najprv, zmazanie CSS až potom** — nikdy naopak, aby neexistoval
+medzistav, v ktorom má stav len farbu a slovo.
+
+### Čo z orchestrácie nefungovalo
+
+Koordinátor spustil pracovníkov na pozadí a **na svoje deti na pozadí nedokáže
+počkať** — turn sa mu ukončil skôr, než mu prišli ich hlásenia, a dvakrát
+nahlásil „pracovníci bežia", keď už nebežal ani jeden. Pracovníkov treba
+spúšťať na popredí (`run_in_background: false`), inak koordinátor nevie, čo
+sa stalo, a hlavný agent ho musí prebúdzať — čo stojí rozpočet navyše.

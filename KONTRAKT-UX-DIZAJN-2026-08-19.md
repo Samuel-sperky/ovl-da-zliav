@@ -239,6 +239,45 @@ kurzíva (appka ju používa) a podmnožina **latin-ext**, bez ktorej by slovens
 
 ---
 
-## Výsledok
+## Výsledok (19. 8. 2026)
 
-*(dopĺňa sa po dokončení)*
+| | |
+|---|---|
+| Testy | 2 479 prejde · 5 padá v `crypto.spec.ts` a `boot-assertions.spec.ts` |
+| Prečo tie padajú | `chmod 400` sa na Windows nedá nastaviť, súbor ostane 444. **Prostredie, nie regresia.** |
+| Lint · typecheck · produkčný build | čisté |
+| Snímky | proti reálnym 41 220 produktom, nie proti prázdnemu e2e |
+| Emoji v appke | **0**, strážené `test/unit/ikony.spec.ts` |
+| Glyfy kreslené písmom | **37 → 7** (checkbox, `<details>`, „×" v „3×", jedna veta v próze) |
+
+### Čo sa nakoniec ukázalo dôležitejšie než pôvodné zadanie
+
+Zadanie znelo „dokončiť UX a dizajn". Traja z pôvodných devätnástich defektov
+boli pritom určené zle a dve najdrahšie zistenia v zadaní vôbec neboli:
+
+- **Appka nedodávala písmo, ktoré deklarovala** (D20). Bežala v Segoe UI,
+  takže každé rozhodnutie o typografii sa robilo proti písmu, ktoré nikto
+  nevidel. Nič nespadlo — preto to prežilo celý vývoj.
+- **Ani jedna značka stavu nebola v Interi.** `✓ ✕ ▲ ○ ● ◆ ◐ ■ ≈ 🔒` padali na
+  záložné systémové písmo, a zámok dokonca na farebné emoji. Zmeraná
+  typografia a zmeraná paleta sa ich netýkali.
+- **D1 nebola chyba appky** — bol to indikátor `next dev`, ktorý sa dostal do
+  každej snímky, lebo e2e harness spúšťa vývojový server.
+- **D3 neplatila vôbec.** `tabular-nums` boli na `body` už dávno; tvrdenie
+  „stĺpce poskakujú" bolo odvodené z prázdnej tabuľky, bez dôkazu.
+
+### Čo prehliadol tento kontrakt a našiel až nezávislý review
+
+- V appke žili **tri** prevodníky `resolution → vzhľad`, takže tá istá
+  prekážka bola na Prehľade jantárová a na Detaile červená.
+- Oprava rol popiskov (D2) siahla na **tri selektory, ktoré nikto nekreslí**.
+  Test to nezistil, lebo tvrdil to isté o tých istých mŕtvych selektoroch.
+- Zlatá `--gold2` kódovala stav „beží" pri kontraste **3,45 : 1** a nebola
+  v žiadnom meraní — tvrdenie „všetko je zmerané" bolo preto nepravdivé.
+- `var(--ink3)` nikdy neexistoval, takže porovnávací pruh sa kreslil ako
+  prázdny žľab — neznáme vykreslené ako nula.
+
+Poučenie, ktoré z toho zostáva v kóde: **test, ktorý tvrdí niečo o CSS
+triede, musí najprv dokázať, že tú triedu niekto kreslí** — a mŕtvosť triedy
+sa v tejto appke nedá dokázať grepom na literál, lebo triedy skladá
+`sigClass()`, `toneSigClass()` a `TONE_SIG_CLASS` až za behu.
