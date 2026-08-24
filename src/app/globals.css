@@ -150,6 +150,13 @@
   --dim: #63696f;
   --line: #dfe1e6;
   --line2: #c7c9cd;
+  /* DRÁHA MERACIEHO PRÚŽKU. Nesie mierku: bez nej je „96/240" plný prúžok
+     a nie dve pätiny. Musí byť vidieť na `--paper2` (karta) aj na `--paper`.
+     Svetlá #e7e9ed má na bielej 1,22 : 1 a stačí; tmavá mala #212329, čo je
+     na #17181c 1,13 : 1 — na snímke `produkty-tmava.png` z nej nezostalo nič
+     a naplnená časť vyzerala ako pahýľ bez mierky. Tmavá je preto #3a3d45,
+     teda 1,60 : 1 na karte a 1,69 : 1 na stránke. Merané, nie odhadnuté —
+     `test/unit/globals-vlna3-chyby.spec.ts`. */
   --track: #e7e9ed;
   --sel: #eef9f9;
   --barfill: var(--deep);
@@ -228,7 +235,7 @@
     --dim:#8b919b;
     --line:#282a31;
     --line2:#3c3e43;
-    --track:#212329;
+    --track:#3a3d45;
     --sel: #152a2a;
     --barfill: var(--teal);
     --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
@@ -289,7 +296,7 @@
   --dim:#8b919b;
   --line:#282a31;
   --line2:#3c3e43;
-  --track:#212329;
+  --track:#3a3d45;
   --sel: #152a2a;
   --barfill: var(--teal);
   --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
@@ -1632,6 +1639,10 @@ input::placeholder {
      preto, že všetky používajú tento krok — nie preto, že to niekto odmeral
      v každej zvlášť. */
   --gap: 16px;
+  /* Koľko sa na dolnej hrane posuvnej plochy stmieva do stratena. Pol riadku
+     tabuľky — dosť na to, aby bolo vidieť, že text nekončí, málo na to, aby
+     zjedol riadok. Pozri `.tbl-scroll` (14.6). */
+  --fade: 26px;
 }
 
 .shell {
@@ -2327,6 +2338,26 @@ b.lvl-2 {
      navyše. Krok je zámerne opatrný — vracia dva riadky, nie celých 55 px,
      aby sa pätka so stránkovaním nedostala pod hranu obrazovky. */
   max-height: calc(100vh - 280px);
+
+  /* DOLNÁ HRANA SA STMIEVA, NEREŽE (24. 8. 2026).
+     Strop výšky je odvodený od okna, nie od výšky riadku, takže posledný
+     viditeľný riadok padne kdekoľvek — najčastejšie do polovice písmen.
+     Vodorovne odseknutý text nevyzerá ako „ide sa posúvať", ale ako chyba
+     vykreslenia; na snímke z 1440 × 900 to bolo na Produktoch aj v Nastaveniach
+     → Histórii.
+
+     Dvojica `padding-bottom` + `mask-image` to rieši bez jediného riadku JS a
+     bez klamania:
+       · maska je pripnutá na RÁM plochy, nie na obsah — obsah sa pod ňou
+         posúva, takže sa stmieva vždy práve to, čo pokračuje ďalej;
+       · `padding-bottom` tej istej výšky je posledná vec v posuvnej ploche,
+         takže NA KONCI posunu sa stmieva prázdne miesto a posledný riadok
+         zostáva celý a ostrý. Bez neho by maska zožrala aj koniec zoznamu
+         a tvárila sa, že tam ešte niečo je.
+     `box-sizing: border-box` drží celok pod tým istým stropom výšky (P4). */
+  padding-bottom: var(--fade);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
 }
 table.tbl {
   width: 100%;
@@ -2933,13 +2964,24 @@ details.tech.bare {
   font-weight: 650;
   margin-bottom: 8px;
 }
-.chart svg {
+/* PLOCHA GRAFU, NIE KAŽDÉ SVG V KARTE (24. 8. 2026).
+   `.chart svg` bralo aj marky legendy z `charts.module.css` — štyri 16 × 12
+   obrázky vedľa slov. `width: 100%` + `height: auto` z nich cez pomer strán
+   spravilo ~60 px kolieska, ktoré preliezli text („dnešok, deň ešte beží"
+   cez „trend cez uzavreté dni"). `.legendMark { flex: none }` to nemá ako
+   vyhrať: `flex: none` je `flex-basis: auto`, čo sa pýta práve na `width`,
+   a `.chart svg` (0,1,1) je aj špecifickejšie než `.legendMark` (0,1,0).
+   Rovnako by sa nafúkla hociktorá `.ovl-ic` v prázdnom stave grafu.
+   Plocha grafu sa pozná podľa `role="img"` — nesie ju `SalesChart` aj
+   `PriceHistogram` a je to to isté, čo z nej robí obrázok pre čítačku. Marky
+   legendy sú `aria-hidden` a rolu nemajú, takže sa rozdiel nedá stratiť. */
+.chart svg[role='img'] {
   display: block;
   width: 100%;
   height: auto;
   overflow: visible;
 }
-.chart svg text {
+.chart svg[role='img'] text {
   font-family: inherit;
   font-size: 10px;
   fill: var(--dim);
@@ -3083,10 +3125,44 @@ details.tech.bare {
    Miesto pre rad neurčuje šírka okna, ale to, čo z nej zostane po paneli
    filtrov — a ten sám mizne až pri 1000 px. Tá istá šírka okna teda raz na
    dva stĺpce stačí a raz nie (1150 px bez filtrov áno, 1150 px s filtrami
-   nie). `flex-wrap` sa nepýta na okno: keď na 600 + 320 px prestane byť
-   miesto, panel spadne POD tabuľku. Na 720 px teda vyjde stĺpec pod tabuľku
-   sám, bez jedinej media query. Základ 600 px je ODMERANÝ v prehliadači:
-   tesne pod ním padá stĺpec názvu pod 230 px a z názvu zostáva začiatok.
+   nie). `flex-wrap` sa nepýta na okno: keď na základy prestane byť miesto,
+   panel spadne POD tabuľku. Na 720 px teda vyjde stĺpec pod tabuľku sám, bez
+   jedinej media query.
+
+   ZÁKLADY SÚ 350 + 180, NIE 600 + 320 (oprava 24. 8. 2026)
+   Pôvodné základy boli odmerané ako „koľko tie dva stĺpce POTREBUJÚ", nie ako
+   „koľko ich smie byť, aby sa rad zmestil" — a to je pri `flex-wrap` tá istá
+   otázka: o zalomení rozhoduje SÚČET ZÁKLADOV (hypotetická veľkosť položky),
+   nie výsledné šírky po raste. Na cieľových 1440 px pritom pre `.catalog-split`
+   zostane len ~886 px:
+
+       1440 − 240 (`--side-w` s rámom, `box-sizing: border-box`)
+            −  40 (`.wrap` 2 × 20 px)
+            − 274 (stĺpec filtrov 260 px + medzera 14 px)  =  886 px
+
+   a 600 + 320 + 14 = 934 px sa doň nezmestí. Hlavná vec celej vlny 3 tak na
+   cieľovej šírke NEPLATILA: panel padal pod tabuľku aj na 1440 px, čiže vždy.
+
+   Nové základy 350 + 180 + 14 = 544 px. Rad teda drží, kým je pre `.catalog-split`
+   aspoň 544 px, t. j. do okna ~1100 px (1100 − 240 − 40 − 274 = 546) — pod tým
+   sa smie zalomiť, a od 1000 px nadol stĺpec filtrov aj tak mizne a miesto sa
+   vráti.
+
+   VOĽNO SA DELÍ 3 : 2 V PROSPECH TABUĽKY
+   Nie je to estetika, je to odmerané v prehliadači. Pri delení 1 : 1 dostane
+   tabuľka 521 px a stĺpec názvu z toho 167 px — a to je presne toľko, že tri
+   rôzne kusy vyzerajú ako „Oceľové náušnice…" a riadok sa nedá vybrať. Pri
+   3 : 2 má tabuľka 555 px, názov 185 px a kusy sa rozlíšia. Opačným smerom to
+   má tiež mieru: pri 2 : 1 klesne panel na 294 px a hodnota „Dámsky prstienok
+   s matným povrchom 4 / 5 mm" sa v ňom láme na štyri riadky. Šírky po raste:
+
+       1440 px  →  tabuľka ~555 px, panel ~317 px
+       1280 px  →  tabuľka ~450 px, panel ~247 px
+
+   Tabuľka je tak dominantou radu (P1) a `min-width: 0` nižšie je to, čo jej
+   dovolí sa naozaj stlačiť — pri užšom rade sa posúva vnútri svojho rámu,
+   stránka nie. Dlhé názvy sa aj tak orežú a celý povie práve ten panel vpravo;
+   to je zmysel majstra a detailu.
 
    PREKRYV SA NEVRACIA ANI NA ÚZKEJ OBRAZOVKE. Je to presne to, čo K1
    zamieta, a na polovici monitora (appka vedľa administrácie shopu) by
@@ -3100,7 +3176,7 @@ details.tech.bare {
 .catalog-split > .tbl-frame {
   /* `min-width: 0` je to, čo dovolí tabuľke zúžiť sa; bez neho ju vnútorná
      šírka obsahu vytlačí z radu a panel by spadol dole aj na 1440 px. */
-  flex: 1 1 600px;
+  flex: 3 1 350px;
   min-width: 0;
 }
 .catalog-split > .drawer {
@@ -3109,7 +3185,7 @@ details.tech.bare {
      len na inom mieste. */
   position: static;
   z-index: auto;
-  flex: 1 1 320px;
+  flex: 2 1 180px;
   width: auto;
   min-width: 0;
   /* Nad 400 px sa panel neroztiahne ani na širokom monitore — riadok textu
@@ -3123,6 +3199,12 @@ details.tech.bare {
      a obrazovka zostáva v 1,5 obrazovky (P4). Skroluje panel, nie stránka. */
   max-height: calc(100vh - 280px);
   overflow: auto;
+  /* Rovnaký strop = rovnaká odseknutá hrana ako v tabuľke, tak aj rovnaké
+     riešenie — pozri `.tbl-scroll` (14.6). Odsadenie panela je 16 px, do
+     `--fade` teda chýba zvyšok. */
+  padding-bottom: var(--fade);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
 }
 /* Najdlhší názov v katalógu má 117 znakov a v 400 px stĺpci sa musí zalomiť
    aj vtedy, keď je jedným slovom bez medzery (D10). */
