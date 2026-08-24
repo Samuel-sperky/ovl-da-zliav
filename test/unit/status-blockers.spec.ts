@@ -49,6 +49,9 @@ import {
 } from '@/lib/shop/rate-limits';
 // Odhad dní má počítať JEDNA funkcia — tá istá, akú používa `syncStatus()`.
 import { readDaysNeeded } from '@/lib/shop/read-budget';
+// Tvar dátumu vo vete dáva jediný formátovač appky (kontrakt UI bod 10) —
+// test ho volá, aby netvrdil o čase niečo, čo závisí od časovej zóny stroja.
+import { formatDateTimeSk } from '@/lib/ui/format';
 
 /* ─────────────── originály zrkadlených čísel (len pre porovnanie) ───────── */
 
@@ -252,15 +255,19 @@ describe('API kľúč — či je vložený a dokedy platí', () => {
     expect(blocker.assumed).toBe(true);
   });
 
-  it('expirovaný kľúč blokuje a veta povie, ako dávno vypršal', () => {
+  it('expirovaný kľúč blokuje a veta povie, KEDY presne vypršal', () => {
+    const expired = new Date(NOW.getTime() - 3 * HOUR);
     const blocker = byId(
-      collectOperationBlockers(
-        healthy({ apiKey: { present: true, expiresAt: new Date(NOW.getTime() - 3 * HOUR) } }),
-      ),
+      collectOperationBlockers(healthy({ apiKey: { present: true, expiresAt: expired } })),
       'key_expired',
     );
     expect(blocker.severity).toBe('blokuje');
-    expect(blocker.what).toContain('pred 3 hodiny');
+    // Do 20. 8. 2026 tu stálo „pred 3 hodiny". Relatívny čas na obrazovke,
+    // ktorá sa neobnovuje sama, starne spolu s ňou — a `ui/format.ts` (bod 3)
+    // ho na povrch nepúšťa. Veta o okamihu nezmizla, zostrila sa na konkrétny
+    // okamih; tvar dáva jediný formátovač, nie literál v teste.
+    expect(blocker.what).toContain(formatDateTimeSk(expired));
+    expect(blocker.what).not.toMatch(/\bpred\s+\d/);
     expect(blocker.assumed).toBe(false);
   });
 
@@ -329,7 +336,12 @@ describe('denný rozpočet zápisov', () => {
     expect(blocker.passableNow).toBe(false);
     expect(blocker.clearsAt?.toISOString()).toBe(nextUtcDayReset(NOW).toISOString());
     expect(blocker.what).toContain('200 z 200');
-    expect(blocker.what).toContain('2026-08-12');
+    // Deň sa z vety nestratil, len sa píše po slovensky: od 20. 8. 2026 ide
+    // `writeBudget.day` cez `formatDateSk` (bod 6 hlavičky `blockers.ts`).
+    // ISO tvar `2026-08-12` na povrchu appky nemá čo robiť — tvrdenie „veta
+    // menuje UTC deň" tým platí prísnejšie, nie slabšie.
+    expect(blocker.what).toContain('12. 8. 2026');
+    expect(blocker.what).not.toContain('2026-08-12');
   });
 
   it('neznáma spotreba sa berie ako vyčerpaný rozpočet', () => {
@@ -368,13 +380,18 @@ describe('denný rozpočet zápisov', () => {
 /* ═══════════════════ 6. Režim rozsahu (K1: pilot vs plny) ═════════════════ */
 
 describe('režim rozsahu — pilot stropuje na 10, plny na uložený strop', () => {
-  it('pilotný strop pri prekročení blokuje a prepnutie chce heslo', () => {
+  it('pilotný strop pri prekročení blokuje a prepnutie chce heslo (povie to zámok)', () => {
     const blocker = byId(
       collectOperationBlockers(healthy({ selection: { selectedCount: 150 } })),
       'scope_pilot_cap',
     );
     expect(blocker.severity).toBe('blokuje');
+    // Heslo nesie `resolution: 'sudo'` — zámok a slovo „vypýta si heslo" kreslí
+    // `ui/blocker-look.ts`. Veta ho od 20. 8. 2026 neopakuje (bod 5 hlavičky
+    // `blockers.ts`); tvrdenie „prepnutie chce heslo" tým nezaniklo, len sa
+    // pýta toho poľa, ktoré ho naozaj nesie.
     expect(blocker.resolution).toBe('sudo');
+    expect(blocker.nextStep).not.toContain('heslo');
     expect(blocker.path).toBe(BLOCKER_PATHS.settings);
     expect(blocker.what).toContain('najviac 10 produktov');
     expect(blocker.what).toContain('vo výbere je 150 produktov');

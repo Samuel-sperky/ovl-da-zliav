@@ -30,6 +30,29 @@ import {
   type CanaryView,
 } from '@/components/settings/api';
 
+/**
+ * Výsledok skúšky spojenia ako JEDEN uzol — farba, značka a slovo spolu.
+ *
+ * Vlastný komponent preto, že tento stav vzniká až po odpovedi servera
+ * (`testConnection()`), takže v statickom renderi celého formulára vôbec nie
+ * je — a stav, ktorý sa nedá vykresliť, nemá ako spadnúť test, keby mu značka
+ * zmizla. Slovo je veta („Spojenie funguje"), nie číslo odpovede; to patrí do
+ * rozkliku Technický detail.
+ */
+export function ConnectionState({ ok }: { ok: boolean }) {
+  return ok ? (
+    <span className="sig ok" data-testid="domain-connection">
+      <SigMark variant="ok" />
+      Spojenie funguje
+    </span>
+  ) : (
+    <span className="sig bad" data-testid="domain-connection">
+      <SigMark variant="bad" />
+      Eshop neodpovedal
+    </span>
+  );
+}
+
 export interface DomainFormProps {
   shopDomain: string | null;
   domainConfirmedAt: string | null;
@@ -107,17 +130,7 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
       <div className="sec-h">
         <h2>Pripojenie</h2>
         <div className="act">
-          {connection === null ? null : connection.ok ? (
-            <span className="sig ok" data-testid="domain-connection">
-              <SigMark variant="ok" />
-              Spojenie funguje
-            </span>
-          ) : (
-            <span className="sig bad" data-testid="domain-connection">
-              <SigMark variant="bad" />
-              Eshop neodpovedal
-            </span>
-          )}
+          {connection === null ? null : <ConnectionState ok={connection.ok} />}
         </div>
       </div>
 

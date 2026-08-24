@@ -377,7 +377,13 @@ describe('V10 — strop výberu a tón vysvetliviek', () => {
     const cap = notes.find((blocker) => blocker.id === 'scope_pilot_cap');
     expect(cap?.severity).toBe('blokuje');
     expect(cap?.what).toContain('150');
-    expect(cap?.nextStep).toContain('heslo');
+    expect(cap?.nextStep).toContain('Zúžte výber');
+    expect(cap?.nextStep).toContain('Nastaveniach');
+    // Že si prepnutie vypýta heslo, hovorí od 20. 8. 2026 ZÁMOK
+    // (`resolution: 'sudo'` → `ui/blocker-look.ts`), nie druhýkrát tá istá
+    // veta. Tvrdenie sa nestratilo, len sa pýta tam, kde to teraz stojí.
+    expect(cap?.resolution).toBe('sudo');
+    expect(cap?.nextStep).not.toContain('heslo');
     expect(cap?.path).toBe('/nastavenia');
   });
 

@@ -711,8 +711,11 @@ export function DiscountDetail({ id }: { id: number }) {
               </tbody>
             </table>
           )}
+          {/* K8, šprint 20 B3 — rovnaká dvojica ako na potvrdení novej zľavy.
+              Prečo je zamknutá, hovorí jedno miesto ("čo appka zatiaľ nevidí
+              a prečo"), nie každá obrazovka vlastnými slovami. */}
           <div className="lvl-3 gap-t">
-            Dopad na maržu <span className="lockline">odomkne sa po doplnení nákupných cien</span>
+            Dopad na maržu <span className="lockline">zamknuté</span>
           </div>
         </div>
       </details>

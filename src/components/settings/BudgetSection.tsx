@@ -22,13 +22,27 @@
  *    o zlyhaní. `BudgetMeter` to drží sám (predvolený tón plného stropu je
  *    `attention`, nie `critical`); kto by si tu vypýtal červenú, poruší K2.
  * 2. **Neznáme číslo sa nedopĺňa.** Keď server rozpočet nevie povedať, prúžok
- *    sa NEKRESLÍ a na jeho mieste je veta s dôvodom. Prúžok s nulou by bol
+ *    sa NEKRESLÍ a na jeho mieste to appka POVIE — priznanie „zatiaľ neviem"
+ *    ostáva na povrchu, len jeho výklad je pod rozklikom. Prúžok s nulou by bol
  *    tvrdenie, nie medzera — a appka zapisuje do produkčného eshopu.
  * 3. **Odhad je označený.** Dátum dobehnutia fronty je plán pri dnešnej
  *    rýchlosti, nie sľub, preto nesie znak `≈` a tlmenejší odtieň.
  *
  * Spotreba sa NEPOČÍTA tu — appka ju číta z histórie, ktorá sa nedá prepísať.
  * Táto obrazovka je čisto čítacia.
+ *
+ * KDE STOJÍ DÔVOD (vlna 2 šprintu 20, 20. 8. 2026)
+ * ------------------------------------------------
+ * Na povrchu ostalo TVRDENIE — že rozpočty sú dva, že sa niektoré číslo nedá
+ * prečítať, že fronta teraz nezapisuje. Prečo to tak je (dve kvóty a dva spôsoby
+ * počítania, prísnejšia možnosť pri neznámom čísle, tichá appka) sa presunulo
+ * pod rozklik „Technický detail" — pravidlo P6, strop P2 je 90 znakov na jeden
+ * blok povrchu. Nič sa nezmazalo, dôvod je o jedno kliknutie ďalej. Kto ho vráti
+ * na povrch, poruší P2; stráži to `test/unit/text-zapisy-povrch.spec.ts`.
+ *
+ * Slová „chyba", „zlyhal" a „porucha" sa v tejto sekcii nesmú objaviť ANI pod
+ * rozklikom — vyčerpaný rozpočet nie je porucha (K2) a testy V12 ich hľadajú
+ * nad CELÝM vykresleným HTML, teda aj v obsahu rozkliku.
  *
  * Vlastník: V12.
  */
@@ -100,10 +114,9 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
 
       {/* Zostáva JEDINÁ veta, ktorú nehovorí nič iné na tejto obrazovke: že sú
           to dva oddelené rozpočty. Prečo je zľava fronta na dni, povie dlaždica
-          „Fronta hotová ≈" vedľa. */}
+          „Fronta hotová ≈" vedľa; čo z oddelenia plynie, stojí pod rozklikom. */}
       <Note testId="budget-intro">
-        <b>Zápisy a čítania majú oddelené rozpočty</b> — načítavanie katalógu neuberá
-        zo zliav a naopak.
+        <b>Zápisy a čítania majú oddelené rozpočty.</b>
       </Note>
 
       <div className="set-meters" data-testid="budget-meters">
@@ -119,9 +132,7 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
             />
           ) : (
             <Note variant="warn" testId="budget-writes-unknown">
-              Koľko zápisov dnes odišlo, <b>zatiaľ neviem</b>. Kým to tak je, appka sa
-              správa, akoby bol rozpočet minutý — radšej nezapíše nič, než by prekročila
-              strop eshopu.
+              Koľko zápisov dnes odišlo, <b>zatiaľ neviem</b>.
             </Note>
           )}
         </div>
@@ -138,9 +149,7 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
             />
           ) : (
             <Note variant="warn" testId="budget-reads-unknown">
-              Koľko čítaní katalógu dnes odišlo, <b>zatiaľ neviem</b>. Načítavanie
-              katalógu preto radšej počká — zliav sa to netýka, tie majú vlastný
-              rozpočet.
+              Koľko čítaní katalógu dnes odišlo, <b>zatiaľ neviem</b>.
             </Note>
           )}
           <div className="lvl-3">Z toho appka číta katalóg aj predajnosť.</div>
@@ -223,8 +232,7 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
 
       {queue?.heartbeat.stale === true ? (
         <Note variant="warn" testId="budget-idle">
-          Fronta teraz nezapisuje — appka sa neozvala dosť dlho na to, aby sa dalo
-          povedať, že beží. Keď sa rozbehne, pokračuje tam, kde skončila.
+          Fronta teraz nezapisuje. Keď sa appka rozbehne, pokračuje tam, kde skončila.
         </Note>
       ) : null}
 
@@ -258,6 +266,26 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
       <details className="tech">
         <summary>Technický detail</summary>
         <div className="body">
+          {/* Sem sa vo vlne 2 presunuli štyri vysvetlenia z povrchu (P6). Sú
+              písané ako trvalé pravidlá, nie ako komentár k aktuálnemu stavu,
+              preto sa kreslia vždy — aj keď práve teraz všetky čísla poznáme. */}
+          <p data-testid="budget-why-two">
+            Zápisy idú s kľúčom a majú vlastnú kvótu na kľúč. Čítanie katalógu ide bez
+            kľúča, na inú kvótu, počítanú na adresu počítača. Preto načítavanie katalógu
+            neuberá zo zliav a naopak.
+          </p>
+          <p data-testid="budget-why-unknown-writes">
+            Kým appka nevie, koľko zápisov dnes odišlo, správa sa, akoby bol rozpočet
+            minutý — radšej nezapíše nič, než by prekročila strop eshopu.
+          </p>
+          <p data-testid="budget-why-unknown-reads">
+            Kým appka nevie, koľko čítaní katalógu dnes odišlo, načítavanie radšej počká.
+            Zliav sa to netýka, tie majú vlastný rozpočet.
+          </p>
+          <p data-testid="budget-why-idle">
+            Fronta nezapisuje aj vtedy, keď sa appka neozvala dosť dlho na to, aby sa
+            dalo povedať, že beží.
+          </p>
           <table>
             <tbody>
               <tr>

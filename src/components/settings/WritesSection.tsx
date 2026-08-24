@@ -26,6 +26,15 @@
  * nepozná, lebo nevzniká z limitov eshopu, ale z poistky appky. Preto sa
  * jediný odvodzuje priamo zo stavu a odkazuje do Poistiek, kde sa otvára.
  *
+ * KDE STOJÍ DÔVOD (vlna 2 šprintu 20, 20. 8. 2026)
+ * ------------------------------------------------
+ * Na povrchu sekcie stojí len TVRDENIE — čo platí a čo z toho plynie. Prečo to
+ * tak je (že vypnutý zápis je dodávateľské nastavenie, že fronta počká celá,
+ * že zapísaná zľava vyprší sama) sa presunulo pod rozklik „Technický detail"
+ * — pravidlo P6, strop P2 je 90 znakov na jeden blok povrchu. Nič sa nezmazalo,
+ * dôvod je o jedno kliknutie ďalej. Kto ho vráti na povrch, poruší P2; stráži
+ * to `test/unit/text-zapisy-povrch.spec.ts` nad vykresleným markupom.
+ *
  * Vlastník: V12.
  */
 import Note from '@/components/ui/Note';
@@ -95,7 +104,7 @@ export function writeConditions(
           tone: permission === null ? 'attention' : blockerTone(permission),
           what:
             permission?.what ??
-            'Stav povolenia sa nepodarilo prečítať — kým to appka nevie, správa sa, akoby zapisovať nesmela.',
+            'Stav povolenia sa nepodarilo prečítať — appka sa preto správa, akoby zapisovať nesmela.',
           nextStep:
             permission?.nextStep ??
             'Skús obrazovku o chvíľu obnoviť; dovtedy appka do eshopu nezapíše nič.',
@@ -200,20 +209,20 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
           detail={settings.shopDomain}
           testId="writes-pill"
         />
+        {/* Povrch nesie tvrdenie, nie výklad (P2, strop 90 znakov). Čo sa stane
+            s čakajúcimi zľavami a v akom poradí fronta zapisuje, stojí pod
+            rozklikom na konci sekcie. */}
         <p className="set-note">
           {blocked
-            ? 'Kým niektorá z podmienok neplatí, fronta počká. Nič sa nestratí a nič sa nezapíše ' +
-              'napoly — zľavy, ktoré čakajú, sa zapíšu hneď, ako podmienka začne platiť.'
-            : 'Všetky tri podmienky platia. Fronta zapisuje podľa denného rozpočtu, ' +
-              'jeden produkt za druhým.'}
+            ? 'Kým niektorá podmienka neplatí, fronta počká; nič sa nezapíše napoly.'
+            : 'Všetky tri podmienky platia. Fronta zapisuje podľa denného rozpočtu.'}
         </p>
       </div>
 
       {enabled === false ? (
         <Note variant="warn" testId="writes-disabled-note">
-          <b>Nie je to chyba</b> — appka sa dodáva s vypnutým zápisom zámerne.{' '}
-          <b>Prepnúť sa to dá len v konfigurácii appky</b>, ktorú opisuje technický
-          detail nižšie.
+          <b>Nie je to chyba</b> — vypnutý zápis je zámer. Prepne ho správca
+          v konfigurácii appky.
         </Note>
       ) : null}
 
@@ -263,16 +272,33 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
           </tbody>
         </table>
         <div className="tbl-foot">
-          <span>
-            Appka zľavu nikdy nezruší — to platí bez ohľadu na tieto tri podmienky. Zapísaná
-            zľava vyprší sama v deň, ktorý má nastavený.
-          </span>
+          <span>Appka zľavu nikdy nezruší. Zapísaná zľava vyprší sama.</span>
         </div>
       </div>
 
       <details className="tech">
         <summary>Technický detail</summary>
         <div className="body">
+          {/* Sem sa vo vlne 2 presunuli tri vysvetľujúce odstavce z povrchu
+              (P6). Prvý je viazaný na stav — dôvod vypnutého zápisu nemá čo
+              vysvetľovať vtedy, keď zápis beží. */}
+          {enabled === false ? (
+            <p data-testid="writes-why-disabled">
+              Appka sa dodáva s vypnutým zápisom zámerne, aby prvý ostrý zápis do
+              produkčného eshopu nevznikol omylom. Povolenie zapisovať žije
+              v konfigurácii appky na počítači, nie v databáze — preto tu nie je
+              a nikdy nebude prepínač, ktorý by ho zapol.
+            </p>
+          ) : null}
+          <p data-testid="writes-why-queue">
+            Kým niektorá z troch podmienok neplatí, nič sa nestratí: zľavy, ktoré
+            čakajú vo fronte, sa zapíšu hneď, ako podmienka začne platiť. Fronta
+            potom ide jeden produkt za druhým, podľa denného rozpočtu.
+          </p>
+          <p data-testid="writes-why-expiry">
+            Že appka zľavu nikdy nezruší, platí bez ohľadu na tieto tri podmienky.
+            Zapísaná zľava vyprší sama v deň, ktorý má nastavený.
+          </p>
           <table>
             <tbody>
               <tr>

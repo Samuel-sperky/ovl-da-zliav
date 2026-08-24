@@ -39,12 +39,12 @@ import {
 } from '@/components/settings/api';
 
 /** Vzhľad výsledku overenia: slovo na povrch a tón, z ktorého ide farba aj značka. */
-interface VerifyLook {
+export interface VerifyLook {
   readonly label: string;
   readonly tone: SigVariant;
 }
 
-const VERIFY_LABELS: Record<string, VerifyLook> = {
+export const VERIFY_LABELS: Record<string, VerifyLook> = {
   valid: { label: 'overený čítaním objednávok', tone: 'ok' },
   unverified: { label: 'neoverený', tone: 'idle' },
   invalid: { label: 'eshop ho neprijal', tone: 'bad' },
@@ -59,15 +59,48 @@ const VERIFY_LABELS: Record<string, VerifyLook> = {
  * stratil. Jantár znamená „treba sa na to pozrieť" — nie zelenú (netvrdíme
  * overenie) a nie červenú (netvrdíme odmietnutie).
  */
-const UNKNOWN_VERIFY: VerifyLook = { label: 'stav overenia neznámy', tone: 'warn' };
+export const UNKNOWN_VERIFY: VerifyLook = { label: 'stav overenia neznámy', tone: 'warn' };
 
 /**
  * Výsledok overenia na vzhľad. `null` znamená, že sonda ešte nebežala — vtedy
  * appka nekreslí nič, lebo nemá čo tvrdiť.
  */
-function verifyLook(status: string | null | undefined): VerifyLook | null {
+export function verifyLook(status: string | null | undefined): VerifyLook | null {
   if (status === null || status === undefined || status === '') return null;
   return VERIFY_LABELS[status] ?? UNKNOWN_VERIFY;
+}
+
+/**
+ * Stav overenia ako JEDEN uzol — farba (trieda), značka (ikona) a slovo spolu.
+ *
+ * Komponent, a nie dvakrát opísaný `<span>`: ten istý stav sa kreslí na dvoch
+ * miestach obrazovky a dve kópie sa časom rozídu — presne tak vznikla podoba,
+ * kde jedno miesto malo tri kanály a druhé jedno holé slovo. Zároveň je stav,
+ * ktorý vzniká až po odpovedi servera, bez samostatného uzla pre statický
+ * render neviditeľný, takže by ho žiadny test nezmeral.
+ */
+export function VerifyState({ look, testId }: { look: VerifyLook; testId: string }) {
+  return (
+    <span className={`sig ${look.tone}`} data-testid={testId}>
+      <SigMark variant={look.tone} />
+      {look.label}
+    </span>
+  );
+}
+
+/**
+ * Hlásenie o NEULOŽENOM kľúči. Vlastný uzol z rovnakého dôvodu ako
+ * `VerifyState` — vzniká až po odpovedi servera a statický render ho inak
+ * nevykreslí.
+ */
+export function NotStoredState() {
+  return (
+    <p className="sig bad" data-testid="orders-key-not-stored">
+      <SigMark variant="bad" />
+      Kľúč sa NEULOŽIL — v appke zostáva pôvodný stav a do eshopu sa nič
+      nezapísalo.
+    </p>
+  );
 }
 
 export interface OrdersKeyFormProps {
@@ -130,10 +163,7 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
           {verify ? (
             <>
               {' · '}
-              <span className={`sig ${verify.tone}`} data-testid="orders-key-verify">
-                <SigMark variant={verify.tone} />
-                {verify.label}
-              </span>
+              <VerifyState look={verify} testId="orders-key-verify" />
             </>
           ) : null}
         </div>
@@ -177,21 +207,14 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
       {stored && storedVerify ? (
         <p className="set-note" data-testid="orders-key-stored">
           Kľúč končiaci na {stored.last4} je uložený (
-          <span className={`sig ${storedVerify.tone}`} data-testid="orders-key-stored-verify">
-            <SigMark variant={storedVerify.tone} />
-            {storedVerify.label}
-          </span>
+          <VerifyState look={storedVerify} testId="orders-key-stored-verify" />
           ). Predané kusy sa doplnia pri najbližšom načítaní.
         </p>
       ) : null}
 
       {failure ? (
         <div className="stack">
-          <p className="sig bad" data-testid="orders-key-not-stored">
-            <SigMark variant="bad" />
-            Kľúč sa NEULOŽIL — v appke zostáva pôvodný stav a do eshopu sa nič
-            nezapísalo.
-          </p>
+          <NotStoredState />
           <ActionFailurePanel failure={failure} testId="orders-key-failure" />
         </div>
       ) : null}

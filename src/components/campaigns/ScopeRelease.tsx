@@ -14,27 +14,44 @@
  * čísla vedľa seba a rovno ponúkne cestu von — aj s upozornením, že si vyžiada
  * heslo. Odmietnuť bez ponuky je tu zakázané.
  *
+ * PREČO TU NIE JE JANTÁROVÁ ŠKATUĽA (šprint 20, B3, 20. 8. 2026)
+ * --------------------------------------------------------------
+ * Do 20. 8. 2026 stála nad číslami `Note variant="warn"` s vetou
+ * `blocker.what`, ktorá v jedinom prípade, kedy sa tento panel vôbec kreslí
+ * (výber prekročil strop), znie: „Na jednu zľavu prejde najviac 10 produktov,
+ * vo výbere je 41 220 — zvyšných 41 210 sa nezapíše."
+ *
+ * Sú to TIE ISTÉ TRI ČÍSLA s tými istými popismi, ktoré hneď pod ňou stoja
+ * v `scopeNumbers`, každé vo veľkom reze a s vlastným popiskom. Jeden fakt tak
+ * mal na dvesto pixeloch päť podôb: riadok výberu nad panelom, jantárová veta,
+ * tri veľké čísla, ďalší krok pod nimi a zámok. Škatuľa bola tá jediná, ktorá
+ * nepridávala nič — čísla povedia „koľko", `scopeStep` povie „čo s tým"
+ * a `LockBadge` povie „čo to bude stáť".
+ *
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
  *
- * 1. **Veta prichádza z `lib/status/blockers.ts`.** Prekážka `scope_pilot_cap`
- *    má hotové vety s číslami aj s ďalším krokom a je označená ako riešiteľná
+ * 1. **Ďalší krok prichádza z `lib/status/blockers.ts`.** Prekážka
+ *    `scope_pilot_cap` má hotovú vetu o ceste von a je označená ako riešiteľná
  *    heslom. Prepísať ju tu vlastnými slovami by znamenalo dve formulácie toho
  *    istého pravidla, ktoré sa časom rozídu.
- * 2. **Panel neprepína rozsah.** Prepnutie je zmena, ktorá otvorí zápis do
+ * 2. **Tri čísla sa nesmú vrátiť do vety.** Ani ako `Note`, ani ako podnadpis:
+ *    kým `scopeNumbers` kreslí `wanted`, `allowed` a `dropped`, je ktorákoľvek
+ *    veta s tými istými číslami tretia kópia toho istého faktu.
+ *    Stráži `test/unit/text-zlavy-duplicity.spec.ts`.
+ * 3. **Panel neprepína rozsah.** Prepnutie je zmena, ktorá otvorí zápis do
  *    desaťtisíc produktov naraz — patrí do Nastavení, kde má vlastné potvrdenie
  *    a heslo. Odtiaľto vedie odkaz, nie akcia.
- * 3. **Zámok stojí pri ponuke, nie v pätke.** Používateľ má vedieť o hesle
+ * 4. **Zámok stojí pri ponuke, nie v pätke.** Používateľ má vedieť o hesle
  *    SKÔR, než klikne — inak sa dozvie až v dialógu a bude to prekvapenie.
  *
- * Vlastník: V11.
+ * Vlastník: V11; text šprint 20, B3.
  */
 import Link from 'next/link';
 
 import styles from '@/components/campaigns/zlavy.module.css';
 import { type BlockerCard } from '@/components/campaigns/queue-model';
 import LockBadge from '@/components/ui/LockBadge';
-import Note from '@/components/ui/Note';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 
 export interface ScopeReleaseProps {
@@ -56,24 +73,7 @@ export function ScopeRelease({ wanted, allowed, blocker, testId }: ScopeReleaseP
 
   return (
     <div className={styles.scopeRelease} data-testid={testId ?? 'scope-release'}>
-      {/*
-       * Note nesie LEN dôvod prekážky — nikdy tie tri čísla pod ňou.
-       *
-       * Do 20. 8. 2026 mala vetva `blocker === null` vlastnú vetu „Výberu
-       * vyhovuje N, ale prejde len M — K sa nezapíše." Boli to presne tie tri
-       * čísla, ktoré stoja hneď pod ňou v `scopeNumbers`, každé s vlastným
-       * popiskom a vo veľkom reze. Jantárová škatuľa nad nimi hovorila to isté
-       * slovami, takže obrazovka mala jeden fakt trikrát.
-       *
-       * Zmazať sa smela LEN tá vetva. `blocker.what` nesie DÔVOD prekážky
-       * z jediného zdroja pravdy (`lib/status/blockers.ts`) a nikde inde na
-       * tejto obrazovke nie je — bez neho panel povie, že sa niečo nezapíše,
-       * a zamlčí prečo. Pri chýbajúcej prekážke sa preto Note nekreslí vôbec:
-       * prázdna jantárová škatuľa je poplach bez obsahu, a čísla aj cestu von
-       * povedia `scopeNumbers` a `scopeStep` samy.
-       */}
-      {blocker === null ? null : <Note variant="warn">{blocker.what}</Note>}
-
+      {/* Čo sa deje, hovoria tri čísla. Škatuľa nad nimi hovorila to isté. */}
       <div className={styles.scopeNumbers}>
         <div>
           <div className="lvl-3">Výberu vyhovuje</div>

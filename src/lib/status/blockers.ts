@@ -61,6 +61,30 @@
  *     formulou, vedľa seba v jednom paneli stáli dva odhady, ktoré sa líšili
  *     o deň. A keď odhad prišiel už spočítaný v snapshote, použije sa ON:
  *     `syncStatus()` pozná pokrok prechodu, tento modul len počty riadkov.
+ *  5. **Veta nehovorí to, čo už povedal zámok.** `resolution: 'sudo'` sa vedľa
+ *     každej vety kreslí ikonou zámku a slovom „rieši sa v appke, vypýta si
+ *     heslo" (`ui/blocker-look.ts`). Kým `nextStep` pri pilotnom strope končil
+ *     na „— prepnutie si vyžiada heslo", stálo to isté na piatich obrazovkách
+ *     dvakrát vedľa seba a veta mala 103 znakov (P2 dáva 90). Od 20. 8. 2026
+ *     znie „Zúžte výber na 10 produktov, alebo prepnite rozsah v Nastaveniach."
+ *     — 66 znakov. Čo sa tým smie TICHO pokaziť: keby niekto `resolution`
+ *     prepol z `sudo` na `sam`, zámok zmizne a heslo už nepovie NIKTO —
+ *     používateľ klikne do Nastavení a nečakane naň vyskočí sudo okno. Tú
+ *     dvojicu (`pilot` ⟹ `sudo`) preto stráži `test/unit/slovnik-prekazky.spec.ts`.
+ *  6. **Dátum vo vete prechádza cez `formatDateSk`.** `writeBudget.day` je
+ *     `YYYY-MM-DD` — prenosový tvar, nie tvar, v akom sa dátum po slovensky
+ *     píše. Do 20. 8. 2026 sa vypisoval priamo a na povrchu stálo „(UTC deň
+ *     2026-08-12)". Nespadlo nič: `${day}` je legálny `string`, typecheck
+ *     mlčí, a `test/unit/datumy-povrch.spec.ts` to nechytil, lebo číta
+ *     reťazcové LITERÁLY v `src/` — a ISO tvar tam nie je, ten prichádza až
+ *     zo snímky za behu. Chytiť sa to dá jedine prečítaním hotovej vety, čo
+ *     robí `test/unit/slovnik-prekazky.spec.ts`.
+ *
+ *     Čo tento bod NEPOKRÝVA: `nextStep` pri `write_budget_low` stále hovorí
+ *     „hotovo bude približne o 3 dni". Je to relatívny čas a appka inde (dlaždice
+ *     fronty, `estimate.date`) hovorí konkrétny deň. Prepočet dní na dátum tu
+ *     nie je len formátovanie — `blockers.ts` si `engine/budget.ts` importovať
+ *     nesmie (ťahá `@/db/pool`), takže je to samostatné rozhodnutie.
  *
  * PREČO SÚ TU PREDSA PÄŤ ZRKADLENÝCH KONŠTÁNT
  * -------------------------------------------
@@ -87,6 +111,9 @@ import {
 // (bod 4 hlavičky). `shop/read-budget.ts` je čistý modul bez DB, takže sa smie
 // importovať aj v client komponente — na rozdiel od repozitára.
 import { readDaysNeeded } from '@/lib/shop/read-budget';
+// Dátum na povrchu kreslí JEDINÝ formátovač appky (kontrakt UI bod 10, bod 6
+// hlavičky). `ui/format.ts` neimportuje nič, takže client-safe modul zostáva.
+import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ══════════════════ 1. Zrkadlené konštanty (stráži ich test) ═══════════════ */
@@ -552,8 +579,6 @@ function keyBlockers(snapshot: StatusSnapshot, now: Date, pending: number | null
   }
 
   if (expiresAt.getTime() <= now.getTime()) {
-    const ago = hoursBetween(expiresAt, now);
-    const agoText = ago < 1 ? 'pred chvíľou' : `pred ${hoursAccusative(ago)}`;
     return [
       {
         id: 'key_expired',
@@ -561,7 +586,10 @@ function keyBlockers(snapshot: StatusSnapshot, now: Date, pending: number | null
         severity: 'blokuje',
         subject: 'operacia',
         productIds: [],
-        what: `Kľúč na zápis do shopu expiroval ${agoText} — appka ho už nepoužije.`,
+        // Konkrétny okamih, nie „pred 3 hodinami": relatívny čas sa čítal inak
+        // ráno a inak po obede a na obrazovke, ktorá sa neobnovuje sama, starol
+        // spolu s ňou (bod 6 hlavičky, `ui/format.ts` bod 3).
+        what: `Kľúč na zápis do shopu expiroval ${formatDateTimeSk(expiresAt)} — appka ho už nepoužije.`,
         nextStep: `Vložte nový kľúč v Nastaveniach; platí ${API_KEY_MAX_TTL_HOURS} hodín od vloženia.`,
         path: BLOCKER_PATHS.settings,
         resolution: 'sam',
@@ -618,7 +646,9 @@ function writeBudgetBlockers(
   const perDay = readCount(snapshot.writeBudget?.budget);
   const spent = readCount(snapshot.writeBudget?.spent);
   const day = typeof snapshot.writeBudget?.day === 'string' ? snapshot.writeBudget.day : null;
-  const dayNote = day === null ? '' : ` (UTC deň ${day})`;
+  // `day` je `YYYY-MM-DD` — prenosový tvar. Do vety ide cez `formatDateSk`,
+  // inak by na piatich obrazovkách svietilo „(UTC deň 2026-08-12)" (bod 6).
+  const dayNote = day === null ? '' : ` (UTC deň ${formatDateSk(day)})`;
   const reset = nextUtcDayReset(now);
 
   // Fail-closed presne ako `resolveDailyBudget()`: „neviem, koľko som už minul"
@@ -770,7 +800,10 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
     productIds: [],
     what: `${capText}, vo výbere ${isAre(selected)} ${products(selected)} — ${remainderPhrase(over)}.`,
     nextStep: pilot
-      ? `Zúžte výber na ${products(cap)}, alebo v Nastaveniach prepnite rozsah na plný — prepnutie si vyžiada heslo.`
+      ? // Že si prepnutie vypýta heslo, hovorí `resolution: 'sudo'` — zámok
+        // aj slovo „vypýta si heslo" kreslí `ui/blocker-look.ts` vedľa tejto
+        // vety. Druhýkrát to tu už nestojí (bod 5 hlavičky).
+        `Zúžte výber na ${products(cap)}, alebo prepnite rozsah v Nastaveniach.`
       : atHardMax
         ? `Rozdeľte výber na viac zliav — vyšší strop než ${products(HARD_MAX_PRODUCTS)} sa nastaviť nedá.`
         : `Zúžte výber na ${products(cap)}, alebo strop zvýšte v Nastaveniach (najviac ${products(HARD_MAX_PRODUCTS)}).`,
