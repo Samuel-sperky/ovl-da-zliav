@@ -13,10 +13,15 @@
 
 /* ─────────────────────────── spoločné ────────────────────────────────── */
 
+/*
+ * 10 px, nie 14: pri piatich útvaroch pod sebou je rozostup 5× na obrazovke
+ * a detail zľavy sa škrtal o každý desiatok pixelov, aby sa vošiel pod P4.
+ * Karty od seba oddeľuje ich vlastný rám, nie vzduch.
+ */
 .page {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
 }
 
 /* Nadpis obrazovky + jedno primárne tlačidlo (zlavy.html). */
@@ -48,7 +53,7 @@
 .side {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
 }
 
@@ -155,6 +160,83 @@
   overflow-y: auto;
 }
 
+/* ═════════ rebrík výberu: opravy geometrie riadku (UX2, 24. 8. 2026) ══════
+ *
+ * Tvar riadku (`.zpick*`) kreslí `globals.css` a vlastní ho niekto iný. Tieto
+ * dve pravidlá sú preto ÚPRAVY, nie druhá kópia: obe visia na `.rail`, teda
+ * na obale rebríka v `DiscountsList.tsx`, a mimo neho nič nemenia.
+ *
+ * 1. PERCENTO SA NESMIE DOTKNÚŤ STAVU.
+ *    Bunka mala 86 px, čo je miera slova „25 %". Zľava s pásmami tam ale
+ *    kreslí ROZSAH („15–30 %“) a ten je pri 26 px široký 109 px — znak „%“
+ *    tak dosadal na slovo „zapisuje sa“ vedľa. Percento sa nezmenšuje:
+ *    dominantou riadku je podľa kontraktu (bod 21) práve ono, takže miesto
+ *    dostane bunka. 116 px = 109 px najširšieho rozsahu a 7 px vzduchu.
+ */
+.rail :global(.zpick),
+.rail :global(.zpick-h) {
+  grid-template-columns: 116px minmax(0, 1fr);
+}
+
+/*
+ * Miesto pre percento ubralo menu 29 px a najdlhší názov sa prestal zmestiť
+ * na jeden riadok. Reže sa preto NIČ: názov sa láme. Tri bodky mali zmysel
+ * v šesťstĺpcovej tabuľke, kde by druhý riadok rozhodil mriežku — v rebríku
+ * výberu je meno to prvé, podľa čoho sa vyberá, a nedočítané meno je horšie
+ * než o riadok vyšší riadok.
+ */
+.rail :global(.zpick-name) {
+  white-space: normal;
+  overflow: visible;
+}
+
+/*
+ * 2. META RIADOK SA NESMIE REZAŤ NA ČÍSLE.
+ *    `globals.css` dáva riadku `white-space: nowrap` + `ellipsis`, takže sa
+ *    orezával sprava — a sprava stojí práve „zapísané 948 z 1 180“, teda
+ *    jediný údaj, kvôli ktorému ten riadok existuje. Skrátiť sa nedá: okno
+ *    platnosti aj počet zapísaných sú obe dôvody, prečo sa riadok číta.
+ *    Preto sa nereže, ale LÁME na dva riadky — okno hore, čísla dole.
+ */
+.rail :global(.zpick-meta) {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  white-space: normal;
+  overflow: visible;
+}
+
+/* Okno platnosti má pevnú dĺžku a vojde sa; keby predsa nie, reže sa ONO. */
+.pickWindow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Spodný riadok: počet zapísaných a (ak je) odhad dobehnutia. Čísla majú
+ * `flex: 0 0 auto`, takže sa nikdy nezmestia „skoro“ — keď je úzko, ustúpi
+ * odhad, ktorý má vlastné miesto v detaile aj na karte na čele.
+ */
+.pickWritten {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pickCounts {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.pickEst {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Dominanta zoznamu: percento vľavo, meno a stav vedľa neho. */
 .feature {
   display: flex;
@@ -181,6 +263,69 @@
   text-decoration: none;
 }
 
+/* ═════════ zoznam zliav: čím je vyplnená pravá polovica (UX2) ═════════════
+ *
+ * Kým nie je otvorená žiadna zľava, končila obrazovka na ~390 px z 900 a
+ * zvyšok bol holý — a to na pracovnom nástroji, ktorý mal načítané dáta
+ * v ruke a zahadzoval ich. Doplnené sú DVE veci a obe sú číslami, ktoré
+ * appka už má; nič sa nedopočítava:
+ *
+ *   · pásma zľavy na čele (`/api/campaigns` → `tiers`) — dominanta obrazovky
+ *     je pri pásmach ROZSAH („15–30 %“) a rozsah sa bez pásiem nedá prečítať;
+ *   · čo čaká na pozretie (`/api/queue` → `attention`) — server posiela počty,
+ *     mená dotknutých zliav aj vetu o ďalšom kroku, a zoznam z toho doteraz
+ *     nepoužil nič.
+ */
+
+/* Pásma zľavy na čele — hustá čítacia tabuľka, tá istá ako v detaile. */
+.leadTiers {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.leadTiersHead {
+  margin-bottom: 6px;
+}
+
+/* Skupina pozornosti — stav, počet, ďalší krok a dotknuté zľavy pod sebou. */
+.watch {
+  min-width: 0;
+}
+
+.watch + .watch {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.watchHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.watchWhat {
+  margin-top: 2px;
+}
+
+.watchStep {
+  margin-top: 2px;
+}
+
+/* Ktorých zliav sa to týka — meno a počet, nie ďalšia tabuľka. */
+.watchWho {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+}
+
+.watchWho a {
+  color: inherit;
+}
+
 /* ───────────── sekcia zbalená do jedného riadku (P5, P6) ────────────────── */
 
 /*
@@ -202,7 +347,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 9px 16px;
   font-size: 10.5px;
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -229,7 +374,7 @@
 }
 
 .foldBody {
-  padding: 0 16px 14px;
+  padding: 0 16px 12px;
 }
 
 /* ─────────────────────────── nová zľava ──────────────────────────────── */
@@ -576,7 +721,7 @@
 .acts {
   display: flex;
   gap: 8px;
-  margin-top: 11px;
+  margin-top: 8px;
 }
 
 .acts :global(.btn) {
@@ -821,7 +966,7 @@
   background: var(--track);
   overflow: hidden;
   width: 100%;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .queueBar i {
@@ -847,7 +992,23 @@
 
 /* Dlaždice nadväzujú priamo na pruh — je to jeden útvar, nie dva. */
 .queueTiles {
-  margin-top: 8px;
+  margin-top: 6px;
+}
+
+/*
+ * ŠTYRI STAVY = ŠTYRI STĹPCE (UX2, 24. 8. 2026).
+ *
+ * `.kpis` skladá dlaždice cez `auto-fit minmax(150px, 1fr)`. V stĺpci s
+ * akciami vedľa mala legenda 440 px, teda 2×2 — a pruh nad ňou má štyri
+ * úseky vedľa seba. Legenda tak čítala inak než to, čoho je legendou, a
+ * navyše brala 190 px výšky tam, kde detail prerastal P4 o 429 px. Dlaždice
+ * sú odteraz cez celú šírku karty a v jednom rade, ako pruh.
+ *
+ * Trieda je zdvojená zámerne: `.kpis` a `.queueTiles` majú rovnakú váhu a
+ * poradie súborov (globálne CSS vs. modul) nie je pri stavbe zaručené.
+ */
+.queueTiles.queueTiles {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /*
@@ -880,16 +1041,21 @@
 .queueGlyph {
   /* `Icon` meria v `em`, veľkosť teda nesie písmo — rovnako ako `.blockerGlyph`. */
   font-size: 12px;
-  /* Na riadok popisku: `.kpi` má hore 11 px odsadenia, `.k` je malé písmo. */
-  margin: 12px 0 0 11px;
+  /* Na riadok popisku: `.kpi` má hore 8 px odsadenia, `.k` je malé písmo. */
+  margin: 9px 0 0 10px;
   align-self: start;
   /* Bez čísla nesie značka len TVAR. Farba prichádza nižšie, a len keď je čo hlásiť. */
   color: var(--dim);
 }
 
-/* O odsadenie tela zľava sa stará mriežka, nie vlastná ľavá výplň dlaždice. */
+/*
+ * O odsadenie tela zľava sa stará mriežka, nie vlastná ľavá výplň dlaždice.
+ * Výplň je tesnejšia než `.kpi` v `globals.css` (11/13): dlaždice sú tu
+ * štyri vedľa seba a ich popisy sú dvoj- až trojriadkové, takže každý
+ * ušetrený pixel sa násobí výškou najvyššej z nich.
+ */
 .queueTile :global(.kpi) {
-  padding-left: 6px;
+  padding: 8px 10px 8px 6px;
   min-width: 0;
 }
 
@@ -928,7 +1094,75 @@
 /* ───────────────── poznámka pod akciou (štart, fronta, opakovanie) ─────── */
 
 .startNote {
-  margin-top: 10px;
+  margin-top: 8px;
+}
+
+/*
+ * PANEL OPAKOVANIA — DVE POZNÁMKY VEDĽA SEBA (UX2, 24. 8. 2026).
+ *
+ * Sekcia „Zopakovať to, čo sa nepodarilo" merala 431 px z 1 674 px celej
+ * obrazovky a takmer tretinu z toho zaberali dve poznámky pod sebou, každá
+ * na tri riadky cez celú kartu. Obsah panelu vlastní `RetryFailed.tsx` a
+ * nemení sa — mení sa len rozvrh: sekcia je pás s lámaním, kde všetko okrem
+ * poznámok drží celú šírku a poznámky si šírku delia.
+ *
+ * Prečo `flex-wrap` a nie mriežka: poznámky nie sú vždy susedia (medzi ne
+ * vie vstúpiť potvrdenie jednodňového okna). Keď sa rozdelia, každá si
+ * pokojne sadne na vlastný riadok — mriežka s pevnými bunkami by v tej
+ * chvíli nechala dieru.
+ */
+.retryPane :global(.sec) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0 16px;
+}
+
+.retryPane :global(.sec) > * {
+  flex: 0 0 100%;
+  min-width: 0;
+}
+
+.retryPane :global(.sec) > .startNote {
+  flex: 1 1 300px;
+}
+
+/*
+ * Štyri čísla opravy v JEDNOM RIADKU, nie štyri stĺpce popisok-nad-číslom.
+ * Ušetrí 40 px a čísla sú krátke — „Zopakuje sa 11" sa číta rovnako dobre
+ * vedľa seba ako pod sebou.
+ */
+.retryNumbers {
+  margin: 10px 0;
+  padding: 9px 0;
+}
+
+.retryNumbers > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * VÝKON VÝBERU POD ROZKLIKOM (UX2, 24. 8. 2026).
+ *
+ * Obsah vlastní `DiscountPerformance.tsx` a nemení sa. Karta vnútri karty by
+ * bola dva rámy nad jednou vecou, takže sa vnútornej `.sec` zoberie chrom —
+ * rám nesie rozklik. Nadpis nesie `summary`; `h2` pod ním by povedal to isté
+ * druhýkrát, popisok obdobia („predané kusy za 14 dní") ale zostáva, lebo
+ * bez neho by čísla nemali obdobie.
+ */
+.perfPane :global(.sec) {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.perfPane :global(.sec-h) h2 {
+  display: none;
 }
 
 /* ───────────────── fronta naživo v detaile zľavy (B5) ─────────────────── */
@@ -938,8 +1172,8 @@
   grid-template-columns: 280px 1fr;
   gap: 18px;
   align-items: start;
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--line);
 }
 
@@ -996,9 +1230,76 @@
 
 /* ───────────────── položky v detaile: rám s vlastným skrolom (P4) ─────── */
 
+/*
+ * Rám s vlastným skrolom je na tejto obrazovke schválený spôsob, ako držať
+ * P4 (to isté robí rebrík cez `.listScroll`): skroluje rám, obrazovka sa
+ * nehýbe. Odkedy sa bunky lámu, sú riadky dvoj- až trojriadkové a pevných
+ * 300 px robilo zo štvrtej sekcie 430 px.
+ *
+ * Strop preto rastie s oknom a 130 px je len spodná hranica pre 900 px vysoké
+ * okno, v ktorom sa appka posudzuje. Na vyššom monitore sa rám otvorí sám.
+ */
 .itemsScroll {
-  max-height: 300px;
+  max-height: max(130px, calc(100vh - 770px));
   overflow: auto;
+}
+
+/*
+ * TABUĽKA POLOŽIEK SA MUSÍ ZMESTIŤ DO KARTY (UX2, 24. 8. 2026).
+ *
+ * `table.tbl` má `white-space: nowrap` na každej bunke a `td.name` strop
+ * 340 px. Pri automatickom rozvrhu si tak tabuľka vypýtala ~845 px do rámu
+ * širokého 732 a posledný stĺpec ostal odrezaný za hranou karty — vodorovný
+ * skrol v dátovej tabuľke je presne to, čo `globals.css` na tejto obrazovke
+ * zakazuje.
+ *
+ * Rozvrh je preto PEVNÝ a šírky určuje `<colgroup>` v JSX. Bunky sa smú lámať
+ * (druhý riadok je lacnejší než nečitateľný stĺpec) a nič sa neorezáva — stav
+ * zápisu sa orezať nesmie vôbec, lebo ho nesie farba, značka AJ slovo.
+ */
+.itemsScroll table {
+  table-layout: fixed;
+}
+
+/*
+ * `table.tbl th` a `table.tbl td` majú váhu 0,1,2 — `.itemsScroll td` by
+ * s 0,1,1 prehralo a `white-space: nowrap` by ostalo. Selektor preto ide
+ * cez tú istú tabuľku, nie okolo nej.
+ */
+.itemsScroll :global(table.tbl th),
+.itemsScroll :global(table.tbl td) {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* Strop z `globals.css` je pri pevnom rozvrhu zbytočný a mätúci. */
+.itemsScroll :global(table.tbl td.name) {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.colName {
+  width: 46%;
+}
+
+.colPrice {
+  width: 16%;
+}
+
+.colPct {
+  width: 10%;
+}
+
+.colState {
+  width: 28%;
+}
+
+/* Dôvod pod stavom — kým bol vlastným stĺpcom, tabuľka sa do karty nezmestila. */
+.itemReason {
+  display: block;
+  margin-top: 1px;
+  color: var(--dim);
 }
 
 /* ─────────────────────────── užšie okno (P4) ─────────────────────────── */

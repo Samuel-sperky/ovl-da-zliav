@@ -7,19 +7,37 @@
  * Obrazovka odpovedá na tri otázky v tomto poradí: **kde je zápis · čo sa
  * nepodarilo · čo sa dá urobiť.**
  *
- * SEKCIE (P5): najviac štyri.
+ * SEKCIE (P5): najviac štyri, dnes tri.
  *
  *   1. **Priebeh** — dominanta (P1): koľko z koľkých je hotových (64 px).
  *      V nej aj štyri dlaždice fronty, denný rozpočet a dôvod, prečo sa
  *      prípadne nezapisuje.
  *   2. **Zopakovať to, čo sa nepodarilo** — len keď je čo.
- *   3. **Výkon výberu** — predané kusy pred zľavou a teraz.
- *   4. **Položky** — súhrn a len problémové riadky.
+ *   3. **Položky** — súhrn a len problémové riadky.
  *
- * Pod rozklikom (teda mimo počtu sekcií): **pásma**, **technický detail
- * problémových položiek** a **audit stopa**. Do 13. 8. mal detail šesť sekcií
- * a bol vyšší než dve obrazovky; percentá pásiem sú odteraz jednou vetou
- * v hlavičke priebehu a celá tabuľka pásiem je na jeden klik.
+ * Pod rozklikom (teda mimo počtu sekcií): **pásma**, **výkon výberu**,
+ * **technický detail problémových položiek** a **audit stopa**. Do 13. 8. mal
+ * detail šesť sekcií a bol vyšší než dve obrazovky; percentá pásiem sú odteraz
+ * jednou vetou v hlavičke priebehu a celá tabuľka pásiem je na jeden klik.
+ *
+ * VÝŠKA JE SÚČASŤ NÁVRHU (P4, 24. 8. 2026)
+ * ----------------------------------------
+ * Detail meral 1 779 px pri 1440 × 900, teda 1,98 obrazovky pri strope 1,5×
+ * (1 350 px). Zrazil sa na 1 339 px a ani jeden krok nebol „zmenšiť písmo":
+ *
+ *   · pruh fronty a jeho štyri dlaždice idú cez celú kartu a v JEDNOM rade
+ *     (predtým 2×2 v 440 px stĺpci vedľa akcií, hoci pruh má štyri úseky),
+ *   · vysvetľujúci odsek o neistých kusoch (256 znakov) je zrušený — bol to
+ *     P2 a hovoril to, čo hovorí dlaždica aj panel opakovania,
+ *   · deň dobehnutia sa presťahoval k dennému rozpočtu; sú to dve strany tej
+ *     istej otázky a stáli pod sebou,
+ *   · dve dlhé poznámky panelu opakovania stoja vedľa seba (`.retryPane`),
+ *   · „Výkon výberu" je pod rozklikom: dva z jeho troch panelov sú zamknuté,
+ *     takže na žiadnu z troch otázok detailu neodpovedá,
+ *   · tabuľka položiek má pevné šírky stĺpcov a vlastný skrolovací rám.
+ *
+ * Kto sem pridá útvar, nech si najprv odmeria, čo to spraví s výškou —
+ * `npm run snimky` to povie bez spustenej appky.
  *
  * ŠTYRI DLAŽDICE FRONTY SA NEZLIEVAJÚ (D45, kontrakt UI, bod 22)
  * -------------------------------------------------------------
@@ -97,7 +115,6 @@ import { useRefreshable } from '@/components/layout/refresh';
 import { hrefForAnchor } from '@/components/settings/sub-pages';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Icon from '@/components/ui/Icon';
-import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
 import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { TONE_ICON } from '@/components/ui/ToneBadge';
@@ -421,7 +438,10 @@ export function QueueTiles({ campaign }: { campaign: DiscountDetailData['campaig
             detail={
               campaign.itemsFailed === 0
                 ? null
-                : 'tieto produkty zlacnené nie sú — dajú sa zopakovať'
+                : /* Kratšie o dve slová než pôvodné znenie: pri štyroch
+                     dlaždicach vedľa seba rozhoduje o výške celého radu
+                     najdlhší popis, a „tieto produkty" nič nepridávalo. */
+                  'zlacnené nie sú, dajú sa zopakovať'
             }
             testId="tile-failed"
           />
@@ -444,6 +464,90 @@ export function QueueTiles({ campaign }: { campaign: DiscountDetailData['campaig
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * TABUĽKA PROBLÉMOVÝCH POLOŽIEK — ŠTYRI STĹPCE, PEVNÉ ŠÍRKY (UX2, 24. 8. 2026).
+ *
+ * Tabuľka mala päť stĺpcov, každý s `white-space: nowrap` z `table.tbl`, a pri
+ * automatickom rozvrhu si vypýtala ~845 px do rámu širokého 732. Posledný
+ * stĺpec tak končil odrezaný za hranou karty.
+ *
+ * „Poznámka" bola vždy DÔVOD toho, čo hovorí stĺpec „Zapísané" — nie
+ * samostatný údaj. Preto je odteraz druhým riadkom tej istej bunky: tabuľka sa
+ * zmestí, dôvod stojí pri stave, ktorý vysvetľuje, a nič sa nestratilo.
+ *
+ * Šírky nesie `<colgroup>` a `table-layout: fixed`, nie odhad prehliadača —
+ * inak by jeden dlhý názov produktu zase pretlačil stav mimo kartu.
+ *
+ * Vlastný komponent je zámer: rozvrh tabuľky sa dá takto overiť bez appky aj
+ * bez prehliadača (`test/unit/zlavy-ux2-rozvrh.spec.ts`).
+ */
+export function ItemsTable({
+  rows,
+  fallbackPercent,
+}: {
+  readonly rows: readonly DiscountItemView[];
+  /** Percento zľavy pre položky, ktoré vlastné percento nemajú (K3). */
+  readonly fallbackPercent: number;
+}) {
+  return (
+    <table className="tbl">
+      <colgroup>
+        <col className={styles.colName} />
+        <col className={styles.colPrice} />
+        <col className={styles.colPct} />
+        <col className={styles.colState} />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Názov</th>
+          <th className="n">Cena pri príprave</th>
+          <th className="n">Zľava</th>
+          <th>Zapísané</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 ? (
+          <tr>
+            <td className="name lvl-3">Zatiaľ sa nič nepokazilo.</td>
+            <td className="n">—</td>
+            <td className="n">—</td>
+            <td>—</td>
+          </tr>
+        ) : (
+          rows.map((item) => {
+            const say = itemSentence(item.status);
+            /* Trieda aj značka z JEDNEJ hodnoty — dve kópie tej istej
+               podmienky by sa časom rozišli a farba by hovorila iné
+               než tvar. */
+            const itemSig: SigVariant = item.status === 'ok' ? 'ok' : 'warn';
+            const reason = item.priceMismatch ? 'Cena sa medzitým zmenila' : say.reason;
+            return (
+              <tr key={item.id}>
+                <td className="name">{item.nameAtWrite ?? 'bez názvu'}</td>
+                <td className="n" data-l="Cena">
+                  {formatEur(item.priceAtPreview)}
+                </td>
+                <td className="n" data-l="Zľava">
+                  {item.percent === undefined ? `${fallbackPercent} %` : `${item.percent} %`}
+                </td>
+                <td data-l="Zapísané">
+                  <span className={`sig ${itemSig}`}>
+                    <SigMark variant={itemSig} />
+                    {say.label}
+                  </span>
+                  {reason === '' ? null : (
+                    <span className={`lvl-3 ${styles.itemReason}`}>{reason}</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })
+        )}
+      </tbody>
+    </table>
   );
 }
 
@@ -589,92 +693,6 @@ export function DiscountDetail({ id }: { id: number }) {
               </div>
             </div>
 
-            <div className={styles.queueBar} aria-hidden="true">
-              <i data-state="ok" style={{ width: `${shareOf(campaign.itemsOk)}%` }} />
-              <i data-state="uncertain" style={{ width: `${shareOf(campaign.itemsUncertain)}%` }} />
-              <i data-state="failed" style={{ width: `${shareOf(campaign.itemsFailed)}%` }} />
-              <i data-state="pending" style={{ width: `${shareOf(campaign.itemsPending)}%` }} />
-            </div>
-
-            <QueueTiles campaign={campaign} />
-
-            {/*
-             * Pod dlaždicami zostáva už len to, čo v nich NIE JE — deň
-             * dobehnutia. „Ostáva zapísať N" tu bolo tretí raz to isté číslo,
-             * ktoré má vlastnú dlaždicu.
-             */}
-            {data.estimate === null ? (
-              campaign.itemsPending === 0 ? null : (
-                <div className="prog-meta">
-                  <span>odhad dokončenia zatiaľ nevieme</span>
-                </div>
-              )
-            ) : (
-              <div className="prog-meta">
-                <span>
-                  hotové <b className="est">{formatDateSk(data.estimate.date)}</b>
-                  {data.estimate.days === 0 ? null : (
-                    <> · pobeží ešte {dayCount(data.estimate.days)}</>
-                  )}
-                </span>
-              </div>
-            )}
-
-            {campaign.itemsUncertain === 0 ? null : (
-              <div className={styles.startNote}>
-                <Note variant="warn" testId="detail-uncertain-note">
-                  Pri týchto produktoch zápis odišiel, ale odpoveď nedorazila — appka nevie
-                  potvrdiť, že zľava naozaj platí. Ďalší krok je pozrieť ich priamo v eshope a ak
-                  zľava neplatí, spustiť zopakovanie nižšie.
-                </Note>
-              </div>
-            )}
-
-            <div className={styles.liveGrid}>
-              <div>
-                {budget === null ? (
-                  <div className="lvl-3">Dnešný rozpočet zápisov sa nepodarilo prečítať.</div>
-                ) : (
-                  <BudgetMeter
-                    label="Zápisy dnes"
-                    spent={budget.spent}
-                    limit={budget.budget}
-                    resetsAt={queue === null ? null : resetPhrase(queue.limits.nextResetAt)}
-                    testId="detail-budget"
-                  />
-                )}
-              </div>
-              <div className={styles.liveNext}>
-                {budget === null ? (
-                  <span className="lvl-3">
-                    Koľko zápisov dnes ostáva, sa nedá prečítať — odhad preto nedopočítavame.
-                  </span>
-                ) : (
-                  <span className="lvl-3">Rozpočet sa delí medzi všetky zľavy vo fronte.</span>
-                )}
-              </div>
-            </div>
-
-            {/*
-             * D16 — jeden zoznam, nie dve červené škatule pod sebou. Dôvod,
-             * prečo fronta stojí (stav BEHU appky), a prekážky zápisu (stav
-             * DÁT a poistiek) sú dve rôzne veci, ktoré sa nesmú zliať do
-             * jednej vety — ale odpovedajú na tú istú otázku, takže patria do
-             * jedného rámu s jedným nadpisom. Do 19. 8. 2026 bola prvá z nich
-             * vyplnená ružová `Note` a druhá skupina s vlastným nadpisom;
-             * obrazovka tak mala dva poplachy tam, kde je jeden dôvod.
-             */}
-            <StandPanel
-              stand={showStand ? stand : null}
-              cards={alarming}
-              testId="detail-blockers"
-              className="gap-t"
-            />
-
-            <div className="fresh">
-              Podľa vlastných zápisov appky · Dáta k{' '}
-              {formatDateTimeSk(at === null ? null : new Date(at))}
-            </div>
           </div>
 
           <div className={styles.side}>
@@ -688,6 +706,100 @@ export function DiscountDetail({ id }: { id: number }) {
                 stránka. Zoznam je odteraz vľavo — v stĺpci akcií zostávajú len
                 akcie, ktoré niečo menia. */}
           </div>
+        </div>
+
+        {/*
+         * PRUH A JEHO LEGENDA STOJA CEZ CELÚ KARTU (UX2, 24. 8. 2026).
+         *
+         * Do 24. 8. boli vnútri ľavého stĺpca `.top`, teda v 440 px vedľa
+         * stĺpca akcií. Dlaždice sa tam skladali 2×2, hoci pruh nad nimi má
+         * štyri úseky vedľa seba — legenda čítala inak než to, čoho je
+         * legendou, a brala 190 px výšky na obrazovke, ktorá prerastala P4
+         * takmer dvojnásobne. Sú preto pod `.top`, cez celú šírku a v jednom
+         * rade. Akcie zostali hore pri dominante, kde sa o nich rozhoduje.
+         */}
+        <div className={styles.queueBar} aria-hidden="true">
+          <i data-state="ok" style={{ width: `${shareOf(campaign.itemsOk)}%` }} />
+          <i data-state="uncertain" style={{ width: `${shareOf(campaign.itemsUncertain)}%` }} />
+          <i data-state="failed" style={{ width: `${shareOf(campaign.itemsFailed)}%` }} />
+          <i data-state="pending" style={{ width: `${shareOf(campaign.itemsPending)}%` }} />
+        </div>
+
+        <QueueTiles campaign={campaign} />
+
+        {/*
+         * Pod dlaždicami zostáva už len to, čo v nich NIE JE — deň
+         * dobehnutia. „Ostáva zapísať N" tu bolo tretí raz to isté číslo,
+         * ktoré má vlastnú dlaždicu.
+         *
+         * Vysvetľujúci odsek o neistých kusoch, ktorý tu stál do 24. 8. 2026,
+         * je zrušený: 256 znakov výkladu na povrchu je P2 a hovoril to isté,
+         * čo dlaždica „Nevieme, či sa zapísalo" so svojím popisom („zápis
+         * odišiel, odpoveď nedorazila") a čo o kus nižšie hovorí panel
+         * opakovania, ktorý ten ďalší krok aj vykoná.
+         */}
+        <div className={styles.liveGrid}>
+          <div>
+            {budget === null ? (
+              <div className="lvl-3">Dnešný rozpočet zápisov sa nepodarilo prečítať.</div>
+            ) : (
+              <BudgetMeter
+                label="Zápisy dnes"
+                spent={budget.spent}
+                limit={budget.budget}
+                resetsAt={queue === null ? null : resetPhrase(queue.limits.nextResetAt)}
+                testId="detail-budget"
+              />
+            )}
+          </div>
+          <div className={styles.liveNext}>
+            {/*
+             * Deň dobehnutia stál do 24. 8. 2026 vo vlastnom riadku nad
+             * rozpočtom. Sú to dve strany tej istej veci — koľko sa dnes
+             * ešte zapíše a kedy to teda skončí — takže stoja vedľa seba
+             * a obrazovka je o riadok kratšia (P4).
+             */}
+            {data.estimate === null ? (
+              campaign.itemsPending === 0 ? null : (
+                <span className="lvl-3">odhad dokončenia zatiaľ nevieme</span>
+              )
+            ) : (
+              <span className="lvl-3" data-testid="detail-estimate">
+                hotové <b className="est">{formatDateSk(data.estimate.date)}</b>
+                {data.estimate.days === 0 ? null : (
+                  <> · pobeží ešte {dayCount(data.estimate.days)}</>
+                )}
+              </span>
+            )}
+            {budget === null ? (
+              <span className="lvl-3">
+                Koľko zápisov dnes ostáva, sa nedá prečítať — odhad preto nedopočítavame.
+              </span>
+            ) : (
+              <span className="lvl-3">Rozpočet sa delí medzi všetky zľavy vo fronte.</span>
+            )}
+          </div>
+        </div>
+
+        {/*
+         * D16 — jeden zoznam, nie dve červené škatule pod sebou. Dôvod,
+         * prečo fronta stojí (stav BEHU appky), a prekážky zápisu (stav
+         * DÁT a poistiek) sú dve rôzne veci, ktoré sa nesmú zliať do
+         * jednej vety — ale odpovedajú na tú istú otázku, takže patria do
+         * jedného rámu s jedným nadpisom. Do 19. 8. 2026 bola prvá z nich
+         * vyplnená ružová `Note` a druhá skupina s vlastným nadpisom;
+         * obrazovka tak mala dva poplachy tam, kde je jeden dôvod.
+         */}
+        <StandPanel
+          stand={showStand ? stand : null}
+          cards={alarming}
+          testId="detail-blockers"
+          className="gap-t"
+        />
+
+        <div className="fresh">
+          Podľa vlastných zápisov appky · Dáta k{' '}
+          {formatDateTimeSk(at === null ? null : new Date(at))}
         </div>
       </section>
 
@@ -742,12 +854,35 @@ export function DiscountDetail({ id }: { id: number }) {
       {/* 2 · Zopakovanie — len keď je čo. Panel si sadu aj dôvody vypýta sám
           a bez čerstvého potvrdenia nezaradí nič (I3, D16). */}
       {retryWorthShowing ? (
-        <RetryFailed campaignId={campaign.id} onCreated={() => void load()} />
+        /*
+         * Obal je LEN geometria (`zlavy.module.css` → `.retryPane`). Panel
+         * opakovania vlastní iný súbor a jeho obsah sa tu nemení; mení sa to,
+         * že jeho dve dlhé poznámky stoja vedľa seba a nie pod sebou. Sekcia
+         * tým stratila ~70 px z 431 a detail sa vošiel pod strop P4.
+         */
+        <div className={styles.retryPane}>
+          <RetryFailed campaignId={campaign.id} onCreated={() => void load()} />
+        </div>
       ) : null}
 
-      {/* 3 · Výkon výberu — dva z troch panelov sú zamknuté, lebo appka tržby
-          ani vlaňajšie dáta nemá (K8). Žiadny záver o príčine (P8). */}
-      <DiscountPerformance id={campaign.id} />
+      {/*
+       * Výkon výberu — pod rozklikom, teda mimo počtu sekcií (P5, P6).
+       *
+       * Do 24. 8. 2026 to bola tretia sekcia na povrchu. Detail mal ale
+       * 1 692 px, teda 1,88 obrazovky pri strope 1,5 — a z troch panelov tejto
+       * sekcie sú dva zamknuté: tržby v eurách appka nečíta a vlaňajšok nemá
+       * (K8). Na tri otázky, na ktoré detail odpovedá (kde je zápis · čo sa
+       * nepodarilo · čo sa dá urobiť), neodpovedá ani jeden z nich. Predané
+       * kusy sú kontext, a kontext ide pod rozklik skôr než práca.
+       *
+       * Žiadny záver o príčine (P8) — čísla stoja vedľa seba a nič netvrdia.
+       */}
+      <details className={`${styles.fold} ${styles.perfPane}`} data-testid="detail-performance-fold">
+        <summary>Výkon výberu — predané kusy pred zľavou a teraz</summary>
+        <div className={styles.foldBody}>
+          <DiscountPerformance id={campaign.id} />
+        </div>
+      </details>
 
       {/* 4 · Položky — súhrn a len problémové riadky */}
       <section className="sec" data-testid="detail-items">
@@ -763,58 +898,7 @@ export function DiscountDetail({ id }: { id: number }) {
 
         <div className="tbl-frame">
           <div className={styles.itemsScroll}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Názov</th>
-                  <th className="n">Cena pri príprave</th>
-                  <th className="n">Zľava</th>
-                  <th>Zapísané</th>
-                  <th>Poznámka</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.length === 0 ? (
-                  <tr>
-                    <td className="name lvl-3">Zatiaľ sa nič nepokazilo.</td>
-                    <td className="n">—</td>
-                    <td className="n">—</td>
-                    <td>—</td>
-                    <td>—</td>
-                  </tr>
-                ) : (
-                  shown.map((item) => {
-                    const say = itemSentence(item.status);
-                    /* Trieda aj značka z JEDNEJ hodnoty — dve kópie tej istej
-                       podmienky by sa časom rozišli a farba by hovorila iné
-                       než tvar. */
-                    const itemSig: SigVariant = item.status === 'ok' ? 'ok' : 'warn';
-                    return (
-                      <tr key={item.id}>
-                        <td className="name">{item.nameAtWrite ?? 'bez názvu'}</td>
-                        <td className="n" data-l="Cena">
-                          {formatEur(item.priceAtPreview)}
-                        </td>
-                        <td className="n" data-l="Zľava">
-                          {item.percent === undefined
-                            ? `${campaign.percent} %`
-                            : `${item.percent} %`}
-                        </td>
-                        <td data-l="Zapísané">
-                          <span className={`sig ${itemSig}`}>
-                            <SigMark variant={itemSig} />
-                            {say.label}
-                          </span>
-                        </td>
-                        <td data-l="Poznámka">
-                          {item.priceMismatch ? 'Cena sa medzitým zmenila' : say.reason}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+            <ItemsTable rows={shown} fallbackPercent={campaign.percent} />
           </div>
           <div className="tbl-foot">
             <span>

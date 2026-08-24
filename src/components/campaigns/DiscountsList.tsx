@@ -70,9 +70,26 @@
  *     otvorená, hovorí o fronte jej detail — dva rámy s tým istým dôvodom
  *     vedľa seba sú presne defekt D16, len na šírku.
  *
- * SEKCIE (P5): jedna. Rebrík vľavo je výberová lišta, nie sekcia obsahu —
- * tú istú rolu má ľavý panel appky; sekcie počíta pravý stĺpec. Skončené sú
- * pod rozklikom.
+ * SEKCIE (P5): dve, kým nie je otvorená zľava — karta zľavy na čele a „Čo
+ * čaká na pozretie". Pri otvorenej zľave je vpravo detail a sekcie počíta on.
+ * Rebrík vľavo je výberová lišta, nie sekcia obsahu — tú istú rolu má ľavý
+ * panel appky. Skončené sú pod rozklikom.
+ *
+ * PRÁZDNE MIESTO JE ZAHODENÁ ODPOVEĎ (24. 8. 2026)
+ * ------------------------------------------------
+ * Obrazovka končila na ~390 px z 900 a spodné dve tretiny boli holé. Nebola
+ * to chyba rozloženia: appka mala načítané dáta v ruke a nepoužila ich.
+ * Doplnené sú dve veci a ani jedna sa nedopočítava — obe prišli zo servera:
+ *
+ *   · **pásma zľavy na čele** (`/api/campaigns` → `tiers`). Dominantou je pri
+ *     pásmach ROZSAH („15–30 %"), a rozsah bez pásiem nie je odpoveď na
+ *     otázku obrazovky, len jej náznak.
+ *   · **Čo čaká na pozretie** (`/api/queue` → `attention`). Tá istá odpoveď,
+ *     z ktorej sa už dnes číta dôvod stojacej fronty, nesie aj počty, mená
+ *     dotknutých zliav a vetu o ďalšom kroku.
+ *
+ * Čo sa tam NEDALO: súčty naprieč zľavami (to by bolo dopočítavanie) a denný
+ * rozpočet zápisov (ten na túto obrazovku nepatrí, pozri bod 4 nižšie).
  *
  * Vlastník: V11.
  */
@@ -91,6 +108,7 @@ import {
 import {
   alarmingCards,
   queueStandSentence,
+  type QueueAttentionGroup,
   type QueueSnapshotView,
 } from '@/components/campaigns/queue-model';
 import {
@@ -98,11 +116,12 @@ import {
   listDiscounts,
   stopDiscountQueue,
   type DiscountRow,
+  type TierView,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
 import EmptyState from '@/components/ui/EmptyState';
 import Note from '@/components/ui/Note';
-import { FlagMark } from '@/components/ui/StatusMark';
+import { FlagMark, SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 import { formatDateSk } from '@/lib/ui/format';
 
@@ -210,7 +229,7 @@ function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
  * názov, stav, okno a koľko z koľkých je zapísaných. Ostatné čísla nezmizli —
  * stoja vpravo v detaile, ktorý sa otvorí jedným klikom a nikam neodvedie.
  */
-function PickRow({ row, selected }: { row: DiscountRow; selected: boolean }) {
+export function PickRow({ row, selected }: { row: DiscountRow; selected: boolean }) {
   const sentence = sentenceOf(row);
   const finished = sentence.state === 'skončila';
   const head = percentHeadline(row.percent, row.tiers);
@@ -231,9 +250,10 @@ function PickRow({ row, selected }: { row: DiscountRow; selected: boolean }) {
 
       <span className="zpick-main">
         {/*
-          Názov je jediná bunka riadku, ktorú appka reže na tri bodky.
-          `title` je preto povinný — bez neho sa dlhý názov nedá dočítať inak
-          než otvorením detailu.
+          Od 24. 8. 2026 sa v riadku nereže NIČ: percento dostalo šírku, ktorú
+          potrebuje jeho rozsah, a názov sa preto láme na druhý riadok namiesto
+          troch bodiek. `title` zostáva pre myš — je to lacná pomôcka, nie
+          náhrada za čitateľný názov.
         */}
         <span className="zpick-name" title={row.name}>
           {row.name}
@@ -253,19 +273,179 @@ function PickRow({ row, selected }: { row: DiscountRow; selected: boolean }) {
           )}
         </span>
 
+        {/*
+          Dva riadky, nie jeden orezaný. Do jedného sa okno platnosti aj počet
+          zapísaných nezmestili a `text-overflow` odkrajoval sprava — teda
+          práve to číslo, kvôli ktorému meta riadok existuje („…zapísané 948
+          z “). Skrátiť sa nedalo ani jedno: okno hovorí, KEDY zľava svieti,
+          počet KAM sa zápis dostal. Keď je aj tak úzko, ustúpi odhad
+          dobehnutia — ten stojí aj na karte na čele aj v detaile.
+        */}
         <span className="zpick-meta lvl-3">
-          {formatDateSk(row.dateFrom)} – {formatDateSk(row.dateTo)}
-          <Dot />
-          zapísané {formatCountSk(row.itemsOk)} z {formatCountSk(row.itemsTotal)}
-          {row.estimate === null ? null : (
-            <>
-              <Dot />
-              <span className="est">{formatDateSk(row.estimate.date)}</span>
-            </>
-          )}
+          <span className={styles.pickWindow}>
+            {formatDateSk(row.dateFrom)} – {formatDateSk(row.dateTo)}
+          </span>
+          <span className={styles.pickWritten}>
+            <span className={styles.pickCounts} data-testid="row-written">
+              zapísané {formatCountSk(row.itemsOk)} z {formatCountSk(row.itemsTotal)}
+            </span>
+            {row.estimate === null ? null : (
+              <span className={styles.pickEst}>
+                <Dot />
+                <span className="est">{formatDateSk(row.estimate.date)}</span>
+              </span>
+            )}
+          </span>
         </span>
       </span>
     </Link>
+  );
+}
+
+/* ═════════════════ čím je vyplnená pravá polovica obrazovky ═══════════════ */
+
+/**
+ * Pásma zľavy na čele.
+ *
+ * Dominantou obrazovky je pri pásmach ROZSAH („15–30 %“). Rozsah sám o sebe
+ * nehovorí, čo ktorý produkt dostal — do 24. 8. 2026 stálo pod ním len
+ * „3 pásma“ a jediná cesta k percentám viedla cez detail. Čísla pritom appka
+ * má rovno v odpovedi `/api/campaigns`, takže sa nič nedopočítava ani
+ * nedoťahuje: vypisuje sa presne to, čo prišlo.
+ *
+ * V detaile sú pásma pod rozklikom, tu nie — a je to zámer. Detail má na
+ * povrchu svoju vlastnú prácu (priebeh, oprava, položky); zoznam nemá inú
+ * otázku než „o koľko percent sa zlacňuje“, a to je práve táto tabuľka.
+ */
+export function LeadTiers({ tiers }: { tiers: readonly TierView[] }) {
+  if (tiers.length <= 1) return null;
+
+  return (
+    <div className={styles.leadTiers} data-testid="leading-tiers">
+      <div className={`lvl-3 ${styles.leadTiersHead}`}>Podľa čoho ktorý produkt zlacnel</div>
+      <table className={styles.tiersRead}>
+        <thead>
+          <tr>
+            <th>Pásmo</th>
+            <th>Pravidlo</th>
+            <th className="n">Produktov</th>
+            <th className="n">Zľava</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tiers.map((tier) => (
+            <tr key={tier.ord}>
+              <td>
+                <b className="lvl-2">{tier.ord}</b>
+              </td>
+              <td>{tier.label}</td>
+              <td className="n num">{formatCountSk(tier.itemsCount)}</td>
+              <td className="n num">
+                <b className="lvl-2">{tier.percent} %</b>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Jedna skupina pozornosti z `/api/queue` — stav, počet, kroky, dotknuté zľavy. */
+interface WatchGroup {
+  readonly key: string;
+  readonly sig: SigVariant;
+  /* Slovo pri značke. Stav nikdy nenesie iba farba (§3.2). */
+  readonly word: string;
+  readonly group: QueueAttentionGroup;
+}
+
+/**
+ * ČO ČAKÁ NA POZRETIE — druhá sekcia zoznamu (UX2, 24. 8. 2026).
+ *
+ * Obrazovka končila na ~390 px z 900 a zvyšok bol prázdny. Nebolo to
+ * rozloženie, bola to zahodená odpoveď: `/api/queue` sa na tejto obrazovke
+ * číta už dnes (kvôli vete o stojacej fronte) a v tej istej odpovedi príde
+ * `attention` — počty, MENÁ dotknutých zliav a veta o ďalšom kroku. Zoznam
+ * z toho nepoužil nič.
+ *
+ * Prečo to nie je duplicita karty na čele (D16): karta hovorí, ako ďaleko je
+ * JEDNA zľava. Táto sekcia hovorí, ktorých zliav sa problém týka a čo s ním
+ * robiť — to karta niesť nevie a nikde inde na obrazovke to nestojí.
+ *
+ * Nekreslí sa, keď nie je čo: prázdny rám s nulami by bol veta, ktorá stojí
+ * na obrazovke stále a nič nehlási (kontrakt UI, bod 3).
+ */
+export function WatchSection({ queue }: { queue: QueueSnapshotView }) {
+  const groups: WatchGroup[] = [];
+  if (queue.attention.failed !== null && queue.attention.failed.items > 0) {
+    groups.push({
+      key: 'failed',
+      sig: 'bad',
+      word: 'nepodarilo sa',
+      group: queue.attention.failed,
+    });
+  }
+  if (queue.attention.uncertain !== null && queue.attention.uncertain.items > 0) {
+    // D45 — neisté nie je zlyhané a nikdy sa s ním nesčíta.
+    groups.push({
+      key: 'uncertain',
+      sig: 'warn',
+      word: 'nevieme, či sa zapísalo',
+      group: queue.attention.uncertain,
+    });
+  }
+  if (groups.length === 0) return null;
+
+  return (
+    <section className="sec" data-testid="discounts-attention">
+      <div className="sec-h">
+        <h2>Čo čaká na pozretie</h2>
+        <div className="act lvl-3">
+          {/* Odhad celej fronty, nie tejto jednej zľavy — preto „celá fronta“.
+              Keď ho appka nemá, povie to; nula by tu bola tvrdenie (P7). */}
+          {queue.estimate === null ? (
+            'celá fronta — odhad dobehnutia zatiaľ nevieme'
+          ) : (
+            <>
+              celá fronta hotová <b className="est">{formatDateSk(queue.estimate.date)}</b>
+            </>
+          )}
+        </div>
+      </div>
+
+      {groups.map((item) => (
+        <div className={styles.watch} key={item.key} data-testid={`watch-${item.key}`}>
+          <div className={styles.watchHead}>
+            <span className={`sig ${item.sig}`}>
+              <SigMark variant={item.sig} />
+              {item.word}
+            </span>
+            <b className="lvl-2 num">{formatCountSk(item.group.items)}</b>
+            <span className="lvl-3">
+              {pluralSk(item.group.items, 'kus', 'kusy', 'kusov')}
+            </span>
+          </div>
+          {item.group.what === '' ? null : (
+            <div className={`lvl-3 ${styles.watchWhat}`}>{item.group.what}</div>
+          )}
+          {item.group.nextStep === '' ? null : (
+            <div className={`hint ${styles.watchStep}`}>{item.group.nextStep}</div>
+          )}
+          {item.group.campaigns.length === 0 ? null : (
+            <div className={styles.watchWho}>
+              {item.group.campaigns.map((one) => (
+                <Link key={one.campaignId} className="lvl-3" href={`/zlavy/${one.campaignId}`}>
+                  {one.name} <Dot />
+                  {formatCountSk(one.items)}
+                </Link>
+              ))}
+              {item.group.truncated ? <span className="lvl-3">a ďalšie zľavy</span> : null}
+            </div>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -415,8 +595,9 @@ export function DiscountsList({ selectedId = null, detail = null }: DiscountsLis
 
       {empty ? null : (
         <div className="zsplit">
-          {/* MAJSTER — rebrík výberu vľavo. */}
-          <div className="zsplit-rail">
+          {/* MAJSTER — rebrík výberu vľavo. `styles.rail` je len háčik pre
+              opravy geometrie riadku; tvar rebríka kreslí `globals.css`. */}
+          <div className={`zsplit-rail ${styles.rail}`}>
             <div className="zlist" data-testid="discounts-active">
               <RailHeader />
               <div className={styles.listScroll}>
@@ -545,8 +726,16 @@ export function DiscountsList({ selectedId = null, detail = null }: DiscountsLis
                           )}
                         </div>
                       </div>
+
+                      {/* Pásma zľavy na čele — výklad rozsahu v dominante. */}
+                      <LeadTiers tiers={featured.tiers} />
                     </section>
                   )}
+
+            {/* Druhá sekcia — len kým nie je otvorená zľava. Pri otvorenej
+                zľave hovorí o nepodarených a neistých kusoch jej detail a dva
+                rovnaké zoznamy vedľa seba sú D16. */}
+            {selectedId === null && queue !== null ? <WatchSection queue={queue} /> : null}
           </div>
         </div>
       )}
