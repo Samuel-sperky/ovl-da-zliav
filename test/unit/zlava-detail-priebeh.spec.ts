@@ -56,6 +56,12 @@ const DETAIL = read('../../src/components/campaigns/DiscountDetail.tsx');
 /**
  * Zdroj bez komentárov — všetko, čo sa môže vykresliť, a nič, čo sa nemôže.
  * Rez od prvého `data-testid` vynechával skoré návraty; toto ich má.
+ *
+ * MERIA SA VÝHRADNE TOTO, nikdy surový `DETAIL`, a to v OBOCH smeroch.
+ * Komentár vie oklamať oba: `not.toContain('TONE_GLYPH')` padne na vete, ktorá
+ * o TONE_GLYPH len píše (a taká veta tu roky stála), a `toContain('Zapísané')`
+ * naopak prejde na slove, ktoré je iba v komentári a nikto ho neuvidí.
+ * `DETAIL` sa drží len ako vstup pre túto funkciu.
  */
 function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
@@ -88,14 +94,14 @@ function textOf(html: string): string {
 describe('A — štyri dlaždice zostávajú, duplicita zmizla inde (D15, bod 22)', () => {
   it('všetky štyri stavy fronty majú vlastnú dlaždicu', () => {
     for (const tile of ['tile-ok', 'tile-pending', 'tile-failed', 'tile-uncertain']) {
-      expect(DETAIL).toContain(`testId="${tile}"`);
+      expect(DETAIL_JSX).toContain(`testId="${tile}"`);
     }
   });
 
   it('„nevieme, či sa zapísalo" ostáva vlastným stavom, nezliatym so zlyhaním', () => {
-    expect(DETAIL).toContain('Nevieme, či sa zapísalo');
-    expect(DETAIL).toContain('Nepodarilo sa');
-    expect(DETAIL).toContain('zápis odišiel, odpoveď nedorazila');
+    expect(DETAIL_JSX).toContain('Nevieme, či sa zapísalo');
+    expect(DETAIL_JSX).toContain('Nepodarilo sa');
+    expect(DETAIL_JSX).toContain('zápis odišiel, odpoveď nedorazila');
   });
 
   it('veta, ktorá tie isté čísla hovorila ešte raz slovami, je preč', () => {
@@ -106,7 +112,7 @@ describe('A — štyri dlaždice zostávajú, duplicita zmizla inde (D15, bod 22
 
   it('pruh priebehu je rozdelený na tie isté štyri stavy ako dlaždice', () => {
     for (const state of ['ok', 'uncertain', 'failed', 'pending']) {
-      expect(DETAIL).toContain(`data-state="${state}"`);
+      expect(DETAIL_JSX).toContain(`data-state="${state}"`);
       expect(CSS).toContain(`.queueBar i[data-state='${state}']`);
     }
   });
@@ -125,14 +131,14 @@ describe('A — štyri dlaždice zostávajú, duplicita zmizla inde (D15, bod 22
     // vracal samé prázdne reťazce — z „glyf + slovo" ostala medzera navyše.
     // Mapa je preč. Kým dlaždice dostanú <Icon>, nesie stav FARBA (data-state
     // + --st-*) a SLOVO v popisku; musia byť oba, inak je to len farba.
-    expect(DETAIL).not.toContain('TONE_GLYPH');
+    expect(DETAIL_JSX).not.toContain('TONE_GLYPH');
     for (const word of ['Zapísané', 'Čaká na zápis', 'Nepodarilo sa', 'Nevieme, či sa zapísalo']) {
-      expect(DETAIL, word).toContain(word);
+      expect(DETAIL_JSX, word).toContain(word);
     }
   });
 
   it('prúžok farby dostane len dlaždica s nenulovým číslom — nula nie je poplach', () => {
-    expect(DETAIL).toContain('anyOf(campaign.itemsFailed)');
+    expect(DETAIL_JSX).toContain('anyOf(campaign.itemsFailed)');
     expect(CSS).toContain(".queueTile[data-any='ano'][data-state='failed']");
   });
 });
