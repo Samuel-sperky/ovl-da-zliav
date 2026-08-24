@@ -60,7 +60,36 @@ interface WireRow {
   readonly quantity: WireValue<number>;
   readonly variantStock: WireValue<number>;
   readonly variants: readonly WireVariant[];
-  readonly full: Record<string, unknown> | null;
+  readonly full: WireFull | null;
+}
+
+/**
+ * Blok spoza kľúča, PRESNE ako ho posiela `/api/catalog/details`.
+ *
+ * Trasa vracia `CatalogDetailRow` z repozitára doslova, takže toto je zrkadlo
+ * typu `CatalogFullDetail` v `lib/repo/catalog.repo.ts`. Že sa tie dva
+ * nerozídu, stráži typová kontrola v `test/unit/detaily-mapovanie.spec.ts` —
+ * komponenty z `@/lib/repo/` neimportujú, tak sa zhoda vynucuje tam.
+ *
+ * PREDTÝM tu stálo `Record<string, unknown>` a čítalo sa z neho voľnými
+ * reťazcami. Kompilátor tak nemal čo skontrolovať a šesť mien bolo zlých:
+ * `wholesalePrice`, `priceWithTax`, `addedAt`, `lastOrderedAt`, `orderedTotal`
+ * a `categories` čítané ako reťazce. Dnes to vidieť nie je — bez oprávnenia
+ * `product:read` je `full` vždy `null` — ale po jeho doplnení by appka o šiestich
+ * existujúcich hodnotách tvrdila „nemá". To je horšie než mlčať.
+ */
+interface WireFull {
+  readonly purchasePrice: number | null;
+  readonly margin: number | null;
+  readonly marginPercent: number | null;
+  readonly sellPrice: number | null;
+  readonly sellPriceWithVat: number | null;
+  readonly active: boolean | null;
+  readonly dateAdd: string | null;
+  readonly lastTimeInOrder: string | null;
+  readonly qtyInOrders: number | null;
+  readonly supplier: string | null;
+  readonly categories: readonly number[] | null;
 }
 
 interface WireResponse {
@@ -99,19 +128,35 @@ function toVariant(v: WireVariant): ProductVariantView {
 
 function toItem(row: WireRow): ProductExtraView {
   const full = row.full;
-  const text = (key: string): string | null => {
+  /*
+   * Kľúč je `keyof WireFull`, nie voľný reťazec. Práve to je oprava: preklep
+   * alebo premenované pole na serveri je odteraz chyba prekladu, nie tiché
+   * „nemá" na obrazovke.
+   */
+  const num = (key: keyof WireFull): number | null => {
+    const raw = full?.[key];
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+  };
+  const text = (key: keyof WireFull): string | null => {
     const raw = full?.[key];
     return typeof raw === 'string' && raw.length > 0 ? raw : null;
   };
-  const num = (key: string): number | null => {
-    const raw = full?.[key];
-    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+  /** Peniaze prídu ako číslo; povrch ich chce ako reťazec a neprepočítava. */
+  const money = (key: keyof WireFull): string | null => {
+    const raw = num(key);
+    return raw === null ? null : String(raw);
   };
 
   return {
     productId: row.productId,
-    description: text('description'),
-    shortDescription: text('shortDescription'),
+    /*
+     * Popis repozitár NENESIE. Čítal sa tu z bloku spoza kľúča, kde nikdy
+     * nebol — teda vždy `null`, len to nebolo vidieť. Nechávame `null`
+     * priznane: keď appka popis raz čítať bude, doplní ho tá istá cesta,
+     * ktorá ho prinesie, a nie tento preklad.
+     */
+    description: null,
+    shortDescription: null,
     variants: row.variants.map(toVariant),
     keyed:
       full === null
@@ -119,24 +164,27 @@ function toItem(row: WireRow): ProductExtraView {
         : {
             reference: row.reference.value,
             ean13: row.ean13.value,
-            wholesalePrice: text('wholesalePrice'),
-            margin: text('margin'),
+            wholesalePrice: money('purchasePrice'),
+            margin: money('margin'),
             marginPercent: num('marginPercent'),
-            priceWithTax: text('priceWithTax'),
-            active: typeof full['active'] === 'boolean' ? (full['active'] as boolean) : null,
-            addedAt: text('addedAt'),
-            lastOrderedAt: text('lastOrderedAt'),
+            priceWithTax: money('sellPriceWithVat'),
+            active: full.active,
+            addedAt: text('dateAdd'),
+            lastOrderedAt: text('lastTimeInOrder'),
             stockQuantity: row.quantity.value,
-            orderedTotal: num('orderedTotal'),
+            orderedTotal: num('qtyInOrders'),
             supplier: text('supplier'),
-            shopDiscountPercent: num('shopDiscountPercent'),
-            shopDiscountFrom: text('shopDiscountFrom'),
-            shopDiscountTo: text('shopDiscountTo'),
-            categories: Array.isArray(full['categories'])
-              ? (full['categories'] as unknown[]).filter(
-                  (c): c is string => typeof c === 'string',
-                )
-              : [],
+            /*
+             * Skutočnú zľavu v eshope repozitár dnes NENESIE — `CatalogFullDetail`
+             * tie tri polia nemá. Nie je to teda „zamknuté za kľúčom", ale
+             * „appka to zatiaľ nečíta". Kým to tak je, `null` je jediná pravdivá
+             * odpoveď; vymyslieť sa nedá a hádať sa nesmie (I11).
+             */
+            shopDiscountPercent: null,
+            shopDiscountFrom: null,
+            shopDiscountTo: null,
+            /* Kategórie prídu ako ID, nie mená. Povrch ich chce ako reťazce. */
+            categories: (full.categories ?? []).map((id) => String(id)),
           },
     at: row.fetchedAt ?? '',
   };
