@@ -6,8 +6,53 @@
  * Audit je append-only: tento modul má výhradne GET volania, žiadna mutácia
  * neexistuje (I4). Snapshoty prichádzajú zo servera už redigované (I1) —
  * UI ich len zobrazí.
+ *
+ * ODPOVEĎ SERVERA SA ČÍTA, NIE PRETYPÚVA (od 24. 8. 2026)
+ * ------------------------------------------------------
+ * Do 24. 8. 2026 tu stálo `getJson<AuditPage>(…)` a `getJson<AuditDetail>(…)`.
+ * `Envelope<T>` sa v `campaigns/api.ts` overuje len po obálku — `T` za behu
+ * neexistuje, takže obsah `data` nikto nečítal. Na obrazovke Histórie to
+ * znamenalo dve biele obrazovky namiesto hlásenia:
+ *
+ *  - `AuditPanel` robí `setPage(res.data)` a hneď `page.data.map(…)`. Keď
+ *    `data.data` nebolo pole (alebo chýbalo), spadol render, nie čítanie.
+ *  - `AuditDetailDrawer` číta `detail.ok === null` ako tri stavy. Keby prišlo
+ *    čokoľvek iné než `true`/`false`/`null`, vypadla by tretia vetva a riadok
+ *    by tvrdil „neúspešné" o udalosti, o ktorej appka nevie nič.
+ *
+ * Preto sa obsah overuje TU, v tom istom vzore ako `dashboard/api.ts`:
+ * `getJson<unknown>()` a k tomu `parseX()` postavené z `dashboard/json.ts`.
+ * Tie helpery majú jedno miesto zámerne — tretia kópia tých istých piatich
+ * funkcií by sa rozišla s prvými dvomi a Historia by začala čítať voľnejšie
+ * než Prehľad.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *  1. **Nečitateľný RIADOK sa zahodí, nečitateľná STRÁNKA je chyba.** Riadok
+ *     bez `id` alebo bez času sa nedá ani zobraziť, ani otvoriť — zostal by
+ *     z neho prázdny pruh v tabuľke. Ale keď `data` nie je pole, appka o obsahu
+ *     stránky nevie NIČ a musí to priznať vetou (`unreadable_body`), nie
+ *     prázdnou tabuľkou, ktorá sa číta ako „nič sa nestalo". História je
+ *     dôkazný záznam; „prázdno" a „neprečítal som to" sú dve rôzne tvrdenia.
+ *  2. **`ok` je TRI stavy, nie dva.** `null` znamená „appka nevie, či to
+ *     dopadlo" a `readTriState` je jediné, čo to od `false` odlíši. `readFlag`
+ *     by z „neviem" urobil „neúspech" a audit by tvrdil viac, než prečítal.
+ *  3. **`actor` je uzavretý zoznam.** Neznámu rolu appka nevypustí na povrch
+ *     (K10) — `readCode` z nej urobí `null` a riadok padne na `'system'`,
+ *     teda na „appka", nie na surový kód z databázy.
+ *  4. **`eventType` je zámerne OTVORENÝ reťazec.** Nový kód udalosti zo servera
+ *     sa nezahadzuje: `auditEventLabel()` mu dá vetu „iná udalosť appky" a čas
+ *     s výsledkom zostanú čitateľné. Zahodiť riadok preto, že appka nepozná
+ *     jeho meno, by z auditu urobil neúplný dôkaz.
  */
-import { getJson } from '@/components/campaigns/api';
+import { getJson, type Envelope } from '@/components/campaigns/api';
+import {
+  asRecord,
+  readCode,
+  readCount,
+  readText,
+  readTriState,
+} from '@/components/dashboard/json';
 
 export interface AuditRow {
   id: number;
@@ -142,5 +187,103 @@ export function toQuery(f: AuditFilterState): string {
   return q.toString();
 }
 
-export const getAudit = (f: AuditFilterState) => getJson<AuditPage>(`/api/audit?${toQuery(f)}`);
-export const getAuditDetail = (id: number) => getJson<AuditDetail>(`/api/audit/${id}`);
+/* ── čítanie odpovede servera ──────────────────────────────────────────── */
+
+/** Roly, ktoré appka pozná. Čokoľvek iné je `null` a padá na `'system'`. */
+const ACTORS: readonly AuditRow['actor'][] = ['user', 'scheduler', 'system'];
+
+/**
+ * Jeden riadok histórie, alebo `null`, keď sa nedá ani zobraziť.
+ *
+ * Hranica je `id` a `ts`: bez identity sa riadok nedá otvoriť do detailu a bez
+ * času sa nedá zaradiť. Všetko ostatné je nullable UŽ V TYPE, takže nečitateľné
+ * pole je `null` — teda „appka to neprečítala", nie nula a nie prázdny reťazec.
+ */
+export function parseAuditRow(raw: unknown): AuditRow | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const id = readCount(record, 'id');
+  const ts = readText(record, 'ts');
+  if (id === null || ts === null) return null;
+  return {
+    id,
+    ts,
+    actor: readCode(record, 'actor', ACTORS) ?? 'system',
+    userId: readCount(record, 'userId'),
+    // Otvorený reťazec zámerne (bod 4 hlavičky) — vetu mu dá `auditEventLabel`.
+    eventType: readText(record, 'eventType') ?? '',
+    ok: readTriState(record, 'ok'),
+    campaignId: readCount(record, 'campaignId'),
+    campaignItemId: readCount(record, 'campaignItemId'),
+    productId: readCount(record, 'productId'),
+    operationId: readText(record, 'operationId'),
+    requestId: readText(record, 'requestId'),
+    httpStatus: readCount(record, 'httpStatus'),
+    message: readText(record, 'message'),
+  };
+}
+
+/**
+ * Stránka histórie, alebo `null`, keď o jej obsahu appka nevie nič.
+ *
+ * `page`/`perPage`/`total` padajú na hodnoty, ktoré sa dajú prečítať z toho, čo
+ * naozaj prišlo — `total` na počet prečítaných riadkov, nie na nulu: nula by
+ * z tabuľky, ktorá riadky MÁ, urobila vetu „história je prázdna".
+ */
+export function parseAuditPage(raw: unknown, fallbackPerPage: number): AuditPage | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const rows = record['data'];
+  if (!Array.isArray(rows)) return null;
+  const data = rows.map(parseAuditRow).filter((row): row is AuditRow => row !== null);
+  return {
+    data,
+    page: readCount(record, 'page') ?? 1,
+    perPage: readCount(record, 'perPage') ?? fallbackPerPage,
+    total: readCount(record, 'total') ?? data.length,
+  };
+}
+
+/** Detail jednej udalosti. Snapshoty ostávajú `unknown` — kreslí ich drawer. */
+export function parseAuditDetail(raw: unknown): AuditDetail | null {
+  const row = parseAuditRow(raw);
+  if (row === null) return null;
+  const record = asRecord(raw);
+  if (record === null) return null;
+  return {
+    ...row,
+    beforeSnapshot: record['beforeSnapshot'],
+    afterSnapshot: record['afterSnapshot'],
+    priceMismatch: record['priceMismatch'] === true,
+    ip: readText(record, 'ip'),
+    userAgent: readText(record, 'userAgent'),
+  };
+}
+
+/**
+ * Chybová obálka pre telo, ktoré prišlo, ale nedá sa prečítať.
+ *
+ * Zámerne NIE prázdna stránka (bod 1 hlavičky): „neprečítal som to" a „nič sa
+ * nestalo" sú v dôkaznom zázname dve rôzne tvrdenia.
+ */
+const unreadable = <T,>(): Envelope<T> => ({
+  ok: false,
+  error: {
+    code: 'unreadable_body',
+    message: 'Históriu sa nepodarilo prečítať. Skúste obrazovku obnoviť.',
+  },
+});
+
+export async function getAudit(f: AuditFilterState): Promise<Envelope<AuditPage>> {
+  const res = await getJson<unknown>(`/api/audit?${toQuery(f)}`);
+  if (!res.ok) return res;
+  const page = parseAuditPage(res.data, f.perPage);
+  return page === null ? unreadable<AuditPage>() : { ok: true, data: page };
+}
+
+export async function getAuditDetail(id: number): Promise<Envelope<AuditDetail>> {
+  const res = await getJson<unknown>(`/api/audit/${id}`);
+  if (!res.ok) return res;
+  const detail = parseAuditDetail(res.data);
+  return detail === null ? unreadable<AuditDetail>() : { ok: true, data: detail };
+}

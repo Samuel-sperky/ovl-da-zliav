@@ -7,7 +7,39 @@
  * kontraktu z BUILD-SPEC §5. Všetky mutácie idú výhradne cez `fetch` na
  * `/api/campaigns/*` (žiadny Server Action, I3) a lokálna validácia (I9)
  * beží VŽDY pred odoslaním na server.
+ *
+ * ČO TENTO MODUL O ODPOVEDI SERVERA OVERUJE
+ * -----------------------------------------
+ * Presne jednu vec: že OBÁLKA je obálka. Do 24. 8. 2026 stačilo, aby v tele
+ * stál kľúč `ok` — čokoľvek ďalšie sa pretypovalo na `Envelope<T>` a poslalo
+ * volajúcemu. Znamenalo to tri crashe, ktoré vyzerali ako biela obrazovka
+ * a nie ako chyba servera:
+ *
+ *  - `{ ok: true }` bez `data` → volajúci robí `res.data.items` nad `undefined`,
+ *  - `{ ok: false }` bez `error` → volajúci robí `res.error.message`,
+ *  - `{ ok: 'yes' }` → `body.ok` je truthy string, takže sa vetva `ok === true`
+ *    v TypeScripte tvári ako splnená a `data` je zase `undefined`.
+ *
+ * Od 24. 8. 2026 sa každý z tých troch prípadov zmení na REGULÁRNU chybovú
+ * obálku s kódom `bad_envelope`, takže obrazovka ukáže vetu a nie prázdno.
+ * Stráži to `test/unit/api-citanie-odpovedi.spec.ts` nad `getJson()`
+ * a `postJson()`, teda nad správaním — nie nad textom tohto súboru.
+ *
+ * ČO TENTO MODUL O ODPOVEDI SERVERA NEOVERUJE
+ * -------------------------------------------
+ * Obsah `data`. `getJson<T>()` je generický prenos a `T` v ňom za behu
+ * neexistuje — kto potrebuje overený OBSAH, dostane ho tak, ako `fetchSession()`
+ * nižšie alebo `getAudit()` v `components/audit/api.ts`: `getJson<unknown>()`
+ * a k tomu `parseX()` postavené z `components/dashboard/json.ts`. Tá cesta je
+ * jediná; druhá implementácia tých istých piatich funkcií by sa o mesiac
+ * rozišla s prvou a jedna obrazovka by začala čítať voľnejšie než druhá.
+ *
+ * Čo sa tým smie TICHO pokaziť: obálka overená neznamená obsah overený.
+ * `getJson<CampaignDetailResponse>()` naďalej vráti `data`, ktoré nikto
+ * nečítal — len už nikdy `undefined`. Zoznam obrazoviek, ktoré na ten obsah
+ * ešte len čakajú, je v hlavičke `test/unit/api-citanie-odpovedi.spec.ts`.
  */
+import { asRecord, readText } from '@/components/dashboard/json';
 import type {
   CampaignKind,
   CampaignMode,
@@ -193,17 +225,64 @@ export interface SessionInfo {
 
 /* ── fetch helpery ─────────────────────────────────────────────────────── */
 
-async function parse<T>(res: Response): Promise<Envelope<T>> {
-  try {
-    const body = (await res.json()) as Envelope<T>;
-    if (body && typeof body === 'object' && 'ok' in body) return body;
-  } catch {
-    /* neplatný JSON — spadne nižšie */
-  }
+/** Objekt prečítaný z JSON, ktorého kľúče ešte nikto neoveril. */
+type UncheckedBody = Record<string, unknown>;
+
+/** Telo odpovede ako objekt, alebo `null` pri čomkoľvek inom (aj pri poli). */
+function asBody(value: unknown): UncheckedBody | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as UncheckedBody;
+}
+
+/**
+ * Chybová obálka z toho, čo sa v tele dalo prečítať.
+ *
+ * Kód a vetu si berie zo servera, KEĎ sú to naozaj neprázdne reťazce. Inak
+ * vlastný kód a vlastnú vetu — volajúci vykresľuje `error.message`, takže
+ * `undefined` v ňom je prázdny riadok, nie hlásenie.
+ */
+function errorEnvelope(body: UncheckedBody | null, fallbackCode: string): Envelope<never> {
+  const raw = body === null ? null : asBody(body['error']);
+  const code = raw === null ? null : raw['code'];
+  const message = raw === null ? null : raw['message'];
   return {
     ok: false,
-    error: { code: `http_${res.status}`, message: 'Server vrátil neočakávanú odpoveď.' },
+    error: {
+      code: typeof code === 'string' && code !== '' ? code : fallbackCode,
+      message:
+        typeof message === 'string' && message !== ''
+          ? message
+          : 'Server vrátil neočakávanú odpoveď.',
+      ...(raw !== null && 'detail' in raw ? { detail: raw['detail'] } : {}),
+    },
   };
+}
+
+/**
+ * Telo odpovede → obálka, o ktorej sa dá tvrdiť, že to obálka JE.
+ *
+ * `ok` sa porovnáva EXPLICITNE proti `true`/`false` (nie truthy): Turbopack tu
+ * v tomto projekte už raz zahodil skratkové porovnanie a `ok: 'yes'` by inak
+ * prešlo ako úspech s `data: undefined`. A úspešná obálka musí `data` naozaj
+ * NIESŤ — kľúč, nie hodnotu, aby `data: null` zostalo legitímnou odpoveďou
+ * „niet čo vrátiť" a nezliala sa s „server to pole vôbec neposlal".
+ */
+async function parse<T>(res: Response): Promise<Envelope<T>> {
+  let body: UncheckedBody | null = null;
+  try {
+    body = asBody(await res.json());
+  } catch {
+    /* neplatný JSON — `body` zostáva `null` a spadne to nižšie */
+  }
+
+  if (body !== null) {
+    if (body['ok'] === true && Object.prototype.hasOwnProperty.call(body, 'data')) {
+      return { ok: true, data: body['data'] as T };
+    }
+    if (body['ok'] === false) return errorEnvelope(body, `http_${res.status}`);
+  }
+  return errorEnvelope(body, res.ok ? 'bad_envelope' : `http_${res.status}`);
 }
 
 export async function getJson<T>(url: string): Promise<Envelope<T>> {
@@ -348,7 +427,39 @@ export function sudoSecondsLeft(sudoUntil: string | null | undefined): number {
   return Math.max(0, Math.ceil((t - Date.now()) / 1000));
 }
 
+/**
+ * Session tak, ako ju appka naozaj prečítala — nie ako ju pretypovala.
+ *
+ * `sudoValid()` a `sudoSecondsLeft()` nižšie stoja na `sudoUntil`, a zámok
+ * sudo okna je poistka proti nechcenému zápisu do ostrého eshopu (D70). Keby
+ * server poslal `sudoUntil: 12345` (číslo, nie reťazec), `new Date(…)` z toho
+ * vyrobí platný čas z roku 1970, `sudoValid()` povie `false` a používateľ
+ * dostane heslové okno navyše. Naopak `absoluteExpiresAt`, ktoré chýba, dnes
+ * prejde ako `undefined` a odpočet v UI ukáže „NaN".
+ *
+ * Preto sa obsah overuje TU: `null` znamená „session sa nedá prečítať", čo je
+ * ten istý výsledok, aký volajúci dostane pri chýbajúcej session — a to je
+ * fail-closed správne, nie strata informácie.
+ */
+export function parseSession(raw: unknown): SessionInfo | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const username = readText(record, 'username');
+  const absoluteExpiresAt = readText(record, 'absoluteExpiresAt');
+  const idleExpiresAt = readText(record, 'idleExpiresAt');
+  // Bez týchto troch nie je čo zobraziť ani čo odpočítavať.
+  if (username === null || absoluteExpiresAt === null || idleExpiresAt === null) return null;
+  return {
+    username,
+    absoluteExpiresAt,
+    idleExpiresAt,
+    // `sudoUntil` chýbať SMIE — znamená to „sudo okno neplatí" a `sudoValid()`
+    // to tak aj číta. Nesmie byť len niečím iným než reťazcom.
+    sudoUntil: readText(record, 'sudoUntil'),
+  };
+}
+
 export async function fetchSession(): Promise<SessionInfo | null> {
-  const res = await getJson<SessionInfo>('/api/auth/session');
-  return res.ok ? res.data : null;
+  const res = await getJson<unknown>('/api/auth/session');
+  return res.ok ? parseSession(res.data) : null;
 }
