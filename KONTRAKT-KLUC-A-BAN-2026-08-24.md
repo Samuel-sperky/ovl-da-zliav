@@ -278,6 +278,62 @@ potrebná), publikovaný port, invarianty I1–I14, kontrakt V3 K1–K12.
 
 ---
 
-## 9. Výsledok
+## 9. Výsledok (24. 8. 2026)
 
-*(Vypĺňa sa po dobehnutí šprintu.)*
+Beh prebehol v samostatnom worktree `C:\Aura\_worktrees\kluc-a-ban` na vetve
+`feat/kluc-a-ban` (odbočená z `4b76729`), lebo v `C:\Aura\ovl-da-zliav` súbežne
+pracovalo pätnásť zapisovateľov druhej session. Do spoločného stromu sa nesiahlo
+ani raz. Vetva je pushnutá; **nezlučovala sa** — koordinátor Sprintu 20 si
+zlúčenie vezme, keď sa mu strom ustáli.
+
+### Hotové
+
+| Bod | Commit | Čo |
+| --- | --- | --- |
+| — | `adf1807` | Kontrakt a žiadosť správcovi shopu |
+| **D** | `a16e355` | Práva tajomstiev sa merajú podľa platformy → **balík je zelený na Windowse** |
+| **A** (server) | `ec152db` | `ip_banned` sa odlíšil od `forbidden`; kľúč sa pri bane uloží ako neoverený a veta hovorí pravdu; zavretá mína pri wipe kľúča |
+| **E2, E3** | `e5b55a1` | Nečitateľné zrkadlo už nezakladá riadky (`mirror_unreadable`); `ordersSeen` je povinné |
+| **E1** | `f3fb2df` | Nečitateľný zoznam zliav prestal znamenať „žiadne zľavy" |
+
+Testy: **2840 prešlo, 0 padlo, 0 preskočených** na Windows hostovi. `typecheck`
+aj `lint` čisté. Každý nový test bol overený mutáciou — po odstránení opravy
+spadne.
+
+### Čo sa našlo nad zadanie
+
+1. **Nastražená mína pri wipe kľúča.** `writeFailure` hlásil 401 aj 403 cez
+   `onKeyRejected`, čo je wipe kľúča (D51/D52). Callback dnes nikto nezapája, ale
+   `ip_banned` je tiež 403 — v deň dopojenia by ban zmazal dobrý kľúč práve
+   v stave, keď sa nový overiť nedá, lebo overenie ide cez tú istú zabanovanú IP.
+2. **Pravidlo o právach tajomstiev malo dve kópie** (`lib/crypto/master-key.ts`
+   a boot assertion v `instrumentation-node.ts`). Zjednotené.
+3. **`keyRowState()` sa na `verifyStatus` nepozerá vôbec**, hoci ho z API
+   dostáva. Neoverený kľúč — a taký je dnes ten objednávkový v DB — sa na
+   obrazovke hlási ako **„vložený a platný"**. Appka tvrdí platnosť, ktorú
+   nikdy nezmerala. NEOPRAVENÉ, viď nižšie.
+
+### Neuzavreté a prečo
+
+| Bod | Stav |
+| --- | --- |
+| **A** (UI) | `src/components/settings/KeysSection.tsx` drží agent UX4 druhej session (potvrdené 24. 8.). Chýba tam vykreslenie `verifyNote` **a oprava `keyRowState()`**, ktorá je vážnejšia než pôvodné zadanie: bez nej obrazovka o neoverenom kľúči tvrdí, že je platný. Pravdivá veta je zatiaľ len v odpovedi API. |
+| **B** | **Zastavené na invariante.** R-2 („appka prizná, že je to jeden kľúč") sa nedá splniť cez `whoami`: `client.ts` má podľa I8' zakázané vedieť čokoľvek o scope objednávok — `SHOP_SCOPES` obsahuje len `product:read` a `product:edit`, ostatné sa len spočítajú ako „iné", a stráži to grep test. Splniť R-2 podľa scopes by znamenalo porušiť I8', a invarianty sú nadradené. Reverzibilná cesta bez dotyku I8': porovnať `last4` oboch slotov (rovnaké → ten istý kľúč). Nesie riziko zhody `last4` u dvoch rôznych kľúčov, takže veta by musela byť opatrná. **Čaká na rozhodnutie používateľa.** |
+| **E4** | `overview.module.css` drží agent UX5 druhej session. |
+| **F** | **Zastavené vo vlne 0.** `rustc`, `cargo` ani `rustup` na tomto PC nie sú. Inštalácia Rust toolchainu je veľká nová závislosť a na tomto stroji už raz Windows Application Control zablokovala binárku (`argon2`), takže niet dôvodu čakať, že prejde. **Čaká na rozhodnutie používateľa.** |
+| **C** | **Vyhodené z rozsahu** — druhá session ho zavrela commitmi `2e96b54` a `3833c14`. |
+
+### Čo sa nezmenilo
+
+Schéma DB (žiadna migrácia, žiadna záloha nebola potrebná), publikovaný port,
+invarianty I1–I14, kontrakt V3 K1–K12. `KeyProbeResult` a `DetailFillOutcome`
+dostali po jednom novom členovi — kto nad nimi má vyčerpávajúci `switch`, musí
+ho doplniť.
+
+### Ostro neoverené
+
+Nič z bodu A sa nedalo overiť proti ostrému shopu: platí ban. Testy idú proti
+mock shopu (I6). Preklik v prehliadači sa nerobil — UI polovica je odložená a
+`argon2` je blokovaná Windows Application Control, takže appka mimo kontejnera
+lokálne nenaštartuje. Akceptačné kritériá 9, 10 a 12 teda splnené nie sú;
+kritérium 11 (review) nebolo súčasťou tohto behu.
