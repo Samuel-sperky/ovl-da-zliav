@@ -438,14 +438,6 @@ h6 {
   font-size: var(--ovl-fs-h3);
 }
 
-.ovl-eyebrow {
-  font-size: var(--ovl-fs-eyebrow);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--ink2);
-}
-
 a {
   color: inherit;
 }
@@ -543,30 +535,6 @@ hr {
 /* ══════════════════════════════════════════════════════════════════════════
    5. Plochy — karty, panely, poznámky
    ══════════════════════════════════════════════════════════════════════════ */
-
-.ovl-card {
-  background: var(--surface);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--line);
-  border-radius: var(--ovl-radius);
-  box-shadow: var(--ovl-shadow);
-  padding: var(--ovl-s5);
-}
-.ovl-card h2 {
-  margin: 0 0 var(--ovl-s3);
-  font-size: var(--ovl-fs-label-tile);
-  font-weight: 600;
-  letter-spacing: 0;
-  color: var(--dim);
-}
-.ovl-card--danger {
-  border-color: var(--st-critical-edge);
-  border-left: 4px solid var(--st-critical);
-}
-.ovl-card--warning {
-  border-color: var(--st-attention-edge);
-  border-left: 4px solid var(--st-attention);
-}
 
 
 /* Poznámkové/stavové panely. VŽDY plné (§1.1) — čitateľnosť je bezpečnostná
@@ -982,66 +950,8 @@ input::placeholder {
    8. Tabuľky (+ mobil: kartový režim a sticky prvý stĺpec — §2 bod 19)
    ══════════════════════════════════════════════════════════════════════════ */
 
-.ovl-table-wrap {
-  overflow-x: auto;
-  border-radius: var(--ovl-radius-sm);
-}
-.ovl-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--ovl-fs-table);
-}
-.ovl-table th,
-.ovl-table td {
-  text-align: left;
-  padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
-  vertical-align: top;
-}
-.ovl-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--surface-solid);
-  font-size: var(--ovl-fs-eyebrow);
-  /* 600, nie 700: stĺpec je najtlmenejší z troch popiskov (D2). */
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--dim);
-  border-bottom: 1px solid var(--line-strong);
-}
-.ovl-table tbody tr:hover {
-  background: var(--surface-raised);
-}
-.ovl-table caption {
-  caption-side: bottom;
-  text-align: left;
-  padding-top: 0.4rem;
-}
-.ovl-table a {
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-  text-decoration-color: color-mix(in oklab, currentColor 40%, transparent);
-}
-.ovl-table .ovl-num {
-  text-align: right;
-}
 /* Dlhá hlavička do dvoch riadkov (V25) — `Položky` + `ok / zlyh. / spolu`.
    Šírka stĺpca potom nie je daná hlavičkou, ale dátami. */
-
-/* Sticky prvý stĺpec + scroll fade pre široké tabuľky (audit) */
-.ovl-table-wrap--sticky-first {
-  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
-}
-.ovl-table--sticky-first th:first-child,
-.ovl-table--sticky-first td:first-child {
-  position: sticky;
-  left: 0;
-  background: var(--surface-solid);
-  border-right: 1px solid var(--line);
-  z-index: 2;
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
    9. Mriežky, produktové karty, drobnosti
@@ -1119,16 +1029,6 @@ input::placeholder {
 .ovl-mono {
   font-family: var(--ovl-mono);
   font-size: 0.9em;
-}
-/* Čísla, ceny, percentá a dátumy sa NESMÚ lámať (V35) */
-.ovl-num,
-.ovl-date {
-  font-variant-numeric: tabular-nums lining-nums;
-  white-space: nowrap;
-}
-.ovl-daterange {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums lining-nums;
 }
 .ovl-stat {
   font-size: var(--ovl-fs-stat);
@@ -1325,52 +1225,6 @@ input::placeholder {
     font-size: var(--ovl-fs-small);
     line-height: var(--ovl-lh-tight);
     letter-spacing: 0.02em;
-  }
-  /* Kartový režim tabuliek: hlavička sa presúva do `data-label` buniek */
-  .ovl-table--cards thead {
-    display: none;
-  }
-  .ovl-table--cards,
-  .ovl-table--cards tbody,
-  .ovl-table--cards tr,
-  .ovl-table--cards td {
-    display: block;
-    width: auto;
-  }
-  .ovl-table--cards tr {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: var(--ovl-radius-sm);
-    padding: 0.5rem 0.6rem;
-    margin-bottom: var(--ovl-s3);
-  }
-  .ovl-table--cards td {
-    border: 0;
-    padding: 0.2rem 0;
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.5rem;
-    text-align: left !important;
-  }
-  .ovl-table--cards td[data-label] {
-    grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
-    align-items: start;
-  }
-  .ovl-table--cards td[data-label]::before {
-    content: attr(data-label);
-    font-size: var(--ovl-fs-eyebrow);
-    font-weight: 700;
-    line-height: var(--ovl-lh-tight);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--dim);
-    /* Číselné stĺpce majú `nowrap` (V35) — hlavička v kartovom režime sa ale
-       zalomiť MUSÍ, inak prekryje hodnotu. */
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-  .ovl-table--cards td:empty {
-    display: none;
   }
 }
 
@@ -2485,9 +2339,11 @@ table.tbl thead th {
   top: 0;
   z-index: 2;
   background: var(--paper2);
-  /* Popisok STLPCA — najtlmenejsia z troch rol (D2). Prva oprava D2 z
-     19. 8. siahla na .ovl-table thead th, ktory NEPOUZIVA ani jeden
-     komponent; hlavicky na siestich obrazovkach kresli tento selektor. */
+  /* Popisok STĹPCA — najtlmenejšia z troch rolí (D2). Prvá oprava D2 z
+     19. 8. siahla na `.ovl-table thead th`, ktorý NEPOUŽÍVAL ani jeden
+     komponent; hlavičky na šiestich obrazovkách kreslí tento selektor.
+     Celá tá mŕtva vrstva je od 24. 8. zmazaná, takže omyl sa nedá zopakovať
+     — nie je na čo siahnuť. Stráži to `mrtve-triedy.spec.ts`. */
   font-size: var(--ovl-fs-eyebrow);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -3133,7 +2989,7 @@ details.tech.bare {
   padding: 11px 13px;
 }
 .kpi .k {
-  /* Popisok DLAŽDICE — tá istá rola ako .ovl-card h2 (D2). Bez verzálok
+  /* Popisok DLAŽDICE — tá istá rola ako popisok karty (D2). Bez verzálok
      zámerne: dlaždica má nad sebou číslo a verzálkový popisok s ním súperí.
      Predtým tu bolo 10 px / 0.12em / 650 verzálkami, teda štvrtá varianta
      popisku, ktorá tri roly z D2 rušila. */
