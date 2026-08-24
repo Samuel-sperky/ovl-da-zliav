@@ -856,9 +856,11 @@ describe('hľadanie je čisté čítanie', () => {
      * doťahovať znova pri každom prelistovaní stránky.
      *
      * Zákaz sa preto nezrušil, ale zúžil — a to, čo chránil, sa pre
-     * `product-details.ts` tvrdí PRÍSNEJŠIE v teste nižšie: nesmie riadok
-     * ZALOŽIŤ, len obohatiť existujúci. Práve zakladanie by nafúklo
-     * `COUNT(*)`, z ktorého sa ráta, koľko katalógu chýba (bod 16).
+     * `product-details.ts` tvrdí PRÍSNEJŠIE inde: nesmie riadok ZALOŽIŤ, len
+     * obohatiť existujúci. Práve zakladanie by nafúklo `COUNT(*)`, z ktorého
+     * sa ráta, koľko katalógu chýba (bod 16). Stráži to `detaily-produktov.spec.ts`
+     * skutočným behom `fillProductDetails()` nad zrkadlom, ktoré sa správa ako
+     * `ON DUPLICATE KEY UPDATE`.
      */
     const VYNIMKA = new Set(['product-details.ts']);
     const files = readdirSync(dir).filter(
@@ -899,25 +901,22 @@ describe('hľadanie je čisté čítanie', () => {
     expect(code).toMatch(/searchIndex/);
   });
 
-  it('doťahovanie detailov riadok NEZAKLADÁ, len obohatí existujúci', () => {
-    /*
-     * `product-details.ts` je jediná výnimka zo zákazu vyššie, a platí za ňu
-     * týmto tvrdením. `upsertMany` je `ON DUPLICATE KEY UPDATE`, takže by
-     * produkt mimo zrkadla vložil ako nový riadok — a `COUNT(*)` zrkadla je
-     * to isté číslo, z ktorého appka počíta, koľko katalógu ešte chýba.
-     * Zrkadlo napĺňa výhradne synchronizácia.
-     */
-    const code = readFileSync(join(resolve(process.cwd(), 'src/lib/catalog'), 'product-details.ts'), 'utf8');
-
-    // Zoznam ID na doplnenie sa filtruje o tie, ktoré v zrkadle nie sú.
-    expect(code, 'chýba filter na riadky mimo zrkadla').toMatch(/notInMirror\s*=/);
-    expect(code, 'filter nepozerá na chýbajúci riadok').toMatch(/row === undefined \|\| row\.missing/);
-    expect(code, 'pending sa nefiltruje o riadky mimo zrkadla').toMatch(/!outside\.has\(id\)/);
-
-    // A volajúci sa o nich dozvie — inak by to bolo tiché zahodenie.
-    // Zoznam sa pripína na výsledok na JEDNOM mieste — obe vetvy ho tak
-    // dostanú aj bez toho, aby si ho podfunkcie pretláčali cez rozhranie.
-    expect(code, 'notInMirror sa nevracia volajúcemu').toMatch(/...result, notInMirror/);
-    expect(code, 'skorý návrat notInMirror zahadzuje').toContain("), notInMirror };");
-  });
+  /*
+   * TU BÝVAL SKENER ZDROJOVÉHO TEXTU `product-details.ts`
+   * („doťahovanie detailov riadok NEZAKLADÁ, len obohatí existujúci").
+   *
+   * Hľadal v kóde reťazce `notInMirror =`, `row === undefined || row.missing`
+   * a `!outside.has(id)`. Všetky tri tam boli — a napriek tomu ručná obnova
+   * (`force: true`, ktorú `POST /api/catalog/details` prijíma z tela
+   * požiadavky) celý ten filter obchádzala a cudzie ID do zrkadla VLOŽILA.
+   * Test bol zelený po celý čas, lebo meral prítomnosť riadkov v súbore,
+   * nie správanie funkcie.
+   *
+   * Nahradil ho behový test v `test/unit/detaily-produktov.spec.ts`
+   * (sekcia „doťahovanie zrkadlo nenapĺňa, len obohacuje"): pustí
+   * `fillProductDetails()` s ID mimo zrkadla — obe cesty aj s `force` —
+   * nad zrkadlom, ktoré sa správa ako `ON DUPLICATE KEY UPDATE`, a zmeria,
+   * že žiadny riadok nevznikol a že ID prišlo späť v `notInMirror`.
+   * Druhá kópia tu by už len brzdila refaktor toho istého správania.
+   */
 });

@@ -231,7 +231,12 @@ export interface ProductDetailsDeps {
   readonly logger?: Logger;
   readonly now?: () => UtcDate;
   readonly operationId?: Ulid;
-  /** Doplň aj to, čo detail už má (napr. „obnov tento riadok"). Default `false`. */
+  /**
+   * Doplň aj to, čo detail už má (napr. „obnov tento riadok"). Default `false`.
+   *
+   * Prebíja VÝHRADNE preskakovanie už doplnených riadkov. Hranicu zrkadla
+   * neprebíja: obnoviť sa dá len riadok, ktorý existuje.
+   */
   readonly force?: boolean;
 }
 
@@ -326,45 +331,58 @@ export async function fillProductDetails(
   /** ID, ktoré v zrkadle nie sú. Doťahovanie ich NEZAKLADÁ — pozri nižšie. */
   let notInMirror: number[] = [];
   let pending = [...unique];
-  if (deps.force !== true) {
-    try {
-      const existing = await deps.catalog.detailsFor(unique);
-      alreadyDetailed = unique.filter((id) => {
-        const row = existing.get(id);
-        if (row === undefined) return false;
-        // Riadok z `getFull` je nadmnožina `get` — verejnou cestou by sa
-        // prepísal na chudobnejší a kód produktu by z tabuľky zmizol.
-        return row.route === 'getFull' || row.route === route;
-      });
-      const skip = new Set(alreadyDetailed);
+  try {
+    const existing = await deps.catalog.detailsFor(unique);
 
-      /*
-       * DOŤAHOVANIE NEZAKLADÁ RIADKY.
-       *
-       * `upsertMany` je `ON DUPLICATE KEY UPDATE`, takže produkt, ktorý
-       * v zrkadle NIE JE, by sa ním vložil ako nový riadok. Z `COUNT(*)`
-       * zrkadla sa pritom ráta, koľko katalógu ešte chýba a dokedy to
-       * potrvá (kontrakt UI, bod 16) — riadok založený čítacou cestou by
-       * to číslo nafúkol o produkt, ktorý prechod synchronizácie nikdy
-       * nevidel, a appka by tvrdila, že má viac katalógu, než prešla.
-       *
-       * Zrkadlo napĺňa VÝHRADNE synchronizácia katalógu. Táto cesta smie
-       * existujúci riadok len obohatiť. Produkt, ktorý v zrkadle nie je,
-       * sa preto nedoťahuje a volajúci sa o tom dozvie — nie je to chyba,
-       * je to hranica. Stráži to `hladanie-produktov.spec.ts`.
-       */
-      notInMirror = unique.filter((id) => {
-        const row = existing.get(id);
-        return row === undefined || row.missing;
-      });
-      const outside = new Set(notInMirror);
+    /*
+     * `force` prebíja „už to máme", NIE hranicu zrkadla.
+     *
+     * Preskočiť kvôli nemu celý tento dotaz by znamenalo, že ručná obnova
+     * nepozná `notInMirror` — a `upsertMany` by cudzie ID vložil ako nový
+     * riadok presne tak, ako to popisuje odsek nižšie. Dotaz ide do vlastnej
+     * DB a nestojí čítanie, tak sa robí vždy; `force` vypína len preskakovanie.
+     */
+    alreadyDetailed =
+      deps.force === true
+        ? []
+        : unique.filter((id) => {
+            const row = existing.get(id);
+            if (row === undefined) return false;
+            // Riadok z `getFull` je nadmnožina `get` — verejnou cestou by sa
+            // prepísal na chudobnejší a kód produktu by z tabuľky zmizol.
+            return row.route === 'getFull' || row.route === route;
+          });
+    const skip = new Set(alreadyDetailed);
 
-      pending = unique.filter((id) => !skip.has(id) && !outside.has(id));
-    } catch (cause) {
-      // Nečitateľné zrkadlo nie je dôvod nedoplniť — nanajvýš sa zaplatí za
-      // detail, ktorý appka možno už má. Chybu vidí log, nie používateľ.
-      log?.warn('detail_fill_mirror_unreadable', { error: errorCode(cause) });
-    }
+    /*
+     * DOŤAHOVANIE NEZAKLADÁ RIADKY.
+     *
+     * `upsertMany` je `ON DUPLICATE KEY UPDATE`, takže produkt, ktorý
+     * v zrkadle NIE JE, by sa ním vložil ako nový riadok. Z `COUNT(*)`
+     * zrkadla sa pritom ráta, koľko katalógu ešte chýba a dokedy to
+     * potrvá (kontrakt UI, bod 16) — riadok založený čítacou cestou by
+     * to číslo nafúkol o produkt, ktorý prechod synchronizácie nikdy
+     * nevidel, a appka by tvrdila, že má viac katalógu, než prešla.
+     *
+     * Zrkadlo napĺňa VÝHRADNE synchronizácia katalógu. Táto cesta smie
+     * existujúci riadok len obohatiť. Produkt, ktorý v zrkadle nie je,
+     * sa preto nedoťahuje a volajúci sa o tom dozvie — nie je to chyba,
+     * je to hranica. Stráži to `detaily-produktov.spec.ts` skutočným behom
+     * nad zrkadlom, ktoré sa správa ako `ON DUPLICATE KEY UPDATE` — a to na
+     * OBOCH cestách aj pri `force`. Skener zdrojového textu, ktorý to strážil
+     * predtým, tú dieru s `force` prehliadol; behový test ju našiel.
+     */
+    notInMirror = unique.filter((id) => {
+      const row = existing.get(id);
+      return row === undefined || row.missing;
+    });
+    const outside = new Set(notInMirror);
+
+    pending = unique.filter((id) => !skip.has(id) && !outside.has(id));
+  } catch (cause) {
+    // Nečitateľné zrkadlo nie je dôvod nedoplniť — nanajvýš sa zaplatí za
+    // detail, ktorý appka možno už má. Chybu vidí log, nie používateľ.
+    log?.warn('detail_fill_mirror_unreadable', { error: errorCode(cause) });
   }
 
   /*
