@@ -37,6 +37,18 @@
  *     `NotStoredState`, `ConnectionState`) a tu sa vykresľujú priamo. Keby sa
  *     vrátili späť do tela formulára, prestali by byť merateľné.
  *
+ * SKENER JE OD 24. 8. 2026 SPOLOČNÝ
+ * ---------------------------------
+ * Vlastný skener markupu z tohto súboru (`stavoveUzly`, `maFarbu`,
+ * `overTriKanaly`) sa zlúčil s dvomi takmer rovnakými kópiami A1 a A2 do
+ * `test/helpers/znacky.ts` — dôvody a zoznam rozdielov sú v hlavičke toho
+ * súboru. Meranie tým zosilnelo v troch bodoch: hostiteľ sa hľadá stromovým
+ * parserom v ĽUBOVOĽNOM prvku a po CELÝCH tokenoch triedy (nie regexom len nad
+ * `<span>`/`<p>`, ktorých trieda sa tokenom začína), slovo sa číta
+ * s rozpustenými entitami a navyše sa tvrdí, že značka stojí PRED slovom.
+ * Zvyšok merania — menovité `data-testid`, práve jedna značka, tón s farbou
+ * v `globals.css` — je ten istý, len na jednom mieste.
+ *
  * Vlastník: A3, vlna 1 šprintu 20 (20. 8. 2026).
  */
 import { readFileSync } from 'node:fs';
@@ -62,6 +74,14 @@ import OrdersKeyForm, {
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
 import UnlockWritesForm from '@/components/settings/UnlockWritesForm';
 import type { KeyMetaView, SettingsView } from '@/components/settings/api';
+
+import {
+  hostitelia,
+  maFarbu as maFarbuVCss,
+  overTriKanaly as overTriKanalyVCss,
+  pocetZnaciek,
+  text,
+} from '../helpers/znacky';
 
 const noop = () => {};
 
@@ -96,53 +116,18 @@ const KEY_META = (verifyStatus: KeyMetaView['verifyStatus']): KeyMetaView => ({
 
 /* ═════════════════════════ hľadanie stavových uzlov ═══════════════════════ */
 
-/** Varianty rodiny `.sig`/`.flag`/`.state`, ktoré nesú farbu. */
-const TONY = ['ok', 'warn', 'bad', 'progress', 'idle', 'lock', 'good', 'neutral',
-  'attention', 'critical', 'live', 'done', 'pripravena', 'zapisuje', 'bezi', 'skoncila'];
-
-interface Uzol {
-  readonly trieda: string;
-  readonly tony: readonly string[];
-  readonly testId: string | null;
-  readonly znacky: number;
-  readonly slovo: string;
-}
-
 /**
- * Nájde v HTML každý uzol s triedou rodiny `.sig`/`.flag`/`.state`.
+ * Stavové uzly obrazovky — hostitelia rodiny `.sig`/`.flag`/`.state`.
  *
- * Hľadá sa len OTVÁRACÍ tag, nie celý prvok — inak by skenovanie prehltlo
- * hostiteľa aj s telom a vnorený stavový uzol (napríklad značku overenia
- * v odstavci `set-note`) by preskočilo. Telo sa doreže až podľa nájdenej
- * pozície.
+ * Hľadanie robí spoločný stromový parser (`test/helpers/znacky.ts`), takže
+ * hostiteľa nájde v ľubovoľnom prvku a aj vnoreného — napríklad značku
+ * overenia v odstavci `set-note`, ktorá bola pôvodným regexom nad otváracím
+ * tagom hraničný prípad.
  */
-function stavoveUzly(markup: string): Uzol[] {
-  const out: Uzol[] = [];
-  const otvarac = /<(span|p)\b[^>]*?class="((?:sig|flag|state)[^"]*)"[^>]*?>/g;
-  let m: RegExpExecArray | null;
-  while ((m = otvarac.exec(markup)) !== null) {
-    const tag = m[1]!;
-    const trieda = m[2]!;
-    const zaciatok = m.index + m[0].length;
-    const koniec = markup.indexOf(`</${tag}>`, zaciatok);
-    const telo = koniec === -1 ? '' : markup.slice(zaciatok, koniec);
-    const testId = /data-testid="([^"]*)"/.exec(m[0])?.[1] ?? null;
-    out.push({
-      trieda,
-      tony: trieda.split(/\s+/).filter((c) => TONY.includes(c)),
-      testId,
-      znacky: (telo.match(/<svg\b[^>]*class="[^"]*\bovl-ic\b/g) ?? []).length,
-      slovo: telo.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(),
-    });
-  }
-  return out;
-}
+const stavoveUzly = hostitelia;
 
 /** Má tón v `globals.css` vlastnú farbu? Bez toho je „farba" prázdny sľub. */
-function maFarbu(ton: string): boolean {
-  const re = new RegExp(`\\.(?:sig|flag|state)\\.${ton}\\s*\\{[^}]*color:\\s*var\\(--`, 'm');
-  return re.test(GLOBALS);
-}
+const maFarbu = (ton: string): boolean => maFarbuVCss(ton, GLOBALS);
 
 /**
  * Overí tri kanály pri KAŽDOM uzle a zároveň to, že sú tam očakávané uzly.
@@ -150,22 +135,10 @@ function maFarbu(ton: string): boolean {
  * `ocakavane` sú `data-testid` uzlov, ktoré na obrazovke musia byť. Je to
  * poistka podľa bodu B hlavičky: bez nej by tvrdenie o troch kanáloch prešlo
  * aj nad prázdnym zoznamom, teda nad obrazovkou, z ktorej stav zmizol.
+ * Farbu tónu overuje pomocník proti `globals.css` tejto appky.
  */
-function overTriKanaly(markup: string, ocakavane: readonly string[], kde: string) {
-  const uzly = stavoveUzly(markup);
-  expect(
-    uzly.map((u) => u.testId).filter((t): t is string => t !== null).sort(),
-    `${kde}: chýba stavový uzol`,
-  ).toEqual([...ocakavane].sort());
-  expect(uzly.length, `${kde}: nenašiel sa ani jeden stavový uzol`).toBe(ocakavane.length);
-  for (const u of uzly) {
-    const meno = `${kde} → ${u.testId ?? u.trieda}`;
-    expect(u.tony.length, `${meno}: trieda "${u.trieda}" nenesie tón, teda ani farbu`).toBe(1);
-    expect(maFarbu(u.tony[0]!), `${meno}: tón ${u.tony[0]} nemá v globals.css farbu`).toBe(true);
-    expect(u.znacky, `${meno}: značka nie je práve jedna (stav je len farba a slovo)`).toBe(1);
-    expect(u.slovo.length, `${meno}: pri značke nestojí slovo`).toBeGreaterThan(3);
-  }
-}
+const overTriKanaly = (markup: string, ocakavane: readonly string[], kde: string): void =>
+  overTriKanalyVCss(markup, ocakavane, kde, GLOBALS);
 
 /* ═════════ 1. Kľúče — výsledok overenia na oboch miestach obrazovky ═══════ */
 
@@ -348,15 +321,17 @@ describe('Zámok zápisov — pokojný aj zamknutý stav', () => {
 
   it('oba stavy sa od seba líšia slovom, nielen farbou', () => {
     const slovo = (locked: boolean) =>
-      stavoveUzly(
-        renderToStaticMarkup(
-          createElement(UnlockWritesForm, {
-            writesLocked: locked,
-            writesLockedReason: null,
-            onUnlocked: noop,
-          }),
-        ),
-      )[0]!.slovo;
+      text(
+        stavoveUzly(
+          renderToStaticMarkup(
+            createElement(UnlockWritesForm, {
+              writesLocked: locked,
+              writesLockedReason: null,
+              onUnlocked: noop,
+            }),
+          ),
+        )[0]!,
+      );
     expect(slovo(true)).not.toBe(slovo(false));
   });
 });
@@ -369,16 +344,23 @@ describe('hľadač stavových uzlov nie je slepý', () => {
     const markup =
       '<p class="set-note" data-testid="obal">Kľúč je uložený (' +
       '<span class="sig ok" data-testid="vnoreny"><svg class="ovl-ic"></svg>overený</span>).</p>';
-    const uzly = stavoveUzly(markup);
-    expect(uzly.map((u) => u.testId)).toEqual(['vnoreny']);
-    expect(uzly[0]!.znacky).toBe(1);
-    expect(uzly[0]!.slovo).toBe('overený');
+    const najdene = stavoveUzly(markup);
+    expect(najdene.map((u) => u.atributy['data-testid'])).toEqual(['vnoreny']);
+    expect(pocetZnaciek(najdene[0]!)).toBe(1);
+    expect(text(najdene[0]!)).toBe('overený');
   });
 
   it('uzol bez značky sa naozaj rozpozná ako uzol bez značky', () => {
-    const uzly = stavoveUzly('<span class="sig bad" data-testid="nemy">Eshop neodpovedal</span>');
-    expect(uzly).toHaveLength(1);
-    expect(uzly[0]!.znacky).toBe(0);
+    const najdene = stavoveUzly('<span class="sig bad" data-testid="nemy">Eshop neodpovedal</span>');
+    expect(najdene).toHaveLength(1);
+    expect(pocetZnaciek(najdene[0]!)).toBe(0);
+  });
+
+  it('obal, ktorý má triedu len ako podreťazec, hostiteľom nie je', () => {
+    // `.checks`, `.stopq` ani hašované meno z CSS modulu do merania nepatria —
+    // inak by test počítal uzly, ktoré žiadny stav nenesú.
+    expect(stavoveUzly('<span class="_flagCritical_1a2b3">x</span>')).toHaveLength(0);
+    expect(stavoveUzly('<div class="checks"><span>x</span></div>')).toHaveLength(0);
   });
 
   it('tón bez farby v globals.css sa rozpozná', () => {

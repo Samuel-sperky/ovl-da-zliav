@@ -46,6 +46,16 @@
  *  F. **Pri nule zostáva TVAR, nie poplach.** Farbu berie značka z tej istej
  *     podmienky ako ľavý prúžok (`data-any='ano'`); bez čísla je tlmená.
  *
+ * SKENER JE OD 24. 8. 2026 SPOLOČNÝ
+ * ---------------------------------
+ * Skener markupu z tohto súboru (`uzly`, `text`, `hostitelia`, `maTon`,
+ * `overHostitelov`) sa zlúčil s dvomi takmer rovnakými kópiami A1 a A3 do
+ * `test/helpers/znacky.ts` — dôvody a zoznam rozdielov sú v hlavičke toho
+ * súboru. Meranie tým zosilnelo: značka musí byť PRÁVE JEDNA (nie „aspoň
+ * jedna"), musí stáť PRED slovom a slovo sa číta s rozpustenými entitami,
+ * takže uzol s obsahom `&nbsp;` už za uzol so slovom neprejde. Výnimka
+ * z bodu C (holá `.sig`) sa do pomocníka presťahovala nedotknutá.
+ *
  * Vlastník: A2, šprint dokončenia 20. 8. 2026.
  */
 import { readFileSync } from 'node:fs';
@@ -68,6 +78,8 @@ import type { BlockerCard, StandSentence } from '@/components/campaigns/queue-mo
 import { BLOCKER_RESOLUTION_CODES, type BlockerResolutionCode } from '@/components/ui/blocker-look';
 import type { CampaignSentence, FlagTone, StateTone } from '@/lib/ui/vocabulary';
 
+import { hostitelia, IKONA, overHostitelov, text, uzly, type Uzol } from '../helpers/znacky';
+
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 const DETAIL = read('../../src/components/campaigns/DiscountDetail.tsx');
@@ -75,111 +87,11 @@ const CSS = read('../../src/components/campaigns/zlavy.module.css');
 
 /* ═══════════════════ 0. Rozrezanie HTML na uzly ═══════════════════════════ */
 
-interface Uzol {
-  /** Meno prvku (`span`, `div`, …). */
-  readonly tag: string;
-  /** Trieda rozdelená na slová. CSS moduly sú tu ako `_queueTile_587bce`. */
-  readonly triedy: readonly string[];
-  /** Atribúty ako mapa — `data-state`, `data-any`, `data-testid`. */
-  readonly atributy: Readonly<Record<string, string>>;
-  /** Vnútro uzla ako HTML — teda to, čo v ŇOM naozaj je. */
-  readonly vnutro: string;
-}
-
-const TAG = /<(\/?)([a-zA-Z][\w:-]*)((?:"[^"]*"|'[^']*'|[^>])*?)(\/?)>/g;
-const VOID = new Set(['br', 'hr', 'img', 'input', 'meta', 'link']);
-
 /**
- * Rozreže vykreslený markup na uzly aj s ich vnútrom.
- *
- * Je to zámerne vlastný, hlúpy skener a nie regex nad celým dokumentom:
- * otázka „je značka VNÚTRI tohto uzla" sa regexom nad dokumentom položiť nedá
- * a práve jej hrubšia náhrada („je značka niekde v HTML") mutáciu pustila.
+ * Skener markupu (`uzly`, `hostitelia`, `text`, `IKONA`) aj jadro merania
+ * (`overHostitelov`) sú v `test/helpers/znacky.ts` — pozri hlavičku tohto
+ * súboru. Tu ostáva len to, čo je vlastné TABU ZĽAVY.
  */
-function uzly(html: string): Uzol[] {
-  const out: Uzol[] = [];
-  const stack: { tag: string; attrs: string; koniecOtvaracieho: number }[] = [];
-  TAG.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = TAG.exec(html)) !== null) {
-    const cely = m[0];
-    const lomka = m[1];
-    const tag = m[2]!;
-    const attrs = m[3]!;
-    const samozatvarajuci = m[4];
-    if (lomka === '/') {
-      for (let i = stack.length - 1; i >= 0; i -= 1) {
-        if (stack[i]!.tag !== tag) continue;
-        const otvoreny = stack[i]!;
-        stack.length = i;
-        const atributy: Record<string, string> = {};
-        for (const a of otvoreny.attrs.matchAll(/([\w:-]+)="([^"]*)"/g)) atributy[a[1]!] = a[2]!;
-        out.push({
-          tag,
-          triedy: (atributy.class ?? '').split(/\s+/).filter(Boolean),
-          atributy,
-          vnutro: html.slice(otvoreny.koniecOtvaracieho, m.index),
-        });
-        break;
-      }
-      continue;
-    }
-    if (samozatvarajuci === '/' || VOID.has(tag)) continue;
-    stack.push({ tag, attrs, koniecOtvaracieho: m.index + cely.length });
-  }
-  return out;
-}
-
-/** Značka zo sady `ui/Icon.tsx`, vykreslená. */
-const IKONA = /<svg[^>]*class="[^"]*\bovl-ic\b/;
-
-/** Text, ktorý človek prečíta — bez značiek a bez okolitého HTML. */
-function text(html: string): string {
-  return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-}
-
-/** Uzly rodiny `.sig` / `.flag` / `.state`. */
-function hostitelia(html: string): Uzol[] {
-  return uzly(html).filter((u) =>
-    u.triedy.some((t) => t === 'sig' || t === 'flag' || t === 'state'),
-  );
-}
-
-/**
- * Nesie hostiteľ TÓN?
- *
- * Holá `.sig` (jediná trieda, žiadna ďalšia) je zámerná výnimka — bod C.
- * Všetko ostatné v rodine tón nesie, vrátane `.flag` bez modifikátora
- * (predvolený tón je `attention`) a tried z CSS modulu (`_flagCritical_…`).
- */
-function maTon(u: Uzol): boolean {
-  return !(u.triedy.length === 1 && u.triedy[0] === 'sig');
-}
-
-/**
- * Jadro testu: pri KAŽDOM tónovanom hostiteľovi tri kanály zvlášť.
- *
- * Chyba pomenúva konkrétny uzol, nie súbor — inak by hlásenie nepovedalo o nič
- * viac než to hrubé meranie, ktoré tento test nahrádza.
- */
-function overHostitelov(kde: string, html: string, ocakavany: number): void {
-  const najdene = hostitelia(html);
-  // Bod B — bez tohto by prešiel aj hostiteľ, ktorý zmizol úplne.
-  expect(najdene.length, `${kde}: iný počet hostiteľov, než test čaká`).toBe(ocakavany);
-
-  for (const u of najdene) {
-    const meno = `${kde} · <${u.tag} class="${u.triedy.join(' ')}">`;
-    if (!maTon(u)) {
-      // Bod C — holá `.sig` má slovo a značku mať NESMIE.
-      expect(text(u.vnutro), `${meno}: výnimka bez slova`).not.toBe('');
-      expect(IKONA.test(u.vnutro), `${meno}: holá .sig si značku pribrala`).toBe(false);
-      continue;
-    }
-    expect(IKONA.test(u.vnutro), `${meno}: BEZ ZNAČKY — stav je len farba a slovo`).toBe(true);
-    expect(text(u.vnutro), `${meno}: bez slova — značka slovo nenahrádza`).not.toBe('');
-  }
-}
-
 const render = (el: ReactElement): string => renderToStaticMarkup(el);
 
 /* ═══════════════════ 1. Dlaždice fronty — každá zvlášť ════════════════════ */

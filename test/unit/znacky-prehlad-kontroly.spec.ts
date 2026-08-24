@@ -25,9 +25,10 @@
  *     z tónu, ktorý vracia `scopeCheck()` (`dashboard/overview-verdict.ts`)
  *     v pilotnom rozsahu. Kto by tu hľadal literál, dokáže si nepravdu; to je
  *     pasca, ktorá tento šprint už raz zdržala.
- *  B. **Tri kanály sa merajú ako tri.** FARBA je trieda tónu, ZNAČKA je `<svg>`
- *     vnútri toho istého uzla, SLOVO je text toho istého uzla. Test, ktorý by
- *     overil len prítomnosť triedy, prejde aj nad stavom bez značky.
+ *  B. **Tri kanály sa merajú ako tri.** FARBA je trieda tónu, ZNAČKA je
+ *     `<svg class="ovl-ic">` vnútri toho istého uzla, SLOVO je text toho istého
+ *     uzla. Test, ktorý by overil len prítomnosť triedy, prejde aj nad stavom
+ *     bez značky.
  *  C. **Značka musí byť POTOMOK hostiteľa, nie súrodenec.** Preto sa markup
  *     naozaj parsuje na strom a `<svg>` sa hľadá vo VNÚTRI uzla. Značka o uzol
  *     vedľa by sa síce nakreslila, ale s vlastnou farbou a na inom mieste
@@ -36,6 +37,16 @@
  *     hostiteľoch" má pred sebou poistku, že sa vôbec nejakí našli. Bez nej by
  *     rozbitý parser svietil zeleno — tak vznikol zelený test o troch mŕtvych
  *     selektoroch (19. 8. 2026, bod A hlavičky `ikony.spec.ts`).
+ *
+ * SKENER JE OD 24. 8. 2026 SPOLOČNÝ
+ * ---------------------------------
+ * Vlastný parser markupu z tohto súboru (`parse`, `classOf`, `textOf`, `hosts`,
+ * `hasMark`, `label`) sa zlúčil s dvomi takmer rovnakými kópiami A2 a A3 do
+ * `test/helpers/znacky.ts` — dôvody a zoznam rozdielov sú v hlavičke toho
+ * súboru. Meranie tým zosilnelo v jednom podstatnom bode: za značku sa už
+ * nepočíta hocijaké `<svg>`, ale len ikona zo sady `ui/Icon.tsx`
+ * (`<svg class="ovl-ic">`). Kus dekoratívnej grafiky v uzle tento test už
+ * neupokojí. Poistky na počet hostiteľov (bod D) ostávajú tam, kde boli.
  *
  * Vlastník: A1, vlna 1 šprintu 20. 8. 2026.
  */
@@ -60,108 +71,25 @@ import type {
   StatusView,
 } from '@/components/dashboard/status-api';
 
+import {
+  hostitelia,
+  maZnacku,
+  popis,
+  text,
+  uzly,
+  znackaJePrva,
+  type Uzol,
+} from '../helpers/znacky';
+
 const TODAY = '2026-08-12';
 
 /* ══════════════════════════ 1. Drobný parser markupu ══════════════════════ */
 
 /**
- * Prvok vykresleného markupu.
- *
- * `inner` je surové HTML medzi otváracou a zatváracou značkou — to je jediné
- * miesto, kde smie stáť značka stavu (bod C hlavičky).
+ * Parser markupu (`uzly`, `hostitelia`, `text`, `maZnacku`, `znackaJePrva`,
+ * `popis`) je v `test/helpers/znacky.ts` — pozri hlavičku tohto súboru.
+ * Tu ostávajú len snímky Prehľadu a tvrdenia nad nimi.
  */
-interface Node {
-  readonly tag: string;
-  readonly attrs: string;
-  readonly inner: string;
-}
-
-/** Prvky bez obsahu — React ich vypisuje ako `<br/>`, `<path …/>`. */
-const VOID_TAGS = new Set([
-  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
-  'param', 'source', 'track', 'wbr',
-]);
-
-const TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>/g;
-
-/**
- * Rozloží markup na zoznam prvkov aj s ich vnútrom.
- *
- * Vlastný parser je tu preto, že prostredie testov je `node` bez DOM
- * (`vitest.config.ts`) — a pribrať kvôli tomuto jednému tvrdeniu jsdom by
- * bola nová závislosť, ktorú šprint zakazuje.
- */
-function parse(html: string): Node[] {
-  const out: Node[] = [];
-  const stack: { tag: string; attrs: string; from: number }[] = [];
-  TAG_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-
-  while ((m = TAG_RE.exec(html)) !== null) {
-    const closing = m[1] === '/';
-    const tag = m[2]!.toLowerCase();
-    const attrs = m[3] ?? '';
-    const selfClosed = m[4] === '/';
-
-    if (closing) {
-      // Nájdi najbližší otvorený rovnaký prvok; nespárované značky ignoruj.
-      for (let i = stack.length - 1; i >= 0; i -= 1) {
-        if (stack[i]!.tag !== tag) continue;
-        const open = stack[i]!;
-        out.push({ tag, attrs: open.attrs, inner: html.slice(open.from, m.index) });
-        stack.length = i;
-        break;
-      }
-      continue;
-    }
-
-    if (selfClosed || VOID_TAGS.has(tag)) {
-      out.push({ tag, attrs, inner: '' });
-      continue;
-    }
-    stack.push({ tag, attrs, from: m.index + m[0]!.length });
-  }
-  return out;
-}
-
-/** Hodnota `class` z atribútov prvku. */
-function classOf(node: Node): string {
-  return /\sclass="([^"]*)"/.exec(node.attrs)?.[1] ?? '';
-}
-
-/** Text prvku bez značiek a bez `&nbsp;`-tried entít — teda SLOVO stavu. */
-function textOf(node: Node): string {
-  return node.inner
-    .replace(/<[^>]*>/g, '')
-    .replace(/&[a-z]+;|&#x?[0-9a-f]+;/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Hostitelia stavu — prvky, ktorých `class` obsahuje `sig`, `flag` alebo
- * `state` ako CELÝ token.
- *
- * Ako token, nie ako podreťazec: `.checks`, `.stopq` ani hašované mená
- * z CSS modulu (`_flagCritical_1a2b3`) hostiteľmi nie sú.
- */
-function hosts(html: string): Node[] {
-  return parse(html).filter((node) =>
-    classOf(node)
-      .split(/\s+/)
-      .some((token) => token === 'sig' || token === 'flag' || token === 'state'),
-  );
-}
-
-/** Nesie uzol značku (ikonu) priamo vo svojom vnútri? */
-function hasMark(node: Node): boolean {
-  return node.inner.includes('<svg');
-}
-
-/** Krátky popis uzla do hlásenia, aby bolo vidieť KTORÝ stav ostal bez značky. */
-function label(node: Node): string {
-  return `<${node.tag} class="${classOf(node)}"> ${textOf(node).slice(0, 40)}`;
-}
 
 /* ═══════════════════════════ 2. Snímky Prehľadu ═══════════════════════════ */
 
@@ -335,20 +263,30 @@ const PREHLAD = [renderStatus(), renderBlockers(), renderCampaigns()].join('\n')
 
 describe('parser markupu', () => {
   it('nájde uzol aj s jeho vnútrom, nie len s atribútmi', () => {
-    const found = hosts('<div><span class="sig lock"><svg></svg>Rozsah</span></div>');
-    expect(found).toHaveLength(1);
-    expect(hasMark(found[0]!)).toBe(true);
-    expect(textOf(found[0]!)).toBe('Rozsah');
+    const najdene = hostitelia(
+      '<div><span class="sig lock"><svg class="ovl-ic"></svg>Rozsah</span></div>',
+    );
+    expect(najdene).toHaveLength(1);
+    expect(maZnacku(najdene[0]!)).toBe(true);
+    expect(text(najdene[0]!)).toBe('Rozsah');
   });
 
   it('značka o uzol VEDĽA sa za značku hostiteľa nepočíta (bod C)', () => {
-    const found = hosts('<span class="sig ok">Hotovo</span><svg></svg>');
-    expect(found).toHaveLength(1);
-    expect(hasMark(found[0]!)).toBe(false);
+    const najdene = hostitelia('<span class="sig ok">Hotovo</span><svg class="ovl-ic"></svg>');
+    expect(najdene).toHaveLength(1);
+    expect(maZnacku(najdene[0]!)).toBe(false);
+  });
+
+  it('dekoratívne <svg> bez ikony zo sady sa za značku nepočíta', () => {
+    // Od zlúčenia skenerov (24. 8. 2026) je značkou len `<svg class="ovl-ic">`.
+    // Kus grafiky v uzle tento test už neupokojí.
+    const najdene = hostitelia('<span class="sig ok"><svg class="deko"></svg>Hotovo</span>');
+    expect(najdene).toHaveLength(1);
+    expect(maZnacku(najdene[0]!)).toBe(false);
   });
 
   it('hašované meno z CSS modulu hostiteľom nie je', () => {
-    expect(hosts('<span class="_flagCritical_1a2b3">x</span>')).toHaveLength(0);
+    expect(hostitelia('<span class="_flagCritical_1a2b3">x</span>')).toHaveLength(0);
   });
 });
 
@@ -356,39 +294,39 @@ describe('parser markupu', () => {
 
 describe('kontrola „Rozsah pilotný" nesie všetky tri kanály', () => {
   /** Uzol kontroly rozsahu z vykresleného riadku kontrol. */
-  function scopeNode(scope: StatusView['scope']): Node {
+  function uzolRozsahu(scope: StatusView['scope']): Uzol {
     const html = renderStatus({ status: status({ scope }) });
-    const node = parse(html).find((n) => n.attrs.includes('data-check="rozsah"'));
-    expect(node, 'kontrola rozsahu sa v riadku kontrol nenašla').toBeDefined();
-    return node!;
+    const uzol = uzly(html).find((u) => u.atributy['data-check'] === 'rozsah');
+    expect(uzol, 'kontrola rozsahu sa v riadku kontrol nenašla').toBeDefined();
+    return uzol!;
   }
 
   it('v pilotnom rozsahu je farba, ZNAČKA aj slovo', () => {
-    const node = scopeNode({ pilot: true, maxProducts: 10 });
+    const uzol = uzolRozsahu({ pilot: true, maxProducts: 10 });
     // FARBA — trieda `sig lock` vzniká za behu zo `sigClass('lock')`; v zdroji
     // ten literál nikde nestojí (bod A hlavičky).
-    expect(classOf(node).split(/\s+/)).toContain('lock');
+    expect(uzol.triedy).toContain('lock');
     // ZNAČKA — ikona zámku vo VNÚTRI toho istého uzla.
-    expect(hasMark(node), 'Rozsah pilotný ostal bez značky').toBe(true);
+    expect(maZnacku(uzol), 'Rozsah pilotný ostal bez značky').toBe(true);
     // SLOVO — bez neho je stav pod deuteranopiou nečitateľný.
-    expect(textOf(node)).toContain('Rozsah pilotný');
+    expect(text(uzol)).toContain('Rozsah pilotný');
   });
 
   it('v plnom rozsahu a pri neznámom rozsahu tiež', () => {
-    const full = scopeNode({ pilot: false, maxProducts: 41220 });
-    expect(hasMark(full)).toBe(true);
-    expect(textOf(full)).toContain('Rozsah plný');
+    const plny = uzolRozsahu({ pilot: false, maxProducts: 41220 });
+    expect(maZnacku(plny)).toBe(true);
+    expect(text(plny)).toContain('Rozsah plný');
 
-    const unknown = scopeNode({ pilot: null, maxProducts: null });
-    expect(hasMark(unknown)).toBe(true);
-    expect(textOf(unknown)).toContain('Rozsah zľavy nevieme');
+    const neznamy = uzolRozsahu({ pilot: null, maxProducts: null });
+    expect(maZnacku(neznamy)).toBe(true);
+    expect(text(neznamy)).toContain('Rozsah zľavy nevieme');
   });
 
   it('značka zámku je ikona, nie znak ani pozadie z CSS', () => {
-    const node = scopeNode({ pilot: true, maxProducts: 10 });
-    expect(node.inner).toMatch(/<svg[^>]*class="[^"]*ovl-ic/);
+    const uzol = uzolRozsahu({ pilot: true, maxProducts: 10 });
+    expect(uzol.vnutro).toMatch(/<svg[^>]*class="[^"]*ovl-ic/);
     // Druhá kópia cesty ikony (maska v CSS) sa sem nesmie vrátiť.
-    expect(node.inner).not.toMatch(/data:image\/svg/);
+    expect(uzol.vnutro).not.toMatch(/data:image\/svg/);
   });
 });
 
@@ -402,24 +340,22 @@ describe('každý stav na Prehľade má značku vo svojom uzle', () => {
     // tvrdenie má chytiť rozbitý parser, nie spadnúť pri každom ubratom riadku
     // (vlna 2 skracuje texty práve v týchto sekciách). Bez tejto poistky by
     // obe tvrdenia nižšie svietili zeleno nad prázdnym zoznamom.
-    expect(hosts(renderStatus()).length).toBeGreaterThanOrEqual(6);
-    expect(hosts(PREHLAD).length).toBeGreaterThanOrEqual(12);
+    expect(hostitelia(renderStatus()).length).toBeGreaterThanOrEqual(6);
+    expect(hostitelia(PREHLAD).length).toBeGreaterThanOrEqual(12);
   });
 
   it('ani jeden hostiteľ nie je len farba a slovo', () => {
-    const bare = hosts(PREHLAD).filter((node) => !hasMark(node)).map(label);
-    expect(bare, 'stav bez značky — chýba tretí kanál').toEqual([]);
+    const bezZnacky = hostitelia(PREHLAD).filter((u) => !maZnacku(u)).map(popis);
+    expect(bezZnacky, 'stav bez značky — chýba tretí kanál').toEqual([]);
   });
 
   it('ani jeden hostiteľ nie je len farba a značka', () => {
-    const mute = hosts(PREHLAD).filter((node) => textOf(node) === '').map(label);
-    expect(mute, 'stav bez slova — pod deuteranopiou nečitateľný').toEqual([]);
+    const bezSlova = hostitelia(PREHLAD).filter((u) => text(u) === '').map(popis);
+    expect(bezSlova, 'stav bez slova — pod deuteranopiou nečitateľný').toEqual([]);
   });
 
   it('značka stojí pred slovom, nie za ním (rovnaké x na každom riadku)', () => {
-    const late = hosts(PREHLAD)
-      .filter((node) => !/^\s*<svg/.test(node.inner))
-      .map(label);
-    expect(late).toEqual([]);
+    const neskoro = hostitelia(PREHLAD).filter((u) => !znackaJePrva(u)).map(popis);
+    expect(neskoro).toEqual([]);
   });
 });
