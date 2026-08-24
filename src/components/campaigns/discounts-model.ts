@@ -311,6 +311,27 @@ const STATE_ORDER: Readonly<Record<SurfaceState, number>> = {
   'skončila': 3,
 };
 
+/** Kam ide stav, ktorý v číselníku nie je — na koniec, za všetky známe. */
+const UNKNOWN_STATE_ORDER = 9;
+
+/**
+ * Poradie jedného stavu v zozname.
+ *
+ * Stráž `?? UNKNOWN_STATE_ORDER` nie je opatrnosť navyše, je to zarovnanie
+ * s dvojičkou na Prehľade (`overview-model.liveCampaigns()`), ktorá ju má od
+ * začiatku. Bez nej dá `STATE_ORDER[neznámy]` hodnotu `undefined`, odčítanie
+ * `NaN`, `sort()` porovnávač, ktorý nie je usporiadaním — a poradie zoznamu sa
+ * medzi dvoma načítaniami toho istého zoznamu mení. `Record<SurfaceState, …>`
+ * to nechytí: typ hovorí, že iný stav neexistuje, presne ako to o kóde
+ * `writing` hovoril `as CampaignStatusCode`.
+ *
+ * Dnes sem neznámy stav nedôjde (`sentenceOf()` je fail-closed), ale práve
+ * asymetria dvoch dvojičiek vyrobila pôvodnú chybu.
+ */
+export function stateRank(state: SurfaceState): number {
+  return STATE_ORDER[state] ?? UNKNOWN_STATE_ORDER;
+}
+
 /**
  * Príznak pre kód stavu, ktorý appka nepozná.
  *
@@ -388,7 +409,7 @@ export function orderDiscounts<T extends DiscountLike>(
 ): OrderedDiscounts<T> {
   const withState = rows.map((row) => ({ row, state: sentenceOf(row, today).state }));
   const sorted = [...withState].sort((a, b) => {
-    const order = STATE_ORDER[a.state] - STATE_ORDER[b.state];
+    const order = stateRank(a.state) - stateRank(b.state);
     if (order !== 0) return order;
     return b.row.id - a.row.id;
   });

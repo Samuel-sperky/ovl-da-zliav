@@ -37,6 +37,7 @@ import type {
 import { query as poolQuery } from '@/db/pool';
 import { WRITE_OUTCOME_EVENTS } from '@/lib/audit/events';
 import { LOGIC_TIME_ZONE, endOfDayExclusiveUtc, startOfDayUtc, todayInZone } from '@/lib/domain/dates';
+import { isItemStatus } from '@/lib/domain/status';
 
 /* ═════════════════════════════ 1. Typy ════════════════════════════════════ */
 
@@ -103,15 +104,31 @@ export interface WriteActivity {
   truncated: boolean;
 }
 
-/** G5 — rozpad položiek kampane po stavoch. */
+/** G5 — rozpad položiek kampane po ZNÁMYCH stavoch. */
 export type CampaignItemTally = Record<ItemStatus, number>;
+
+/**
+ * G5 — celý rozpad položiek kampane.
+ *
+ * `unrecognized` je počet položiek so stavom mimo číselníka `ITEM_STATUSES`.
+ * Nesie sa oddelene a NIKDY sa nezahadzuje: do 24. 8. 2026 taký riadok z tally
+ * ticho vypadol a `total` v odpovedi bol nižší než skutočnosť — appka tvrdila
+ * počet, ktorý nesedel, bez najmenšieho náznaku, že niečo nezarátala. Nula
+ * namiesto pomlčky. S týmto číslom vedľa tally súčet zase sedí a obrazovka má
+ * medzeru v poznaní z čoho priznať.
+ */
+export interface CampaignItemBreakdown {
+  readonly tally: CampaignItemTally;
+  /** Počet položiek, ktorých stav appka nepozná. `0` = zaradili sme všetky. */
+  readonly unrecognized: number;
+}
 
 export interface InsightsRepoContract {
   campaignWindows(from: DateOnly, to: DateOnly, conn?: Queryable): Promise<CampaignWindowRow[]>;
   discountDepth(conn?: Queryable): Promise<DiscountDepthRow[]>;
   productWrites(productId: number, limit?: number, conn?: Queryable): Promise<ProductWriteRow[]>;
   writeActivity(from: DateOnly, to: DateOnly, conn?: Queryable): Promise<WriteActivity>;
-  campaignItemTally(campaignId: number, conn?: Queryable): Promise<CampaignItemTally>;
+  campaignItemTally(campaignId: number, conn?: Queryable): Promise<CampaignItemBreakdown>;
 }
 
 /* ═══════════════════════════ 2. Konštanty ═════════════════════════════════ */
@@ -377,19 +394,33 @@ async function writeActivity(
   };
 }
 
-/** G5 — rozpad položiek kampane; chýbajúci stav je 0, nie „nezobrazený" (U6). */
+/**
+ * G5 — rozpad položiek kampane; chýbajúci stav je 0, nie „nezobrazený" (U6).
+ *
+ * Stav, ktorý v číselníku nie je, sa NEZAHADZUJE — spočíta sa do
+ * `unrecognized`. Do 24. 8. 2026 tu stálo `if (status in tally)` a taký riadok
+ * ticho zmizol; `total` postavený nad tally potom hlásil menej položiek, než
+ * kampaň má, a nikde sa nedalo dozvedieť, že chýbajú. Zaraďuje sa runtime
+ * číselníkom, nie pretypovaním: `str(row.status) as ItemStatus` je len sľub
+ * typu, hodnota chodí z `ENUM` v databáze a prvá migrácia ju rozšíri.
+ *
+ * (`status in tally` malo aj druhú chybu: `in` vidí aj kľúče z prototypu, takže
+ * riadok so stavom `constructor` alebo `toString` by prešiel ako známy stav.)
+ */
 async function campaignItemTally(
   campaignId: number,
   conn?: Queryable,
-): Promise<CampaignItemTally> {
-  if (!isValidId(campaignId)) return { ...EMPTY_TALLY };
+): Promise<CampaignItemBreakdown> {
+  if (!isValidId(campaignId)) return { tally: { ...EMPTY_TALLY }, unrecognized: 0 };
   const rows = await run<DbRow[]>(conn, SQL_ITEM_TALLY, [campaignId]);
   const tally: CampaignItemTally = { ...EMPTY_TALLY };
+  let unrecognized = 0;
   for (const row of Array.isArray(rows) ? rows : []) {
-    const status = str(row.status) as ItemStatus;
-    if (status in tally) tally[status] = num(row.n);
+    const status = str(row.status);
+    if (isItemStatus(status)) tally[status] = num(row.n);
+    else unrecognized += num(row.n);
   }
-  return tally;
+  return { tally, unrecognized };
 }
 
 /* ═══════════════════════════ 6. Export ════════════════════════════════════ */

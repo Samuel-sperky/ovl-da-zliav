@@ -31,6 +31,7 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   DateOnly,
+  ItemStatus,
   ProductFullDetail,
   SecretHandle,
   SecretRef,
@@ -764,5 +765,127 @@ describe('GET /api/catalog/reduction-check', () => {
     const { body, fullCalls } = await callRoute('?productIds=0,-4,abc', { scopes: WITH_SCOPE });
     expect(body.data.outcome).toBe('no_ids');
     expect(fullCalls).toEqual([]);
+  });
+});
+
+/* ═══════ 6. Stav položky, ktorý appka nepozná (audit B7, 24. 8. 2026) ══════ */
+
+/**
+ * `campaign_items.status` je dnes `ENUM` s ôsmimi hodnotami a `ITEM_STATUSES`
+ * má presne tých istých osem, takže z databázy sem deviaty stav dnes nepríde.
+ * Príde prvou migráciou, ktorá stav pridá — presne tak, ako vznikol `writing`
+ * v `campaigns.status`. Meria sa to preto FIXTÚROU: `productWrites()` typuje
+ * stĺpec cez `str(row.status) as ItemStatus`, takže hodnota mimo číselníka je
+ * v tejto vrstve bežný reťazec a schéma sa na to meniť nemusí.
+ *
+ * Čo sa dialo do 24. 8. 2026: taký zápis vypadol z filtra `USABLE_ITEM_STATUSES`
+ * rovnako ako `failed`, vlastný stav klesol na `none` a porovnanie vyhlásilo
+ * `differs` / `extra` — teda „eshop hlási zľavu, appka ju nezapisovala".
+ * Appka tým tvrdila, že do admina eshopu siahol človek.
+ */
+const NEZNAMY_STAV = 'writing' as ItemStatus;
+
+describe('neznámy stav položky sa neprelieva na obvinenie z ručného zásahu', () => {
+  it('zápis s neznámym stavom nie je „appka nič nezapisovala"', () => {
+    const own = deriveOwnReduction([ownWrite({ status: NEZNAMY_STAV })], TODAY);
+    expect(own.state).toBe('unrecognized');
+    expect(own.state).not.toBe('none');
+  });
+
+  it('a porovnanie z toho NEVYVODÍ cudzí zásah — je to priznané NEVIEME', () => {
+    const own = deriveOwnReduction([ownWrite({ status: NEZNAMY_STAV })], TODAY);
+    const result = compareReduction(own, shopActive(20, '2026-08-10', '2026-08-24'));
+
+    expect(result.verdict).toBe('unknown');
+    expect(result.verdict).not.toBe('differs');
+    expect(result.differences).toEqual([]);
+    // `extra` je veta „toto tam dal niekto ručne". Nesmie zaznieť z nevedomosti.
+    expect(result.differences).not.toContain('extra');
+    expect(result.unknownCause).toBe('own_unrecognized');
+    // Opakované čítanie vráti ten istý neznámy stav — tlačidlo by klamalo.
+    expect(result.nextStep).toBe('inspect_own_record');
+    expect(result.nextStep).not.toBe('read_again');
+  });
+
+  it('nevedomosť sa nezlieva ani s tichým eshopom — dôvod je vlastný', () => {
+    const own = deriveOwnReduction([ownWrite({ status: NEZNAMY_STAV })], TODAY);
+    expect(compareReduction(own, SHOP_NONE).verdict).toBe('unknown');
+    expect(compareReduction(own, SHOP_NONE).unknownCause).toBe('own_unrecognized');
+    // Aj keď eshop mlčí: „nevideli sme" a „nerozumieme tomu" sú dve medzery.
+    const shopTicho = compareReduction(own, { state: 'unknown', reason: 'read_failed' });
+    expect(shopTicho.unknownCause).toBe('own_unrecognized');
+    expect(shopTicho.unknownCause).not.toBe('own_unread');
+  });
+
+  it('platí to aj pre zápis dopredu — okno pred nami nevedomosť nezmaže', () => {
+    const own = deriveOwnReduction(
+      [ownWrite({ status: NEZNAMY_STAV, dateFrom: '2026-09-04', dateTo: '2026-09-18' })],
+      TODAY,
+    );
+    expect(own.state).toBe('unrecognized');
+    expect(compareReduction(own, SHOP_NONE).unknownCause).toBe('own_unrecognized');
+  });
+
+  it('rozhoduje NAJNOVŠÍ zápis — neznámy stav pod starším „ok" ho neprebije', () => {
+    const own = deriveOwnReduction(
+      [
+        ownWrite({ itemId: 1, status: 'ok', at: '2026-08-11T07:00:00.000Z' }),
+        ownWrite({ itemId: 2, status: NEZNAMY_STAV, at: '2026-08-15T07:00:00.000Z' }),
+      ],
+      TODAY,
+    );
+    expect(own.state).toBe('unrecognized');
+  });
+
+  it('novší „ok" nad starším neznámym zápisom naopak platí — shop drží posledný', () => {
+    const own = deriveOwnReduction(
+      [
+        ownWrite({ itemId: 1, status: NEZNAMY_STAV, at: '2026-08-11T07:00:00.000Z' }),
+        ownWrite({ itemId: 2, status: 'ok', percent: 25, at: '2026-08-15T07:00:00.000Z' }),
+      ],
+      TODAY,
+    );
+    expect(own.state === 'expected' && own.write.percent).toBe(25);
+  });
+
+  it('neznámy stav v okne ZA NAMI dnešok neovplyvní', () => {
+    const own = deriveOwnReduction(
+      [ownWrite({ status: NEZNAMY_STAV, dateFrom: '2026-06-15', dateTo: '2026-07-15' })],
+      TODAY,
+    );
+    expect(own.state).toBe('none');
+  });
+
+  it('známe stavy sa nezmenili — inak by príznak hlásil pri každej zľave', () => {
+    expect(deriveOwnReduction([ownWrite({ status: 'ok' })], TODAY).state).toBe('expected');
+    expect(deriveOwnReduction([ownWrite({ status: 'uncertain' })], TODAY).state).toBe('expected');
+    for (const status of ['failed', 'not_found', 'blocked', 'skipped', 'interrupted', 'pending'] as const) {
+      expect(deriveOwnReduction([ownWrite({ status })], TODAY).state).toBe('none');
+    }
+  });
+
+  it('celá cesta až do odpovede API hovorí NEVIEME, nie „niekto zasiahol"', async () => {
+    const { body } = await callRoute('?productIds=1&day=2026-08-18', {
+      scopes: WITH_SCOPE,
+      own: { 1: [ownWrite({ status: NEZNAMY_STAV })] },
+      reductions: { 1: shopActive(15, '2026-08-10', '2026-08-24') },
+    });
+
+    const row = body.data.products[0];
+    expect(row?.verdict).toBe('unknown');
+    expect(row?.differences).toEqual([]);
+    expect(row?.unknownCause).toBe('own_unrecognized');
+    expect(row?.own.state).toBe('unrecognized');
+    // Meraný stav eshopu ostáva v odpovedi — nevedomosť je na NAŠEJ strane.
+    expect(row?.shop).toEqual({ state: 'active', percent: 15, from: '2026-08-10', to: '2026-08-24' });
+    expect(body.data.summary).toEqual({ match: 0, differs: 0, unknown: 1 });
+  });
+
+  it('vnútorný kód stavu sa do odpovede neprepašuje (K10)', async () => {
+    const { body } = await callRoute('?productIds=1&day=2026-08-18', {
+      scopes: WITH_SCOPE,
+      own: { 1: [ownWrite({ status: NEZNAMY_STAV })] },
+    });
+    expect(JSON.stringify(body.data.products[0])).not.toContain(NEZNAMY_STAV);
   });
 });

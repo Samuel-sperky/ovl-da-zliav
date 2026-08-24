@@ -62,6 +62,7 @@ import type {
   ShopReductionState,
 } from '@/contracts';
 
+import { isItemStatus } from '@/lib/domain/status';
 import type { ProductWriteRow } from '@/lib/repo/insights.repo';
 
 /* ═══════════════ 1. Čo o produkte hovoria VLASTNÉ zápisy ══════════════════ */
@@ -75,6 +76,9 @@ import type { ProductWriteRow } from '@/lib/repo/insights.repo';
  * nedostanú: `failed`, `not_found`, `blocked`, `skipped` a `interrupted`
  * znamenajú, že sa nezapísalo, a `pending`, že sa ešte nezapisovalo — ani
  * z jedného sa nedá odvodiť očakávanie voči eshopu.
+ *
+ * Stav MIMO číselníka sem tiež nedôjde, ale z opačného dôvodu: nezahodí sa,
+ * zastaví celý výrok na `unrecognized` (viď `deriveOwnReduction`).
  */
 export interface OwnWriteRecord {
   readonly campaignId: number;
@@ -108,10 +112,33 @@ export type OwnReductionState =
    * Vlastné zápisy sa nedali prečítať (vlastná DB mlčí). NIE JE to `none`:
    * „appka nič nezapísala" je tvrdenie o vlastných dátach, ktoré nikto nevidel.
    */
-  | { readonly state: 'unknown' };
+  | { readonly state: 'unknown' }
+  /**
+   * Zápis, ktorý o porovnávanom dni rozhoduje, nesie stav MIMO číselníka
+   * `ITEM_STATUSES` — appka ho prečítala, ale nevie ho zaradiť.
+   *
+   * Je to vlastný stav a nie `none`, lebo `none` znamená „appka na tento deň
+   * nič nezapisovala", a z toho `compareReduction` vyvodí `extra`, teda vetu
+   * „eshop hlási zľavu, ktorú appka nezapisovala" — obvinenie človeka zo
+   * zásahu v admine eshopu. Z nevedomosti o vlastnom zázname sa nikdy nesmie
+   * stať tvrdenie o cudzom zásahu.
+   */
+  | { readonly state: 'unrecognized' };
 
 /** Stavy položky, z ktorých sa dá odvodiť očakávanie voči eshopu. */
 const USABLE_ITEM_STATUSES: ReadonlySet<ItemStatus> = new Set<ItemStatus>(['ok', 'uncertain']);
+
+/**
+ * `true` = stav položky, ktorý appka nepozná.
+ *
+ * `ProductWriteRow.status` je typovaný ako `ItemStatus`, ale hodnota prichádza
+ * z databázy cez `str(row.status) as ItemStatus` — typ ju teda neoveruje. Prvá
+ * migrácia, ktorá do `ENUM` pridá stav, sem taký reťazec prinesie a od typu sa
+ * to nedozvieme. Overuje sa preto runtime číselníkom, nie pretypovaním.
+ */
+function isUnrecognizedStatus(row: ProductWriteRow): boolean {
+  return !isItemStatus(row.status);
+}
 
 /** Kľúč na zoradenie „najnovší prvý" — čas uzavretia, potom id položky. */
 function writeOrderKey(row: ProductWriteRow): string {
@@ -131,6 +158,18 @@ function writeOrderKey(row: ProductWriteRow): string {
  * vo dvoch kampaniach naraz a platí to, čo appka poslala do shopu naposledy —
  * shop si predošlú hodnotu neodkladá.
  *
+ * NEZNÁMY STAV SA NEVYFILTRUJE. Do 24. 8. 2026 tu bol jediný filter na
+ * `USABLE_ITEM_STATUSES` a stav mimo číselníka z neho vypadol rovnako ako
+ * `failed`. Rozdiel je pritom zásadný: pri `failed` appka VIE, že sa
+ * nezapísalo, pri neznámom stave nevie NIC. Vypadnutý riadok sa javil ako
+ * „appka nezapisovala" a `compareReduction` z toho vyrobil `extra`, teda vetu
+ * „eshop hlási zľavu, appka ju nezapisovala" — obvinenie človeka zo zásahu
+ * v admine eshopu, kvôli ktorému celý tento modul vznikol. Neznámy stav preto
+ * filtrom prejde a rozhodne o výsledku: keď je to práve ten zápis, ktorý sa
+ * porovnávaného dňa týka, výsledok je `unrecognized`, teda priznaná nevedomosť.
+ * Dnes to spustiť nejde (`ENUM` a `ITEM_STATUSES` majú rovnakých osem hodnôt),
+ * ožije to prvou migráciou, ktorá stav pridá — presne tak, ako vznikol `writing`.
+ *
  * Vstup sa NEMUTUJE (`insightsRepo.productWrites()` ho vracia už zoradený, ale
  * spoliehať sa na cudzie `ORDER BY` by znamenalo, že zmena SQL ticho zmení
  * výrok tejto funkcie).
@@ -139,8 +178,10 @@ export function deriveOwnReduction(
   writes: readonly ProductWriteRow[],
   day: DateOnly,
 ): OwnReductionState {
-  const usable = writes
-    .filter((row) => USABLE_ITEM_STATUSES.has(row.status))
+  // Zápisy, ktoré k porovnávanému dňu môžu niečo znamenať: tie, z ktorých sa
+  // očakávanie odvodiť DÁ, plus tie, o ktorých to nevieme povedať.
+  const relevant = writes
+    .filter((row) => USABLE_ITEM_STATUSES.has(row.status) || isUnrecognizedStatus(row))
     .slice()
     .sort((a, b) => writeOrderKey(b).localeCompare(writeOrderKey(a)));
 
@@ -154,11 +195,21 @@ export function deriveOwnReduction(
     writeStatus: row.status === 'uncertain' ? 'uncertain' : 'ok',
   });
 
-  const covering = usable.find((row) => row.dateFrom <= day && row.dateTo >= day);
-  if (covering !== undefined) return { state: 'expected', write: toRecord(covering) };
+  // Rozhoduje NAJNOVŠÍ z nich — starší zápis shop už neplatí. Keď je najnovší
+  // ten, ktorému appka nerozumie, výrok končí priznaním, nie odhadom.
+  const covering = relevant.find((row) => row.dateFrom <= day && row.dateTo >= day);
+  if (covering !== undefined) {
+    return isUnrecognizedStatus(covering)
+      ? { state: 'unrecognized' }
+      : { state: 'expected', write: toRecord(covering) };
+  }
 
-  const ahead = usable.find((row) => row.dateFrom > day);
-  if (ahead !== undefined) return { state: 'ahead', write: toRecord(ahead) };
+  const ahead = relevant.find((row) => row.dateFrom > day);
+  if (ahead !== undefined) {
+    return isUnrecognizedStatus(ahead)
+      ? { state: 'unrecognized' }
+      : { state: 'ahead', write: toRecord(ahead) };
+  }
 
   return { state: 'none' };
 }
@@ -203,6 +254,12 @@ export type ReductionUnknownCause =
   | 'shop_unread'
   /** Vlastné zápisy sa nedali prečítať, takže niet čo porovnať. */
   | 'own_unread'
+  /**
+   * Vlastný zápis sa prečítal, ale nesie stav, ktorý appka nepozná. Je to iná
+   * medzera než `own_unread`: tam appka nevidela nič, tu videla a nerozumie.
+   * Rozlíšené sú preto, že opakované čítanie prvú spraví, druhú nie.
+   */
+  | 'own_unrecognized'
   /** Okno vlastného zápisu sa ešte nezačalo a `getFull` hlási len bežiacu zľavu. */
   | 'not_started';
 
@@ -223,7 +280,13 @@ export type ReductionNextStep =
   /** Bez oprávnenia na čítanie produktu sa overiť nedá. */
   | 'need_permission'
   /** Čítanie sa nepodarilo; dá sa zopakovať. */
-  | 'read_again';
+  | 'read_again'
+  /**
+   * Vlastný zápis nesie stav mimo číselníka — pozrieť sa naň musí človek.
+   * NIE `read_again`: opakované čítanie vráti ten istý neznámy stav a tlačidlo
+   * „skúsiť znova" by len predstieralo, že sa dá niečo spraviť.
+   */
+  | 'inspect_own_record';
 
 export interface ReductionComparison {
   readonly verdict: ReductionVerdict;
@@ -260,6 +323,9 @@ function round2(value: number): number {
  *      v admine. Preto je táto vetva PRVÁ: keby bola druhá, výsledok by ukazoval
  *      na eshop tam, kde je pokazená vlastná DB, a poslal by človeka opravovať
  *      zlú vec.
+ *   1b. **Nezaraditeľný vlastný zápis je to isté.** Stav mimo číselníka nie je
+ *      „nezapísali sme" — je to „nevieme, čo sme zapísali", a rovnako ako vetva
+ *      1 nesmie skončiť ukazovaním na eshop.
  *   2. **Nečitateľný stav eshopu je druhý.** Keď `getFull` neodpovedal, nedá sa
  *      povedať ani „sedí", ani „rozchádza sa".
  *   3. **Zápis dopredu s tichým eshopom je `unknown`, nie rozdiel.** Viď bod 3
@@ -293,6 +359,21 @@ export function compareReduction(
       differences: [],
       unknownCause: 'own_unread',
       nextStep: 'read_again',
+    };
+  }
+
+  /* ── 1b. vlastný zápis nesie stav, ktorý appka nepozná ──────────────────── */
+
+  // Prebíja aj nečitateľný eshop, z rovnakého dôvodu ako vetva 1: kým appka
+  // nevie, čo sama zapísala, nesmie o eshope povedať ani „sedí", ani „nesedí",
+  // a už vôbec nie „toto tam dal niekto ručne".
+  if (own.state === 'unrecognized') {
+    return {
+      ...base,
+      verdict: 'unknown',
+      differences: [],
+      unknownCause: 'own_unrecognized',
+      nextStep: 'inspect_own_record',
     };
   }
 
