@@ -12,9 +12,11 @@
  *     kontrolujú konkrétne čísla vo vetách a plošne zakazujú `undefined`,
  *     `NaN` aj vnútorné kódy na povrchu (K10).
  *  3. **Zrkadlené konštanty sa nerozišli s originálmi.** `blockers.ts` si
- *     zrkadlí päť čísel z modulov, ktoré ťahajú `@/db/pool` (a s ním `mariadb`),
- *     aby zostal použiteľný aj v client komponente. Originály sa importujú TU
- *     a porovnajú — rozídenie hodnôt zhodí test, nie produkciu.
+ *     zrkadlí šesť hodnôt z modulov, ktoré ťahajú `@/db/pool` (a s ním
+ *     `mariadb`), aby zostal použiteľný aj v client komponente. Originály sa
+ *     importujú TU a porovnajú — rozídenie hodnôt zhodí test, nie produkciu.
+ *     Od 24. 8. 2026 je medzi nimi aj `BUDGET_TIME_ZONE`: deň dobehnutia fronty
+ *     sa počíta z neho, takže rozídenie zóny by posunulo dátum na povrchu.
  *
  * Vlastník: S1.
  */
@@ -24,6 +26,7 @@ import {
   API_KEY_MAX_TTL_HOURS,
   BLOCKER_ORDER,
   BLOCKER_PATHS,
+  BUDGET_TIME_ZONE,
   CATALOG_PAGE_SIZE,
   FAIL_CLOSED_DAILY_BUDGET,
   HARD_MAX_PRODUCTS,
@@ -51,11 +54,18 @@ import {
 import { readDaysNeeded } from '@/lib/shop/read-budget';
 // Tvar dátumu vo vete dáva jediný formátovač appky (kontrakt UI bod 10) —
 // test ho volá, aby netvrdil o čase niečo, čo závisí od časovej zóny stroja.
-import { formatDateTimeSk } from '@/lib/ui/format';
+import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
+// Počet vo vete píše ten istý formátovač ako v module — inak by test hľadal
+// „1500" v texte, kde stojí „1 500".
+import { formatCountSk } from '@/lib/ui/vocabulary';
 
 /* ─────────────── originály zrkadlených čísel (len pre porovnanie) ───────── */
 
-import { estimateFinish, FAIL_CLOSED_DAILY_BUDGET as ORIGINAL_FAIL_CLOSED_BUDGET } from '@/lib/engine/budget';
+import {
+  estimateFinish,
+  BUDGET_TIME_ZONE as ORIGINAL_BUDGET_TIME_ZONE,
+  FAIL_CLOSED_DAILY_BUDGET as ORIGINAL_FAIL_CLOSED_BUDGET,
+} from '@/lib/engine/budget';
 import { API_KEY_MAX_TTL_HOURS as ORIGINAL_KEY_TTL } from '@/lib/repo/api-key.repo';
 import {
   HARD_MAX_PRODUCTS as ORIGINAL_HARD_MAX,
@@ -67,6 +77,22 @@ import { CATALOG_PAGE_SIZE as ORIGINAL_PAGE_SIZE } from '@/lib/shop/catalog-sync
 
 const NOW = new Date('2026-08-12T10:00:00.000Z');
 const HOUR = 3_600_000;
+
+/**
+ * Veta nesie ČÍSLO — nech ho obopína akákoľvek väzba.
+ *
+ * Do 24. 8. 2026 tu stálo `toContain('150 produktov')`. Keď sa vety skrátili
+ * (P2, bod 8 hlavičky `blockers.ts`), údaj z vety nezmizol — „150" v nej stojí
+ * ďalej, len bez jednotky vedľa. Tvrdenie padlo aj tak, pretože zamykalo
+ * SLOVNÉ SPOJENIE namiesto faktu; tak by padlo pri každom ďalšom skrátení
+ * a nútilo by prepisovať test namiesto merania.
+ *
+ * `formatCountSk` oddeľuje tisícky OBYČAJNOU medzerou (`ui/vocabulary.ts`), nie
+ * nezlomiteľnou — preto sa číslo skladá cez ňu a nehľadá naivne ako `1500`.
+ * Ohraničenie `(?<!\d)`/`(?!\d)` je tu preto, aby „40" nenašlo v „140".
+ */
+const nesieCislo = (text: string, count: number): boolean =>
+  new RegExp(`(?<!\\d)${formatCountSk(count).replace(/ /g, '\\s')}(?!\\d)`).test(text);
 
 /** Snapshot, v ktorom nič nezlyháva — základ, od ktorého sa odchyľuje. */
 function healthy(overrides: StatusSnapshot = {}): StatusSnapshot {
@@ -131,6 +157,14 @@ describe('zrkadlené konštanty sa nesmú rozísť s originálmi', () => {
     expect(CATALOG_PAGE_SIZE).toBe(100);
   });
 
+  it('zóna zápisového rozpočtu je tá istá ako v engine/budget', () => {
+    // Šiesta zrkadlená konštanta (od 24. 8. 2026). Deň dobehnutia fronty sa
+    // počíta `addDays` nad dňom v TEJTO zóne — keby sa rozišla s originálom,
+    // veta by ukazovala na iný deň než dlaždice fronty.
+    expect(BUDGET_TIME_ZONE).toBe(ORIGINAL_BUDGET_TIME_ZONE);
+    expect(BUDGET_TIME_ZONE).toBe('UTC');
+  });
+
   it('odhad dobehnutia fronty počíta rovnako ako estimateFinish v engine/budget', () => {
     // 150 vo výbere, 40 sa dnes ešte zmestí, 200 na deň → ešte 1 deň.
     const expected = estimateFinish(150, 200, { remainingToday: 40, now: NOW });
@@ -138,7 +172,43 @@ describe('zrkadlené konštanty sa nesmú rozísť s originálmi', () => {
       healthy({ writeBudget: { budget: 200, spent: 160 }, selection: { selectedCount: 150 } }),
     );
     expect(expected.days).toBe(1);
-    expect(byId(blockers, 'write_budget_low').nextStep).toContain(`${expected.days} deň`);
+    // Od 24. 8. 2026 veta hovorí KONKRÉTNY DEŇ, nie „o 1 deň" (bod 6 hlavičky
+    // `blockers.ts`). Tvrdenie tým zosilnelo: nestačí, že sa počet dní zhoduje
+    // s `estimateFinish()` — musí sa zhodovať aj DEŇ, na ktorý ukazujú, a to
+    // v tvare, v akom sa dátum po slovensky píše (`formatDateSk`).
+    const krok = byId(blockers, 'write_budget_low').nextStep;
+    expect(krok).toContain(formatDateSk(expected.date));
+    expect(krok).toContain('13. 8. 2026');
+    // Relatívny čas sa nesmie vrátiť ani ako druhé číslo vedľa dátumu.
+    expect(krok).not.toContain(`o ${expected.days} deň`);
+    // A prenosový tvar dňa na povrch nepatrí (bod 6 hlavičky).
+    expect(krok).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it('deň dobehnutia sedí s estimateFinish aj pri iných počtoch, nie len pri jednom', () => {
+    // `finishDay()` v `blockers.ts` zrkadlí `estimateFinish().date`, pretože
+    // `engine/budget.ts` sa sem importovať nedá (ťahá `@/db/pool`). Rozídenie
+    // aritmetiky (iná zóna, iné zaokrúhľovanie) musí zhodiť test, nie povrch —
+    // a jedna hodnota by rozdiel v zaokrúhľovaní neodhalila.
+    for (const [vyber, minute] of [
+      [150, 160],
+      [800, 0],
+      [12_000, 199],
+    ] as const) {
+      const ocakavane = estimateFinish(vyber, 200, { remainingToday: 200 - minute, now: NOW });
+      const blocker = byId(
+        collectOperationBlockers(
+          healthy({
+            writeBudget: { budget: 200, spent: minute },
+            selection: { selectedCount: vyber },
+          }),
+        ),
+        'write_budget_low',
+      );
+      expect(blocker.nextStep, `${vyber} vo výbere, ${minute} minutých`).toContain(
+        formatDateSk(ocakavane.date),
+      );
+    }
   });
 });
 
@@ -201,8 +271,17 @@ describe('zdravý snapshot nič neblokuje', () => {
       'scope_pilot_cap',
     );
     expect(over.severity).toBe('blokuje');
+    // Strop, výber, zvyšok — bod 1 hlavičky `blockers.ts` žiada od blokujúcej
+    // vety všetky tri. Merajú sa ako ČÍSLA, nie ako väzby: jednotka pri druhom
+    // čísle a prívlastok „zvyšných" z vety 24. 8. 2026 vypadli (P2, bod 8)
+    // a fakt tým nezanikol.
+    for (const n of [PILOT_MAX_PRODUCTS, 150, 140]) {
+      expect(nesieCislo(over.what, n), `veta nenesie ${n}`).toBe(true);
+    }
+    // Jednotka zostala aspoň raz — bez nej sa nedá zistiť, čoho je 10.
     expect(over.what).toContain('10 produktov');
-    expect(over.what).toContain('150 produktov');
+    // A zvyšok má dôsledok, nie len číslo.
+    expect(over.what).toMatch(/nezapíše|nezapíšu/);
   });
 });
 
@@ -303,9 +382,20 @@ describe('API kľúč — či je vložený a dokedy platí', () => {
       'key_expires_soon',
     );
     expect(blocker.severity).toBe('obmedzuje');
-    // 1 500 položiek pri 200/deň (200 sa zmestí dnes) = ešte 7 dní.
-    expect(blocker.what).toContain('7 dní');
-    expect(blocker.what).toContain('1 500 produktov');
+    // 1 500 položiek pri 200/deň (200 sa zmestí dnes) = ešte 7 dní. Vo vete
+    // stoja tie DVE čísla, ktoré sa navzájom porovnávajú — hodiny kľúča a dni
+    // fronty — a dôsledok, ktorý z ich porovnania plynie.
+    for (const n of [6, 7]) {
+      expect(nesieCislo(blocker.what, n), `veta nenesie ${n}`).toBe(true);
+    }
+    expect(blocker.what).toMatch(/zastaví|vyprší/);
+    // Počet položiek a rýchlosť „pri 200 zápisoch na deň" z vety 24. 8. 2026
+    // vypadli ZÁMERNE, ako mechanika (P2, P6): dni sa z nich počítajú, veta
+    // neporovnáva produkty, a `Fronta 3 420/8 000` stojí v hlavičke KAŽDEJ
+    // stránky — bolo to tretí raz to isté. Preto je to zákaz, nie požiadavka:
+    // keby sa počet vrátil, veta má 148 znakov (P2 dáva 90).
+    expect(nesieCislo(blocker.what, 1_500), 'počet položiek sa do vety vrátil').toBe(false);
+    expect(blocker.what).not.toContain('zápisoch na deň');
   });
 
   it('dosť dlhá platnosť sa nespomína vôbec', () => {
@@ -362,9 +452,12 @@ describe('denný rozpočet zápisov', () => {
       'write_budget_low',
     );
     expect(blocker.severity).toBe('obmedzuje');
-    expect(blocker.what).toContain('40 zápisov');
-    expect(blocker.what).toContain('150 produktov');
-    expect(blocker.what).toContain('110');
+    // Dnešný zvyšok, výber, odklad. Všetky tri zostali; veta ich len
+    // 24. 8. 2026 preskládala tak, aby sa zmestila do P2 („Z 150 produktov
+    // sa dnes zapíše 40 — 110 počká.").
+    for (const n of [40, 150, 110]) {
+      expect(nesieCislo(blocker.what, n), `veta nenesie ${n}`).toBe(true);
+    }
     expect(blocker.resolution).toBe('cakanie');
   });
 
@@ -394,8 +487,9 @@ describe('režim rozsahu — pilot stropuje na 10, plny na uložený strop', () 
     expect(blocker.nextStep).not.toContain('heslo');
     expect(blocker.path).toBe(BLOCKER_PATHS.settings);
     expect(blocker.what).toContain('najviac 10 produktov');
-    expect(blocker.what).toContain('vo výbere je 150 produktov');
-    expect(blocker.what).toContain('zvyšných 140 sa nezapíše');
+    for (const n of [150, 140]) {
+      expect(nesieCislo(blocker.what, n), `veta nenesie ${n}`).toBe(true);
+    }
   });
 
   it('plný režim má vlastný strop a mení sa bez hesla', () => {
@@ -501,7 +595,10 @@ describe('režim rozsahu — pilot stropuje na 10, plny na uložený strop', () 
       'scope_pilot_cap',
     );
     expect(nad.severity).toBe('blokuje');
-    expect(nad.what).toContain('15 produktov');
+    // Strop, dopočítaný výber, zvyšok — a nič z toho ako väzba.
+    for (const n of [PILOT_MAX_PRODUCTS, 15, 5]) {
+      expect(nesieCislo(nad.what, n), `veta nenesie ${n}`).toBe(true);
+    }
   });
 });
 
@@ -609,8 +706,12 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
     expect(expectedDays).toBe(2);
     expect(blocker.severity).toBe('obmedzuje');
     expect(blocker.what).toContain('12 000 z 40 483 produktov');
-    expect(blocker.what).toContain('28 483 zatiaľ chýba');
-    expect(blocker.what).toContain(`približne ${expectedDays} dni`);
+    // Od 24. 8. 2026 veta nehovorí len „chýba", ale DÔSLEDOK — chýbajúce sa
+    // nedajú vybrať. To je dôvod, prečo prekážka vôbec existuje.
+    expect(blocker.what).toContain('28 483 sa zatiaľ vybrať nedá');
+    // Odhad sa presunul do ďalšieho kroku (tempo čítania je technika, P6).
+    expect(blocker.nextStep).toContain(`približne za ${expectedDays} dni`);
+    expect(blocker.what).not.toContain('približne');
     expect(blocker.resolution).toBe('cakanie');
     expect(blocker.passableNow).toBe(false);
   });
@@ -644,8 +745,8 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
 
     const pages = Math.ceil(28_483 / CATALOG_PAGE_SIZE);
     expect(readDaysNeeded(pages, ANON_READS_PER_UTC_DAY)).toBe(1);
-    expect(blocker.what).toContain('približne 1 deň');
-    expect(blocker.what).not.toContain('2 dni');
+    expect(blocker.nextStep).toContain('približne za 1 deň');
+    expect(blocker.nextStep).not.toContain('2 dni');
   });
 
   it('keď server odhad už spočítal, prekážka použije JEHO číslo', () => {
@@ -670,7 +771,7 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
       'catalog_incomplete',
     );
 
-    expect(blocker.what).toContain('približne 6 dní');
+    expect(blocker.nextStep).toContain('približne za 6 dní');
     expect(blocker.clearsAt?.toISOString()).toBe(finish.toISOString());
   });
 

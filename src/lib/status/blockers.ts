@@ -80,16 +80,75 @@
  *     zo snímky za behu. Chytiť sa to dá jedine prečítaním hotovej vety, čo
  *     robí `test/unit/slovnik-prekazky.spec.ts`.
  *
- *     Čo tento bod NEPOKRÝVA: `nextStep` pri `write_budget_low` stále hovorí
- *     „hotovo bude približne o 3 dni". Je to relatívny čas a appka inde (dlaždice
- *     fronty, `estimate.date`) hovorí konkrétny deň. Prepočet dní na dátum tu
- *     nie je len formátovanie — `blockers.ts` si `engine/budget.ts` importovať
- *     nesmie (ťahá `@/db/pool`), takže je to samostatné rozhodnutie.
+ *     ROZHODNUTIE Z 24. 8. 2026 (relatívny čas v odhade fronty). `nextStep`
+ *     pri `write_budget_low` hovoril „hotovo bude približne o 3 dni". Appka
+ *     inde (dlaždice fronty, `estimate.date`) hovorí konkrétny deň, takže dve
+ *     odpovede na tú istú otázku stáli na tých istých obrazovkách vedľa seba.
+ *     Deň sa počíta TU, čistou funkciou `finishDay()` — nepribudlo pole do
+ *     `StatusSnapshot`. Dôvod: `needsDays` si tento modul aj tak počíta sám
+ *     (`daysToFinish()`), takže deň je z neho len `addDays` nad UTC dnešným,
+ *     teda tá istá aritmetika ako `estimateFinish().date`. Nové pole by
+ *     znamenalo drôt (`WriteBudgetWire` v `status/snapshot.ts`), serializáciu
+ *     na oboch koncoch a serverového producenta pre číslo, ktoré je zo snímky
+ *     dopočítateľné. `catalog.estimatedFinishAt` je iný prípad a preto v snímke
+ *     ostáva: server tam pozná pokrok prechodu (`last_page`), čiže vie niečo,
+ *     čo tento modul naozaj nevie.
+ *     Čo sa tým smie TICHO pokaziť: `finishDay()` a `daysToFinish()` zrkadlia
+ *     `engine/budget.ts`, ktorý sa sem importovať nedá. Keby sa tam zmenila
+ *     zóna rozpočtu alebo zaokrúhľovanie, tu by o tom nikto nevedel — zhodu
+ *     preto stráži `test/unit/status-blockers.spec.ts` nad ORIGINÁLMI.
+ *     Čo tento bod NEPOKRÝVA: odhad dočítania katalógu (`catalog_incomplete`)
+ *     stále hovorí „približne za 2 dni". Dátum tam k dispozícii je (`clearsAt`),
+ *     ale prepnutie by prepísalo tvrdenia, ktoré v teste držia „jeden odhad,
+ *     nie dva" — je to samostatná úloha.
  *
- * PREČO SÚ TU PREDSA PÄŤ ZRKADLENÝCH KONŠTÁNT
- * -------------------------------------------
+ *  7. **Fail-closed veta sa skracuje vypustením domnienky, nie dôsledku.**
+ *     Vety s `assumed: true` mali 91 až 166 znakov (P2 dáva 90) a všetky
+ *     hovorili to isté dvakrát: „Nevieme X — kým to nevieme, appka počíta
+ *     s tým, že Y, a preto Z." Že veta stojí na domnienke, kreslí UI samo
+ *     (`assumed` → „appka to nevie"), takže vnútorné „kým to nevieme, počíta
+ *     s tým, že Y" bolo tretie zopakovanie tej istej informácie. Od
+ *     24. 8. 2026 znejú „Nevieme X — appka preto Z." a zmestia sa do 90.
+ *     Čo sa NESKRACUJE: dôsledok (Z) a číslo, ktoré ho robí konkrétnym.
+ *     Čo sa tým smie TICHO pokaziť: keby UI prestalo `assumed` priznávať,
+ *     fail-closed veta začne znieť ako meraný fakt — appka bude tvrdiť, že
+ *     zápisy sú vypnuté, hoci len nevie, či sú zapnuté. Preto to `assumed`
+ *     musí kresliť povrch, nie veta.
+ *
+ *  8. **MERANÁ veta sa skracuje vypustením mechaniky, nie čísel.** Bod 7
+ *     zavrel domnienky; 24. 8. 2026 dobehol zvyšok. Šesť meraných viet bolo
+ *     nad P2 (90): `key_expires_soon` 148, `write_budget_exhausted` 118,
+ *     `write_budget_low` 118, `scope_full_cap` 107, `catalog_reads_minute_`
+ *     `exhausted` 99, `scope_pilot_cap` 98. Vypustilo sa z nich to, ČÍM appka
+ *     k číslu prišla, nie samo číslo ani dôsledok: „pri 200 zápisoch na deň",
+ *     „ktoré shop pustí za jeden UTC deň", „ktoré si appka dovolí", „a odloží
+ *     zvyšok na neskôr", druhé „produktov" a prívlastok „zvyšných". Technika
+ *     patrí pod rozklik (P6) — a veta o strope tým dostala presne ten tvar,
+ *     ktorý ako vzor uvádza bod 1.
+ *
+ *     Čo sa NEVYPUSTILO ani raz: obe čísla blokujúcej vety (bod 1), náš strop
+ *     vedľa stropu shopu pri čítaniach (`engine/budget.ts` to žiada oboma
+ *     smermi) a dôsledok. `key_expires_soon` je hraničný prípad a stojí za
+ *     vysvetlenie: z vety vypadol POČET čakajúcich produktov, teda číslo.
+ *     Smelo, pretože veta neporovnáva produkty, ale hodiny kľúča s dňami
+ *     fronty — a `Fronta 3 420/8 000` stojí v hlavičke KAŽDEJ stránky, takže
+ *     to bolo tretí raz to isté, presne z toho dôvodu, pre ktorý bod 1
+ *     škrtol druhé číslo z informatívnej vety o strope.
+ *
+ *     Čo sa tým smie TICHO pokaziť: rezerva je tesná. Najdlhšia veta po
+ *     skrátení má 88 znakov (`scope_full_cap` pri strope 10 000 a výbere
+ *     12 000) a čísla v týchto vetách rastú s inštaláciou — pri rozpočte
+ *     1 zápis na deň (fail-closed) povie `key_expires_soon` „11 999 dní".
+ *     Kto pridá do niektorej vety slovo, nemusí prekročiť limit na svojich
+ *     dátach a prekročí ho na ostrých. Preto to nemeria oko, ale
+ *     `test/unit/slovnik-prekazky.spec.ts` sekcia 8 — PLOŠNE nad všetkými
+ *     vetami a nad maticou, ktorá tie najširšie čísla zámerne vyrába.
+ *
+ * PREČO JE TU PREDSA ŠESŤ ZRKADLENÝCH KONŠTÁNT
+ * --------------------------------------------
  * `PILOT_MAX_PRODUCTS`, `HARD_MAX_PRODUCTS`, `FAIL_CLOSED_DAILY_BUDGET`,
- * `API_KEY_MAX_TTL_HOURS` a `CATALOG_PAGE_SIZE` žijú v moduloch, ktoré ťahajú
+ * `API_KEY_MAX_TTL_HOURS`, `CATALOG_PAGE_SIZE` a `BUDGET_TIME_ZONE` žijú
+ * v moduloch, ktoré ťahajú
  * `@/db/pool`, a s ním `mariadb` a `node:fs`. Tento modul musí zostať
  * použiteľný aj v client komponente (rovnako ako `ui/vocabulary.ts`), takže si
  * ich zrkadlí ako lokálne konštanty. Aby sa kópie nerozišli, zhodu čísel
@@ -111,6 +170,11 @@ import {
   type SalesBlockKind,
 } from '@/lib/sales/stop-policy';
 
+// Deň dobehnutia fronty sa počíta TOU ISTOU aritmetikou ako
+// `estimateFinish().date` v `engine/budget.ts` (bod 6 hlavičky): `addDays` nad
+// UTC dňom. `domain/dates.ts` neimportuje `@/db/pool` (len `@date-fns/tz`
+// a `domain/errors.ts`, ktorý neimportuje nič), takže client-safe modul zostáva.
+import { addDays, todayInZone } from '@/lib/domain/dates';
 import {
   ANON_READS_PER_MINUTE,
   ANON_READS_PER_UTC_DAY,
@@ -142,6 +206,14 @@ export const API_KEY_MAX_TTL_HOURS = 48;
 
 /** Zhoda s `CATALOG_PAGE_SIZE` v `shop/catalog-sync.ts` — stránka katalógu. */
 export const CATALOG_PAGE_SIZE = 100;
+
+/**
+ * Zhoda s `BUDGET_TIME_ZONE` v `engine/budget.ts` — zápisový rozpočet beží
+ * v UTC. Zámerne NIE `READ_BUDGET_TIME_ZONE` zo `shop/read-budget.ts`, hoci má
+ * dnes tú istú hodnotu: sú to dve kvóty s dvomi vlastníkmi (bod 4 hlavičky)
+ * a zliatie do jednej konštanty by z posunu jednej ticho posunulo druhú.
+ */
+export const BUDGET_TIME_ZONE = 'UTC';
 
 /**
  * Od koľkých zostávajúcich hodín sa o platnosti kľúča hovorí nahlas. Nie je to
@@ -441,11 +513,17 @@ function isAre(count: number): string {
   return count >= 2 && count <= 4 ? 'sú' : 'je';
 }
 
-/** „zvyšný 1 sa nezapíše" / „zvyšné 3 sa nezapíšu" / „zvyšných 140 sa nezapíše". */
+/**
+ * „1 sa nezapíše" / „3 sa nezapíšu" / „140 sa nezapíše".
+ *
+ * Prívlastok „zvyšný/zvyšné/zvyšných" tu do 24. 8. 2026 stál a ťahal vetu
+ * o strope nad P2 (90). Vypadol preto, že to isté už povedal zvyšok vety:
+ * po „prejde najviac 10, vo výbere je 150" je 140 zvyšok a nič iné. Presne
+ * v tomto tvare stojí veta aj v bode 1 hlavičky ako VZOR („— 140 sa nezapíše").
+ */
 function remainderPhrase(count: number): string {
-  const adjective = pluralSk(count, 'zvyšný', 'zvyšné', 'zvyšných');
   const verb = count >= 2 && count <= 4 ? 'nezapíšu' : 'nezapíše';
-  return `${adjective} ${formatCountSk(count)} sa ${verb}`;
+  return `${formatCountSk(count)} sa ${verb}`;
 }
 
 /** „1 deň" / „3 dni" / „12 dní". */
@@ -488,8 +566,27 @@ function daysToFinish(pending: number, perDay: number, remainingToday: number): 
   return Math.ceil((pending - today) / speed);
 }
 
-/** Spoločný tvar „nemusíte nič robiť, pokračuje to samo". */
-const WAIT_STEP = 'Netreba robiť nič — pokračuje to samo';
+/**
+ * UTC deň, kedy fronta dobehne — ten istý tvar aj tá istá aritmetika ako
+ * `estimateFinish().date` v `engine/budget.ts` (`addDays` nad `budgetDay`).
+ * Vracia `DateOnly`, do vety ide cez `formatDateSk` (bod 6 hlavičky).
+ */
+function finishDay(now: Date, days: number): DateOnly {
+  return addDays(todayInZone(now, BUDGET_TIME_ZONE), Math.max(0, days));
+}
+
+/**
+ * Spoločný tvar „nemusíte nič robiť".
+ *
+ * Do 24. 8. 2026 znel „Netreba robiť nič — pokračuje to samo" (37 znakov).
+ * Všetkých šesť viet, ktoré ho používajú, za ním pokračovalo vlastným
+ * „…a fronta pokračuje sama" / „…synchronizácia pokračuje sama" — teda to isté
+ * druhýkrát, a dvadsať znakov, ktoré každú z tých viet ťahalo nad P2 (90).
+ * Čo sa tým smie TICHO pokaziť: keby niekto za dvojbodku napísal vetu, ktorá
+ * NEPOVIE, že sa to pohne samo, prekážka `resolution: 'cakanie'` prestane
+ * hovoriť, na čo sa čaká — a to je presne mŕtvy bod z bodu 3 hlavičky.
+ */
+const WAIT_STEP = 'Netreba robiť nič';
 
 /* ═════════════════ 4. Normalizácia snapshotu (fail-closed) ════════════════ */
 
@@ -552,9 +649,15 @@ function writesBlockers(snapshot: StatusSnapshot): Blocker[] {
       severity: 'blokuje',
       subject: 'operacia',
       productIds: [],
+      // Obe vetvy musia povedať, že to NIE JE o výbere: bez tej časti prečíta
+      // používateľ „nezapíše nič" ako dôsledok svojho VÝBERU, zúži ho a stlačí
+      // Zaradiť znova. Za tú časť si veta 20. 8. 2026 vypýtala výnimku z P2
+      // (96 znakov), lenže fail-closed dvojča ju 24. 8. 2026 povedalo v 87 —
+      // „bez ohľadu na výber" namiesto „nech je vo výbere čokoľvek". Ten istý
+      // tvar tu drží dôvod v 69 znakoch, takže výnimka padla (ARCHITEKTURA.md).
       what: assumed
-        ? 'Nevieme overiť, či má appka zápisy do shopu vôbec zapnuté — kým to nevieme, počíta s tým, že sú vypnuté, a nezapíše ani jeden produkt.'
-        : 'Zápisy do shopu sú vypnuté — appka teraz nezapíše ani jeden produkt, nech je vo výbere čokoľvek.',
+        ? 'Nevieme, či sú zápisy do shopu zapnuté — appka preto nezapíše nič, bez ohľadu na výber.'
+        : 'Zápisy do shopu sú vypnuté — appka nezapíše nič, bez ohľadu na výber.',
       nextStep: 'Zapnúť ich môže len správca počítača v konfigurácii appky.',
       path: null,
       resolution: 'mimo_appky',
@@ -579,10 +682,14 @@ function keyBlockers(snapshot: StatusSnapshot, now: Date, pending: number | null
         severity: 'blokuje',
         subject: 'operacia',
         productIds: [],
+        // „kým to nevieme, appka počíta s tým, že chýba" hovorilo dvakrát to
+        // isté: že sa počíta s chýbajúcim kľúčom, JE dôsledok „nezapisuje".
         what: assumed
-          ? 'Nevieme, či je kľúč na zápis do shopu vložený — kým to nevieme, appka počíta s tým, že chýba, a nezapisuje.'
+          ? 'Nevieme, či je kľúč na zápis do shopu vložený — appka preto nezapisuje.'
           : 'Kľúč na zápis do shopu nie je vložený — bez neho sa nedá zapísať ani jeden produkt.',
-        nextStep: `Vložte kľúč v Nastaveniach (platí ${API_KEY_MAX_TTL_HOURS} hodín); fronta potom plynulo pokračuje tam, kde stojí.`,
+        // „plynulo" nepovedalo nič, čo „pokračuje tam, kde stojí" nepovie samo,
+        // a držalo zdieľaný ďalší krok oboch vetiev na 91 znakoch.
+        nextStep: `Vložte kľúč v Nastaveniach (platí ${API_KEY_MAX_TTL_HOURS} hodín); fronta potom pokračuje tam, kde stojí.`,
         path: BLOCKER_PATHS.settings,
         resolution: 'sam',
         passableNow: true,
@@ -603,7 +710,8 @@ function keyBlockers(snapshot: StatusSnapshot, now: Date, pending: number | null
         severity: 'blokuje',
         subject: 'operacia',
         productIds: [],
-        what: 'Kľúč na zápis je vložený, ale nevieme, dokedy platí — kým to nevieme, appka s ním nepočíta.',
+        // „kým to nevieme" je to isté, čo už povedala prvá polovica vety.
+        what: 'Kľúč na zápis je vložený, ale nevieme, dokedy platí — appka s ním nepočíta.',
         nextStep: `Vložte kľúč v Nastaveniach znova; platnosť je ${API_KEY_MAX_TTL_HOURS} hodín od vloženia.`,
         path: BLOCKER_PATHS.settings,
         resolution: 'sam',
@@ -658,11 +766,18 @@ function keyBlockers(snapshot: StatusSnapshot, now: Date, pending: number | null
       severity: outlivesKey ? 'obmedzuje' : 'informuje',
       subject: 'operacia',
       productIds: [],
+      // Zostali dve čísla, ktoré sa navzájom porovnávajú (hodiny kľúča vs. dni
+      // fronty) a dôsledok. Vypadla MECHANIKA — počet čakajúcich produktov
+      // a rýchlosť „pri 200 zápisoch na deň": z toho sa dni počítajú, a fronta
+      // je pritom tretí raz to isté (`Fronta 3 420/8 000` stojí v hlavičke
+      // každej stránky). Presne ten dôvod už raz škrtol druhé číslo z vety
+      // o strope (bod 1). Z `nextStep` vypadlo „a odloží zvyšok na neskôr" —
+      // to je to isté, čo hovorí „zastaví sa na kľúči" vo vete nad ním.
       what: outlivesKey
-        ? `Kľúč na zápis platí ešte ${hoursAccusative(hoursLeft)}, ale fronta ${products(pending ?? 0)} potrvá pri ${formatCountSk(perDay ?? 0)} zápisoch na deň ešte ${days(needsDays)} — kľúč dovtedy vyprší a fronta sa zastaví.`
+        ? `Kľúč na zápis platí ešte ${hoursAccusative(hoursLeft)}, fronta potrvá ${days(needsDays)} — zastaví sa na kľúči.`
         : `Kľúč na zápis platí ešte ${hoursAccusative(hoursLeft)}.`,
       nextStep: outlivesKey
-        ? 'Vložte nový kľúč v Nastaveniach skôr, než tento vyprší — inak fronta počká na kľúč a odloží zvyšok na neskôr.'
+        ? 'Vložte nový kľúč v Nastaveniach skôr, než tento vyprší — inak fronta počká.'
         : 'Keď vyprší, vložte v Nastaveniach nový; dovtedy sa nič nedeje.',
       path: BLOCKER_PATHS.settings,
       resolution: 'sam',
@@ -697,7 +812,11 @@ function writeBudgetBlockers(
         severity: 'blokuje',
         subject: 'operacia',
         productIds: [],
-        what: `Nevieme, koľko zápisov dnes už odišlo${dayNote} — kým to nevieme, appka počíta s tým, že denný rozpočet je vyčerpaný, a ďalej nezapisuje. Bezpečný predpoklad je ${FAIL_CLOSED_DAILY_BUDGET} zápis na deň.`,
+        // Bez `dayNote`: keď nevieme spotrebu, deň, za ktorý sa nepočítalo, nič
+        // nevysvetľuje — a „o polnoci UTC" v ďalšom kroku UTC deň aj tak menuje.
+        // Číslo vo vete zostáva (bod 1 hlavičky žiada od blokujúcej vety číslo);
+        // v tejto vetve je jediné pravdivé číslo práve fail-closed strop.
+        what: `Nevieme, koľko zápisov dnes odišlo — appka nezapisuje. Bezpečný strop: ${FAIL_CLOSED_DAILY_BUDGET} zápis na deň.`,
         nextStep: `${WAIT_STEP}: rozpočet sa obnoví o polnoci UTC a fronta pokračuje sama.`,
         path: null,
         resolution: 'cakanie',
@@ -718,8 +837,12 @@ function writeBudgetBlockers(
         severity: 'blokuje',
         subject: 'operacia',
         productIds: [],
-        what: `Dnešný rozpočet zápisov je vyčerpaný${dayNote} — minutých je ${formatCountSk(spent)} z ${formatCountSk(perDay)}, ktoré shop pustí za jeden UTC deň.`,
-        nextStep: `${WAIT_STEP}: rozpočet sa obnoví o polnoci UTC a fronta pokračuje presne tam, kde skončila.`,
+        // Obe čísla zostávajú (bod 1) — vypadlo „ktoré shop pustí za jeden UTC
+        // deň": že strop je shopov, je technika (P6), a UTC deň menuje `dayNote`
+        // aj ďalší krok. Z ďalšieho kroku vypadlo „presne tam" — „pokračuje,
+        // kde skončila" hovorí to isté a zmestí sa do P2.
+        what: `Dnešný rozpočet zápisov je vyčerpaný${dayNote} — minutých je ${formatCountSk(spent)} z ${formatCountSk(perDay)}.`,
+        nextStep: `${WAIT_STEP}: rozpočet sa obnoví o polnoci UTC a fronta pokračuje, kde skončila.`,
         path: null,
         resolution: 'cakanie',
         passableNow: false,
@@ -740,8 +863,16 @@ function writeBudgetBlockers(
       severity: 'obmedzuje',
       subject: 'operacia',
       productIds: [],
-      what: `Dnes sa zmestí ešte ${formatCountSk(remaining)} zápisov${dayNote}, vo výbere ${isAre(pending)} ${products(pending)} — ${formatCountSk(later)} z nich sa dnes nezapíše.`,
-      nextStep: `${WAIT_STEP}: fronta pokračuje každý deň sama, hotovo bude približne o ${days(needsDays)}.`,
+      // Všetky tri čísla zostali (koľko sa dnes zmestí, koľko je vo výbere,
+      // koľko počká) — vypadlo len druhé „dnes" a „z nich": po „Z 12 000
+      // produktov sa dnes zapíše 200" je zvyšok jednoznačný.
+      what: `Z ${products(pending)} sa dnes${dayNote} zapíše ${formatCountSk(remaining)} — ${formatCountSk(later)} počká.`,
+      // Konkrétny deň, nie „o 3 dni" (bod 6 hlavičky). Dátum sa NEBERIE zo
+      // snapshotu: `needsDays` už tento modul počíta sám a deň je z neho len
+      // `addDays` nad UTC dnešným — tá istá aritmetika ako `estimateFinish()`.
+      // Nové pole v `StatusSnapshot` by pridalo drôt (`WriteBudgetWire`)
+      // a serverového producenta pre číslo, ktoré je odtiaľto dopočítateľné.
+      nextStep: `${WAIT_STEP}: fronta pokračuje sama, hotovo bude približne ${formatDateSk(finishDay(now, needsDays))}.`,
       path: null,
       resolution: 'cakanie',
       passableNow: false,
@@ -762,9 +893,14 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
       severity: 'obmedzuje',
       subject: 'operacia',
       productIds: [],
-      what: `Nastavenia rozsahu sa nepodarilo prečítať — appka preto beží v najprísnejšom, pilotnom režime so stropom ${products(PILOT_MAX_PRODUCTS)} na jednu zľavu.`,
+      // „Režim" ani „pilot" tu už nestoja: `ScopeMode` je vnútorný kód (P3)
+      // a z informatívnej vety o strope ho odstránila už vlna 2 — tu prežil.
+      // Strop sám je zrozumiteľný bez pomenovania režimu, a `scope_pilot_cap`
+      // stojí v tom istom zozname vždy, takže na obrazovke je aj to, čoho sa
+      // strop týka („na jednu zľavu").
+      what: `Nastavenia rozsahu sa nepodarilo prečítať — platí preto najprísnejší strop ${products(PILOT_MAX_PRODUCTS)}.`,
       nextStep:
-        'Skúste obrazovku o chvíľu obnoviť; kým je režim neznámy, appka nepustí viac než pilotný strop, aj keby bol v Nastaveniach uložený vyšší.',
+        'Skúste obrazovku obnoviť; kým sa nastavenia nedočítajú, vyšší uložený strop neplatí.',
       path: BLOCKER_PATHS.settings,
       resolution: 'sam',
       passableNow: true,
@@ -834,7 +970,10 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
     severity: 'blokuje',
     subject: 'operacia',
     productIds: [],
-    what: `${capText}, vo výbere ${isAre(selected)} ${products(selected)} — ${remainderPhrase(over)}.`,
+    // Druhé „produktov" vypadlo 24. 8. 2026 spolu s prívlastkom „zvyšných":
+    // jednotku už povedal strop na začiatku vety. Veta tým dostala presne ten
+    // tvar, ktorý bod 1 hlavičky uvádza ako VZOR — obe čísla aj zvyšok.
+    what: `${capText}, vo výbere ${isAre(selected)} ${formatCountSk(selected)} — ${remainderPhrase(over)}.`,
     nextStep: pilot
       ? // Že si prepnutie vypýta heslo, hovorí `resolution: 'sudo'` — zámok
         // aj slovo „vypýta si heslo" kreslí `ui/blocker-look.ts` vedľa tejto
@@ -842,7 +981,9 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
         `Zúžte výber na ${products(cap)}, alebo prepnite rozsah v Nastaveniach.`
       : atHardMax
         ? `Rozdeľte výber na viac zliav — vyšší strop než ${products(HARD_MAX_PRODUCTS)} sa nastaviť nedá.`
-        : `Zúžte výber na ${products(cap)}, alebo strop zvýšte v Nastaveniach (najviac ${products(HARD_MAX_PRODUCTS)}).`,
+        : // Jednotku povedal už prvý strop vo vete, druhé „produktov" ju len
+          // zopakovalo a držalo radu na 91 znakoch (P2 dáva 90).
+          `Zúžte výber na ${products(cap)}, alebo strop zvýšte v Nastaveniach (najviac ${formatCountSk(HARD_MAX_PRODUCTS)}).`,
     path: BLOCKER_PATHS.settings,
     resolution: pilot ? 'sudo' : 'sam',
     passableNow: true,
@@ -876,9 +1017,10 @@ function catalogBlockers(
         severity: 'blokuje',
         subject: 'operacia',
         productIds: [],
-        what: 'V plnom režime appka zapíše len do produktov, ktoré má vo svojom katalógu — a teraz sa nedá overiť, či tam vybrané produkty sú.',
-        nextStep:
-          'Načítajte katalóg v Produktoch a výber zopakujte; kým to appka nevie overiť, radšej nezapíše nič.',
+        // Vetva beží len pri `full`, takže „v plnom režime" nič nepridávalo,
+        // a „radšej nezapíše nič" v ďalšom kroku bolo to isté, čo koniec vety.
+        what: 'Nedá sa overiť, či sú vybrané produkty v katalógu appky — bez toho nezapíše nič.',
+        nextStep: 'Načítajte katalóg v Produktoch a výber zopakujte.',
         path: BLOCKER_PATHS.products,
         resolution: 'sam',
         passableNow: true,
@@ -968,10 +1110,22 @@ function catalogBlockers(
     readDate(catalog?.estimatedFinishAt) ??
     new Date(nextUtcDayReset(now).getTime() + Math.max(0, needsDays - 1) * 86_400_000);
 
+  /**
+   * ODHAD PATRÍ DO ĎALŠIEHO KROKU, NIE DO POPISU STAVU.
+   *
+   * Do 24. 8. 2026 stál v `what` a s ním aj tempo čítania („za jeden UTC deň sa
+   * zmestí 240 čítaní po 100 produktov"). Veta mala 170 znakov (P2 dáva 90)
+   * a to tempo bolo mechanika, teda technika, ktorá podľa P6 nepatrí na povrch:
+   * vysvetľovalo, ODKIAĽ sa odhad vzal, nie čo má používateľ robiť.
+   * Čo sa tým smie TICHO pokaziť: odhad je označený len slovom „približne"
+   * (P7 chce aj tlmenejší odtieň — ten kreslí `ui/blocker-look.ts`). Keby ho
+   * niekto vykreslil rovnakým štýlom ako merané čísla vyššie, bude to čítať
+   * ako sľub dňa, ktorý appka nedáva.
+   */
   const estimate =
     needsDays <= 0
-      ? 'Zvyšok sa dočíta ešte dnes, ak sa zmestí do denného rozpočtu čítaní.'
-      : `Dočítanie potrvá približne ${days(needsDays)} — za jeden UTC deň sa zmestí ${formatCountSk(ANON_READS_PER_UTC_DAY)} čítaní po ${products(CATALOG_PAGE_SIZE)}.`;
+      ? 'zvyšok katalógu sa dočíta ešte dnes.'
+      : `katalóg sa dočíta približne za ${days(needsDays)}.`;
 
   list.push({
     id: 'catalog_incomplete',
@@ -979,8 +1133,10 @@ function catalogBlockers(
     severity: full ? 'obmedzuje' : 'informuje',
     subject: 'operacia',
     productIds: [],
-    what: `Načítaných je ${formatCountSk(loaded)} z ${products(total)}, ktoré shop hlási — ${formatCountSk(rest)} zatiaľ chýba. ${estimate}`,
-    nextStep: `${WAIT_STEP}: synchronizácia katalógu pokračuje sama. Produkty, ktoré ešte nie sú načítané, sa zatiaľ vybrať nedajú.`,
+    // „ktoré shop hlási" a „zatiaľ chýba" sa zlialo do dôsledku, ktorý je
+    // dôvodom, prečo prekážka vôbec existuje: chýbajúce sa nedajú vybrať.
+    what: `Načítaných je ${formatCountSk(loaded)} z ${products(total)} — ${formatCountSk(rest)} sa zatiaľ vybrať nedá.`,
+    nextStep: `${WAIT_STEP}: ${estimate}`,
     path: BLOCKER_PATHS.products,
     resolution: 'cakanie',
     passableNow: false,
@@ -1011,10 +1167,17 @@ function catalogReadBlockers(snapshot: StatusSnapshot, now: Date): Blocker[] {
       severity: 'obmedzuje',
       subject: 'operacia',
       productIds: [],
+      // Obe čísla vedľa seba zostávajú (náš rozpočet aj strop shopu) — je to
+      // to isté pravidlo, ktoré `engine/budget.ts` drží pre zápisy: kto vidí
+      // len jedno, prestane rozumieť tomu, čo môže zmeniť sám. Vypadlo len
+      // slovo „rezerva" a „ktoré si appka za UTC deň dovolí": rozdiel 240 a 300
+      // je z dvoch čísel vedľa seba vidieť, a UTC deň menuje ďalší krok.
       what: assumed
-        ? `Nevieme, koľko čítaní katalógu dnes odišlo — appka preto počíta s tým, že denný rozpočet ${formatCountSk(ANON_READS_PER_UTC_DAY)} čítaní je vyčerpaný, a katalóg ďalej nečíta.`
-        : `Dnešný rozpočet čítaní katalógu je vyčerpaný — odišlo ${formatCountSk(perDay)} z ${formatCountSk(ANON_READS_PER_UTC_DAY)}, ktoré si appka za UTC deň dovolí (shop pustí ${formatCountSk(SHOP_ANON_LIMIT.perUtcDay)}, zvyšok je rezerva).`,
-      nextStep: `${WAIT_STEP}: rozpočet čítaní sa obnoví o polnoci UTC a synchronizácia katalógu pokračuje sama. Zápisov sa to netýka, tie majú vlastný rozpočet.`,
+        ? `Nevieme, koľko z ${formatCountSk(ANON_READS_PER_UTC_DAY)} denných čítaní katalógu odišlo — appka preto ďalej nečíta.`
+        : `Dnešný rozpočet čítaní katalógu je vyčerpaný — odišlo ${formatCountSk(perDay)} z ${formatCountSk(ANON_READS_PER_UTC_DAY)} (shop pustí ${formatCountSk(SHOP_ANON_LIMIT.perUtcDay)}).`,
+      // „Zápisov sa to netýka" je dôvod, prečo je celá sekcia opt-in — ostáva.
+      // Vypadlo „tie majú vlastný rozpočet", čo je to isté inými slovami.
+      nextStep: `${WAIT_STEP}: rozpočet čítaní sa obnoví o polnoci UTC. Zápisov sa to netýka.`,
       path: BLOCKER_PATHS.products,
       resolution: 'cakanie',
       passableNow: false,
@@ -1032,8 +1195,11 @@ function catalogReadBlockers(snapshot: StatusSnapshot, now: Date): Blocker[] {
       subject: 'operacia',
       productIds: [],
       what: assumed
-        ? `Nevieme, koľko čítaní katalógu odišlo za poslednú minútu — appka preto počíta s tým, že minútový strop ${formatCountSk(ANON_READS_PER_MINUTE)} je vyčerpaný.`
-        : `Za poslednú minútu odišlo ${formatCountSk(perMinute)} z ${formatCountSk(ANON_READS_PER_MINUTE)} čítaní katalógu, ktoré si appka dovolí (shop pustí ${formatCountSk(SHOP_ANON_LIMIT.perMinute)} za minútu).`,
+        ? `Nevieme, koľko z ${formatCountSk(ANON_READS_PER_MINUTE)} čítaní katalógu za minútu odišlo — appka preto čaká.`
+        // Náš strop aj strop shopu zostávajú vedľa seba (to isté pravidlo drží
+        // `engine/budget.ts`) — vypadlo „ktoré si appka dovolí", presne ako
+        // v dennej vetve nad tým: rozdiel 24 a 30 je z dvoch čísel vidieť.
+        : `Za poslednú minútu odišlo ${formatCountSk(perMinute)} z ${formatCountSk(ANON_READS_PER_MINUTE)} čítaní katalógu (shop pustí ${formatCountSk(SHOP_ANON_LIMIT.perMinute)} za minútu).`,
       nextStep: `${WAIT_STEP}: synchronizácia si sama počká a do minúty pokračuje.`,
       path: BLOCKER_PATHS.products,
       resolution: 'cakanie',

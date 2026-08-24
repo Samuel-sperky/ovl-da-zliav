@@ -145,7 +145,10 @@ describe('buildStatusSnapshot — číta fakty a priznáva medzery', () => {
     const blocker = collectOperationBlockers(reading.snapshot).find(
       (row) => row.id === 'catalog_incomplete',
     );
-    expect(blocker?.what).toContain('približne 2 dni');
+    // Odhad sa 24. 8. 2026 presunul z popisu stavu do ďalšieho kroku (tempo
+    // čítania bolo technika, P6) — číslo je stále SERVEROVO, nie dopočítané.
+    expect(blocker?.nextStep).toContain('približne za 2 dni');
+    expect(blocker?.what).not.toContain('približne');
     expect(blocker?.clearsAt).toEqual(finish);
   });
 

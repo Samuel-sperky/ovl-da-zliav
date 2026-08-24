@@ -27,9 +27,12 @@
  *     B1 nevlastní. Zoznam výnimiek sa preto NEOPISUJE ručne — číta sa
  *     z toho istého kódu, ktorý vety vyrobil. Keď ich niekto skráti, test to
  *     ticho prijme; keď sa dlhá veta objaví v súbore B1, test padne.
- *  D. **Veta o vypnutých zápisoch zostáva celá.** Má 96 znakov, je to zapísaná
- *     výnimka z P2 (`design/v3/ARCHITEKTURA.md`) a jej koniec „nech je vo
- *     výbere čokoľvek" je dôvod, prečo veta existuje.
+ *  D. **Veta o vypnutých zápisoch nesie svoj dôvod.** Že to NIE JE o výbere
+ *     používateľa, je dôvod, prečo veta existuje. Do 24. 8. 2026 to hovorila
+ *     tvarom „nech je vo výbere čokoľvek" za cenu zapísanej výnimky z P2
+ *     (96 znakov); teraz to hovorí tvarom „bez ohľadu na výber" v 69 znakoch
+ *     a výnimka je v `design/v3/ARCHITEKTURA.md` preškrtnutá. Meria sa dôvod
+ *     a dĺžka, nie konkrétna koncovka.
  *  E. **Po skrátení zostalo SLOVO.** Pravidlo vlny 2: v každom uzle `.sig`,
  *     `.flag`, `.state` a v každej dlaždici musí zostať text, nie len farba.
  *  F. **Poistka na poistku.** Keby sa vyrezávanie rozbilo a nenašlo NIČ,
@@ -353,13 +356,18 @@ describe('P2 — na povrchu nie je blok dlhší než 90 znakov', () => {
   }
 
   it('výnimky sú len tie cudzie vety, ktoré tieto sekcie nepíšu', () => {
-    const over = SCREENS.flatMap((s) => surfaceBlocks(s.markup)).filter(
-      (b) => b.length > P2_LIMIT,
-    );
-    // Aspoň jedna dlhá veta na povrchu byť MUSÍ — je to veta prekážky
-    // `writes_disabled` so zapísanou výnimkou z P2. Keby ich bolo nula,
-    // znamenalo by to, že sa vyrezávanie rozbilo, nie že je povrch krátky.
-    expect(over.length, 'žiadna dlhá veta — meranie je podozrivo prázdne').toBeGreaterThan(0);
+    const bloky = SCREENS.flatMap((s) => surfaceBlocks(s.markup));
+    // Do 24. 8. 2026 tu stálo, že aspoň jedna dlhá veta na povrchu byť MUSÍ —
+    // veta prekážky `writes_disabled` so zapísanou výnimkou z P2. Tá sa skrátila
+    // pod limit a výnimka padla, takže dlhých viet môže byť nula. Poistkou proti
+    // prázdnemu meraniu je odvtedy toto: cudzie vety sa na povrch naozaj
+    // dostávajú, takže výnimka nižšie nekryje prázdno. (Že sa vyrezávanie
+    // nerozbilo, tvrdí sekcia F zdola počtom blokov.)
+    expect(
+      bloky.some((b) => FOREIGN.has(b)),
+      'ani jedna veta prekážky sa nevykreslila — meranie je podozrivo prázdne',
+    ).toBe(true);
+    const over = bloky.filter((b) => b.length > P2_LIMIT);
     for (const block of over) expect(FOREIGN.has(block), `nekrytá veta: ${block}`).toBe(true);
   });
 });
@@ -441,15 +449,20 @@ describe('Vysvetlenie sa presunulo pod rozklik, nezmizlo', () => {
 /* ══════════════ C. + D. Čo skrátenie nesmie zobrať ════════════════════════ */
 
 describe('Vety, bez ktorých by appka prestala byť pravdivá', () => {
-  it('vypnuté zápisy nesú celú vetu aj s koncom „nech je vo výbere čokoľvek"', () => {
-    const povrch = surfaceBlocks(WRITES[0]!.markup).join(' ');
-    expect(povrch).toContain('nech je vo výbere čokoľvek');
-    // Zapísaná výnimka z P2 má strop: `design/v3/ARCHITEKTURA.md` hovorí, že
-    // keby veta prerástla 96 znakov, výnimka padá a veta ide pod rozklik.
-    // Skrátiť ju vlastník `blockers.ts` smie — predĺžiť nie.
-    const veta = surfaceBlocks(WRITES[0]!.markup).find((b) => b.includes('nech je vo výbere'));
+  it('vypnuté zápisy nesú na povrchu aj dôvod, že to nie je o výbere', () => {
+    const bloky = surfaceBlocks(WRITES[0]!.markup);
+    const povrch = bloky.join(' ');
+    // Samotný fakt…
+    expect(povrch).toContain('Zápisy do shopu sú vypnuté');
+    // …aj dôvod, prečo veta existuje: bez neho prečíta používateľ „nezapíše
+    // nič" ako dôsledok svojho VÝBERU, zúži ho a stlačí Zaradiť znova. Tvar
+    // sa 24. 8. 2026 zmenil z „nech je vo výbere čokoľvek" (96 znakov,
+    // výnimka z P2) na „bez ohľadu na výber" — dôvod zostal, výnimka padla.
+    expect(povrch).toContain('bez ohľadu na výber');
+    const veta = bloky.find((b) => b.includes('bez ohľadu na výber'));
     expect(veta?.length ?? 0).toBeGreaterThan(0);
-    expect(veta?.length ?? 0).toBeLessThanOrEqual(96);
+    // Skrátiť ju vlastník `blockers.ts` smie — predĺžiť nad P2 už nie.
+    expect(veta?.length ?? 0).toBeLessThanOrEqual(P2_LIMIT);
   });
 
   it('vypnutý zápis zostáva na povrchu vysvetlený ako zámer, nie ako porucha', () => {
