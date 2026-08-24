@@ -5,6 +5,11 @@
  * Server komponent overí len tvar adresy — dáta číta klient
  * z `/api/campaigns/[id]`, takže `next build` nepotrebuje databázu.
  *
+ * Od šprintu 20 sa detail vykresľuje do pravého stĺpca shellu
+ * `(prehlad)/layout.tsx` — vľavo pri ňom zostáva rebrík zliav. Trasa sa tým
+ * nemení: je to stále plnohodnotná adresa, takže priamy odkaz, obnovenie
+ * stránky aj tlačidlo Späť fungujú ako predtým.
+ *
  * Vlastník: V11.
  */
 import type { Metadata } from 'next';

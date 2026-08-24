@@ -2077,6 +2077,12 @@ b.lvl-2 {
   gap: 12px;
   margin-bottom: 10px;
 }
+/*
+ * `h3` sedí tu vedľa `h2` zámerne: hlavička sekcie vyzerá rovnako bez ohľadu
+ * na to, ako hlboko sekcia stojí. Na detaile zľavy je sekcia o úroveň nižšie
+ * (shell nesie `h1`, názov zľavy `h2`), na ostatných obrazovkách nie.
+ */
+.sec-h h3,
 .sec-h h2 {
   font-size: var(--ovl-fs-eyebrow);
   letter-spacing: 0.14em;
@@ -3209,6 +3215,76 @@ details.tech.bare {
   color: var(--dim);
   font-size: 16px;
 }
+
+/* ---------- 14.15b Majster/detail v katalógu (K1) ------------------------
+   Detail kusu je DRUHÝ STĹPEC vedľa tabuľky, nie prekryv cez ňu. Appka je
+   pracovný nástroj: kto porovnáva dva kusy, musí vidieť tabuľku aj panel
+   naraz. `.catalog-split` obaľuje `.tbl-frame` a `.drawer` na obrazovke
+   Produkty; kým nie je otvorený riadok, panel v DOM vôbec nie je a tabuľka
+   dostane celú šírku.
+
+   PREČO FLEX A NIE GRID S MEDZOU ŠÍRKY
+   Miesto pre rad neurčuje šírka okna, ale to, čo z nej zostane po paneli
+   filtrov — a ten sám mizne až pri 1000 px. Tá istá šírka okna teda raz na
+   dva stĺpce stačí a raz nie (1150 px bez filtrov áno, 1150 px s filtrami
+   nie). `flex-wrap` sa nepýta na okno: keď na 600 + 320 px prestane byť
+   miesto, panel spadne POD tabuľku. Na 720 px teda vyjde stĺpec pod tabuľku
+   sám, bez jedinej media query. Základ 600 px je ODMERANÝ v prehliadači:
+   tesne pod ním padá stĺpec názvu pod 230 px a z názvu zostáva začiatok.
+
+   PREKRYV SA NEVRACIA ANI NA ÚZKEJ OBRAZOVKE. Je to presne to, čo K1
+   zamieta, a na polovici monitora (appka vedľa administrácie shopu) by
+   zakryl celú tabuľku, nie jej tretinu. */
+.catalog-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px;
+}
+.catalog-split > .tbl-frame {
+  /* `min-width: 0` je to, čo dovolí tabuľke zúžiť sa; bez neho ju vnútorná
+     šírka obsahu vytlačí z radu a panel by spadol dole aj na 1440 px. */
+  flex: 1 1 600px;
+  min-width: 0;
+}
+.catalog-split > .drawer {
+  /* Ruší sa presne prekryv: `position`, tieň a rám iba zľava. Odsadenie,
+     podklad a vnútro panela zostávajú z `.drawer` — je to ten istý panel,
+     len na inom mieste. */
+  position: static;
+  z-index: auto;
+  flex: 1 1 320px;
+  width: auto;
+  min-width: 0;
+  /* Nad 400 px sa panel neroztiahne ani na širokom monitore — riadok textu
+     dlhší než pár slov sa v ňom už len ťažko skenuje. Prebytok dostane
+     tabuľka, teda dominanta obrazovky (P1). */
+  max-width: 400px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: none;
+  /* Rovnaký strop ako `.tbl-scroll`: panel a tabuľka končia na jednej linke
+     a obrazovka zostáva v 1,5 obrazovky (P4). Skroluje panel, nie stránka. */
+  max-height: calc(100vh - 280px);
+  overflow: auto;
+}
+/* Najdlhší názov v katalógu má 117 znakov a v 400 px stĺpci sa musí zalomiť
+   aj vtedy, keď je jedným slovom bez medzery (D10). */
+.catalog-split > .drawer .drawer-h .t {
+  overflow-wrap: anywhere;
+}
+/* Riadok, ktorý panel vpravo práve popisuje. Zvislý prúžok, nie iba iná
+   farba — a `aria-current` na `<tr>` to isté pre čítačku. Prúžok znesie aj
+   podfarbenie vybraného riadku (`tr.on`), lebo sedí v inom kanáli. */
+table.tbl tbody tr.open:not(.on) td {
+  /* Podfarbenie len tam, kde riadok nie je zároveň vybraný — `--sel` hovorí
+     „pôjde do zľavy" a to je iná informácia, ktorú prekryť nesmieme. */
+  background: var(--paper3);
+}
+table.tbl tbody tr.open td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .dl {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -3222,6 +3298,52 @@ details.tech.bare {
   color: var(--ink);
   font-weight: 600;
   text-align: right;
+}
+
+/* ---------- 14.15c Varianty kusu v paneli detailu ------------------------
+   Kód, EAN a sklad po variantoch. Je to ZOZNAM, nie `.dl`: variant má tri
+   hodnoty naraz a dvojstĺpcová mriežka by z jedného kusu spravila deväť
+   riadkov, v ktorých sa ten správny variant nedá nájsť.
+
+   Prvý riadok je NÁZOV variantu („Zlatá · 52"), druhý sú jeho hodnoty. Názov
+   sa oreže výpustkou — panel má 400 px a „Veľkosť: 54 · Farba: biele zlato"
+   sa doň celý nezmestí; hodnoty pod ním sa naopak zalomia, lebo kód ani EAN
+   sa orezať NESMIE. Zoznam je bez odrážok a bez odsadenia: odrážka by pri
+   dvojriadkovej položke sedela na prázdnom mieste.
+
+   Prázdna hodnota si farbu aj slovo prináša so sebou (`AbsenceValue`), takže
+   sa tu nefarbí — inak by tie dva odtiene raz nesedeli. */
+.varlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12.5px;
+}
+.varrow {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+}
+.varrow:last-child {
+  border-bottom: 0;
+}
+.varname {
+  display: block;
+  color: var(--ink);
+  font-weight: 640;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.varfacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-top: 2px;
+  color: var(--dim);
+}
+.varfact b {
+  color: var(--ink2);
+  font-weight: 600;
 }
 
 /* ---------- 14.16 Kroky sprievodcu --------------------------------------- */
@@ -3825,4 +3947,199 @@ details.tech.bare {
   .ovl-statusbar {
     position: static;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   15. ZĽAVY — MAJSTER/DETAIL (K1, šprint 20 vlna 3)
+   ══════════════════════════════════════════════════════════════════════════
+
+   Tab Zľavy prestal byť stránkou, z ktorej sa odchádza na detail. Vľavo je
+   rebrík zliav, vpravo detail tej vybranej. Trasa `/zlavy/[id]` sa tým nemení
+   — pravý stĺpec je slot pre stránku trasy, nie stav komponentu.
+
+   Rebrík má pevných 380 px, lebo je to VÝBER: čítať sa v ňom má názov a stav,
+   nie tabuľka. Detail dostáva zvyšok, lebo tam sa pracuje. Pod 1180 px sa
+   stĺpce poskladajú pod seba — 380 px rebríka by inak detailu nechalo menej,
+   než potrebujú jeho štyri dlaždice.
+   ------------------------------------------------------------------------- */
+
+.zsplit {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.zsplit-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.zsplit-detail {
+  min-width: 0;
+}
+
+/* Hlavička rebríka drží tie isté stĺpce ako riadok — popisky stoja nad svojimi
+   hodnotami a rozísť sa nesmú. `padding-left` dorovnáva 2 px pruhu výberu. */
+.zpick-h {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 12px;
+  padding-left: 16px;
+}
+
+/* Celý riadok je odkaz: v majster/detail je jeho jediným cieľom otvoriť
+   detail, takže klikacia plocha nesmie byť len názov. */
+.zpick {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid transparent;
+  color: inherit;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.zpick:last-child {
+  border-bottom: 0;
+}
+
+.zpick:hover {
+  background: var(--paper3);
+}
+
+/* Vybraný riadok — pruh v akcente je ten istý mechanizmus ako aktívna položka
+   v ľavom paneli appky (`.shell-side .tabs a.on`). */
+.zpick.on {
+  background: var(--paper3);
+  border-left-color: var(--accent);
+}
+
+/* Skončená zľava je tlmená — je to kontext, nie práca (§4). */
+.zpick.dim {
+  opacity: 0.62;
+}
+
+.zpick-pct {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* 26 px = 41 % dominanty (64 px). P1 pripúšťa najviac 55 %, takže percento
+   v rebríku smie byť druhé najväčšie a nesmie sa priblížiť dominante. */
+.zpick-pct b {
+  font-size: 26px;
+  font-weight: 660;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.zpick-pct i {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--dim);
+}
+
+.zpick-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.zpick-name {
+  font-weight: 620;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zpick-state {
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.zpick-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Odkaz na JEDINÉ miesto s vysvetlením zamknutých údajov (kontrakt bod 18).
+   Zámerne je to len slovo v tlmenej veľkosti: výklad patrí do Nastavení,
+   sem patrí cesta k nemu. */
+/* `a.lockwhy`, nie `.lockwhy`: `.wrap a` farbí odkazy akcentom a odkaz na
+   vysvetlenie má byť tichý — je to cesta k výkladu, nie akcia. */
+a.lockwhy {
+  font-size: 12px;
+  color: var(--dim);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a.lockwhy:hover {
+  color: var(--ink2);
+}
+
+@media (max-width: 1180px) {
+  .zsplit {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- 14.24 Prehľad vedie číslami (šprint 20, vlna 3, C4) ----------
+   Tri pravidlá, ktoré patria k prestavbe dominanty Prehľadu z vety na číslo.
+   Žijú tu a nie ako inline štýl v komponente, aby sa hierarchia obrazovky
+   dala nájsť na tom istom mieste ako `.lvl-1`, `.kpi` a `.sig`.
+   ------------------------------------------------------------------------- */
+
+/*
+ * Menovateľ dominanty (`3 420 / 8 000`).
+ *
+ * NIE JE to nová škála veľkosti, ale ten istý vzťah, aký má `.lvl-1.prog-lg
+ * .big .of` (64 px číslo, 34 px menovateľ) — prepočítaný na 44 px rez, teda
+ * 64 % čitateľa. Zlomok sa má prečítať ako JEDNO číslo s kontextom; keby mal
+ * menovateľ plných 44 px, čítali by sa ako dve rovnako dôležité čísla a P1 by
+ * na tej istej karte malo dve ohniská.
+ */
+.lvl-1 .big.sm .of {
+  font-size: 28px;
+  color: var(--dim);
+  font-weight: 550;
+}
+
+/*
+ * Stavová veta nad číslami — bývalá dominanta Prehľadu.
+ *
+ * `.sig` má 11,5 px, čo je stupeň pre značku v riadku kontrol; pre odpoveď na
+ * otázku „je všetko v poriadku?" je to primálo, lebo by bola menšia než tlmený
+ * riadok vedľa nej. Dostáva preto 14 px, teda PRESNE stupeň `.lvl-2` — nová
+ * veľkosť tu nevzniká, len sa použije existujúci stupeň škály.
+ */
+.ovl-verdict {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  margin-bottom: 12px;
+}
+.ovl-verdict > .sig {
+  font-size: 14px;
+}
+
+/* Pásmo čísel pod dominantou. Dlaždice kreslí `.kpis` a `.kpi.dense`
+   (globals §14.14) — tu je len odsadenie od pruhu priebehu nad ním. */
+.ovl-figs {
+  margin-top: 12px;
 }

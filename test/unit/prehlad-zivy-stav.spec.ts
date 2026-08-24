@@ -560,11 +560,13 @@ describe('Prehľad — dominanta a prekážky sa vykreslia', () => {
   }
 
   /**
-   * Najdôležitejšie tvrdenie tohto súboru. Dominantou Prehľadu je VETA, ktorá
-   * je odpoveďou na „je všetko v poriadku?" — nie číslo fronty, z ktorého sa
-   * odpoveď musí odvodiť. Číslo zostáva, ale na polovičnej veľkosti (P1).
+   * Dominantou Prehľadu je od 20. 8. 2026 (šprint 20, vlna 3) ČÍSLO fronty
+   * v 44 px slote `.big.sm`; veta verdiktu z obrazovky nezmizla, len prestala
+   * byť jej najväčším prvkom. Sem patrí len tvrdenie, že sa na karte vyskytujú
+   * OBE — kto z nich je v displejovom slote a v akom pomere veľkostí, meria
+   * `prehlad-hierarchia.spec.ts` (blok „Prehľad vedie číslami").
    */
-  it('dominantou je veta, nie číslo fronty', () => {
+  it('na karte je číslo fronty aj veta verdiktu', () => {
     const html = renderStatus();
     expect(html).toContain('Všetko v poriadku');
     expect(html).toContain('class="big sm"');

@@ -1,23 +1,26 @@
 'use client';
 
 /**
- * Aura Zľavy — DOMINANTA PREHĽADU: „je všetko v poriadku?" (V9, kontrakt UI
- * 13. 8. 2026, body 3–5 a 11).
+ * Aura Zľavy — DOMINANTA PREHĽADU: ČÍSLA (V9, kontrakt UI 13. 8. 2026, body
+ * 3–5 a 11; šprint 20, vlna 3, pracovník C4).
  *
- * PREČO JE DOMINANTOU VETA A NIE ČÍSLO FRONTY
- * -------------------------------------------
- * Architektúra §1 mala dominantou `3 420 / 8 000` v 64 px. Je to pekné číslo,
- * ale odpovedá na otázku „aké mám čísla" — a používateľ sa na túto obrazovku
- * pozerá kvôli inej: či niekde nehorí. Číslo fronty na ňu neodpovedá ani
- * omylom: `3 420 / 8 000` vyzerá rovnako, keď fronta beží, aj keď stojí od
- * včera. Dominantou je preto VERDIKT — jedna veta v 44 px, ktorá je odpoveďou
- * a nie surovinou na jej odvodenie. Fronta zostáva hneď pod ňou, v 22 px, teda
- * na presne 50 % veľkosti dominanty (P1 povoľuje 55 %).
+ * PREČO JE DOMINANTOU ČÍSLO A NIE VETA
+ * ------------------------------------
+ * Do 20. 8. 2026 bola dominantou VETA verdiktu v 44 px („Zápis stojí",
+ * „Všetko v poriadku"). Bola to odpoveď na otázku „je všetko v poriadku?",
+ * lenže na tú istú otázku odpovedá aj slovo pri značke, aj celá sekcia
+ * prekážok pod dominantou — takže najväčší prvok obrazovky niesol tretiu
+ * kópiu toho istého a údaje, kvôli ktorým sa človek na prístrojovú dosku
+ * pozerá, boli pod ním v 12,5 px riadku. Prehľad preto vedie ČÍSLAMI:
  *
- * Sekcia zlúčila tri bývalé: „Čo sa práve zapisuje", „Živý stav" a „Prvá
- * zľava". Živý stav zanikol, lebo štyri veci, ktoré ukazoval (spojenie, kľúč,
- * rozpočet, katalóg), od 13. 8. nesie stavový pruh; z neho tu zostal len
- * jednoriadkový RIADOK KONTROL s tým, čo pruh nehovorí.
+ *   dominanta ....... `3 420 / 8 000` v `.lvl-1 .big.sm` (44 px)
+ *   pásmo čísel ..... štyri dlaždice `.kpi.dense` (18 px = 41 % dominanty)
+ *   stavová veta .... jeden riadok `.ovl-verdict` (14 px, teda stupeň `.lvl-2`)
+ *
+ * „Zápis stojí" NEZMIZOL — presunul sa nad čísla ako stavová veta. Je druhý
+ * v poradí čítania, nesie farbu + značku + slovo (nikdy len farbu) a je
+ * necelú tretinu veľkosti dominanty. Dôvody sa nezdvojujú: verdikt povie
+ * KOĽKO prekážok, vety o nich vypisuje `BlockersSection` hneď pod sekciou.
  *
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
@@ -26,48 +29,56 @@
  *    z `overview-verdict.ts`, stav fronty z `overview-model.ts`. Oba majú
  *    testy bez prehliadača; podmienka dopísaná do JSX by sa dala overiť len
  *    klikaním.
- * 2. **Dominanta ostáva jedna.** Verdikt je `.lvl-1 .big.sm` (44 px). Číslo
- *    fronty má vlastnú triedu s 22 px a nič iné v tejto sekcii nesmie byť
- *    väčšie. Veľkosť dominanty nesie od 19. 8. 2026 VÝHRADNE `.lvl-1 .big`;
- *    `.prog-lg` je už len geometria. Kto sem vráti vlastnú veľkosť — či cez
- *    `.calm` (32 px), či akokoľvek inak — zhodí P1.
- * 3. **Nula sa nedopĺňa, kreslí sa pomlčka** (bod 5 kontraktu). Keď appka
- *    stav fronty nepozná, je tu `—` a dôvod je pod rozklikom „Prečo —",
- *    rovnako ako v stavovom pruhu. `0 / 0` na prístrojovej doske eshopu je
- *    tvrdenie, nie medzera.
- * 4. **Prázdny stav je JEDNA VETA a JEDNO TLAČIDLO** (bod 11) a je TICHÝ
- *    (oprava D5, 19. 8. 2026). Do tohto dátumu to bola vycentrovaná škatuľa
- *    `.empty` uprostred karty: 15 px nadpis, 34 px vzduchu okolo a plné teal
- *    tlačidlo v strede. Na jednej karte tak stáli dve dominanty naraz —
- *    verdikt v 44 px a druhé ohnisko pod ním — a to P1 zakazuje. Dominantou
- *    zostáva VERDIKT, lebo obrazovka odpovedá na „je všetko v poriadku?";
- *    „ešte nemáte zľavu" je odpoveď na inú otázku a patrí do tlmenej roviny.
- *    Veta je preto dnes tlmený riadok presne tam, kde inokedy stoja čísla
- *    fronty, a JEDINÉ tlačidlo stojí v stĺpci akcií, teda tam, kde primárna
- *    akcia stojí vo všetkých ostatných stavoch — obrazovka sa medzi stavmi
- *    nepreskladá a tlačidlo neposkakuje.
- *    Tri očíslované kroky, ktoré tu boli do 18. 8., sa zrušili — návod patrí
- *    do rozcestníka „Čo appka vie" v Nastaveniach. V prázdnom stave sa preto
- *    v stĺpci akcií kreslí PRESNE JEDNO tlačidlo: „Zoznam zliav" vedľa neho by
- *    bol druhý klik na obrazovke, kde ten zoznam nemá čo ukázať.
- * 5. **Fronta sa po odstávke NIKDY nerozbehne sama.** „Pokračovať" je vedomý
+ * 2. **Dominanta ostáva jedna.** Číslo je `.lvl-1 .big.sm` (44 px) a je
+ *    NAJVIAC JEDNO na celej obrazovke. Dlaždice pásma sú `.kpi.dense`
+ *    (18 px), stavová veta 14 px — P1 povoľuje druhej veci 55 % dominanty,
+ *    takže je tu rezerva. Veľkosť nesie od 19. 8. 2026 VÝHRADNE `.lvl-1
+ *    .big`; `.prog-lg` je už len geometria. Kto sem vráti vlastnú veľkosť,
+ *    zhodí P1 a nebude to vidieť inak než meraním.
+ * 3. **Nula sa nedopĺňa, kreslí sa pomlčka** (bod 5 kontraktu). Platí to
+ *    o KAŽDOM čísle na obrazovke, nielen o fronte: keď sa nedá prečítať
+ *    zoznam zliav, je `calm` rovno `null` a dlaždice pokojného stavu majú
+ *    pomlčku. Nula by tvrdila „nič nebeží", a to je tvrdenie o ostrom eshope.
+ *    Rozpočet, odhad dokončenia ani okno zľavy sa nedopočítavajú.
+ * 4. **Odhad je označený ako odhad** (P7). Dátum dobehnutia nesie `.est`,
+ *    teda `≈` a tlmenejší odtieň. Meraný fakt ho nemá nikdy.
+ * 5. **V displejovom slote nikdy nestojí samotná pomlčka** (D11). Keď sa
+ *    stav fronty nedá prečítať, dominanta sa NEKRESLÍ — pomlčka so slovom
+ *    stojí v čitateľnom 22 px stupni (`.queueNum`) a dôvod je pod rozklikom
+ *    „Prečo —", rovnako ako v stavovom pruhu. Em pomlčka v 44 px reze nie je
+ *    znak, ale vyplnený obdĺžnik.
+ * 6. **Prázdny stav je JEDNA VETA a JEDNO TLAČIDLO** (bod 11) a je TICHÝ
+ *    (oprava D5, 19. 8. 2026). Veta je tlmený riadok presne tam, kde inokedy
+ *    stoja čísla, a JEDINÉ tlačidlo stojí v stĺpci akcií, teda tam, kde
+ *    primárna akcia stojí vo všetkých ostatných stavoch — obrazovka sa medzi
+ *    stavmi nepreskladá a tlačidlo neposkakuje. Tri očíslované kroky, ktoré
+ *    tu boli do 18. 8., sa zrušili — návod patrí do rozcestníka „Čo appka
+ *    vie" v Nastaveniach.
+ * 7. **Fronta sa po odstávke NIKDY nerozbehne sama.** „Pokračovať" je vedomý
  *    klik a v tom jedinom stave je primárnym tlačidlom on, nie „Nová zľava".
+ * 8. **Pásmo čísel nesmie opakovať stavový pruh.** Pruh (chróm) nesie ostrý
+ *    zápis, kľúč, rozpočet zápisov a počty katalógu. Dlaždica „Dnes
+ *    zapísaných" je jediný priesečník a je tu zámerne: bez nej sa nedá
+ *    prečítať, či fronta dnes ešte prejde. Počty katalógu sem NEPATRIA.
  *
- * Vlastník: V9.
+ * Vlastník: V9; prestavba na čísla C4 (šprint 20, vlna 3).
  */
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import StateLine from '@/components/dashboard/StateLine';
 import styles from '@/components/dashboard/overview.module.css';
 import { resumeQueue, stopQueue, type ActionResult } from '@/components/dashboard/api';
 import { sigClass } from '@/components/dashboard/live-status-model';
-import type { QueueProgress } from '@/components/dashboard/overview-model';
+import type { CalmNumbers, QueueProgress } from '@/components/dashboard/overview-model';
 import type { CheckMark, Verdict } from '@/components/dashboard/overview-verdict';
 import Note from '@/components/ui/Note';
 import { SigMark } from '@/components/ui/StatusMark';
 import { formatDateSk } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+
+/** Čím appka hovorí „toto nevieme". Nikdy nula, nikdy dopočítaný odhad. */
+const DASH = '—';
 
 export interface StatusSectionProps {
   verdict: Verdict;
@@ -76,8 +87,8 @@ export interface StatusSectionProps {
   progress: QueueProgress;
   /** Koľko sa dnes zapísalo a z akého rozpočtu; `null` = nevieme. */
   budget: { spent: number; budget: number; remaining: number } | null;
-  /** Čísla pokojného stavu — bežiace, pripravené, zlacnené. */
-  calm: { live: number; ready: number; discounted: number };
+  /** Čísla pokojného stavu; `null` = zoznam zliav sa nedal prečítať. */
+  calm: CalmNumbers | null;
   /** Veta o tom, čo sa nedalo prečítať; `null` = prečítalo sa všetko. */
   gap: string | null;
   /** Prekreslenie po akcii, ktorá zmenila stav fronty. */
@@ -86,11 +97,54 @@ export interface StatusSectionProps {
 
 /* ═══════════════════════════ Malé stavebné diely ══════════════════════════ */
 
-function Dot() {
+/**
+ * Jedna dlaždica pásma čísel.
+ *
+ * `unknown` nie je kozmetika: stlmí hodnotu cez `.kpi.dense .v[data-unknown]`,
+ * takže pomlčka vyzerá inak než nameraná nula a nedá sa s ňou zameniť.
+ */
+function Figure({
+  label,
+  value,
+  unknown = false,
+}: {
+  label: string;
+  value: ReactNode;
+  unknown?: boolean;
+}) {
   return (
-    <span className="sep-dot" aria-hidden="true">
-      ·
-    </span>
+    <div className="kpi dense">
+      <div className="k">{label}</div>
+      <div className="v" data-unknown={unknown ? 'ano' : undefined}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Dominanta — jediné 44 px číslo na obrazovke.
+ *
+ * `of` je menovateľ (`/ 8 000`) a má vlastný, menší stupeň: zlomok sa má dať
+ * prečítať ako jedno číslo s kontextom, nie ako dve rovnako dôležité čísla.
+ */
+function Dominant({
+  value,
+  of = null,
+  caption,
+}: {
+  value: string;
+  of?: string | null;
+  caption: string;
+}) {
+  return (
+    <div className="lvl-1">
+      <span className="big sm" data-testid="queue-number">
+        {value}
+        {of === null ? null : <span className="of"> / {of}</span>}
+      </span>
+      <span className="sub">{caption}</span>
+    </div>
   );
 }
 
@@ -166,7 +220,13 @@ function ResumeQueue({ onChanged }: { onChanged: () => void }) {
 
 /* ══════════════════════════ Telo podľa stavu fronty ═══════════════════════ */
 
-/** Fronta zapisuje alebo stojí: číslo, pruh a jeden riadok faktov. */
+/**
+ * Fronta zapisuje alebo stojí: zlomok v dominante, pruh a pásmo štyroch čísel.
+ *
+ * Meno zľavy, jej stav a počet pásiem stoja v tlmenom riadku medzi dominantou
+ * a pruhom. Sú to popisky čísla nad nimi, nie samostatné údaje — dlaždica by
+ * z názvu zľavy spravila piatu vec, ktorá súperí o pozornosť.
+ */
 function RunningBody({
   progress,
   budget,
@@ -175,26 +235,25 @@ function RunningBody({
   budget: StatusSectionProps['budget'];
 }) {
   const paused = progress.mode === 'paused';
+  const windowKnown = progress.dateFrom !== null && progress.dateTo !== null;
 
   return (
     <div data-testid="queue-running">
-      <div className={styles.queueHead}>
-        <span className={`num ${styles.queueNum}`} data-testid="queue-number">
-          {formatCountSk(progress.done)}{' '}
-          <span className={styles.queueOf}>/ {formatCountSk(progress.total)}</span>
-        </span>
-        <span className={styles.queueName}>
-          <b className="lvl-2">{progress.campaignName}</b>
-          <br />
-          {progress.sentence === null ? null : (
-            <StateLine sentence={progress.sentence} testId="queue-state" />
-          )}
-          <span className="lvl-3">
-            <Dot />
-            {formatCountSk(progress.total)}{' '}
-            {pluralSk(progress.total, 'produkt', 'produkty', 'produktov')}
-            {progress.tiersLabel === null ? null : ` · ${progress.tiersLabel}`}
-          </span>
+      <Dominant
+        value={formatCountSk(progress.done)}
+        of={formatCountSk(progress.total)}
+        caption="zapísaných položiek"
+      />
+
+      <div className="prog-meta">
+        <b className={`lvl-2 ${styles.queueName}`}>{progress.campaignName}</b>
+        {progress.sentence === null ? null : (
+          <StateLine sentence={progress.sentence} testId="queue-state" />
+        )}
+        <span className="lvl-3">
+          {formatCountSk(progress.total)}{' '}
+          {pluralSk(progress.total, 'produkt', 'produkty', 'produktov')}
+          {progress.tiersLabel === null ? null : ` · ${progress.tiersLabel}`}
         </span>
       </div>
 
@@ -202,33 +261,37 @@ function RunningBody({
         <i style={{ width: `${progress.percent.toFixed(2)}%` }} />
       </div>
 
-      <div className="prog-meta">
-        {progress.finishDay === null ? (
-          <span className="lvl-3">Odhad dokončenia zatiaľ nevieme</span>
-        ) : (
-          <span>
-            Hotové <b className="est">{formatDateSk(progress.finishDay)}</b>
-          </span>
-        )}
-        {progress.dateFrom === null || progress.dateTo === null ? null : (
-          <>
-            <Dot />
-            <span>
-              Okno{' '}
-              <b>
-                {formatDateSk(progress.dateFrom)} – {formatDateSk(progress.dateTo)}
-              </b>
-            </span>
-          </>
-        )}
-        {budget === null ? null : (
-          <>
-            <Dot />
-            <span>
-              Dnes zapísaných <b>{formatCountSk(budget.spent)}</b> z {formatCountSk(budget.budget)}
-            </span>
-          </>
-        )}
+      <div className="kpis ovl-figs" data-testid="queue-figures">
+        <Figure label="Zostáva zapísať" value={formatCountSk(progress.pending)} />
+        <Figure
+          label="Dnes zapísaných"
+          value={
+            budget === null
+              ? DASH
+              : `${formatCountSk(budget.spent)} z ${formatCountSk(budget.budget)}`
+          }
+          unknown={budget === null}
+        />
+        <Figure
+          label="Odhad dokončenia"
+          value={
+            progress.finishDay === null ? (
+              DASH
+            ) : (
+              <span className="est">{formatDateSk(progress.finishDay)}</span>
+            )
+          }
+          unknown={progress.finishDay === null}
+        />
+        <Figure
+          label="Okno zľavy"
+          value={
+            windowKnown
+              ? `${formatDateSk(progress.dateFrom)} – ${formatDateSk(progress.dateTo)}`
+              : DASH
+          }
+          unknown={!windowKnown}
+        />
       </div>
     </div>
   );
@@ -237,27 +300,46 @@ function RunningBody({
 /**
  * Nič sa nezapisuje: žiadny pruh na nule, len čísla, ktoré appka naozaj má.
  *
+ * Dominantou je počet zlacnených produktov — jediné číslo pokojného stavu,
+ * ktoré hovorí o eshope, a nie o appke. Je to počet PODĽA VLASTNÝCH ZÁPISOV;
+ * appka nekontroluje, čo v shope naozaj visí, a nesmie to predstierať.
+ *
+ * Keď sa zoznam zliav nedal prečítať, nie je tu nula, ale pomlčka so slovom —
+ * a v 22 px stupni, nie v displejovom (D11).
+ *
  * Rozpočet sem NEPATRÍ. „Voľných zápisov dnes 200" tu bol stavový pruh
  * v hlavičke druhýkrát — a keď sa tie dve čísla rozišli o jedno kolo fronty,
  * obrazovka si protirečila sama so sebou o dva riadky nižšie.
  */
-function CalmBody({ calm }: { calm: StatusSectionProps['calm'] }) {
+function CalmBody({ calm, done }: { calm: CalmNumbers | null; done: number }) {
   return (
-    <div className="prog-meta" data-testid="queue-calm">
-      <span>
-        <b>{formatCountSk(calm.live)}</b>{' '}
-        {pluralSk(calm.live, 'zľava beží', 'zľavy bežia', 'zliav beží')}
-      </span>
-      <Dot />
-      <span>
-        <b>{formatCountSk(calm.ready)}</b>{' '}
-        {pluralSk(calm.ready, 'pripravená', 'pripravené', 'pripravených')}
-      </span>
-      <Dot />
-      <span>
-        <b>{formatCountSk(calm.discounted)}</b> zlacnených{' '}
-        <span className="lvl-3">podľa vlastných zápisov</span>
-      </span>
+    <div data-testid="queue-calm">
+      {calm === null ? (
+        <div className={styles.queueHead}>
+          <span className={`num ${styles.queueNum}`} data-testid="queue-number">
+            {DASH} zoznam zliav nevieme
+          </span>
+        </div>
+      ) : (
+        <Dominant
+          value={formatCountSk(calm.discounted)}
+          caption="zlacnených produktov podľa vlastných zápisov"
+        />
+      )}
+
+      <div className="kpis ovl-figs" data-testid="queue-figures">
+        <Figure
+          label="Zľavy bežia"
+          value={calm === null ? DASH : formatCountSk(calm.live)}
+          unknown={calm === null}
+        />
+        <Figure
+          label="Pripravené"
+          value={calm === null ? DASH : formatCountSk(calm.ready)}
+          unknown={calm === null}
+        />
+        <Figure label="Spracované položky" value={formatCountSk(done)} />
+      </div>
     </div>
   );
 }
@@ -265,13 +347,16 @@ function CalmBody({ calm }: { calm: StatusSectionProps['calm'] }) {
 /**
  * Stav fronty sa nedá prečítať. Pomlčka namiesto čísla a dôvod pod rozklikom —
  * ten istý tvar, aký má stavový pruh, aby sa pomlčka čítala rovnako všade.
+ *
+ * Dominanta sa v tomto stave NEKRESLÍ (D11): em pomlčka v 44 px reze nie je
+ * znak, ale vyplnený obdĺžnik. Pomlčka preto stojí so slovom v 22 px.
  */
 function UnknownBody() {
   return (
     <div data-testid="queue-unknown">
       <div className={styles.queueHead}>
         <span className={`num ${styles.queueNum}`} data-testid="queue-number">
-          —
+          {DASH} stav fronty nevieme
         </span>
       </div>
       <details className={styles.why} data-testid="queue-why">
@@ -304,33 +389,36 @@ export function StatusSection({
     <section className="sec" data-testid="overview-status" data-verdict={verdict.kind}>
       <div className="sec-h">
         <h2>Stav</h2>
-        <div className="act">
-          <span className={sigClass(verdict.tone)} data-testid="verdict-word">
-            <SigMark variant={verdict.tone} />
-            {verdict.word}
-          </span>
-        </div>
+      </div>
+
+      {/*
+        Stavová veta. Do 20. 8. 2026 to bola dominanta v 44 px; dnes je druhá
+        v poradí čítania a necelú tretinu veľkosti čísla pod ňou. Tri kanály
+        zostávajú v JEDNOM uzle — farba (trieda tónu), značka (`<svg>`) aj
+        slovo — aby sa nemohli rozísť. Slovo verdiktu (`verdict.word`) sa
+        v hlavičke sekcie už nekreslí: bola to tretia formulácia tej istej veci
+        vedľa tejto vety a vedľa sekcie prekážok.
+      */}
+      <div className="ovl-verdict">
+        <span className={sigClass(verdict.tone)} data-testid="verdict-headline">
+          <SigMark variant={verdict.tone} />
+          {verdict.headline}
+        </span>
+        <span className="lvl-3" data-testid="verdict-detail">
+          {verdict.detail}
+        </span>
       </div>
 
       <div className={styles.top}>
         <div>
-          <div className="lvl-1">
-            <span className="big sm" data-testid="verdict-headline">
-              {verdict.headline}
-            </span>
-            <span className="sub" data-testid="verdict-detail">
-              {verdict.detail}
-            </span>
-          </div>
-
           <div className={styles.queueBody}>
             {progress.mode === 'unknown' ? <UnknownBody /> : null}
-            {progress.mode === 'calm' ? <CalmBody calm={calm} /> : null}
+            {progress.mode === 'calm' ? <CalmBody calm={calm} done={progress.done} /> : null}
             {running ? <RunningBody progress={progress} budget={budget} /> : null}
             {/*
               D5 — prázdny stav je jeden tlmený riadok na mieste čísel fronty,
-              nie vycentrovaná škatuľa s vlastným tlačidlom. Tlačidlo má
-              obrazovka jedno a stojí v stĺpci akcií vpravo.
+              nie vycentrovaná škatuľa s vlastným tlačidlom. Dominanta sa
+              nekreslí: appka nemá ani jedno číslo, ktoré by do nej patrilo.
             */}
             {empty ? (
               <div className="prog-meta" data-testid="overview-empty">

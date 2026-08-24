@@ -3,13 +3,19 @@
 /**
  * Aura Zľavy — PREHĽAD (V9, architektúra §1 TAB 1, kontrakt UI 13. 8. 2026).
  *
- * OTÁZKA, NA KTORÚ TÁTO OBRAZOVKA ODPOVEDÁ: „je všetko v poriadku?" Nie „aké
- * mám čísla". Podľa toho je vybraná dominanta aj poradie sekcií.
+ * OTÁZKA, NA KTORÚ TÁTO OBRAZOVKA ODPOVEDÁ: „je všetko v poriadku?" Poradie
+ * sekcií je vybrané podľa nej. Dominantou je od 20. 8. 2026 ČÍSLO, nie veta
+ * (šprint 20, vlna 3): odpoveď „je to v poriadku" povie farba, značka a slovo
+ * v stavovej vete nad číslami, a keď v poriadku nie je, celú vetu o tom
+ * vypisuje sekcia prekážok. Najväčší prvok prístrojovej dosky preto patrí
+ * údaju, kvôli ktorému sa na ňu človek pozerá — dôvod, prečo bol dovtedy
+ * dominantou verdikt, je zapísaný v hlavičke `StatusSection.tsx`.
  *
  * ŠTYRI SEKCIE, ZHORA PODĽA NALIEHAVOSTI (P5):
  *
- *   1. STAV — dominanta. Verdikt jednou vetou v 44 px, pod ním fronta v 22 px
- *      a riadok kontrol, ktoré nenesie stavový pruh. `StatusSection`.
+ *   1. STAV — dominanta. Číslo fronty v 44 px, nad ním stavová veta v 14 px,
+ *      pod ním pásmo štyroch čísel v 18 px a riadok kontrol, ktoré nenesie
+ *      stavový pruh. `StatusSection`.
  *   2. PREČO SA NEZAPISUJE — prekážky zo `/api/status`, všetky tri úrovne.
  *      Kreslí sa LEN vtedy, keď niečo zastavuje alebo brzdí; inak mlčí a celou
  *      odpoveďou je zelená značka v stavovom pruhu (kontrakt, bod 3).
@@ -129,7 +135,10 @@ export function Overview() {
 
   const progress = queueProgress({ snapshot, campaigns: rows, today });
   const live: LiveCampaign[] | null = rows === null ? null : liveCampaigns(rows, today);
-  const calm = calmNumbers(rows ?? [], today);
+  // Nečitateľný zoznam zliav je `null`, nie prázdne pole: `calmNumbers([])`
+  // vráti samé nuly a „0 zliav beží" je tvrdenie o ostrom eshope, nie priznaná
+  // medzera (P7, kontrakt UI bod 5). Sekcia z `null` nakreslí pomlčky.
+  const calm = rows === null ? null : calmNumbers(rows, today);
   const heartbeat = snapshot === null ? null : snapshot.heartbeat;
 
   const verdictInput = {

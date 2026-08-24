@@ -71,9 +71,19 @@ import type { TierPlan } from '@/components/campaigns/discounts-model';
 // panel opakovania a dve kópie toho istého prekladu by sa časom rozišli (K10).
 import { previewBlockerText, type BlockerCard } from '@/components/campaigns/queue-model';
 import type { CreateResult, PreviewData } from '@/components/campaigns/zlavy-api';
+import { hrefForAnchor } from '@/components/settings/sub-pages';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
+
+/**
+ * Kam vedie odkaz spod „Dopad na maržu — zamknuté" (kontrakt bod 18).
+ *
+ * Vysvetlenie má v celej appke JEDINÉ miesto: `settings/LockedFeatures.tsx`.
+ * Karta rozhodnutia naň odkazuje jedným slovom a nedopisuje ani pol vety
+ * vlastnými slovami — pravidlo 1 v hlavičke tohto súboru platí ďalej.
+ */
+const LOCKED_WHY_HREF = hrefForAnchor('#zamknute');
 
 export interface NewDiscountConfirmProps {
   itemsCount: number;
@@ -225,10 +235,15 @@ export function NewDiscountConfirm({
 
       {plan}
 
-      {/* K8 — dopad na maržu sa NIKDY neukáže ako číslo, ani odhadom. */}
+      {/* K8 — dopad na maržu sa NIKDY neukáže ako číslo, ani odhadom.
+          Prečo je zamknutý, hovorí jediné miesto v appke; tu je naň odkaz
+          v jednom slove, nie druhý výklad (kontrakt bod 18). */}
       <div className={styles.margin}>
         <span className="lvl-3">Dopad na maržu</span>
         <span className="lockline">zamknuté</span>
+        <Link className="lockwhy" href={LOCKED_WHY_HREF}>
+          prečo
+        </Link>
       </div>
 
       {/*

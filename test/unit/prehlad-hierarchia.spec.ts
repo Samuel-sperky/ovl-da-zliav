@@ -26,6 +26,9 @@
  *
  * Vlastník: vlna O1, kontrakt UX/dizajn 19. 8. 2026.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -36,7 +39,12 @@ import SalesSection from '@/components/dashboard/SalesSection';
 import StatusSection from '@/components/dashboard/StatusSection';
 
 import type { SalesSnapshot } from '@/components/dashboard/api';
-import { liveCampaigns, queueProgress, type QueueProgress } from '@/components/dashboard/overview-model';
+import {
+  liveCampaigns,
+  queueProgress,
+  type CalmNumbers,
+  type QueueProgress,
+} from '@/components/dashboard/overview-model';
 import {
   overviewChecks,
   overviewVerdict,
@@ -251,13 +259,22 @@ describe('D5 — na Prehľade je jedna dominanta, aj keď ešte nie je zľava', 
     expect(html).toContain('Zatiaľ nie je žiadna zľava');
   });
 
-  it('dominanta je práve jedna a je ňou verdikt', () => {
+  /*
+   * Od 20. 8. 2026 (šprint 20, vlna 3) je dominantou Prehľadu ČÍSLO, nie veta
+   * verdiktu. Prázdny stav preto dominantu NEMÁ: appka nemá ani jedno číslo,
+   * ktoré by do 44 px slotu patrilo, a nula ani pomlčka tam stáť nesmú
+   * (kontrakt UI bod 5, D11). Tvrdenie sa tým nezmäkčilo — nula dominánt je
+   * prísnejšia hranica než jedna, a že v OSTATNÝCH stavoch dominanta naozaj
+   * je, meria blok „Prehľad vedie číslami" nižšie.
+   */
+  it('prázdny stav nemá dominantu — nie je z čoho ju spraviť', () => {
     const html = renderStatus({ progress: firstRun() });
 
-    expect(count(html, /class="lvl-1"/g)).toBe(1);
-    // 44 px verdiktu. Druhé `.big` (64 px) by dominantu prebilo.
-    expect(count(html, /class="big sm"/g)).toBe(1);
+    expect(count(html, /class="lvl-1"/g)).toBe(0);
+    expect(count(html, /class="big sm"/g)).toBe(0);
     expect(html).not.toContain('prog-lg');
+    // A už vôbec nie pomlčka či nula v displejovom reze (D11).
+    expect(html).not.toMatch(/class="big[^"]*"[^>]*>\s*[—0]/);
   });
 
   it('prázdny stav má JEDNU vetu a JEDNO tlačidlo (kontrakt UI, bod 11)', () => {
@@ -401,5 +418,174 @@ describe('Prehľad ako celok — najviac štyri sekcie a jedna dominanta', () =>
     for (const sales of [salesWithData(), salesWithoutData()]) {
       expect(count(wholeScreen(sales), /class="lvl-1"/g)).toBe(1);
     }
+  });
+});
+
+/* ═════════ C4 — Prehľad vedie ČÍSLAMI, nie vetou (šprint 20, vlna 3) ══════ */
+
+/**
+ * Do 20. 8. 2026 stála v 44 px slote VETA („Zápis stojí", „Všetko v poriadku").
+ * Bola to tretia kópia tej istej odpovede — nesie ju aj značka pri vete, aj
+ * celá sekcia prekážok pod ňou — a údaje, kvôli ktorým sa človek na prístrojovú
+ * dosku pozerá, boli pod ňou v 12,5 px riadku.
+ *
+ * Tento blok meria opak, a to na VYKRESLENOM markupe aj na SKUTOČNOM CSS:
+ * v displejovom slote je číslo, veta zostáva na obrazovke o dva stupne nižšie
+ * a každé číslo, ktoré appka nepozná, je pomlčka — nikdy nula.
+ */
+describe('Prehľad vedie číslami — dominantou je údaj, nie veta', () => {
+  const GLOBALS = readFileSync(
+    fileURLToPath(new URL('../../src/app/globals.css', import.meta.url)),
+    'utf8',
+  );
+
+  const noop = (): void => {};
+
+  /** Veľkosť písma prvého pravidla daného selektora, v px. */
+  function fontSizeOf(selector: string): number {
+    const at = GLOBALS.indexOf(`${selector} {`);
+    expect(at, selector).toBeGreaterThan(-1);
+    const block = GLOBALS.slice(at, GLOBALS.indexOf('}', at));
+    const size = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(block);
+    expect(size, selector).not.toBeNull();
+    return Number(size![1]);
+  }
+
+  /**
+   * Obsah každého displejového slotu (`.big`) vo vykreslenom markupe — presne
+   * ten istý meter, aký používa `dominanta-pomlcka.spec.ts` (D11).
+   */
+  function displaySlots(html: string): string[] {
+    const found: string[] = [];
+    const pattern = /<(\w+)[^>]*class="[^"]*\bbig\b[^"]*"[^>]*>([\s\S]*?)<\/\1>/g;
+    for (const hit of html.matchAll(pattern)) found.push(hit[2]!);
+    return found;
+  }
+
+  /** Hodnoty všetkých dlaždíc pásma čísel. */
+  function figureValues(html: string): string[] {
+    return [...html.matchAll(/<div class="v"[^>]*>([\s\S]*?)<\/div>/g)].map((hit) => hit[1]!);
+  }
+
+  /** Render s voľným `calm` aj `budget` — tie starý helper fixuje napevno. */
+  function renderWith(
+    patch: Partial<VerdictInput> = {},
+    opts: {
+      calm?: CalmNumbers | null;
+      budget?: { spent: number; budget: number; remaining: number } | null;
+    } = {},
+  ): string {
+    const view = input(patch);
+    return renderToStaticMarkup(
+      createElement(StatusSection, {
+        verdict: overviewVerdict(view),
+        checks: overviewChecks(view),
+        progress: view.progress,
+        budget:
+          opts.budget === undefined ? { spent: 100, budget: 200, remaining: 100 } : opts.budget,
+        calm: opts.calm === undefined ? { live: 1, ready: 1, discounted: 2380 } : opts.calm,
+        gap: null,
+        onChanged: noop,
+      }),
+    );
+  }
+
+  /** Fronta nemá čo zapisovať — pokojný stav. */
+  function calmQueue(): QueueProgress {
+    return {
+      ...running(),
+      mode: 'calm',
+      pending: 0,
+      campaignId: null,
+      campaignName: null,
+      sentence: null,
+    };
+  }
+
+  it('v displejovom slote stojí číslo fronty, nie veta verdiktu', () => {
+    const html = renderWith();
+    const slots = displaySlots(html);
+
+    expect(slots).toHaveLength(1);
+    expect(slots[0]).toContain('3 420');
+    expect(slots[0]).toContain('8 000');
+
+    // Veta z obrazovky nezmizla — len prestala byť najväčšou vecou na nej.
+    expect(html).toContain('Všetko v poriadku');
+    expect(slots[0]).not.toContain('Všetko v poriadku');
+  });
+
+  it('„Zápis stojí" je vidieť, ale nie je najväčším prvkom karty', () => {
+    const html = renderWith({
+      status: status({ blockers: [blocker(), blocker({ id: 'catalog_empty' })] }),
+    });
+
+    expect(html).toContain('Zápis stojí');
+    const slots = displaySlots(html);
+    expect(slots).toHaveLength(1);
+    expect(slots[0]).not.toContain('Zápis stojí');
+  });
+
+  it('stavová veta nesie farbu, ZNAČKU aj slovo v jednom uzle', () => {
+    expect(renderWith()).toMatch(
+      /<span class="sig ok" data-testid="verdict-headline"><svg[^>]*class="[^"]*ovl-ic[\s\S]*?<\/svg>Všetko v poriadku<\/span>/,
+    );
+  });
+
+  it('hierarchia je zmeraná v CSS: 44 px číslo, 18 px dlaždica, 14 px veta', () => {
+    const dominant = fontSizeOf('.lvl-1 .big.sm');
+    const tile = fontSizeOf('.kpi.dense .v');
+    const sentence = fontSizeOf('.ovl-verdict > .sig');
+
+    expect(sentence).toBeLessThan(tile);
+    expect(tile).toBeLessThan(dominant);
+    // P1: druhá najväčšia vec smie mať najviac 55 % dominanty.
+    expect(tile / dominant).toBeLessThanOrEqual(0.55);
+    // Menovateľ zlomku je časťou dominanty, nie druhým ohniskom.
+    expect(fontSizeOf('.lvl-1 .big.sm .of')).toBeLessThan(dominant);
+  });
+
+  it('pokojný stav vedie počtom zlacnených, nie zlomkom fronty', () => {
+    const html = renderWith({ progress: calmQueue() });
+
+    expect(displaySlots(html)[0]).toContain('2 380');
+    expect(html).not.toContain('/ 8 000');
+  });
+
+  it('nečitateľný zoznam zliav dá pomlčky, NIKDY nuly', () => {
+    const html = renderWith({ progress: calmQueue() }, { calm: null });
+
+    // Dominanta sa v tomto stave nekreslí — pomlčka v 44 px reze je obdĺžnik.
+    expect(displaySlots(html)).toEqual([]);
+    expect(html).toContain('— zoznam zliav nevieme');
+
+    const values = figureValues(html);
+    expect(values.filter((value) => value.includes('—'))).toHaveLength(2);
+    expect(values.some((value) => value.trim() === '0')).toBe(false);
+    expect(html).toContain('data-unknown="ano"');
+  });
+
+  it('chýbajúci rozpočet, odhad ani okno sa nedopočítavajú nulou', () => {
+    const html = renderWith(
+      { progress: { ...running(), finishDay: null, dateFrom: null, dateTo: null } },
+      { budget: null },
+    );
+
+    const values = figureValues(html);
+    expect(values).toHaveLength(4);
+    expect(values.filter((value) => value.includes('—'))).toHaveLength(3);
+    expect(values.some((value) => value.trim() === '0')).toBe(false);
+    // Bez odhadu nesmie zostať visieť ani značka odhadu.
+    expect(html).not.toContain('class="est"');
+  });
+
+  it('odhad dokončenia je označený ako odhad (P7)', () => {
+    expect(renderWith()).toContain('class="est"');
+  });
+
+  it('pásmo čísel neopakuje počty katalógu zo stavového pruhu', () => {
+    const html = renderWith();
+    expect(html).not.toContain('41 082');
+    expect(html).not.toContain('2 900');
   });
 });

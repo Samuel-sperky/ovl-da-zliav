@@ -94,6 +94,7 @@ import {
   type DiscountItemView,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
+import { hrefForAnchor } from '@/components/settings/sub-pages';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Icon from '@/components/ui/Icon';
 import Note from '@/components/ui/Note';
@@ -102,6 +103,17 @@ import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { TONE_ICON } from '@/components/ui/ToneBadge';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, pluralSk } from '@/lib/ui/vocabulary';
+
+/**
+ * Kam vedie odkaz spod „Dopad na maržu — zamknuté" (kontrakt bod 18).
+ *
+ * Vysvetlenie, PREČO je údaj zamknutý, má v celej appke jediné miesto:
+ * `settings/LockedFeatures.tsx`. Detail naň teda odkazuje a nedopisuje ani
+ * pol vety vlastnými slovami — dva výklady toho istého sa raz rozídu.
+ * Kotva `#zamknute` sa na cestu prekladá cez `hrefForAnchor`, takže
+ * presťahovanie sekcie medzi podstránkami Nastavení sem nesiahne.
+ */
+const LOCKED_WHY_HREF = hrefForAnchor('#zamknute');
 
 /** Koľko položiek si vypýtame. Detail nie je export katalógu (odpoveď 56). */
 const ITEMS_LIMIT = 1000;
@@ -521,18 +533,21 @@ export function DiscountDetail({ id }: { id: number }) {
 
   return (
     <div className={styles.page} data-testid="discount-detail">
+      {/* Omrvinka „← Zľavy" tu bola dovtedy, kým bol detail samostatná
+          stránka. Od šprintu 20 stojí zoznam vľavo od detailu, takže odkaz
+          späť by ukazoval na to, čo je vidieť (P2). */}
       <div className={styles.dhead}>
-        <Link className="lvl-3" href="/zlavy">
-          ← Zľavy
-        </Link>
-        <h1>{campaign.name}</h1>
+        {/* `h2`, nie `h1`. Od šprintu 20 stojí detail vnútri shellu, ktorý
+            svoje `<h1>Zľavy</h1>` už má; druhý by rozbil osnovu čítačke
+            obrazovky. Sekcie nižšie sú preto `h3`. */}
+        <h2>{campaign.name}</h2>
         <DiscountState sentence={sentence} testId="detail-state" />
       </div>
 
       {/* 1 · DOMINANTA — priebeh fronty, štyri dlaždice a denný rozpočet */}
       <section className="sec" data-testid="detail-progress">
         <div className="sec-h">
-          <h2>Priebeh</h2>
+          <h3>Priebeh</h3>
           <div className="act lvl-3">
             zľava <b>{head.big}</b>
             {head.sub === null ? null : <> · {head.sub}</>} · svieti{' '}
@@ -669,9 +684,9 @@ export function DiscountDetail({ id }: { id: number }) {
             {canEnd ? (
               <EndDiscountInShop id={campaign.id} facts={endFacts} onChanged={() => void load()} />
             ) : null}
-            <Link className="btn" href="/zlavy">
-              Späť na zoznam
-            </Link>
+            {/* Tlačidlo „Späť na zoznam" tu stálo, kým bol detail samostatná
+                stránka. Zoznam je odteraz vľavo — v stĺpci akcií zostávajú len
+                akcie, ktoré niečo menia. */}
           </div>
         </div>
       </section>
@@ -713,9 +728,13 @@ export function DiscountDetail({ id }: { id: number }) {
           )}
           {/* K8, šprint 20 B3 — rovnaká dvojica ako na potvrdení novej zľavy.
               Prečo je zamknutá, hovorí jedno miesto ("čo appka zatiaľ nevidí
-              a prečo"), nie každá obrazovka vlastnými slovami. */}
+              a prečo"), nie každá obrazovka vlastnými slovami. Odkaz je preto
+              jedno slovo: výklad patrí tam, nie sem. */}
           <div className="lvl-3 gap-t">
-            Dopad na maržu <span className="lockline">zamknuté</span>
+            Dopad na maržu <span className="lockline">zamknuté</span>{' '}
+            <Link className="lockwhy" href={LOCKED_WHY_HREF}>
+              prečo
+            </Link>
           </div>
         </div>
       </details>
@@ -733,7 +752,7 @@ export function DiscountDetail({ id }: { id: number }) {
       {/* 4 · Položky — súhrn a len problémové riadky */}
       <section className="sec" data-testid="detail-items">
         <div className="sec-h">
-          <h2>Položky</h2>
+          <h3>Položky</h3>
           {/* Štyri čísla tu boli tie isté štyri dlaždice o sekciu vyššie,
               napísané slovami. Zostáva jediné, ktoré dlaždice nemajú. */}
           <div className="act lvl-3">

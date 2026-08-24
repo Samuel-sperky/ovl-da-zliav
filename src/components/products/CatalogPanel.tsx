@@ -843,8 +843,27 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
             </div>
           ) : null}
 
+          {/*
+            MAJSTER/DETAIL — DETAIL JE DRUHÝ STĹPEC, NIE PREKRYV (K1).
+            ────────────────────────────────────────────────────────
+            Panel kusu stojí VEDĽA tabuľky, v tom istom rade. Predtým to bol
+            `position: fixed` prekryv cez pravú tretinu tabuľky: kto porovnával
+            dva kusy, musel panel zavrieť, nájsť riadok, ktorý bol pod ním,
+            a otvoriť ho znova. Appka je pracovný nástroj, takže majster aj
+            detail musia byť vidieť naraz.
+
+            Kým nie je otvorený riadok, panel sa NEVYKRESLÍ vôbec — stĺpec
+            teda nezaberá ani pixel a tabuľka je na celú šírku.
+
+            Rad sa zalamuje SÁM (`flex-wrap`, `.catalog-split` v `globals.css`),
+            takže tu nie je žiadna medza šírky ani meranie okna: keď na tabuľku
+            aj panel prestane stačiť miesto, panel spadne POD tabuľku. Prekryv
+            sa nevracia ani na 720 px — je to presne to, čo K1 zamieta, a na
+            polovici monitora (appka vedľa administrácie shopu) by zakryl celú
+            tabuľku, nie jej tretinu.
+          */}
           {error === null ? (
-            <div style={{ marginTop: '10px' }}>
+            <div className="catalog-split" style={{ marginTop: '10px' }}>
               <CatalogTable
                 rows={rows}
                 extras={extras}
@@ -859,6 +878,10 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 onToggleRow={toggleRow}
                 onTogglePage={togglePage}
                 onOpenDetail={setDetailId}
+                /* Ktorý riadok panel vpravo práve popisuje. Pri prekryve to
+                   bolo zrejmé (panel prišiel a odišiel); trvalý stĺpec bez
+                   tejto väzby by ukazoval kus, ktorého riadok nikto nenájde. */
+                openId={detailId}
                 onPage={(page) => change({ page })}
                 onPerPage={(perPage: PerPage) => change({ perPage, page: 1 })}
                 sort={filter.sort}
@@ -909,6 +932,15 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                   />
                 }
               />
+
+              {detailRow === undefined ? null : (
+                <ProductDetailPanel
+                  row={detailRow}
+                  soldWindowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
+                  blockers={detailBlockers}
+                  onClose={() => setDetailId(null)}
+                />
+              )}
             </div>
           ) : (
             <section className="sec" data-testid="catalog-error">
@@ -1015,15 +1047,6 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
           ) : null}
         </div>
       </div>
-
-      {detailRow === undefined ? null : (
-        <ProductDetailPanel
-          row={detailRow}
-          soldWindowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
-          blockers={detailBlockers}
-          onClose={() => setDetailId(null)}
-        />
-      )}
     </>
   );
 }

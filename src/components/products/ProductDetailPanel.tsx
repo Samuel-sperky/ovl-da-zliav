@@ -23,10 +23,16 @@
  *  · **Predané kusy** — vlastný výpočet z objednávok. Okno je voliteľné priamo
  *    tu: tá istá položka vyzerá inak za 30 a inak za 360 dní a kvôli tomuto
  *    rozdielu sa panel otvára.
+ *  · **Varianty** — kód (`reference`), EAN a sklad po variantoch z verejného
+ *    `products/get`. Je to JEDINÉ miesto, kde tie tri údaje vidno bez kľúča,
+ *    a kreslí sa len pri kuse, ktorý varianty naozaj má.
  *  · **Zľavy podľa vlastných zápisov** — výhradne to, čo appka sama zapísala.
- *  · **Zatiaľ nedostupné** — kód, sklad, nákupná cena, marža, kategórie a
- *    SKUTOČNÁ zľava v eshope. Prázdna hodnota a zámok, NIE vynechaný riadok:
- *    keby riadok chýbal, nedalo by sa zistiť, že tá informácia vôbec existuje.
+ *  · **Zatiaľ nedostupné / Podrobnosti z eshopu** — polia z `products/getFull`
+ *    za oprávnením `product:read`: kód a EAN produktu, sklad, nákupná cena,
+ *    marža, cena s DPH, dodávateľ, kategórie, stav, dátumy, objednané kusy
+ *    a SKUTOČNÁ zľava v eshope. Prázdna hodnota so slovom, NIE vynechaný
+ *    riadok: keby riadok chýbal, nedalo by sa zistiť, že tá informácia vôbec
+ *    existuje. Nadpis sa mení podľa toho, či hodnoty naozaj prišli.
  *
  * ČO SA TU NESMIE POKAZIŤ
  * ───────────────────────
@@ -45,7 +51,10 @@
  *    Zamknuté funkcie) a odtiaľto naň vedie odkaz. Druhé vysvetlenie tej istej
  *    veci by si po prvej zmene s prvým protirečilo.
  * 4. **Čo appka nevie, je pomlčka — nikdy nula.** Nula je tvrdenie o predaji,
- *    ktoré sa pri nenačítanom riadku nedá urobiť.
+ *    ktoré sa pri nenačítanom riadku nedá urobiť. Pri doťahovaných údajoch to
+ *    ide ešte o krok ďalej: TRI prázdna sa nesmú zliať. `pending` (ešte sme
+ *    sa nepýtali) · `locked` (chýba kľúč) · `none` (shop to o kuse nevedie).
+ *    Rozhoduje o tom `keyedField()` a `product-extras.ts`, nikdy JSX.
  * 5. **Časy sú konkrétne.** `12.05.2026 09:14`, nikdy „pred 3 minútami".
  * 6. **Pomlčka sa nekreslí do displejového rezu** (D11, 19. 8. 2026 — tu
  *    doriešené 19. 8. 2026). Bod 4 platí ďalej, ale em pomlčka je celoštvorcová
@@ -76,6 +85,17 @@ import { catalogRow, isAborted, productWrites } from '@/components/products/cata
 import type { SoldWindow } from '@/components/products/catalog-filter';
 import { newDiscountHref, SOLD_WINDOWS } from '@/components/products/catalog-filter';
 import { productReasons } from '@/components/products/catalog-status';
+import { fetchExtras } from '@/components/products/extras-api';
+import {
+  absent,
+  fieldOf,
+  known,
+  stockText,
+  type Field,
+  type ProductExtraView,
+} from '@/components/products/product-extras';
+import { FieldValue } from '@/components/products/ProductFacts';
+import ProductVariants from '@/components/products/ProductVariants';
 import Icon from '@/components/ui/Icon';
 import type { Blocker } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
@@ -222,6 +242,75 @@ function LockedRow({ label }: { label: string }) {
   );
 }
 
+/* ───────── Údaje spoza kľúča `product:read` ──────────────────────────────
+ *
+ * Panel ich kreslí ako RIADKY, nie ako vynechanie: keby riadok chýbal, nedalo
+ * by sa zistiť, že tá informácia vôbec existuje. Ktoré z troch prázdien to je,
+ * rozhoduje `keyedField()` a nikto iný:
+ *
+ *   detail sme ešte nepýtali        → `pending`
+ *   detail prišiel bez bloku `keyed` → `locked`  (chýba kľúč)
+ *   blok `keyed` prišiel, pole prázdne → `none`  (shop to o kuse nevedie)
+ *
+ * PREČO `lockcell` NIE JE NA VŠETKÝCH RIADKOCH. `.lockcell` je iba tlmená
+ * bunka (`color: var(--dim)`), nie tvrdenie — čo presne chýba, hovorí SLOVO
+ * vnútri (`AbsenceValue`), a to slovo si bunka nesie samo aj bez tej triedy.
+ * Historických šesť riadkov (kód, sklad, nákupná cena, marža, kategórie,
+ * skutočná zľava) ju drží ďalej, lebo na ich počte stojí kontrola, že sa
+ * zamknuté NEVYNECHÁVA. Nové riadky ju nepotrebujú a vyzerajú rovnako.
+ */
+
+/**
+ * Hodnota spoza kľúča, alebo správne prázdno.
+ *
+ * `extra === undefined` je „nepýtali sme sa", NIE „nie je" — riadok, ktorý sa
+ * ešte nedoťahal, sa nesmie tváriť ako riadok bez údaja.
+ */
+function keyedField<T>(
+  extra: ProductExtraView | undefined,
+  pick: (keyed: NonNullable<ProductExtraView['keyed']>) => T | null | undefined,
+): Field<T> {
+  if (extra === undefined) return absent('pending');
+  if (extra.keyed === null) return absent('locked');
+  return fieldOf(pick(extra.keyed), 'none');
+}
+
+/** To isté pre zoznam — prázdny zoznam je `none`, nie prázdna bunka. */
+function keyedList(
+  extra: ProductExtraView | undefined,
+  pick: (keyed: NonNullable<ProductExtraView['keyed']>) => readonly string[],
+): Field<readonly string[]> {
+  if (extra === undefined) return absent('pending');
+  if (extra.keyed === null) return absent('locked');
+  const list = pick(extra.keyed);
+  return list.length === 0 ? absent('none') : known(list);
+}
+
+/**
+ * Jeden riadok skupiny za kľúčom. `legacy` drží triedu `.lockcell` na tých
+ * šiestich riadkoch, ktoré ju mali odjakživa — pozri poznámku vyššie.
+ */
+function KeyedRow<T>({
+  label,
+  field,
+  render,
+  legacy,
+}: {
+  label: string;
+  field: Field<T>;
+  render: (value: T) => ReactNode;
+  legacy?: boolean;
+}) {
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd className={!field.known && legacy === true ? 'lockcell' : undefined}>
+        <FieldValue field={field} render={render} />
+      </dd>
+    </>
+  );
+}
+
 function WriteRow({ write }: { write: ProductWriteView }) {
   const sentence = itemSentence(write.status);
   return (
@@ -281,6 +370,12 @@ export function ProductDetailPanel({
   const [windowDays, setWindowDays] = useState<SoldWindow>(asSoldWindow(soldWindowDays));
   /** Predané kusy za `windowDays`. `null` = nevieme, teda pomlčka (nie nula). */
   const [sold, setSold] = useState<number | null>(row.unitsSold);
+  /**
+   * Doťahnutý detail TOHTO kusu — varianty s kódom, EAN a skladom, a keď je
+   * kľúč, aj polia spoza neho. `undefined` = zatiaľ sme sa nepýtali, takže
+   * všetky bunky sú `pending`; nikdy nie `none`.
+   */
+  const [extra, setExtra] = useState<ProductExtraView | undefined>(undefined);
 
   /* Vlastné zápisy appky — jediný zdroj všetkého, čo panel povie o zľavách. */
   useEffect(() => {
@@ -296,6 +391,34 @@ export function ProductDetailPanel({
       } else if (!isAborted(history.error)) {
         setState({ writes: null, today: null, failed: true });
       }
+    })();
+
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [row.productId]);
+
+  /*
+   * DETAIL JEDNÉHO KUSU — varianty, kódy, sklad a polia spoza kľúča.
+   *
+   * Doťahuje sa práve ten kus, ktorý má používateľ otvorený, a práve raz na
+   * otvorenie. Riadok, ktorý detail už má, server znovu zo shopu NEČÍTA
+   * (`fillProductDetails` ho preskočí), takže otvorenie kusu z už doplnenej
+   * stránky nestojí z rozpočtu čítaní nič.
+   *
+   * Neúspech NIE JE prázdny výsledok: `extra` zostane `undefined`, teda bunky
+   * ostanú „zatiaľ nenačítané" a nie „shop nič nemá".
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    let live = true;
+    setExtra(undefined);
+
+    void (async () => {
+      const { view } = await fetchExtras([row.productId], controller.signal);
+      if (!live || view === null) return;
+      setExtra(view.items.find((item) => item.productId === row.productId));
     })();
 
     return () => {
@@ -352,6 +475,22 @@ export function ProductDetailPanel({
     if (running !== null) return formatPercentSk(running.percent);
     if (!row.discountedNow) return 'bez zľavy';
     return state.writes === null ? DASH : 'v zľave';
+  })();
+
+  /** `true` = blok spoza kľúča naozaj prišiel, takže skupina nesie hodnoty. */
+  const keyedShown = extra !== undefined && extra.keyed !== null;
+
+  /**
+   * Marža ako jeden údaj: eurá a percentá vedľa seba. Percento samo o sebe je
+   * bez sumy nečitateľné a suma bez percenta sa nedá porovnať naprieč cenami.
+   * Nič sa nedopočítava — keď shop percento nepošle, riadok ho neuvedie.
+   */
+  const marginField = ((): Field<string> => {
+    const eur = keyedField(extra, (keyed) => keyed.margin);
+    if (!eur.known) return eur;
+    const percent = extra?.keyed?.marginPercent ?? null;
+    if (percent === null) return known(formatEur(eur.value));
+    return known(`${formatEur(eur.value)} · ${formatPercentSk(percent)}`);
   })();
 
   return (
@@ -446,6 +585,17 @@ export function ProductDetailPanel({
         </div>
       </DetailGroup>
 
+      {/*
+       * Varianty sú jediné miesto, kde je kód a sklad vidieť BEZ kľúča. Kus
+       * bez variantov ich nemá o čom povedať — to už hovorí riadok „Varianty"
+       * vyššie a druhá veta o tom istom by bola šum.
+       */}
+      {row.hasAttributes ? (
+        <DetailGroup title="Varianty">
+          <ProductVariants extra={extra} />
+        </DetailGroup>
+      ) : null}
+
       <DetailGroup title="Zľavy podľa vlastných zápisov">
         <dl className="dl" data-testid="detail-discounts">
           <dt>Zľava teraz</dt>
@@ -487,13 +637,84 @@ export function ProductDetailPanel({
         </div>
       </DetailGroup>
 
-      <DetailGroup title="Zatiaľ nedostupné">
+      {/*
+       * Nadpis sa mení s tým, čo appka naozaj má: kým blok spoza kľúča
+       * neprišiel, je celá skupina „Zatiaľ nedostupné"; keď príde, sú to
+       * podrobnosti z eshopu. Nadpis, ktorý by nad vypísanými hodnotami tvrdil
+       * „nedostupné", by bol nepravdivý.
+       */}
+      <DetailGroup title={keyedShown ? 'Podrobnosti z eshopu' : 'Zatiaľ nedostupné'}>
         <dl className="dl" data-testid="detail-locked">
-          <LockedRow label="Kód produktu" />
-          <LockedRow label="Sklad" />
-          <LockedRow label="Nákupná cena" />
-          <LockedRow label="Marža" />
-          <LockedRow label="Kategórie" />
+          <KeyedRow
+            legacy
+            label="Kód produktu"
+            field={keyedField(extra, (k) => k.reference)}
+            render={(value) => <span className="num">{value}</span>}
+          />
+          <KeyedRow
+            label="EAN produktu"
+            field={keyedField(extra, (k) => k.ean13)}
+            render={(value) => <span className="num">{value}</span>}
+          />
+          <KeyedRow
+            legacy
+            label="Sklad"
+            field={keyedField(extra, (k) => k.stockQuantity)}
+            render={(value) => <span className="num">{stockText(value)}</span>}
+          />
+          <KeyedRow
+            legacy
+            label="Nákupná cena"
+            field={keyedField(extra, (k) => k.wholesalePrice)}
+            render={(value) => formatEur(value)}
+          />
+          <KeyedRow
+            legacy
+            label="Marža"
+            field={marginField}
+            render={(value) => value}
+          />
+          <KeyedRow
+            label="Cena s DPH"
+            field={keyedField(extra, (k) => k.priceWithTax)}
+            render={(value) => formatEur(value)}
+          />
+          <KeyedRow
+            label="Dodávateľ"
+            field={keyedField(extra, (k) => k.supplier)}
+            render={(value) => value}
+          />
+          <KeyedRow
+            legacy
+            label="Kategórie"
+            field={keyedList(extra, (k) => k.categories)}
+            render={(value) => value.join(' · ')}
+          />
+          <KeyedRow
+            label="Zapnutý v eshope"
+            field={keyedField(extra, (k) => k.active)}
+            render={(value) => (value ? 'áno' : 'nie')}
+          />
+          <KeyedRow
+            label="Pridané do eshopu"
+            field={keyedField(extra, (k) => k.addedAt)}
+            render={(value) => formatDateSk(value)}
+          />
+          <KeyedRow
+            label="Naposledy objednané"
+            field={keyedField(extra, (k) => k.lastOrderedAt)}
+            render={(value) => formatDateSk(value)}
+          />
+          <KeyedRow
+            label="Objednané kusy spolu"
+            field={keyedField(extra, (k) => k.orderedTotal)}
+            render={(value) => <span className="num">{formatCountSk(value)}</span>}
+          />
+          {/*
+           * Skutočnú zľavu v eshope zatiaľ nenesie ANI cesta `getFull`, ktorú
+           * appka číta — nie je to teda „shop nemá", ale „appka nedovidí".
+           * Preto zostáva pevne zamknutá, kým to doťahovanie nedoplní.
+           */}
           <LockedRow label="Skutočná zľava v eshope" />
         </dl>
         <div className="lvl-3" style={{ marginTop: '6px' }}>
@@ -516,6 +737,18 @@ export function ProductDetailPanel({
                 <td>Posledné načítanie</td>
                 <td>
                   <b>{formatDateTimeSk(row.fetchedAt)}</b>
+                </td>
+              </tr>
+              <tr>
+                <td>Detail kusu načítaný</td>
+                <td>
+                  <b>{extra === undefined ? DASH : formatDateTimeSk(extra.at)}</b>
+                </td>
+              </tr>
+              <tr>
+                <td>Variantov v detaile</td>
+                <td>
+                  <b>{extra === undefined ? DASH : extra.variants.length}</b>
                 </td>
               </tr>
             </tbody>

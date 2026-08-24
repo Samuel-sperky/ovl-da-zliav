@@ -70,6 +70,10 @@
  *    rozlišovacia časť („Prevliekací strieborný náhrdelník 925 …") stojí na
  *    začiatku. Na úzkej obrazovke (≤ 640 px) sa riadky menia na karty a názov
  *    sa zalamuje celý; preto tu `white-space` DEDÍ z bunky a nediktuje sa.
+ *    Od K1 stojí panel detailu ako druhý stĺpec vedľa tabuľky, takže pri
+ *    OTVORENOM kuse padne stĺpec názvu na ≈ 340 px (≈ 50 znakov). Mriežka to
+ *    prežije — štyri číselné stĺpce sú pevné a zúži sa výhradne názov —
+ *    a orezaný chvost je čitateľný v `title` aj v samotnom paneli vedľa.
  * 3. **Virtualizácia sa nepridáva.** V DOM nikdy nie je 41 220 riadkov —
  *    server stránkuje po 50/100/200. Chýbal spôsob, ako sa na riadok 30 000
  *    DOSTAŤ, nie ako ho vykresliť. Preto skok na stránku a poradie stĺpcov,
@@ -246,6 +250,17 @@ export interface CatalogTableProps {
   onToggleRow: (productId: number, checked: boolean) => void;
   onTogglePage: (checked: boolean) => void;
   onOpenDetail: (productId: number) => void;
+  /**
+   * Riadok, ktorý práve popisuje panel detailu vedľa tabuľky (K1). `null` =
+   * žiadny, teda panel nie je otvorený.
+   *
+   * Kým bol detail prekryv, väzba bola zrejmá: panel priletel a odletel. Ako
+   * trvalý druhý stĺpec by bez tejto značky ukazoval kus, ktorého riadok
+   * v päťdesiatich ďalších nikto nenájde. Značka ide DVOMA kanálmi — `.open`
+   * kreslí zvislý prúžok pri riadku (nie iba farbu) a `aria-current` to
+   * povie čítačke.
+   */
+  openId?: number | null;
   onPage: (page: number) => void;
   onPerPage: (perPage: PerPage) => void;
   /** Platné poradie riadkov. Predvolene najdrahšie prvé (kontrakt UI, bod 19). */
@@ -278,6 +293,7 @@ export function CatalogTable({
   onToggleRow,
   onTogglePage,
   onOpenDetail,
+  openId = null,
   onPage,
   onPerPage,
   sort = DEFAULT_CATALOG_FILTER.sort,
@@ -382,8 +398,19 @@ export function CatalogTable({
               rows.map((row) => {
                 const checked = allMatchingSelected || selected.has(row.productId);
                 const reason = rowReason?.(row) ?? null;
+                /* Otvorený a označený je to isté dvakrát len zdanlivo: výber
+                   je „pôjde do zľavy", otvorenie je „toto teraz čítam vpravo".
+                   Preto sa triedy skladajú, nie vylučujú. */
+                const open = openId !== null && openId === row.productId;
+                const classes = [checked ? 'on' : null, open ? 'open' : null]
+                  .filter((name) => name !== null)
+                  .join(' ');
                 return (
-                  <tr key={row.productId} className={checked ? 'on' : undefined}>
+                  <tr
+                    key={row.productId}
+                    className={classes === '' ? undefined : classes}
+                    aria-current={open ? true : undefined}
+                  >
                     <td className="sel">
                       <input
                         className="cb"

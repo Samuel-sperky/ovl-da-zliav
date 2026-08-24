@@ -1,10 +1,12 @@
 /**
  * Aura Zľavy — TAB 1: Prehľad (V9, architektúra §1).
  *
- * Prístrojová doska. Odpovedá na JEDNU otázku — „je všetko v poriadku?" — a
- * podľa nej je vybraná dominanta: verdikt jednou vetou, nie číslo fronty.
- * Najviac štyri sekcie (Stav · prekážky · Zľavy · Predaj), v pokojnom stave
- * tri. Jediný rozklik je dôvod pomlčky, keď sa stav fronty nedá prečítať.
+ * Prístrojová doska. Odpovedá na JEDNU otázku — „je všetko v poriadku?" — ale
+ * VEDIE ČÍSLAMI (šprint 20, vlna 3): dominantou je od 20. 8. 2026 číslo, ktoré
+ * appka naozaj zmerala, a odpoveď na otázku nesie stavová veta nad ním (farba
+ * + značka + slovo) spolu so sekciou prekážok pod ním. Najviac štyri sekcie
+ * (Stav · prekážky · Zľavy · Predaj), v pokojnom stave tri. Jediný rozklik je
+ * dôvod pomlčky, keď sa stav fronty nedá prečítať.
  *
  * Stránka je zámerne chudobná — všetko vykresľuje klientský `Overview`, ktorý
  * číta štyri čítacie endpointy. `next build` tak nezávisí od bežiacej
