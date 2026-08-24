@@ -846,8 +846,29 @@ describe('GET /api/catalog/search — hľadanie na obrazovke', () => {
 describe('hľadanie je čisté čítanie', () => {
   it('moduly hľadania neobsahujú zápis do zrkadla ani do shopu', () => {
     const dir = resolve(process.cwd(), 'src/lib/catalog');
-    const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
+
+    /*
+     * ZÁKAZ PLATÍ NA HĽADACIE MODULY, NIE NA CELÝ PRIEČINOK.
+     *
+     * Pôvodne sa skenovalo všetko v `src/lib/catalog` — vtedy tam boli len
+     * hľadacie moduly. 20. 8. 2026 pribudol `product-details.ts`, ktorý
+     * detaily do zrkadla ZÁMERNE zapisuje: bez toho by sa kód a EAN museli
+     * doťahovať znova pri každom prelistovaní stránky.
+     *
+     * Zákaz sa preto nezrušil, ale zúžil — a to, čo chránil, sa pre
+     * `product-details.ts` tvrdí PRÍSNEJŠIE v teste nižšie: nesmie riadok
+     * ZALOŽIŤ, len obohatiť existujúci. Práve zakladanie by nafúklo
+     * `COUNT(*)`, z ktorého sa ráta, koľko katalógu chýba (bod 16).
+     */
+    const VYNIMKA = new Set(['product-details.ts']);
+    const files = readdirSync(dir).filter(
+      (name) => name.endsWith('.ts') && !VYNIMKA.has(name),
+    );
     expect(files.length).toBeGreaterThan(0);
+    // Poistka: výnimka smie menovať len súbor, ktorý naozaj existuje.
+    for (const name of VYNIMKA) {
+      expect(readdirSync(dir), `výnimka ${name} je pre neexistujúci súbor`).toContain(name);
+    }
 
     for (const name of files) {
       const code = readFileSync(join(dir, name), 'utf8');
@@ -876,5 +897,27 @@ describe('hľadanie je čisté čítanie', () => {
     expect(code).not.toMatch(/SecretRef|loadForUse|apiKeyRepo/);
     // Poistka, že orez naozaj nechal kód: hľadanie samo v ňom byť musí.
     expect(code).toMatch(/searchIndex/);
+  });
+
+  it('doťahovanie detailov riadok NEZAKLADÁ, len obohatí existujúci', () => {
+    /*
+     * `product-details.ts` je jediná výnimka zo zákazu vyššie, a platí za ňu
+     * týmto tvrdením. `upsertMany` je `ON DUPLICATE KEY UPDATE`, takže by
+     * produkt mimo zrkadla vložil ako nový riadok — a `COUNT(*)` zrkadla je
+     * to isté číslo, z ktorého appka počíta, koľko katalógu ešte chýba.
+     * Zrkadlo napĺňa výhradne synchronizácia.
+     */
+    const code = readFileSync(join(resolve(process.cwd(), 'src/lib/catalog'), 'product-details.ts'), 'utf8');
+
+    // Zoznam ID na doplnenie sa filtruje o tie, ktoré v zrkadle nie sú.
+    expect(code, 'chýba filter na riadky mimo zrkadla').toMatch(/notInMirror\s*=/);
+    expect(code, 'filter nepozerá na chýbajúci riadok').toMatch(/row === undefined \|\| row\.missing/);
+    expect(code, 'pending sa nefiltruje o riadky mimo zrkadla').toMatch(/!outside\.has\(id\)/);
+
+    // A volajúci sa o nich dozvie — inak by to bolo tiché zahodenie.
+    // Zoznam sa pripína na výsledok na JEDNOM mieste — obe vetvy ho tak
+    // dostanú aj bez toho, aby si ho podfunkcie pretláčali cez rozhranie.
+    expect(code, 'notInMirror sa nevracia volajúcemu').toMatch(/...result, notInMirror/);
+    expect(code, 'skorý návrat notInMirror zahadzuje').toContain("), notInMirror };");
   });
 });

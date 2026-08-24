@@ -187,6 +187,12 @@ export interface ProductDetailsResult {
   readonly alreadyDetailed: readonly number[];
   /** ID, na ktoré shop odpovedal „taký produkt nemám" (riadok dostal `not_found`). */
   readonly notInShop: readonly number[];
+  /**
+   * ID, ktoré v zrkadle nie sú — doťahovanie ich zámerne NEZAKLADÁ.
+   * Volajúci to musí vedieť odlíšiť od „shop ich nepozná": tu appka
+   * jednoducho ešte neprešla tú časť katalógu.
+   */
+  readonly notInMirror: readonly number[];
   /** ID, na ktoré sa nedostalo. Dôvod v `notFilledReason`. */
   readonly notFilled: readonly number[];
   readonly notFilledReason: DetailFillStop;
@@ -302,6 +308,7 @@ export async function fillProductDetails(
     filled: [],
     alreadyDetailed: [],
     notInShop: [],
+    notInMirror: [],
     notFilled: [],
     notFilledReason: 'none',
     readsUsed: 0,
@@ -316,6 +323,8 @@ export async function fillProductDetails(
   /* ── 1. Čo detail už má (jeden dotaz do vlastnej DB, zadarmo) ──────────── */
 
   let alreadyDetailed: number[] = [];
+  /** ID, ktoré v zrkadle nie sú. Doťahovanie ich NEZAKLADÁ — pozri nižšie. */
+  let notInMirror: number[] = [];
   let pending = [...unique];
   if (deps.force !== true) {
     try {
@@ -328,7 +337,29 @@ export async function fillProductDetails(
         return row.route === 'getFull' || row.route === route;
       });
       const skip = new Set(alreadyDetailed);
-      pending = unique.filter((id) => !skip.has(id));
+
+      /*
+       * DOŤAHOVANIE NEZAKLADÁ RIADKY.
+       *
+       * `upsertMany` je `ON DUPLICATE KEY UPDATE`, takže produkt, ktorý
+       * v zrkadle NIE JE, by sa ním vložil ako nový riadok. Z `COUNT(*)`
+       * zrkadla sa pritom ráta, koľko katalógu ešte chýba a dokedy to
+       * potrvá (kontrakt UI, bod 16) — riadok založený čítacou cestou by
+       * to číslo nafúkol o produkt, ktorý prechod synchronizácie nikdy
+       * nevidel, a appka by tvrdila, že má viac katalógu, než prešla.
+       *
+       * Zrkadlo napĺňa VÝHRADNE synchronizácia katalógu. Táto cesta smie
+       * existujúci riadok len obohatiť. Produkt, ktorý v zrkadle nie je,
+       * sa preto nedoťahuje a volajúci sa o tom dozvie — nie je to chyba,
+       * je to hranica. Stráži to `hladanie-produktov.spec.ts`.
+       */
+      notInMirror = unique.filter((id) => {
+        const row = existing.get(id);
+        return row === undefined || row.missing;
+      });
+      const outside = new Set(notInMirror);
+
+      pending = unique.filter((id) => !skip.has(id) && !outside.has(id));
     } catch (cause) {
       // Nečitateľné zrkadlo nie je dôvod nedoplniť — nanajvýš sa zaplatí za
       // detail, ktorý appka možno už má. Chybu vidí log, nie používateľ.
@@ -336,11 +367,21 @@ export async function fillProductDetails(
     }
   }
 
-  if (pending.length === 0) return report('done', { alreadyDetailed });
+  /*
+   * `notInMirror` sa pripína TU a nikde inde.
+   *
+   * Zisťuje ho táto funkcia, ale správu skladajú `fillViaBatch` a
+   * `fillViaGetFull`. Pretlačiť premennú cez obe rozhrania by znamenalo dve
+   * miesta, kde sa dá zabudnúť; takto je jedno. Ktorákoľvek vetva vráti
+   * čokoľvek, zoznam ide s ňou.
+   */
+  if (pending.length === 0) return { ...report('done', { alreadyDetailed }), notInMirror };
 
-  return route === 'getFull'
+  const result = route === 'getFull'
     ? await fillViaGetFull({ pending, alreadyDetailed, capability, deps, ctx, now, report })
     : await fillViaBatch({ pending, alreadyDetailed, deps, ctx, now, log, report });
+
+  return { ...result, notInMirror };
 }
 
 /* ─────────────── 5a. Verejná cesta: `/api/batch` + `get` ──────────────── */
