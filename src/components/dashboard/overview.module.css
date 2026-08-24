@@ -38,12 +38,37 @@
   align-items: start;
 }
 
-/* „Zľavy": vľavo čo beží, vpravo čo sa ponúka. */
+/*
+ * „Zľavy": vľavo čo beží, vpravo čo sa ponúka.
+ *
+ * Vodorovné odsadenie 8 px je PRIESTOR PRE PRESAH RIADKOV, nie vzduch okolo
+ * mriežky: `.campRow` má zámerný záporný okraj `0 -8px`, aby podfarbenie pri
+ * prejdení myšou nekončilo tesne na písmenách. Ten presah musí mať kam
+ * vytiecť — inak zo stĺpca vylezie von (24. 8. 2026 to snímkovač hlásil ako
+ * „obsah je o 8 px širší než rám" a ako tri presahy riadkov). Záporný okraj
+ * rovnakej veľkosti vracia OBSAHOVÝ rám na pôvodné miesto, takže stĺpce
+ * mriežky ani medzera medzi nimi sa nemenia o jediný pixel; celý presah sa
+ * schová do 16 px vnútorného okraja karty `.sec`.
+ *
+ * Kto zmení `-8px` na riadku, musí zmeniť aj tieto dve čísla — inak sa presah
+ * vráti von zo stĺpca.
+ */
 .mid {
   display: grid;
   grid-template-columns: 1.15fr 1fr;
   gap: 20px;
   align-items: start;
+  margin: 0 -8px;
+  padding: 0 8px;
+}
+
+/*
+ * Ľavý stĺpec („Beží teraz"). Nesie ten istý 8 px priestor ako `.mid` — presah
+ * riadku sa meria voči NAJBLIŽŠIEMU rámu, takže ho musí pojať aj on.
+ */
+.liveCol {
+  margin: 0 -8px;
+  padding: 0 8px;
 }
 
 /* Bez jedinej zľavy sa ľavý stĺpec nekreslí a návrhy dostanú celú šírku. */
@@ -60,6 +85,21 @@
 
 .actions :global(.btn) {
   justify-content: center;
+}
+
+/*
+ * „Zastaviť frontu" je `<summary class="btn">` vnútri `<details>`, teda NIE JE
+ * položkou tohto flexu — položkou je `<details>`. `align-items: stretch` preto
+ * naťahovalo obal a tlačidlo vnútri si držalo šírku svojho textu: dve tlačidlá
+ * nad ním mali 260 px, tretie 122 px a stĺpec vyzeral ako schodisko.
+ *
+ * `display: flex` z neho spraví blokový rámec, takže vyplní šírku obalu; do
+ * stredu ho už zarovná pravidlo nad týmto. Značka rozkliku sa tým nevráti —
+ * `.stopq > summary` má `list-style: none` a Chrome ju pri inom zobrazení než
+ * `list-item` nekreslí.
+ */
+.actions :global(.stopq > summary.btn) {
+  display: flex;
 }
 
 /* Nadpis stĺpca nad riadkami. */
@@ -106,6 +146,42 @@
 
 .queueName {
   min-width: 0;
+}
+
+/*
+ * PÁSMO ŠTYROCH ČÍSEL — ŠTVRTÁ BUNKA JE ŠIRŠIA A JE TO ZÁMER.
+ *
+ * `.kpis` z globals dáva `repeat(auto-fit, minmax(150px, 1fr))`, teda štyri
+ * ROVNAKO široké bunky po 210 px (186 px obsahu). Tri z nich nesú jeden údaj,
+ * štvrtá („Okno zľavy") nesie DVA dátumy: `22. 8. 2026 – 5. 9. 2026` má
+ * v 18 px reze 200 px, takže sa zalomila do dvoch riadkov — a bunky mriežky sú
+ * rovnako vysoké, takže jedna zalomená hodnota zdvihla celý rad o riadok.
+ * Rad dlaždíc má vyzerať ako rad, nie ako schod.
+ *
+ * MERANÉ ŠÍRKY HODNÔT (Inter, 18 px, 660):
+ *   `518`, `128 z 200`, `27. 8. 2026` ............... 40–97 px
+ *   `22. 8. 2026 – 5. 9. 2026` ..................... 200 px
+ *   `22. 12. 2026 – 15. 1. 2027` (cez prelom roka) .. 223 px
+ *
+ * Šírka pásma sa NEMENÍ (P4, strop 1350 px) — mení sa len jej rozdelenie:
+ * 1,35 dielu pre dátumové okno, po jednom pre ostatné tri. Pri 846 px pásma to
+ * je 261 px na okno (237 px obsahu, teda aj na prelom roka ostáva rezerva)
+ * a 193 px na ostatné, kde najdlhší popisok („Odhad dokončenia") má 103 px.
+ *
+ * PREČO NIE KRATŠÍ TVAR DÁTUMU: `22. 8. – 5. 9. 2026` by ušetrilo 50 px, ale
+ * dátum má v appke JEDEN tvar (kontrakt UI, bod 10; stráži `datumy-povrch`)
+ * a ten istý rozsah kreslí rovnakým tvarom aj obrazovka Zliav. Druhý tvar len
+ * pre jednu dlaždicu je horšia cena než o 60 px širšia bunka — a cez prelom
+ * roka by sa aj tak musel vrátiť celý, teda dlaždicu by nezachránil.
+ */
+/*
+ * `:global(.kpis)` v selektore NIE JE ozdoba: `.kpis` z globals má rovnakú
+ * špecifickosť ako samotná `.figs` a v jednom zlepenom hárku rozhoduje poradie
+ * súborov — pri prvom pokuse vyhral globals a rad sa lámal ďalej. Dvojica
+ * tried drží pravidlo nad ním bez ohľadu na poradie a bez `!important`.
+ */
+:global(.kpis).figs {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.35fr);
 }
 
 /* Rozklik k pomlčke — rovnaký tvar ako „Prečo —" v stavovom pruhu. */
@@ -161,6 +237,10 @@
  * Vlastná dvojriadková geometria namiesto širokej `.zrow` zo zoznamu zliav:
  * `.zrow` má šesť pevných stĺpcov (spolu vyše 800 px) a v polovičnom okne by
  * vyrobila vodorovný skrol (kontrakt UI, bod 12).
+ *
+ * Záporný vodorovný okraj je presah podfarbenia pod myšou — jeho veľkosť musí
+ * ostať zhodná s vnútorným okrajom `.liveCol` a `.mid`, inak riadok vylezie
+ * von zo stĺpca.
  */
 .campRow {
   display: grid;
@@ -355,6 +435,15 @@
 @media (max-width: 640px) {
   .reason {
     grid-template-columns: 1fr;
+  }
+
+  /*
+   * Pásmo čísel sa v tejto šírke skladá na dve bunky v rade. Bez toho by štyri
+   * pevné stĺpce mali po 160 px a dátumové okno by sa zalomilo znova — tentoraz
+   * do troch riadkov.
+   */
+  :global(.kpis).figs {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .reason :global(.btn) {

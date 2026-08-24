@@ -154,7 +154,19 @@
   gap: 6px;
 }
 
-/* Marka legendy je 14×14 SVG, aby vedela nakresliť aj prerušovanú čiaru. */
+/*
+ * Marka legendy je malé SVG (16 × 12 v Predaji, 12 × 12 v cenách), aby vedela
+ * nakresliť aj prerušovanú čiaru — bodka by trend od série neodlíšila.
+ *
+ * `flex: none` tu nesie ROZMER, nie len zákaz rastu: `flex-basis: auto` sa
+ * pýta na `width` marky, takže pravidlo, ktoré dá SVG v grafe `width: 100%`,
+ * z nej spraví koliesko cez celý riadok (24. 8. 2026). Plocha grafu je preto
+ * v `globals.css` adresovaná cez `svg[role="img"]`; marky rolu nemajú.
+ *
+ * Rozostupy legendy (6 px marka–slovo, 14 px medzi položkami) sú po oprave
+ * zmerané a nemenia sa: vnútorná medzera musí ostať výrazne menšia než medzera
+ * medzi položkami, inak sa slovo prilepí k susednej marke.
+ */
 .legendMark {
   flex: none;
   display: block;

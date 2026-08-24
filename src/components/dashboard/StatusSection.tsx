@@ -261,7 +261,13 @@ function RunningBody({
         <i style={{ width: `${progress.percent.toFixed(2)}%` }} />
       </div>
 
-      <div className="kpis ovl-figs" data-testid="queue-figures">
+      {/*
+        `styles.figs` patrí LEN k tomuto štvorpásmu: štvrtá bunka („Okno
+        zľavy") nesie dva dátumy a v rovnako širokých bunkách sa zalamovala,
+        čím zdvíhala celý rad o riadok. Trojpásmo pokojného stavu ho NEMÁ —
+        malo by o jeden stĺpec viac než dlaždíc.
+      */}
+      <div className={`kpis ovl-figs ${styles.figs}`} data-testid="queue-figures">
         <Figure label="Zostáva zapísať" value={formatCountSk(progress.pending)} />
         <Figure
           label="Dnes zapísaných"
