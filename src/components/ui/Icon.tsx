@@ -40,7 +40,7 @@
  *    Lucide kreslí na mriežku 24 s hrúbkou ťahu 2; zmenšené na 11 px z toho
  *    ostane kaša. **Tu sa kreslí na mriežku 16 s hrúbkou 1,5** — a nič iné.
  *    Kto pridá cestu, prepočíta ju na 16-mriežku, inak sa sada rozíde.
- * 3. **Pätnásť ikon z 1 650** je nákup skladu kvôli jednej skrutke.
+ * 3. **Šestnásť ikon z 1 650** je nákup skladu kvôli jednej skrutke.
  *
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
@@ -58,6 +58,18 @@
  *     tam, kde je ikona JEDINÝM nositeľom významu. V tlačidle bez viditeľného
  *     textu meno nesie `aria-label` TLAČIDLA — nikdy oboje naraz, čítačka by
  *     to prečítala dvakrát.
+ *  E. **Neznáme meno NIKDY nezhodí obrazovku.** `IconName` platí pri preklade,
+ *     lenže meno sem chodí aj z dát: `STATE_ICON[tone]`, `TONE_ICON[tone]`,
+ *     `RESOLUTION_ICON[resolution]` sú mapy indexované hodnotou z odpovede.
+ *     24. 8. 2026 stačil kód stavu, ktorý appka nepozná, a `ICON_PATHS[name]`
+ *     bolo `undefined` — `.map()` nad ním zhodil celý tab Zľavy na bielu
+ *     stránku, bez hlásenia. Odteraz sa nakreslí NÁHRADNÝ tvar (`unknown`,
+ *     otáznik v krúžku) a `<svg>` nesie `data-icon-unknown` s tým menom.
+ *     Náhrada je zámerne otáznik a nie `circle` ani `alertTriangle`: tie dva
+ *     tvary už význam nesú (nečinné, pozor) a chýbajúca značka by sa tvárila
+ *     ako platná. Zámerne to ani nie je prázdno — značka, ktorá potichu
+ *     zmizne, je porušenie pravidla „farba + značka + slovo", o ktorom sa
+ *     nikto nedozvie.
  *
  * `ICON_PATHS` je JEDINÝ zdroj tvarov v celom repe — a to od 19. 8. 2026 platí
  * doslova. Predtým mal `globals.css` v `.sig.lock::before` tú istú cestu zámoku
@@ -136,6 +148,18 @@ export const ICON_PATHS = {
   ],
   /** Mesiac — „prepni na tmavú tému" (Lucide `moon`). */
   moon: ['M8 2a4.2 4.2 0 0 0 6 6 6 6 0 1 1-6-6Z'],
+  /**
+   * NÁHRADNÝ TVAR — otáznik v krúžku (Lucide `circle-help`).
+   *
+   * Kreslí sa vtedy, keď `name` v sade nie je. Nie je to ikona na volanie
+   * z obrazovky; je to to, čo `Icon` nakreslí namiesto pádu (pozri bod E
+   * hlavičky).
+   */
+  unknown: [
+    'M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 1 0 0-13Z',
+    'M6.06 6.05a2 2 0 0 1 3.89.65c0 1.33-1.95 2-1.95 2',
+    'M8 11.5h.01',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 /** Meno ikony zo sady. Iné mená neexistujú — sada sa rozširuje tu, nikde inde. */
@@ -159,6 +183,18 @@ export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'children' | 'n
 }
 
 /**
+ * Meno, ktoré `Icon` nakreslí, keď žiadané meno v sade nie je (bod E hlavičky).
+ */
+export const FALLBACK_ICON: IconName = 'unknown';
+
+/**
+ * Atribút, ktorým sa chýbajúca značka dá NÁJSŤ — v teste, v DOM aj v snímke.
+ * Ikona, ktorá potichu zmizne, je porušenie pravidla „farba + značka + slovo",
+ * o ktorom sa nikto nedozvie; ikona, ktorá o sebe povie, sa dá opraviť.
+ */
+export const ICON_UNKNOWN_ATTR = 'data-icon-unknown';
+
+/**
  * Ikona zo sady. Server-safe: žiadne hooky, žiadne `use client`.
  */
 export function Icon({ name, label, size = 1, className, ...rest }: IconProps) {
@@ -167,6 +203,18 @@ export function Icon({ name, label, size = 1, className, ...rest }: IconProps) {
       ? ({ 'aria-hidden': true } as const)
       : ({ role: 'img', 'aria-label': label } as const);
   const classes = ['ovl-ic', className ?? ''].filter(Boolean).join(' ');
+
+  /*
+    Typ `IconName` platí pri preklade; do behu appky sa meno dostane aj
+    z dát (`STATE_ICON[tone]`, `RESOLUTION_ICON[resolution]` — mapy indexované
+    hodnotou z odpovede). Keď taká hodnota v mape nie je, `ICON_PATHS[name]` je
+    `undefined` a `.map()` nad ním zhodí CELÚ obrazovku, nielen značku. Preto
+    sa tu meno OVERUJE, nie predpokladá.
+  */
+  const shapes: readonly string[] | undefined = ICON_PATHS[name];
+  const missing = shapes === undefined;
+  const paths = missing ? ICON_PATHS[FALLBACK_ICON] : shapes;
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -182,8 +230,10 @@ export function Icon({ name, label, size = 1, className, ...rest }: IconProps) {
       className={classes}
       {...a11y}
       {...rest}
+      /* Až za `rest` — príznak chýbajúcej značky sa nesmie dať prepísať zvonku. */
+      {...(missing ? { [ICON_UNKNOWN_ATTR]: name } : {})}
     >
-      {ICON_PATHS[name].map((d) => (
+      {paths.map((d) => (
         <path key={d} d={d} />
       ))}
     </svg>

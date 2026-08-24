@@ -27,8 +27,14 @@
  */
 import type { DateOnly } from '@/contracts';
 
+import { toStatusCode } from '@/components/dashboard/overview-model';
 import { addDays, todayInZone, LOGIC_TIME_ZONE } from '@/lib/domain/dates';
-import { campaignSentence, type CampaignStatusCode, type SurfaceState } from '@/lib/ui/vocabulary';
+import {
+  campaignSentence,
+  type CampaignSentence,
+  type SurfaceFlag,
+  type SurfaceState,
+} from '@/lib/ui/vocabulary';
 
 /* ═════════════════════════════ 1. Pásma (K3) ══════════════════════════════ */
 
@@ -305,10 +311,43 @@ const STATE_ORDER: Readonly<Record<SurfaceState, number>> = {
   'skončila': 3,
 };
 
-/** Stav zľavy ako veta povrchu — jediná cesta k slovu o stave (K10). */
-export function sentenceOf(row: DiscountLike, today?: DateOnly) {
-  return campaignSentence({
-    status: row.status as CampaignStatusCode,
+/**
+ * Príznak pre kód stavu, ktorý appka nepozná.
+ *
+ * Slovník preň vetu nemá a nemôže mať — nepozná ho ani on. Znenie preto žije
+ * tu, rovnako ako veta „nevieme, či sa zapísalo" v `DiscountsList` (D45).
+ * Kód sa do textu NEDÁVA: vnútorné kódy na povrch nepatria (K10).
+ *
+ * Tón je jantárový, nie červený a nie sivý — presne ako
+ * `UNKNOWN_RESOLUTION_LOOK` pri prekážkach: netvrdíme poruchu ani pokoj,
+ * len že sa treba pozrieť.
+ */
+export const UNKNOWN_STATUS_FLAG: SurfaceFlag = {
+  text: 'tento stav nepoznáme',
+  tone: 'attention',
+};
+
+/**
+ * Stav zľavy ako veta povrchu — jediná cesta k slovu o stave (K10).
+ *
+ * KÓD SA NEPRETYPOVÁVA, OVERUJE SA. Do 24. 8. 2026 tu stálo
+ * `row.status as CampaignStatusCode`. Kód, ktorý appka nepozná (stalo sa
+ * s `writing`), tak prešiel do slovníka, `CAMPAIGN_STATE` preň nemal slovo,
+ * tón bol `undefined` a značka stavu zhodila celý tab na bielu stránku.
+ *
+ * Prevod robí `toStatusCode()` z Prehľadu — TÁ ISTÁ funkcia, nie druhá kópia.
+ * Dva fail-closed prevody by sa po prvej zmene rozišli a jedna obrazovka by
+ * o tej istej zľave tvrdila niečo iné než druhá.
+ *
+ * Neznámy kód nie je chyba appky, je to fakt o dátach. Slovo preto padá na
+ * najpasívnejšie tvrdenie („pripravená" — nič sa nezapisuje), ale veta to
+ * PRIZNÁVA príznakom za bodkou: `pripravená · tento stav nepoznáme`. Tichá
+ * náhrada by predstierala jeden zo známych stavov.
+ */
+export function sentenceOf(row: DiscountLike, today?: DateOnly): CampaignSentence {
+  const status = toStatusCode(row.status);
+  const sentence = campaignSentence({
+    status,
     dateFrom: row.dateFrom as DateOnly,
     dateTo: row.dateTo as DateOnly,
     ...(today !== undefined ? { today } : {}),
@@ -316,6 +355,18 @@ export function sentenceOf(row: DiscountLike, today?: DateOnly) {
     failedCount: row.itemsFailed,
     lateCount: row.late ? row.itemsPending : 0,
   });
+
+  // Prevod, ktorý kód ZMENIL, je jediný dôkaz, že sme ho nepoznali.
+  if (status === row.status) return sentence;
+
+  const flags = [...sentence.flags, UNKNOWN_STATUS_FLAG];
+  return {
+    ...sentence,
+    flags,
+    // Gramatika povrchu je `stav · príznak · príznak` (§4) — rovnako ako ju
+    // skladá slovník; skladá sa znovu, lebo príznak pribudol až tu.
+    text: [sentence.state, ...flags.map((flag) => flag.text)].join(' · '),
+  };
 }
 
 export interface OrderedDiscounts<T extends DiscountLike> {
