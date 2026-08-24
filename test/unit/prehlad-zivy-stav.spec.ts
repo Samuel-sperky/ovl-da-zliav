@@ -522,6 +522,7 @@ describe('Prehľad — kódy sedia s originálmi (kontroluje typ, nie viera)', (
       scope: 'scope',
       catalog: 'catalog',
       catalogReads: 'catalogReads',
+      salesSync: 'salesSync',
     };
     const waiting: Record<CatalogWaitingReason, CatalogWaitingCode> = {
       rate_limited: 'rate_limited',
@@ -532,7 +533,7 @@ describe('Prehľad — kódy sedia s originálmi (kontroluje typ, nie viera)', (
 
     expect(Object.keys(severity)).toHaveLength(3);
     expect(Object.keys(resolution)).toHaveLength(4);
-    expect(Object.keys(sections)).toHaveLength(6);
+    expect(Object.keys(sections)).toHaveLength(7);
     expect(Object.keys(waiting)).toHaveLength(4);
   });
 });

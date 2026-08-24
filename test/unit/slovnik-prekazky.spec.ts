@@ -119,6 +119,18 @@ const SNIMKY: readonly StatusSnapshot[] = [
   healthy({ scope: { mode: 'plny', maxProducts: 500, failClosed: false }, catalog: {} }),
   healthy({ catalogReads: { usedThisMinute: 24, usedThisUtcDay: 240 } }),
   healthy({ catalogReads: {} }),
+  // Odmietnuté čítanie objednávok. `salesSync: {}` je zámerne tiež v matici:
+  // sekcia bez druhu prekážky NESMIE vyrobiť vetu, inak by appka poslala
+  // človeka prestavovať kľúč, ktorý je v poriadku.
+  healthy({ salesSync: { block: 'permission', since: new Date(NOW.getTime() - 48 * HOUR) } }),
+  healthy({
+    salesSync: {
+      block: 'ip_ban',
+      since: new Date(NOW.getTime() - 48 * HOUR),
+      probeAt: new Date(NOW.getTime() + 6 * HOUR),
+    },
+  }),
+  healthy({ salesSync: {} }),
 ];
 
 /** Všetky rôzne vety, ktoré modul nad maticou vyrobí. */

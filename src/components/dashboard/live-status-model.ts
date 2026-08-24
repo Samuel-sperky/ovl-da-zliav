@@ -221,6 +221,7 @@ export const SECTION_WORD: Readonly<Record<StatusSectionCode, string>> = {
   scope: 'rozsah zľavy',
   catalog: 'katalóg',
   catalogReads: 'rozpočet čítaní',
+  salesSync: 'stav predajnosti',
 };
 
 /**

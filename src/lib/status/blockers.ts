@@ -101,6 +101,16 @@
 import type { DateOnly } from '@/contracts';
 import type { ScopeMode } from '@/lib/repo/settings.repo';
 
+// Čistý modul bez DB a bez `env` — smie sa importovať aj v client komponente,
+// rovnako ako `shop/read-budget.ts` nižšie. Vety o odmietnutom čítaní
+// objednávok sa píšu TAM a odtiaľ ich berie aj `sales/sync-runner.ts`; druhá
+// kópia tých istých viet by sa s prvou rozišla.
+import {
+  salesBlockNextStep,
+  salesBlockWhat,
+  type SalesBlockKind,
+} from '@/lib/sales/stop-policy';
+
 import {
   ANON_READS_PER_MINUTE,
   ANON_READS_PER_UTC_DAY,
@@ -195,7 +205,9 @@ export type BlockerId =
   | 'catalog_product_missing'
   | 'catalog_incomplete'
   | 'catalog_reads_day_exhausted'
-  | 'catalog_reads_minute_exhausted';
+  | 'catalog_reads_minute_exhausted'
+  | 'sales_reads_forbidden'
+  | 'sales_reads_ip_banned';
 
 /**
  * Kanonické poradie prekážok v rámci rovnakej závažnosti. Zoznam je zámerne
@@ -216,6 +228,8 @@ export const BLOCKER_ORDER: readonly BlockerId[] = [
   'catalog_incomplete',
   'write_budget_low',
   'key_expires_soon',
+  'sales_reads_ip_banned',
+  'sales_reads_forbidden',
   'catalog_reads_day_exhausted',
   'catalog_reads_minute_exhausted',
 ];
@@ -348,6 +362,27 @@ export interface CatalogReadsSnapshot {
 }
 
 /**
+ * Synchronizácia predajnosti (`lib/sales/stop-policy.ts`).
+ *
+ * Sekcia je ZÁMERNE opt-in, z rovnakého dôvodu ako `catalogReads`: čítanie
+ * objednávok beží na vlastnom kľúči a vlastnej kvóte, takže odmietnuté čítanie
+ * predajov NEBRÁNI zápisu zliav. Keď sa volajúci na predajnosť nepýta, sekciu
+ * neposiela a modul o nej mlčí.
+ *
+ * A tu fail-closed NEPLATÍ ani vnútri sekcie: chýbajúce `kind` znamená „shop
+ * nás neodmieta", nie „asi nás odmieta". Vymyslieť odmietnutie, ktoré sa
+ * nestalo, by poslalo človeka prestavovať kľúč, ktorý je v poriadku.
+ */
+export interface SalesSyncSnapshot {
+  /** Druh trvalej prekážky. `null`/chýba = žiadna netrvá. */
+  readonly block?: SalesBlockKind | null;
+  /** Odkedy prekážka stojí. */
+  readonly since?: Date | null;
+  /** Kedy sa appka ozve jednou overovacou požiadavkou. `null` = na rozvrhu nikdy. */
+  readonly probeAt?: Date | null;
+}
+
+/**
  * Všetko, čo modul potrebuje vedieť. Každá sekcia je voliteľná a každá chýbajúca
  * hodnota znamená „neviem" — a „neviem" sa vyhodnotí prísnejšie.
  */
@@ -361,6 +396,7 @@ export interface StatusSnapshot {
   readonly selection?: SelectionSnapshot;
   readonly catalog?: CatalogSnapshot;
   readonly catalogReads?: CatalogReadsSnapshot;
+  readonly salesSync?: SalesSyncSnapshot;
 }
 
 /** Zhrnutie zoznamu — jedna odpoveď na otázku „ide to, alebo nie?". */
@@ -1010,6 +1046,50 @@ function catalogReadBlockers(snapshot: StatusSnapshot, now: Date): Blocker[] {
   return list;
 }
 
+/**
+ * 5.7 — čítanie objednávok, ktoré shop trvalo odmieta (`sales/stop-policy.ts`).
+ *
+ * Prečo `obmedzuje` a nie `blokuje`: zľavy sa zapisujú ďalej. Zastavila sa
+ * predajnosť, teda ČÍSLA, nie operácia — a prekážka, ktorá by tvrdila, že
+ * zastavuje všetko, by pri každej zľave hlásila poplach, ktorý neplatí.
+ *
+ * Prečo `clearsAt: null` aj pri zablokovanej IP: appka vie, kedy sa sama ozve,
+ * ale nevie, kedy blokáda skončí. Sľúbiť čas uvoľnenia by bola domnienka
+ * vydávaná za meranie (I11). Že sa appka ozve sama, hovorí veta.
+ *
+ * Prečo to NEPATRÍ medzi zamknuté funkcie (`settings/LockedFeatures.tsx`): tá
+ * tabuľka hovorí, čo rozhranie eshopu neposkytuje NIKOMU a NIKDY. Toto je
+ * meniteľný stav tejto inštalácie — kľúč, ktorý sa dá prestaviť, a adresa,
+ * ktorá sa dá odblokovať.
+ */
+function salesSyncBlockers(snapshot: StatusSnapshot): Blocker[] {
+  const sales = snapshot.salesSync;
+  if (sales === undefined) return [];
+  const kind = sales.block ?? null;
+  if (kind === null) return [];
+
+  const banned = kind === 'ip_ban';
+  return [
+    {
+      id: banned ? 'sales_reads_ip_banned' : 'sales_reads_forbidden',
+      area: 'citanie',
+      severity: 'obmedzuje',
+      subject: 'operacia',
+      productIds: [],
+      // Vety píše `sales/stop-policy.ts` — to isté znenie vidí aj log spúšťača.
+      what: salesBlockWhat(kind),
+      nextStep: salesBlockNextStep(kind),
+      // Odblokovanie adresy sa v appke urobiť nedá; vloženie kľúča áno, a je
+      // za sudo oknom (`PUT /api/key`), čo podľa bodu 5 hlavičky povie zámok.
+      path: banned ? null : BLOCKER_PATHS.settings,
+      resolution: banned ? 'mimo_appky' : 'sudo',
+      passableNow: true,
+      clearsAt: null,
+      assumed: false,
+    },
+  ];
+}
+
 /* ═══════════════════════════ 6. Verejné API ═══════════════════════════════ */
 
 /**
@@ -1046,6 +1126,7 @@ export function collectOperationBlockers(snapshot: StatusSnapshot = {}): readonl
     ...scopeBlockers(scope, selected),
     ...catalogBlockers(snapshot, scope, selected, now),
     ...catalogReadBlockers(snapshot, now),
+    ...salesSyncBlockers(snapshot),
   ]);
 }
 

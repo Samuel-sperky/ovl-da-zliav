@@ -55,6 +55,7 @@
  */
 import type { DateOnly } from '@/contracts';
 import type { ScopeMode } from '@/lib/repo/settings.repo';
+import type { SalesBlockKind } from '@/lib/sales/stop-policy';
 
 import {
   HARD_MAX_PRODUCTS,
@@ -85,7 +86,8 @@ export type StatusSection =
   | 'writeBudget'
   | 'scope'
   | 'catalog'
-  | 'catalogReads';
+  | 'catalogReads'
+  | 'salesSync';
 
 /** Tvar `ScopeSettings` z `repo/settings.repo.ts` — bez importu servera. */
 export interface ScopeFacts {
@@ -149,6 +151,18 @@ export interface CatalogReadFacts {
   readonly usedThisUtcDay: number | null;
 }
 
+/**
+ * Trvalá prekážka čítania objednávok — opt-in, viď `SalesSyncSnapshot`
+ * v `blockers.ts`. Tvar je zhodný so `SalesBlock` zo `sales/stop-policy.ts`,
+ * zúžený na to, čo smie opustiť server: druh a dva časy, nikdy kód chyby ani
+ * čokoľvek z odpovede shopu (I1).
+ */
+export interface SalesSyncFacts {
+  readonly block: SalesBlockKind | null;
+  readonly since: Date | null;
+  readonly probeAt: Date | null;
+}
+
 /* ═════════════════════════ 2. Zdroje (injektované) ════════════════════════ */
 
 /**
@@ -193,6 +207,12 @@ export interface StatusSources {
    * než zápisy, takže vyčerpané čítania zápisu nebránia.
    */
   catalogReads?(): Promise<CatalogReadFacts>;
+  /**
+   * Stojí synchronizácia predajnosti na tom, že shop čítanie objednávok
+   * odmieta? Opt-in z rovnakého dôvodu ako `catalogReads`: predajnosť beží na
+   * vlastnom kľúči a vlastnej kvóte a jej zastavenie zápisu NEBRÁNI.
+   */
+  salesSync?(): Promise<SalesSyncFacts>;
   now?(): Date;
 }
 
@@ -312,6 +332,11 @@ export async function buildStatusSnapshot(sources: StatusSources): Promise<Statu
   const catalogReads = readCatalogReads === undefined ? null : await attempt(readCatalogReads);
   if (readCatalogReads !== undefined && catalogReads === null) unreadable.add('catalogReads');
 
+  /* ── 7. Odmietnuté čítanie objednávok — opt-in, viď `StatusSources`. ──── */
+  const readSalesSync = sources.salesSync?.bind(sources);
+  const salesSync = readSalesSync === undefined ? null : await attempt(readSalesSync);
+  if (readSalesSync !== undefined && salesSync === null) unreadable.add('salesSync');
+
   const catalog: CatalogSnapshot | undefined =
     loadedProducts === null
       ? undefined
@@ -342,6 +367,7 @@ export async function buildStatusSnapshot(sources: StatusSources): Promise<Statu
     },
     ...(catalog === undefined ? {} : { catalog }),
     ...(catalogReads === null ? {} : { catalogReads }),
+    ...(salesSync === null ? {} : { salesSync }),
   };
 
   return {
@@ -424,6 +450,14 @@ export interface CatalogReadsWire {
   readonly usedThisUtcDay: number | null;
 }
 
+export interface SalesSyncWire {
+  readonly block: SalesBlockKind | null;
+  /** ISO 8601 UTC — odkedy prekážka stojí. */
+  readonly since: string | null;
+  /** ISO 8601 UTC — kedy sa appka ozve jednou požiadavkou. `null` = nikdy sama. */
+  readonly probeAt: string | null;
+}
+
 /** Odpoveď na otázku „ide to, alebo nie?" — jedna veta pre hlavičku. */
 export interface StatusSummaryWire {
   readonly blocked: boolean;
@@ -447,6 +481,8 @@ export interface StatusPayload {
   readonly catalog: CatalogWire | null;
   /** `null`, kým spotrebu čítaní katalógu niekto nemeria (opt-in). */
   readonly catalogReads: CatalogReadsWire | null;
+  /** `null`, kým sa na predajnosť nikto nepýta (opt-in). */
+  readonly salesSync: SalesSyncWire | null;
   /** Hotový zoznam prekážok pre PRÁZDNY výber, zoradený podľa závažnosti. */
   readonly blockers: readonly BlockerWire[];
   readonly summary: StatusSummaryWire;
@@ -456,6 +492,13 @@ export interface StatusPayload {
 
 const iso = (value: Date | null): string | null =>
   value instanceof Date && Number.isFinite(value.getTime()) ? value.toISOString() : null;
+
+/** ISO reťazec → `Date`. Nečitateľný čas je „neviem", nie `Invalid Date`. */
+function parseIso(value: string | null): Date | null {
+  if (value === null) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
 
 /** `Blocker` → JSON tvar. */
 export function toBlockerWire(blocker: Blocker): BlockerWire {
@@ -508,6 +551,7 @@ export function toStatusPayload(reading: StatusReading): StatusPayload {
   const scope = reading.snapshot.scope;
   const catalog = reading.snapshot.catalog;
   const reads = reading.snapshot.catalogReads;
+  const sales = reading.snapshot.salesSync;
 
   const budgetWire: WriteBudgetWire | null =
     budget === undefined ||
@@ -557,6 +601,14 @@ export function toStatusPayload(reading: StatusReading): StatusPayload {
         : {
             usedThisMinute: reads.usedThisMinute ?? null,
             usedThisUtcDay: reads.usedThisUtcDay ?? null,
+          },
+    salesSync:
+      sales === undefined
+        ? null
+        : {
+            block: sales.block ?? null,
+            since: iso(sales.since ?? null),
+            probeAt: iso(sales.probeAt ?? null),
           },
     blockers: blockers.map(toBlockerWire),
     summary: {
@@ -654,5 +706,14 @@ export function statusSnapshotFromPayload(
           },
         }),
     ...(payload.catalogReads === null ? {} : { catalogReads: payload.catalogReads }),
+    ...(payload.salesSync === null
+      ? {}
+      : {
+          salesSync: {
+            block: payload.salesSync.block,
+            since: parseIso(payload.salesSync.since),
+            probeAt: parseIso(payload.salesSync.probeAt),
+          },
+        }),
   };
 }

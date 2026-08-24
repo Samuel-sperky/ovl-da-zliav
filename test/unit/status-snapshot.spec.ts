@@ -25,7 +25,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { SessionClaims } from '@/contracts';
 
-import { createStatusRoute } from '@/app/api/status/route';
+import { createStatusRoute, productionStatusSources } from '@/app/api/status/route';
 import type { RouteDeps } from '@/lib/http/define-route';
 import { REDACTED } from '@/lib/log/redact';
 import { collectOperationBlockers, type BlockerId } from '@/lib/status/blockers';
@@ -646,5 +646,91 @@ describe('GET /api/status — celá pipeline vrátane redaktora (I1)', () => {
     for (const blocker of body.data.blockers) {
       expect(known).toContain(blocker.id);
     }
+  });
+});
+
+/* ══════════ 5. Odmietnuté čítanie objednávok (predajnosť, 24. 8. 2026) ═════ */
+
+describe('salesSync — prekážka predajnosti prejde celou cestou na povrch', () => {
+  const SINCE = new Date('2026-08-09T07:18:54.000Z');
+  const PROBE = new Date('2026-08-31T06:58:08.000Z');
+
+  it('bez zdroja je sekcia `null` a v `unreadable` sa neobjaví (opt-in)', async () => {
+    const reading = await buildStatusSnapshot(healthySources());
+
+    expect(toStatusPayload(reading).salesSync).toBeNull();
+    expect(reading.unreadable).not.toContain('salesSync');
+  });
+
+  it('zablokovaná IP dorazí do payloadu aj s časmi v ISO', async () => {
+    const reading = await buildStatusSnapshot(
+      healthySources({
+        salesSync: async () => ({ block: 'ip_ban', since: SINCE, probeAt: PROBE }),
+      }),
+    );
+    const payload = toStatusPayload(reading);
+
+    expect(payload.salesSync).toEqual({
+      block: 'ip_ban',
+      since: SINCE.toISOString(),
+      probeAt: PROBE.toISOString(),
+    });
+    expect(payload.blockers.some((b) => b.id === 'sales_reads_ip_banned')).toBe(true);
+  });
+
+  it('payload sa vráti do snapshotu bez straty — obrazovka si prekážky prepočíta', () => {
+    const payload: StatusPayload = {
+      now: NOW.toISOString(),
+      writes: { enabled: true, locked: false, lockedReason: null, lockedAt: null },
+      apiKey: { present: true, expiresAt: null },
+      writeBudget: null,
+      scope: { mode: 'plny', maxProductsSetting: 500, maxProducts: 500, failClosed: false },
+      catalog: null,
+      catalogReads: null,
+      salesSync: { block: 'permission', since: SINCE.toISOString(), probeAt: null },
+      blockers: [],
+      summary: {
+        blocked: false,
+        blockingCount: 0,
+        worstBlockerId: null,
+        waitUntil: null,
+        anyAssumed: false,
+      },
+      unreadable: [],
+    };
+
+    const snapshot = statusSnapshotFromPayload(payload);
+
+    expect(snapshot.salesSync?.block).toBe('permission');
+    expect(snapshot.salesSync?.since?.toISOString()).toBe(SINCE.toISOString());
+    expect(snapshot.salesSync?.probeAt).toBeNull();
+    expect(
+      collectOperationBlockers(snapshot).some((b) => b.id === 'sales_reads_forbidden'),
+    ).toBe(true);
+  });
+
+  it('nečitateľný zdroj sa prizná, nie zamlčí', async () => {
+    const reading = await buildStatusSnapshot(
+      healthySources({
+        salesSync: async () => {
+          throw new Error('DB spadla');
+        },
+      }),
+    );
+
+    expect(reading.unreadable).toContain('salesSync');
+    expect(toStatusPayload(reading).salesSync).toBeNull();
+  });
+});
+
+describe('produkčné zapojenie — sekcia predajnosti naozaj visí na spúšťači', () => {
+  it('zdroj existuje a bez behu tvrdí, že nič nestojí', async () => {
+    // Bez tohto testu sa dá celá cesta odpojiť jedným zmazaným riadkom v route
+    // a všetko ostatné zostane zelené.
+    const source = productionStatusSources(() => NOW).salesSync;
+    expect(source).toBeDefined();
+
+    // Po štarte procesu spúšťač ešte nebežal — appka o prekážke nič netvrdí.
+    expect(await source?.()).toEqual({ block: null, since: null, probeAt: null });
   });
 });

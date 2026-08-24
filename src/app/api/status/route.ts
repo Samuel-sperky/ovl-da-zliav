@@ -53,6 +53,7 @@ import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/d
 import { apiKeyRepo as defaultApiKeyRepo } from '@/lib/repo/api-key.repo';
 import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
+import { lastSalesRun } from '@/lib/sales/sync-runner';
 import {
   readStatusPayload,
   type StatusPayload,
@@ -144,6 +145,29 @@ export function productionStatusSources(now: () => Date = () => new Date()): Sta
           estimatedFinishAt: status.estimatedFinishAt,
         };
       },
+    },
+
+    /**
+     * Stojí predajnosť na tom, že shop čítanie objednávok odmieta?
+     *
+     * ZDROJ JE PAMÄŤ SPÚŠŤAČA, NIE DB — a je to rozhodnutie o cene. Runner
+     * prekážku číta z `sales_sync_state` raz za beh (a raz za pár minút, kým
+     * trvá); tento endpoint volá päť obrazoviek pri každom obnovení a bod 1
+     * hlavičky hovorí, že sa doň nový dotaz pridávať nesmie. Cena za to je
+     * úzka: kým po štarte appky neprebehne prvý tick schedulera, endpoint
+     * o prekážke mlčí. Mlčí ako „nepýtal sa nikto", nie ako „nič nestojí" —
+     * sekcia sa neposiela vôbec.
+     *
+     * I1: von idú len druh prekážky a dva časy. Kód chyby ani čokoľvek
+     * z odpovede shopu sa tadiaľto neposiela.
+     */
+    salesSync: async () => {
+      const block = lastSalesRun()?.block ?? null;
+      return {
+        block: block?.kind ?? null,
+        since: block?.since ?? null,
+        probeAt: block?.probeAt ?? null,
+      };
     },
 
     /**

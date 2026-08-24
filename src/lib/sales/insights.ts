@@ -38,6 +38,7 @@ import type {
 
 import { query as poolQuery } from '@/db/pool';
 import { addDays, diffDays, isDateOnly } from '@/lib/domain/dates';
+import type { SalesStopRecord } from '@/lib/sales/stop-policy';
 
 /* ═══════════════════════════ 1. Konštanty ═════════════════════════════════ */
 
@@ -53,8 +54,30 @@ const MAX_SYNC_DAYS = 400;
  */
 export const MIN_DAYS_FOR_TREND = 4;
 
-/** Dni, ktoré nesú skutočné dáta. `pending` je „ešte sa nesťahovalo". */
-const COVERED_STATUSES: ReadonlySet<SalesSyncDay['status']> = new Set(['complete', 'partial']);
+/** Dni, o ktorých appka NIEČO vie. `pending` je „ešte sa nesťahovalo". */
+const TOUCHED_STATUSES: ReadonlySet<SalesSyncDay['status']> = new Set(['complete', 'partial']);
+
+/**
+ * Zmeral tento deň appka, alebo sa ho len dotkla?
+ *
+ * `complete` je meranie aj s nulou: appka deň prečítala celý a nič sa nepredalo.
+ * `partial` je meranie len vtedy, keď z neho prečítala aspoň jednu objednávku;
+ * `partial` s nulou znamená, že beh spadol skôr, než čokoľvek priniesol.
+ *
+ * Prečo na tom záleží: 24. 8. 2026 mala appka v `product_sales_daily` dva dni
+ * (5. a 6. 8., 1073 kusov) a v `sales_sync_state` ďalších štrnásť dní
+ * `partial / orders_seen = 0` — dni, ktoré shop odmietol. Kým sa počítali ako
+ * pokryté, `unitsPerDay` sa delilo šestnástimi namiesto dvoma a KAŽDÉ číslo
+ * o predajnosti bolo zhruba osemkrát nižšie než to, čo sa naozaj zmeralo.
+ *
+ * `ordersSeen === undefined` je „nevieme" a vyhodnocuje sa PRÍSNEJŠIE: deň sa
+ * za zmeraný nepovažuje. Neoverené nie je to isté ako overene v poriadku.
+ */
+function isMeasuredDay(row: SalesSyncDay): boolean {
+  if (row.status === 'complete') return true;
+  if (row.status !== 'partial') return false;
+  return typeof row.ordersSeen === 'number' && row.ordersSeen > 0;
+}
 
 /* ═══════════════════════════ 2. Pomocníci ═════════════════════════════════ */
 
@@ -74,10 +97,14 @@ function toDay(value: unknown): DateOnly {
   return String(value ?? '').slice(0, 10) as DateOnly;
 }
 
-function toIsoOrNull(value: unknown): string | null {
+function toDateOrNull(value: unknown): Date | null {
   if (value == null) return null;
   const date = value instanceof Date ? value : new Date(String(value));
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toIsoOrNull(value: unknown): string | null {
+  return toDateOrNull(value)?.toISOString() ?? null;
 }
 
 /** Fail-closed sanitácia ID: nečíselný vstup sa nikdy nedostane do dotazu. */
@@ -89,8 +116,28 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 /* ═══════════════════════════════ 3. SQL ═══════════════════════════════════ */
 
 const SQL_SYNC_DAYS =
-  'SELECT sale_day, status, finished_at, updated_at FROM sales_sync_state ' +
+  'SELECT sale_day, status, orders_seen, finished_at, updated_at FROM sales_sync_state ' +
   'ORDER BY sale_day ASC LIMIT ?';
+
+/**
+ * Posledné slovo shopu o objednávkach + odkedy stojí nevyriešená chyba.
+ *
+ * Prečo to nečíta `salesRepo.getSyncState(den)`: spúšťač predajnosti sa pýta
+ * „stojí to na niečom?", a nie „ako dopadol konkrétny deň" — deň, na ktorom sa
+ * to zastavilo, sa s posúvajúcim sa oknom mení každý deň (7. 8. → 18. 8. 2026
+ * je dvanásť rôznych dní s tým istým kódom).
+ *
+ * `last_code` je kód z naposledy dotknutého dňa: keď posledný beh prešiel,
+ * je `NULL` a prekážka tým padá. `since` je najstarší deň, ktorý kód STÁLE
+ * nesie — dopočítaný deň si `last_error` prepíše na `NULL`, takže sa do neho
+ * nezapočíta dávno vyriešená chyba.
+ */
+const SQL_SYNC_STOP =
+  'SELECT ' +
+  '(SELECT last_error FROM sales_sync_state ORDER BY updated_at DESC, sale_day DESC LIMIT 1) ' +
+  'AS last_code, ' +
+  '(SELECT MAX(updated_at) FROM sales_sync_state) AS last_at, ' +
+  '(SELECT MIN(updated_at) FROM sales_sync_state WHERE last_error IS NOT NULL) AS since';
 
 /**
  * Súčet PREDANÝCH KUSOV produktov jednej zľavy za obdobie.
@@ -129,14 +176,30 @@ export async function syncDays(conn?: Queryable): Promise<SalesSyncDay[]> {
     const status = String(row.status ?? 'pending');
     out.push({
       saleDay,
-      status: COVERED_STATUSES.has(status as SalesSyncDay['status'])
+      status: TOUCHED_STATUSES.has(status as SalesSyncDay['status'])
         ? (status as SalesSyncDay['status'])
         : 'pending',
       finishedAt: toIsoOrNull(row.finished_at),
       updatedAt: toIsoOrNull(row.updated_at),
+      ordersSeen: Math.max(0, Math.trunc(num(row.orders_seen))),
     });
   }
   return out;
+}
+
+/**
+ * Na čom stojí synchronizácia predajnosti — jeden riadok pre `sync-runner.ts`.
+ *
+ * Vracia surové fakty, NIE rozhodnutie: čo z nich vyplýva, hovorí čistý modul
+ * `lib/sales/stop-policy.ts`. Prázdna tabuľka vráti samé `null`, teda „nič
+ * nestojí" — appka ešte nikdy nebežala a to prekážka nie je.
+ */
+export async function latestSyncStop(conn?: Queryable): Promise<SalesStopRecord> {
+  const rows = await run<DbRow[]>(conn, SQL_SYNC_STOP, []);
+  const row = Array.isArray(rows) ? rows[0] : undefined;
+  if (row === undefined) return { code: null, at: null, since: null };
+  const code = typeof row.last_code === 'string' && row.last_code.length > 0 ? row.last_code : null;
+  return { code, at: toDateOrNull(row.last_at), since: toDateOrNull(row.since) };
 }
 
 /**
@@ -203,6 +266,13 @@ export async function campaignUnits(
  * `lastSyncedAt` je najnovší dotyk ktoréhokoľvek dňa — aj toho, ktorý zostal
  * `pending`, pretože aj neúspešný beh je informácia o tom, kedy sa naposledy
  * synchronizovalo (P6, fail-soft).
+ *
+ * POKRYTIE JE MERANIE, NIE DOTYK. Do `daysCovered`, `from` a `to` ide len deň,
+ * ktorý prešiel cez `isMeasuredDay()`. Deň, ktorý sa začal a hneď spadol
+ * (`partial` s nulou objednávok), je dotyk bez merania a v pokrytí nemá čo
+ * hľadať — inak sa ním delí priemer a appka ukazuje čísla, ktoré nezmerala.
+ * `lastSyncedAt` sa toho NETÝKA: ten hovorí, kedy sa appka naposledy pokúsila,
+ * a pokus je pokus aj vtedy, keď nič nepriniesol.
  */
 export function summarizeCoverage(
   rows: readonly SalesSyncDay[],
@@ -219,7 +289,7 @@ export function summarizeCoverage(
     for (const stamp of [row.finishedAt, row.updatedAt]) {
       if (stamp != null && (lastSyncedAt == null || stamp > lastSyncedAt)) lastSyncedAt = stamp;
     }
-    if (!COVERED_STATUSES.has(row.status)) continue;
+    if (!isMeasuredDay(row)) continue;
     daysCovered += 1;
     if (row.status === 'partial') daysPartial += 1;
     if (from == null || row.saleDay < from) from = row.saleDay;
@@ -340,4 +410,5 @@ export function describeCoverageSk(coverage: SalesCoverage): string {
 export const salesInsights = {
   syncDays,
   dailyUnits,
+  latestSyncStop,
 };

@@ -21,6 +21,7 @@ import type {
   SalesSyncStateRecord,
   SalesSyncStateWrite,
 } from '@/lib/repo/sales.repo';
+import { ShopRequestError, makeShopError } from '@/lib/shop/errors';
 import { createOrdersClient, type OrdersClient } from '@/lib/shop/orders-client';
 import {
   READ_LANE_LIMITS,
@@ -424,6 +425,53 @@ describe('sales-sync — fail-soft (P6)', () => {
     const state = await repo.getSyncState('2026-08-04');
     expect(state?.status).toBe('partial');
     expect(state?.lastError).toBe('forbidden');
+  });
+
+  it('403 s vlastným kódom shopu sa do stavu zapíše ako `forbidden`', async () => {
+    // `sales_sync_state` je jediné miesto, z ktorého sa po reštarte appky dá
+    // zistiť, že sa na rozvrhu nemá skúšať ďalej (`lib/sales/stop-policy.ts`).
+    // Keby v ňom stál kód, ktorý appka nepozná (tu `missing_scope`), prekážka
+    // by sa po štarte stratila a opakovanie by sa vrátilo — presne to, čo
+    // vyrobilo dvanásť riadkov `forbidden` medzi 7. 8. a 18. 8. 2026.
+    const refusing: OrdersClient = {
+      async listOrders() {
+        throw new ShopRequestError(
+          makeShopError({ kind: 'forbidden', code: 'missing_scope', httpStatus: 403 }),
+        );
+      },
+      async getOrderUnits() {
+        throw new Error('detail sa v tomto teste nikdy nevolá');
+      },
+    };
+
+    const result = await syncSales(
+      { ...deps(), ordersClient: refusing, flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    expect(result.error).toBe('forbidden');
+    expect((await repo.getSyncState(TODAY))?.lastError).toBe('forbidden');
+  });
+
+  it('kód, ktorý prekážku pomenúva sám (`ip_banned`), sa zachová', async () => {
+    const banned: OrdersClient = {
+      async listOrders() {
+        throw new ShopRequestError(
+          makeShopError({ kind: 'forbidden', code: 'ip_banned', httpStatus: 403 }),
+        );
+      },
+      async getOrderUnits() {
+        throw new Error('detail sa v tomto teste nikdy nevolá');
+      },
+    };
+
+    const result = await syncSales(
+      { ...deps(), ordersClient: banned, flags: flags({ windowDays: 1 }) },
+      { today: TODAY },
+    );
+
+    expect(result.error).toBe('ip_banned');
+    expect((await repo.getSyncState(TODAY))?.lastError).toBe('ip_banned');
   });
 
   it('trvalý `rate_limited` beh ukončí fail-soft s kódom, po backoffe', async () => {

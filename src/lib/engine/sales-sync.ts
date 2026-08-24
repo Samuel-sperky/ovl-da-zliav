@@ -44,7 +44,8 @@ import { env } from '@/env';
 import { addDays } from '@/lib/domain/dates';
 import { logger as defaultLogger } from '@/lib/log/logger';
 import { newOperationId, newRequestId } from '@/lib/shop/correlation';
-import { isShopRequestError } from '@/lib/shop/errors';
+import { isKeyRejectedKind, isShopRequestError } from '@/lib/shop/errors';
+import { classifySalesStop } from '@/lib/sales/stop-policy';
 // Deň sa počíta cez `Intl.DateTimeFormat` s `timeZone` (D31) — v tomto projekte
 // už raz flakoval test, ktorý „dnes" počítal v UTC.
 import { todayInTimeZone } from '@/lib/shop/client';
@@ -271,9 +272,25 @@ function createMemoryBudgetGate(): SalesReadBudgetGate {
 /**
  * Chyba → KÓD do `last_error` (I1). Nikdy text odpovede shopu, nikdy hláška
  * z knižnice — len zaradenie, ktoré appka sama vyrobila.
+ *
+ * ODMIETNUTÝ KĽÚČ SA ZAPISUJE DRUHOM, NIE SUROVÝM KÓDOM
+ * -----------------------------------------------------
+ * Pri 401/403 ide do `last_error` názov DRUHU (`unauthorized` / `forbidden`)
+ * všade tam, kde by surový kód shopu prekážku zatajil. Dôvod je prevádzkový:
+ * `sales_sync_state` je JEDINÉ miesto, z ktorého sa po reštarte appky dá
+ * zistiť, že sa na rozvrhu nemá skúšať ďalej (`lib/sales/stop-policy.ts`),
+ * a keby v ňom stál kód, ktorý appka nepozná, prekážka by sa stratila a
+ * opakovanie by sa vrátilo. Kód, ktorý prekážku pomenúva sám (`ip_banned`),
+ * sa zachová — nesie viac než druh.
+ *
+ * Surový kód sa nestráca: ide do logu (`sales_sync_day_done`, `errorCode`).
  */
 function errorCode(error: unknown): string {
-  if (isShopRequestError(error)) return error.shopError.code ?? error.shopError.kind;
+  if (isShopRequestError(error)) {
+    const { kind, code } = error.shopError;
+    if (isKeyRejectedKind(kind) && classifySalesStop(code) === null) return kind;
+    return code ?? kind;
+  }
   if (error instanceof Error && error.name.length > 0) return `local_${error.name}`;
   return 'local_unknown';
 }
@@ -682,6 +699,14 @@ export async function syncSales(
 
   if (capReached) {
     opLog.warn('sales_sync_request_cap_reached', { requestsUsed, maxRequests });
+  }
+
+  // Trvalá prekážka (401/403, zablokovaná IP). Hlási sa NAHLAS a s vlastným
+  // menom udalosti — do 24. 8. 2026 sa strácala medzi bežnými chybami behu
+  // a runner sa podľa nej nevedel zariadiť.
+  const blockKind = classifySalesStop(runError);
+  if (blockKind !== null) {
+    opLog.warn('sales_sync_blocked', { block: blockKind, errorCode: runError, requestsUsed });
   }
 
   if (budgetStop !== null) {

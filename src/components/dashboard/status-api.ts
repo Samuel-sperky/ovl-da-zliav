@@ -140,6 +140,7 @@ export const STATUS_SECTIONS = [
   'scope',
   'catalog',
   'catalogReads',
+  'salesSync',
 ] as const;
 export type StatusSectionCode = (typeof STATUS_SECTIONS)[number];
 

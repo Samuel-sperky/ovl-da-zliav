@@ -1103,3 +1103,82 @@ describe('fail-closed — odobratie vedomosti nikdy zoznam nezmäkčí', () => {
     expect(byId(blockers, 'write_budget_exhausted').assumed).toBe(true);
   });
 });
+
+/**
+ * Odmietnuté čítanie objednávok (24. 8. 2026).
+ *
+ * Prekážka pribudla po tom, čo appka dvanásť dní opakovala požiadavku, na ktorú
+ * dostávala 403, a používateľ o tom nemal ako vedieť: `sales_sync_state` to
+ * nieslo, ale na povrch sa z toho nedostalo nič.
+ */
+describe('predajnosť — shop odmieta čítanie objednávok', () => {
+  it('bez sekcie modul mlčí — o predajnosť sa nikto nepýtal', () => {
+    expect(has(collectOperationBlockers(healthy()), 'sales_reads_forbidden')).toBe(false);
+    expect(has(collectOperationBlockers(healthy()), 'sales_reads_ip_banned')).toBe(false);
+  });
+
+  it('sekcia bez prekážky NEVYROBÍ prekážku — tu sa fail-closed nedomýšľa', () => {
+    // Vymyslené odmietnutie by poslalo človeka prestavovať kľúč, ktorý je
+    // v poriadku. To je horšie než mlčať.
+    const blockers = collectOperationBlockers(healthy({ salesSync: {} }));
+    expect(has(blockers, 'sales_reads_forbidden')).toBe(false);
+    expect(blockers.every((b) => b.area !== 'citanie' || b.id !== 'sales_reads_ip_banned')).toBe(
+      true,
+    );
+  });
+
+  it('chýbajúce oprávnenie vedie do Nastavení a vypýta si heslo', () => {
+    const blocker = byId(
+      collectOperationBlockers(healthy({ salesSync: { block: 'permission' } })),
+      'sales_reads_forbidden',
+    );
+
+    expect(blocker.severity).toBe('obmedzuje');
+    expect(blocker.path).toBe(BLOCKER_PATHS.settings);
+    // Uloženie kľúča je za sudo oknom (`PUT /api/key`) — zámok to povie sám,
+    // veta to opakovať nesmie (bod 5 hlavičky modulu).
+    expect(blocker.resolution).toBe('sudo');
+    expect(blocker.nextStep).not.toMatch(/heslo/i);
+    expect(blocker.assumed).toBe(false);
+  });
+
+  it('zablokovaná IP sa v appke vyriešiť nedá a nesľubuje čas uvoľnenia', () => {
+    const blocker = byId(
+      collectOperationBlockers(
+        healthy({ salesSync: { block: 'ip_ban', probeAt: new Date(NOW.getTime() + HOUR) } }),
+      ),
+      'sales_reads_ip_banned',
+    );
+
+    expect(blocker.path).toBeNull();
+    expect(blocker.resolution).toBe('mimo_appky');
+    // Kedy sa appka ozve, vieme. Kedy blokáda skončí, nie — a to sa nesľubuje.
+    expect(blocker.clearsAt).toBeNull();
+  });
+
+  it('predajnosť NEZASTAVUJE zápis zliav — beží na vlastnom kľúči a kvóte', () => {
+    for (const block of ['permission', 'ip_ban'] as const) {
+      const summary = summarizeBlockers(collectOperationBlockers(healthy({ salesSync: { block } })));
+      expect(summary.blocked).toBe(false);
+    }
+  });
+
+  it('obe vety sa zmestia do 90 znakov a nenesú vnútorný kód', () => {
+    for (const block of ['permission', 'ip_ban'] as const) {
+      const blocker = collectOperationBlockers(healthy({ salesSync: { block } })).find(
+        (b) => b.id === 'sales_reads_forbidden' || b.id === 'sales_reads_ip_banned',
+      );
+      expect(blocker).toBeDefined();
+      expect([...(blocker?.what ?? '')].length).toBeLessThanOrEqual(90);
+      expect([...(blocker?.nextStep ?? '')].length).toBeLessThanOrEqual(90);
+      expect(`${blocker?.what} ${blocker?.nextStep}`).not.toMatch(
+        /forbidden|ip_ban|unauthorized|403/,
+      );
+    }
+  });
+
+  it('obe nové prekážky majú miesto v kanonickom poradí', () => {
+    expect(BLOCKER_ORDER).toContain('sales_reads_forbidden');
+    expect(BLOCKER_ORDER).toContain('sales_reads_ip_banned');
+  });
+});

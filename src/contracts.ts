@@ -1033,7 +1033,7 @@ export interface ProductSalesDay {
   unitsSold: number;
 }
 
-/** Stav synchronizácie jedného dňa (`sales_sync_state`) — bez počtov objednávok. */
+/** Stav synchronizácie jedného dňa (`sales_sync_state`). */
 export interface SalesSyncDay {
   saleDay: DateOnly;
   status: 'pending' | 'partial' | 'complete';
@@ -1041,6 +1041,20 @@ export interface SalesSyncDay {
   finishedAt: string | null;
   /** Kedy sa riadok naposledy hýbal (ISO) — zdroj „naposledy synchronizované". */
   updatedAt: string | null;
+  /**
+   * Z koľkých objednávok sa deň naozaj spočítal. POČET, nikdy odkaz na
+   * objednávku (I8' bod 3).
+   *
+   * Prečo to tu pribudlo: bez tohto čísla sa deň `partial`, ktorý spadol skôr,
+   * než čokoľvek priniesol, nedá odlíšiť od dňa, ktorý sa naozaj zmeral.
+   * `summarizeCoverage()` prvý z nich do pokrytia počítať nesmie — inak delí
+   * priemer dňami, ktoré appka nikdy nevidela.
+   *
+   * Voliteľné zámerne: `undefined` znamená „nevieme" a vyhodnotí sa PRÍSNEJŠIE
+   * (deň sa nepočíta ako zmeraný), nie voľnejšie. Produkčná cesta
+   * (`lib/sales/insights.ts`) hodnotu vždy dodá.
+   */
+  ordersSeen?: number | null;
 }
 
 /**
@@ -1056,7 +1070,11 @@ export interface SalesCoverage {
   /** Prvý a posledný pokrytý deň; `null`, keď nie je pokrytý ani jeden. */
   from: DateOnly | null;
   to: DateOnly | null;
-  /** Počet dní so skutočnými dátami (`complete` + `partial`). */
+  /**
+   * Počet dní, ktoré appka NAOZAJ zmerala: `complete`, plus `partial` s aspoň
+   * jednou prečítanou objednávkou. Deň, ktorý sa začal a hneď spadol, tu NIE JE
+   * — delil by priemer dňami bez merania (I11).
+   */
   daysCovered: number;
   /** Z toho dní dopočítaných len čiastočne — pokrok, nie hotový deň (P6). */
   daysPartial: number;

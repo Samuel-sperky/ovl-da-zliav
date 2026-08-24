@@ -76,6 +76,7 @@ function payload(overrides: Partial<StatusPayload> = {}): StatusPayload {
       lastFetchedAt: '2026-08-12T09:40:00.000Z',
     },
     catalogReads: null,
+    salesSync: null,
     blockers: [],
     summary: {
       blocked: false,

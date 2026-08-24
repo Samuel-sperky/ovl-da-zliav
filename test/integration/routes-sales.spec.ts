@@ -77,12 +77,17 @@ function depthRow(productId: number, overrides: Partial<DiscountDepthRow> = {}):
   };
 }
 
-function syncDay(saleDay: string, status: SalesSyncDay['status'] = 'complete'): SalesSyncDay {
+function syncDay(
+  saleDay: string,
+  status: SalesSyncDay['status'] = 'complete',
+  ordersSeen = 6,
+): SalesSyncDay {
   return {
     saleDay,
     status,
     finishedAt: status === 'complete' ? `${saleDay}T23:00:00.000Z` : null,
     updatedAt: `${saleDay}T23:30:00.000Z`,
+    ordersSeen,
   };
 }
 
@@ -262,6 +267,15 @@ describe('GET /api/sales — kusy, kusy/deň, dni od posledného predaja', () =>
     });
     expect(res.body.data!.coverage.daysCovered).toBe(2);
     expect(res.body.data!.coverage.daysPartial).toBe(1);
+  });
+
+  it('deň, na ktorom sťahovanie spadlo skôr než čokoľvek prinieslo, pokrytie NIE JE', async () => {
+    const res = await call({
+      ...world,
+      syncDays: [syncDay('2026-08-04'), syncDay('2026-08-05', 'partial', 0)],
+    });
+    expect(res.body.data!.coverage.daysCovered).toBe(1);
+    expect(res.body.data!.coverage.daysPartial).toBe(0);
   });
 
   it('odpoveď neobsahuje peniaze, krajinu ani nič zákaznícke (I8′ bod 3, P4)', async () => {

@@ -15,14 +15,16 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import type { ProductSalesDay, SalesSyncDay } from '@/contracts';
+import type { ProductSalesDay, Queryable, SalesSyncDay } from '@/contracts';
 
 import {
   MIN_DAYS_FOR_TREND,
   describeCoverageSk,
+  latestSyncStop,
   salesMetrics,
   splitCoverage,
   summarizeCoverage,
+  syncDays,
 } from '@/lib/sales/insights';
 
 const TODAY = '2026-08-06';
@@ -33,6 +35,7 @@ function syncDay(saleDay: string, overrides: Partial<SalesSyncDay> = {}): SalesS
     status: 'complete',
     finishedAt: `${saleDay}T23:00:00.000Z`,
     updatedAt: `${saleDay}T23:00:00.000Z`,
+    ordersSeen: 4,
     ...overrides,
   };
 }
@@ -86,6 +89,60 @@ describe('summarizeCoverage — za aké obdobie dáta NAOZAJ sú (P3)', () => {
     ]);
     expect(coverage.daysCovered).toBe(2);
     expect(coverage.daysPartial).toBe(1);
+  });
+
+  /**
+   * Regres z 24. 8. 2026. `sales_sync_state` malo dva dni `complete`
+   * (5. a 6. 8., spolu 1073 kusov) a ďalších štrnásť dní `partial`
+   * s `orders_seen = 0` — dni, na ktorých shop čítanie odmietol. Kým sa
+   * počítali ako pokryté, `unitsPerDay` sa delilo šestnástimi a každé číslo
+   * o predajnosti bolo zhruba osemkrát nižšie než to, čo appka zmerala.
+   */
+  it('`partial` bez jedinej objednávky pokrytie NIE JE — je to dotyk, nie meranie', () => {
+    const coverage = coverageOf([
+      syncDay('2026-08-04'),
+      syncDay('2026-08-05', { status: 'partial', finishedAt: null, ordersSeen: 0 }),
+    ]);
+    expect(coverage.daysCovered).toBe(1);
+    expect(coverage.daysPartial).toBe(0);
+    // Deň bez merania nesmie natiahnuť ani hranice pokrytia.
+    expect(coverage.to).toBe('2026-08-04');
+  });
+
+  it('`complete` s nulou pokrytie JE — appka deň prečítala a nič sa nepredalo', () => {
+    const coverage = coverageOf([syncDay('2026-08-04', { ordersSeen: 0 })]);
+    expect(coverage.daysCovered).toBe(1);
+    expect(coverage.hasData).toBe(true);
+  });
+
+  it('neznámy počet objednávok sa vyhodnotí prísnejšie, nie voľnejšie', () => {
+    const coverage = coverageOf([
+      syncDay('2026-08-04'),
+      syncDay('2026-08-05', { status: 'partial', finishedAt: null, ordersSeen: undefined }),
+    ]);
+    expect(coverage.daysCovered).toBe(1);
+  });
+
+  it('nezmeraný deň neriedi priemer kusov na deň', () => {
+    // Presne ten tvar, ktorý mala DB 24. 8. 2026: dva zmerané dni a k tomu
+    // rad dní, ktoré shop odmietol.
+    const rows = [
+      syncDay('2026-08-04'),
+      syncDay('2026-08-05'),
+      ...['2026-08-06', '2026-08-07', '2026-08-08', '2026-08-09'].map((d) =>
+        syncDay(d, { status: 'partial' as const, finishedAt: null, ordersSeen: 0 }),
+      ),
+    ];
+    const coverage = coverageOf(rows, 3);
+    const metrics = salesMetrics({
+      products: [products[0]!],
+      days: [day(201, '2026-08-04', 10), day(201, '2026-08-05', 10)],
+      coverage,
+      today: TODAY,
+    });
+
+    expect(coverage.daysCovered).toBe(2);
+    expect(metrics[0]?.unitsPerDay).toBe(10);
   });
 
   it('`lastSyncedAt` je najnovší dotyk — aj z dňa, ktorý zostal pending', () => {
@@ -295,5 +352,63 @@ describe('predajnosť sa nikde nevydáva za obrátkovosť', () => {
     const filters = read('src/components/products/CatalogFilters.tsx');
     expect(filters).toContain("turnover: 'Obrátkovosť'");
     expect(filters).toContain('aria-disabled="true"');
+  });
+});
+
+/* ════════ Čítanie stavu z DB — bez kontajnera, cez podstrčené spojenie ═════ */
+
+/** Spojenie, ktoré zapíše dotaz a vráti pripravené riadky. Žiadna DB. */
+function fakeConn(rows: unknown[]): Queryable & { sql: string[] } {
+  const sql: string[] = [];
+  return {
+    sql,
+    query: async <T,>(text: string): Promise<T> => {
+      sql.push(text);
+      return rows as T;
+    },
+  };
+}
+
+describe('syncDays — riadok DB → stav dňa', () => {
+  it('prenesie počet objednávok, inak sa pokrytie nedá rozhodnúť', async () => {
+    const conn = fakeConn([
+      { sale_day: '2026-08-05', status: 'complete', orders_seen: 298, finished_at: null, updated_at: null },
+      { sale_day: '2026-08-07', status: 'partial', orders_seen: 0, finished_at: null, updated_at: null },
+    ]);
+
+    const rows = await syncDays(conn);
+
+    expect(conn.sql[0]).toContain('orders_seen');
+    expect(rows.map((r) => r.ordersSeen)).toEqual([298, 0]);
+    // A rovno dôkaz, že sa to prepíše do pokrytia: zmeraný je len prvý deň.
+    expect(summarizeCoverage(rows, { syncEnabled: true, windowDays: 3 }).daysCovered).toBe(1);
+  });
+
+  it('nečitateľný počet je nula, nie NaN — pokrytie sa oň nesmie potknúť', async () => {
+    const conn = fakeConn([
+      { sale_day: '2026-08-05', status: 'partial', orders_seen: null, finished_at: null, updated_at: null },
+    ]);
+
+    const rows = await syncDays(conn);
+
+    expect(rows[0]?.ordersSeen).toBe(0);
+  });
+});
+
+describe('latestSyncStop — na čom stojí synchronizácia', () => {
+  it('prečíta posledný kód aj vek prekážky', async () => {
+    const at = new Date('2026-08-24T06:58:08.497Z');
+    const since = new Date('2026-08-09T07:18:54.533Z');
+    const conn = fakeConn([{ last_code: 'ip_banned', last_at: at, since }]);
+
+    const stop = await latestSyncStop(conn);
+
+    expect(stop).toEqual({ code: 'ip_banned', at, since });
+  });
+
+  it('prázdna tabuľka nie je prekážka — appka ešte nikdy nebežala', async () => {
+    const stop = await latestSyncStop(fakeConn([{ last_code: null, last_at: null, since: null }]));
+
+    expect(stop).toEqual({ code: null, at: null, since: null });
   });
 });
