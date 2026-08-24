@@ -41,6 +41,10 @@ import {
   type StatusSources,
 } from '@/lib/status/snapshot';
 
+// Vety prekážok sa merajú ako FAKT, nie ako slovné spojenie — pomôcka aj dôvod
+// sú v jednom súbore spolu s `status-blockers.spec.ts`.
+import { nesieCislo } from '../helpers/vety';
+
 /* ════════════════════════════ 1. Prostredie ═══════════════════════════════ */
 
 const NOW = new Date('2026-08-12T10:00:00.000Z');
@@ -147,7 +151,12 @@ describe('buildStatusSnapshot — číta fakty a priznáva medzery', () => {
     );
     // Odhad sa 24. 8. 2026 presunul z popisu stavu do ďalšieho kroku (tempo
     // čítania bolo technika, P6) — číslo je stále SERVEROVO, nie dopočítané.
-    expect(blocker?.nextStep).toContain('približne za 2 dni');
+    // Odhad ako FAKT: „približne" (P7 — odhad sa nevydáva za meranie), počet
+    // dní a to, že je to číslo zo SERVERA. Väzba „približne za 2 dni" by padla
+    // pri každom skrátení vety, hoci údaj v nej zostal.
+    expect(blocker?.nextStep).toContain('približne');
+    expect(blocker?.nextStep).toMatch(/\d+ (deň|dni|dní)/);
+    expect(nesieCislo(blocker?.nextStep ?? '', 2), 'odhad nenesie serverové 2 dni').toBe(true);
     expect(blocker?.what).not.toContain('približne');
     expect(blocker?.clearsAt).toEqual(finish);
   });

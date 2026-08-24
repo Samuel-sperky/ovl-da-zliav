@@ -508,6 +508,30 @@ function products(count: number): string {
   return `${formatCountSk(count)} ${pluralSk(count, 'produkt', 'produkty', 'produktov')}`;
 }
 
+/**
+ * To isté v GENITÍVE — „z 1 produktu", „z 3 produktov", „z 150 produktov".
+ *
+ * Prečo to nie je jedna funkcia: `products()` vracia nominatív („1 produkt",
+ * „3 produkty"), ktorý je správny po „najviac" a „vo výbere je". Po predložke
+ * „z"/„Z" je ale nominatív chyba, a do 24. 8. 2026 tam stál: veta o chýbajúcich
+ * produktoch hovorila „1 produkt Z 1 PRODUKT vo výbere appka v katalógu
+ * nevidí", odhad dočítania „z 3 produkty" a veta o zvyšku rozpočtu „Z 3
+ * produkty sa dnes zapíše 2".
+ *
+ * Čo sa tým smie TICHO pokaziť: `${products(n)}` po „z" je legálny `string`,
+ * takže typecheck mlčí a testy, ktoré hľadajú reťazcové literály v `src/`,
+ * nenájdu nič — tvar vzniká až za behu zo snímky. Chytiť sa to dá jedine
+ * prečítaním hotovej vety, čo robí `test/unit/slovnik-prekazky.spec.ts`
+ * (plošný zákaz zlého pádu po „z" nad VŠETKÝMI vetami, nie po jednej).
+ *
+ * Pozor na 2–4: genitív plurálu je „produktov", nie „produkty" — preto sa
+ * `few` a `many` nelíšia a `pluralSk` sa tu volá zámerne s tým istým slovom
+ * dvakrát, nie omylom.
+ */
+function productsGenitive(count: number): string {
+  return `${formatCountSk(count)} ${pluralSk(count, 'produktu', 'produktov', 'produktov')}`;
+}
+
 /** Sloveso „je"/„sú" podľa slovenskej zhody (2–4 → „sú"). */
 function isAre(count: number): string {
   return count >= 2 && count <= 4 ? 'sú' : 'je';
@@ -866,7 +890,7 @@ function writeBudgetBlockers(
       // Všetky tri čísla zostali (koľko sa dnes zmestí, koľko je vo výbere,
       // koľko počká) — vypadlo len druhé „dnes" a „z nich": po „Z 12 000
       // produktov sa dnes zapíše 200" je zvyšok jednoznačný.
-      what: `Z ${products(pending)} sa dnes${dayNote} zapíše ${formatCountSk(remaining)} — ${formatCountSk(later)} počká.`,
+      what: `Z ${productsGenitive(pending)} sa dnes${dayNote} zapíše ${formatCountSk(remaining)} — ${formatCountSk(later)} počká.`,
       // Konkrétny deň, nie „o 3 dni" (bod 6 hlavičky). Dátum sa NEBERIE zo
       // snapshotu: `needsDays` už tento modul počíta sám a deň je z neho len
       // `addDays` nad UTC dnešným — tá istá aritmetika ako `estimateFinish()`.
@@ -1029,7 +1053,7 @@ function catalogBlockers(
       });
     } else if (missing.length > 0) {
       const count = missing.length;
-      const ofSelected = selected === null ? '' : ` z ${products(selected)} vo výbere`;
+      const ofSelected = selected === null ? '' : ` z ${productsGenitive(selected)} vo výbere`;
       list.push({
         id: 'catalog_product_missing',
         area: 'katalog',
@@ -1135,7 +1159,7 @@ function catalogBlockers(
     productIds: [],
     // „ktoré shop hlási" a „zatiaľ chýba" sa zlialo do dôsledku, ktorý je
     // dôvodom, prečo prekážka vôbec existuje: chýbajúce sa nedajú vybrať.
-    what: `Načítaných je ${formatCountSk(loaded)} z ${products(total)} — ${formatCountSk(rest)} sa zatiaľ vybrať nedá.`,
+    what: `Načítaných je ${formatCountSk(loaded)} z ${productsGenitive(total)} — ${formatCountSk(rest)} sa zatiaľ vybrať nedá.`,
     nextStep: `${WAIT_STEP}: ${estimate}`,
     path: BLOCKER_PATHS.products,
     resolution: 'cakanie',

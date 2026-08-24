@@ -55,9 +55,11 @@ import { readDaysNeeded } from '@/lib/shop/read-budget';
 // Tvar dátumu vo vete dáva jediný formátovač appky (kontrakt UI bod 10) —
 // test ho volá, aby netvrdil o čase niečo, čo závisí od časovej zóny stroja.
 import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
-// Počet vo vete píše ten istý formátovač ako v module — inak by test hľadal
-// „1500" v texte, kde stojí „1 500".
-import { formatCountSk } from '@/lib/ui/vocabulary';
+
+// Pomôcky na meranie hotových viet (a pasce, pre ktoré vznikli) žijú v jednom
+// súbore — `status-snapshot.spec.ts` meria tie isté vety a druhá kópia by sa
+// s prvou rozišla.
+import { nesieCislo } from '../helpers/vety';
 
 /* ─────────────── originály zrkadlených čísel (len pre porovnanie) ───────── */
 
@@ -77,22 +79,6 @@ import { CATALOG_PAGE_SIZE as ORIGINAL_PAGE_SIZE } from '@/lib/shop/catalog-sync
 
 const NOW = new Date('2026-08-12T10:00:00.000Z');
 const HOUR = 3_600_000;
-
-/**
- * Veta nesie ČÍSLO — nech ho obopína akákoľvek väzba.
- *
- * Do 24. 8. 2026 tu stálo `toContain('150 produktov')`. Keď sa vety skrátili
- * (P2, bod 8 hlavičky `blockers.ts`), údaj z vety nezmizol — „150" v nej stojí
- * ďalej, len bez jednotky vedľa. Tvrdenie padlo aj tak, pretože zamykalo
- * SLOVNÉ SPOJENIE namiesto faktu; tak by padlo pri každom ďalšom skrátení
- * a nútilo by prepisovať test namiesto merania.
- *
- * `formatCountSk` oddeľuje tisícky OBYČAJNOU medzerou (`ui/vocabulary.ts`), nie
- * nezlomiteľnou — preto sa číslo skladá cez ňu a nehľadá naivne ako `1500`.
- * Ohraničenie `(?<!\d)`/`(?!\d)` je tu preto, aby „40" nenašlo v „140".
- */
-const nesieCislo = (text: string, count: number): boolean =>
-  new RegExp(`(?<!\\d)${formatCountSk(count).replace(/ /g, '\\s')}(?!\\d)`).test(text);
 
 /** Snapshot, v ktorom nič nezlyháva — základ, od ktorého sa odchyľuje. */
 function healthy(overrides: StatusSnapshot = {}): StatusSnapshot {
@@ -705,12 +691,23 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
     const expectedDays = readDaysNeeded(Math.ceil(28_483 / CATALOG_PAGE_SIZE), 0);
     expect(expectedDays).toBe(2);
     expect(blocker.severity).toBe('obmedzuje');
-    expect(blocker.what).toContain('12 000 z 40 483 produktov');
+    // Načítané, celkom, zvyšok — tri čísla ako FAKTY, nie ako väzby: väzba by
+    // padla pri každom skrátení vety (P2), hoci údaj v nej zostal.
+    for (const n of [12_000, 40_483, 28_483]) {
+      expect(nesieCislo(blocker.what, n), `veta nenesie ${n}`).toBe(true);
+    }
+    // Jednotka zostala aspoň raz, a po „z" v GENITÍVE („z 40 483 produktov") —
+    // nominatív po tejto predložke bol chybou opravenou 24. 8. 2026.
+    expect(blocker.what).toContain('z 40 483 produktov');
     // Od 24. 8. 2026 veta nehovorí len „chýba", ale DÔSLEDOK — chýbajúce sa
     // nedajú vybrať. To je dôvod, prečo prekážka vôbec existuje.
-    expect(blocker.what).toContain('28 483 sa zatiaľ vybrať nedá');
+    expect(blocker.what).toMatch(/vybrať nedá|nedá sa vybrať/);
     // Odhad sa presunul do ďalšieho kroku (tempo čítania je technika, P6).
-    expect(blocker.nextStep).toContain(`približne za ${expectedDays} dni`);
+    // Meria sa ČÍSLO dní a to, že je označené ako odhad (P7) — nie väzba
+    // „približne za 2 dni", ktorá by padla už len prepnutím na „do 2 dní".
+    expect(blocker.nextStep).toContain('približne');
+    expect(blocker.nextStep).toMatch(/\d+ (deň|dni|dní)/);
+    expect(nesieCislo(blocker.nextStep, expectedDays), 'odhad nenesie počet dní').toBe(true);
     expect(blocker.what).not.toContain('približne');
     expect(blocker.resolution).toBe('cakanie');
     expect(blocker.passableNow).toBe(false);
@@ -745,8 +742,12 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
 
     const pages = Math.ceil(28_483 / CATALOG_PAGE_SIZE);
     expect(readDaysNeeded(pages, ANON_READS_PER_UTC_DAY)).toBe(1);
-    expect(blocker.nextStep).toContain('približne za 1 deň');
-    expect(blocker.nextStep).not.toContain('2 dni');
+    expect(blocker.nextStep).toContain('približne');
+    expect(blocker.nextStep).toMatch(/\d+ (deň|dni|dní)/);
+    expect(nesieCislo(blocker.nextStep, 1), 'odhad nenesie 1 deň').toBe(true);
+    // Fail-closed odhad (2 dni) sa sem nesmie prepašovať — meria sa ČÍSLO,
+    // takže zákaz nezanikne ani pri prepnutí väzby na „do 2 dní".
+    expect(nesieCislo(blocker.nextStep, 2), 'do odhadu sa vrátilo cudzie číslo').toBe(false);
   });
 
   it('keď server odhad už spočítal, prekážka použije JEHO číslo', () => {
@@ -771,7 +772,9 @@ describe('katalóg — v plnom režime je podmienkou zápisu', () => {
       'catalog_incomplete',
     );
 
-    expect(blocker.nextStep).toContain('približne za 6 dní');
+    expect(blocker.nextStep).toContain('približne');
+    expect(blocker.nextStep).toMatch(/\d+ (deň|dni|dní)/);
+    expect(nesieCislo(blocker.nextStep, 6), 'nepoužil sa serverový odhad').toBe(true);
     expect(blocker.clearsAt?.toISOString()).toBe(finish.toISOString());
   });
 

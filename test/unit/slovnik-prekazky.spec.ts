@@ -97,6 +97,10 @@ import {
   type StatusSnapshot,
 } from '@/lib/status/blockers';
 
+// Zlý pád po predložke „z" sa meria na hotovej vete — dôvod aj pasca sú
+// v hlavičke toho súboru.
+import { zlyPadPoZ } from '../helpers/vety';
+
 /* ═══════════════════════ 0. Matica snímok a hotové vety ═══════════════════ */
 
 const NOW = new Date('2026-08-12T10:00:00.000Z');
@@ -165,6 +169,31 @@ const SNIMKY: readonly StatusSnapshot[] = [
     catalog: { loadedProducts: 2900, shopTotalProducts: 41_082, missingProductIds: [7, 8] },
   }),
   healthy({ scope: { mode: 'plny', maxProducts: 500, failClosed: false }, catalog: {} }),
+  // Číslovky 1 a 2–4 sú tri RÔZNE slovenské tvary a po predložke „z" sa lámu
+  // inak než po „vo výbere je". Do 24. 8. 2026 matica púšťala len 5 a viac,
+  // takže veta „1 produkt z 1 produkt vo výbere" (nominatív po „z") sa
+  // v žiadnom meraní neobjavila a plošný zákaz v sekcii 9 by o nej mlčal.
+  healthy({
+    scope: { mode: 'plny', maxProducts: 500, failClosed: false },
+    catalog: { loadedProducts: 2900, shopTotalProducts: 41_082, missingProductIds: [7] },
+    selection: { selectedCount: 1 },
+  }),
+  healthy({
+    scope: { mode: 'plny', maxProducts: 500, failClosed: false },
+    catalog: { loadedProducts: 2900, shopTotalProducts: 41_082, missingProductIds: [7, 8, 9] },
+    selection: { selectedCount: 3 },
+  }),
+  // To isté v odhade dočítania („z 3 produktov", nie „z 3 produkty")…
+  healthy({
+    scope: { mode: 'plny', maxProducts: 500, failClosed: false },
+    catalog: { loadedProducts: 1, shopTotalProducts: 3, missingProductIds: [] },
+    selection: { selectedCount: 1 },
+  }),
+  // …a vo vete o zvyšku rozpočtu („Z 3 produktov", nie „Z 3 produkty").
+  healthy({
+    writeBudget: { budget: 200, spent: 198, day: DEN_PRENOSOVY },
+    selection: { selectedCount: 3 },
+  }),
   healthy({ catalogReads: { usedThisMinute: 24, usedThisUtcDay: 240 } }),
   healthy({ catalogReads: {} }),
   // Odmietnuté čítanie objednávok. `salesSync: {}` je zámerne tiež v matici:
@@ -619,5 +648,47 @@ describe('P2 nad celým zoznamom viet — už bez triedy, ktorá je vyňatá', (
         `${b.id} nepovie dôsledok`,
       ).toBe(true);
     }
+  });
+});
+/* ═════ 9. Slovenské skloňovanie po číslovke — PLOŠNE nad všetkými vetami ═══ */
+
+describe('číslovka vo vete má správny pád, nie len správne číslo', () => {
+  it('po predložke „z" nestojí ani jeden nominatív', () => {
+    // Do 24. 8. 2026 povrch hovoril „1 produkt Z 1 PRODUKT vo výbere appka
+    // v katalógu nevidí", „z 3 produkty" v odhade dočítania a „Z 3 produkty
+    // sa dnes zapíše 2" pri zvyšku rozpočtu. Nespadlo nič: `${products(n)}`
+    // je legálny `string`, typecheck mlčí a tvar vzniká až za behu zo snímky,
+    // takže test nad reťazcovými literálmi v `src/` ho nemá kde nájsť.
+    // Preto je to plošné a nad HOTOVOU vetou: `blockers.ts` má na genitív
+    // vlastnú funkciu (`productsGenitive`) a toto je jediné miesto, ktoré
+    // zistí, že ju niekto na novom mieste zabudol použiť.
+    const chyby = VETY.flatMap((b) =>
+      [...zlyPadPoZ(b.what), ...zlyPadPoZ(b.nextStep)].map((zle) => `${b.id}: „${zle}"`),
+    );
+    expect(chyby).toEqual([]);
+  });
+
+  it('a všetky tri tvary sa naozaj vykreslili — zákaz má čo merať (bod B)', () => {
+    // Zákaz sa páruje s dôkazom prítomnosti. Keby matica prestala púšťať
+    // vetvy s 1 a s 2–4, zákaz vyššie by svietil zeleno nad samými „produktov"
+    // — a práve tie dva tvary sa lámali.
+    const poZ = VETY.flatMap((b) => [
+      ...povrch(b).matchAll(/\b[zZ] (\d[\d\s]*?) (produkt\p{L}*)/gu),
+    ]);
+    const tvary = new Set(poZ.map((m) => m[2]));
+    expect(tvary.has('produktu'), 'vetva s jedným produktom sa nevykreslila').toBe(true);
+    expect(tvary.has('produktov'), 'vetva s viac produktmi sa nevykreslila').toBe(true);
+    // Jednotné číslo aj 2–4 aj 5+ — tri rôzne vstupy, dva rôzne tvary.
+    const cisla = new Set(poZ.map((m) => m[1]));
+    expect(cisla.has('1'), 'chýba vetva s číslovkou 1').toBe(true);
+    expect(cisla.has('3'), 'chýba vetva s číslovkou 2–4').toBe(true);
+  });
+
+  it('nominatív po „najviac" a „vo výbere je" zostal nominatívom', () => {
+    // Genitív sa nesmie rozliať všade: „najviac 10 produktu" by bola tá istá
+    // chyba opačným smerom. Veta o strope preto musí ďalej znieť nominatívne.
+    const nad = jedina('scope_pilot_cap', (b) => b.severity === 'blokuje');
+    expect(nad.what).toContain('najviac 10 produktov');
+    expect(nad.what).not.toContain('najviac 10 produktu');
   });
 });
