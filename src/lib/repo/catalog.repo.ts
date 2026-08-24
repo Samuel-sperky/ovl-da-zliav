@@ -63,6 +63,27 @@
  * hľadal frázu v presnom poradí — „naramok zirkon" vracalo 10 zhôd, kým slová
  * cez `AND` ich nájdu 797. Kto do poľa napíše dve slová, nemyslí frázu.
  *
+ * DETAILY PRODUKTU: ČO SA TU SMIE TICHO POKAZIŤ (20. 8. 2026)
+ * ------------------------------------------------------------
+ * Zoznamový prechod naplnil 41 220 riadkov, ale `raw` v nich je len
+ * `{id, name, price, has_attributes}` — kód produktu, EAN ani sklad v zrkadle
+ * nie sú. Doťahuje ich `@/lib/catalog/product-details` a ukladá do TÝCH ISTÝCH
+ * riadkov (`source` = `get`/`batch`, `raw` = celá odpoveď). Čítacia strana je
+ * `detailsFor()` a `catalogDetailFromRecord()`.
+ *
+ *  1. **Pomlčka nie je nula.** `quantity: 0` je platná nula, chýbajúci sklad je
+ *     `{ value: null, gap }`. Preto `CatalogDetailValue`, nie holé `number | null`
+ *     — z holého `null` sa na obrazovke `?? 0` spraví nula v jednom riadku kódu.
+ *  2. **Tri dôvody chýbania, nikdy jeden.** `not_fetched` (nikto detail nepýtal)
+ *     · `needs_product_read` (cesta `get` toto pole nedáva) · `shop_has_none`
+ *     (shop to o produkte nevie). Zliať ich znamená poslať používateľa žiadať
+ *     oprávnenie kvôli produktu, ktorý kód naozaj nemá — alebo naopak tvrdiť
+ *     „nemá kód" o produkte, na ktorý sme sa nikdy nespýtali.
+ *  3. **`raw` zostáva HOLÝ objekt odpovede**, nie obálka. Číta ho aj
+ *     `variantStockFromRaw()` v `@/lib/ai/rules` (očakáva `raw.attributes`)
+ *     a `api/ai/insights`. Zabaliť ho do `{via, product}` by tie dve miesta
+ *     ticho oslepilo.
+ *
  * Repozitár je zároveň JEDINÉ DVERE k zdieľanému rozpočtu čítaní
  * (`shop_read_budget` cez `@/lib/repo/read-budget.repo`), aby synchronizácia
  * nemusela poznať ani SQL, ani stropy — a aby si nikto nezaložil vlastné
@@ -149,6 +170,114 @@ export interface CatalogFactsResult {
   soldWindowDays: number;
   soldFrom: DateOnly;
   soldTo: DateOnly;
+}
+
+/* ───────── Doťahnuté detaily produktu (kód, EAN, sklad, varianty) ───────── */
+
+/**
+ * Ktorou cestou riadok zrkadla prišiel.
+ *
+ * `list` je zoznamový prechod synchronizácie a nesie len `{id, name, price,
+ * has_attributes}` — teda ŽIADNY kód, EAN ani sklad. `get` je verejný
+ * `GET /api/products/get` (aj cez `/api/batch`): pridá popis a VARIANTY, kde
+ * každý variant nesie `reference`, `ean13` a `quantity`. `getFull` je
+ * `GET /api/products/getFull` za scope `product:read`: to isté plus tie isté
+ * polia NA ÚROVNI PRODUKTU, takže kód a sklad vie povedať aj o produkte, ktorý
+ * varianty nemá.
+ *
+ * Rozdiel `get` vs. `getFull` NIE JE kozmetika. Bez neho sa nedá odlíšiť
+ * „produkt kód nemá" od „nemali sme kľúč, tak sme sa nepýtali" — a 32 557
+ * z 41 220 produktov zrkadla varianty nemá, takže pri ceste `get` je o ich
+ * kóde známe presne nič.
+ */
+export type CatalogDetailRoute = 'list' | 'get' | 'getFull';
+
+/**
+ * Prečo hodnota chýba. Tri dôvody, ktoré sa NIKDY nesmú zliať do jedného „—":
+ * prvý sa rieši kliknutím (dotiahni detail), druhý oprávnením (`product:read`),
+ * tretí sa nerieši vôbec — shop to o produkte proste nevedie.
+ */
+export type CatalogDetailGap =
+  /** Riadok je stále zo zoznamového prechodu (alebo v zrkadle vôbec nie je). */
+  | 'not_fetched'
+  /** Detail prišiel cez `get`; toto pole dáva výhradne `getFull` (`product:read`). */
+  | 'needs_product_read'
+  /** Detail prišiel z tej cesty, ktorá pole nesie — a shop ho pri produkte nevedie. */
+  | 'shop_has_none';
+
+/**
+ * Jedna hodnota z detailu. `gap === null` ⇔ hodnotu POZNÁME.
+ *
+ * `quantity: 0` je platná nula a má `gap: null`; chýbajúci sklad má
+ * `value: null` a dôvod v `gap`. To sú dve rôzne vety a rozdiel medzi nimi je
+ * celý zmysel tohto typu — „Sklad 0" a „sklad nevieme" sa na obrazovke nesmú
+ * napísať rovnako.
+ */
+export interface CatalogDetailValue<T> {
+  readonly value: T | null;
+  readonly gap: CatalogDetailGap | null;
+}
+
+/** Jeden variant produktu tak, ako ho vrátil `get`/`getFull`. */
+export interface CatalogVariantDetail {
+  readonly variantId: number;
+  /** Kód variantu. `null` = shop ho pri tomto variante nevedie. */
+  readonly reference: string | null;
+  readonly ean13: string | null;
+  /** Sklad variantu. `null` = shop ho neposlal; `0` je platná nula. */
+  readonly quantity: number | null;
+  readonly isDefault: boolean | null;
+  /** Hodnoty atribútov („Zlatá / 52") tak, ako prišli. */
+  readonly values: readonly string[];
+}
+
+/** Polia, ktoré dáva VÝHRADNE `getFull` (scope `product:read`). */
+export interface CatalogFullDetail {
+  readonly purchasePrice: number | null;
+  readonly margin: number | null;
+  readonly marginPercent: number | null;
+  readonly sellPrice: number | null;
+  readonly sellPriceWithVat: number | null;
+  readonly active: boolean | null;
+  readonly dateAdd: string | null;
+  readonly lastTimeInOrder: string | null;
+  readonly qtyInOrders: number | null;
+  readonly supplier: string | null;
+  readonly categories: readonly number[] | null;
+}
+
+/**
+ * Všetko, čo appka o produkte vie nad rámec názvu a ceny — aj s priznaním,
+ * čo nevie a prečo.
+ */
+export interface CatalogDetailRow {
+  readonly productId: number;
+  /** `true` = riadok v zrkadle vôbec nie je (potom je všetko `not_fetched`). */
+  readonly missing: boolean;
+  /** Ktorou cestou riadok prišiel. `list` = detail sa nikdy nedoťahoval. */
+  readonly route: CatalogDetailRoute;
+  /** Hodnota stĺpca `source` — `list` · `get` · `batch`. Diagnostika. */
+  readonly source: CatalogSource | null;
+  /** Kedy sa riadok naozaj čítal zo shopu (P7). `null` = riadok neexistuje. */
+  readonly fetchedAt: UtcDate | null;
+  readonly name: string | null;
+  readonly price: MoneyString | null;
+  readonly hasAttributes: boolean;
+  /** Kód produktu na úrovni PRODUKTU. Len `getFull`. */
+  readonly reference: CatalogDetailValue<string>;
+  /** EAN na úrovni PRODUKTU. Len `getFull`. */
+  readonly ean13: CatalogDetailValue<string>;
+  /** Sklad na úrovni PRODUKTU. Len `getFull`. */
+  readonly quantity: CatalogDetailValue<number>;
+  readonly variants: readonly CatalogVariantDetail[];
+  /**
+   * Súčet skladu cez varianty — jediné skladové číslo dostupné BEZ
+   * `product:read`. Známy je len vtedy, keď sklad povedal KAŽDÝ variant;
+   * čiastočný súčet by bol nižšie číslo vydávané za celok.
+   */
+  readonly variantStock: CatalogDetailValue<number>;
+  /** Polia za `product:read`. `null` = riadok cez `getFull` neprišiel. */
+  readonly full: CatalogFullDetail | null;
 }
 
 /** Vedrá predajnosti podľa bočného panela (`design/v3/produkty.html`). */
@@ -609,6 +738,211 @@ function mapSearchRow(row: SearchRow): CatalogSearchRow {
 
 const isValidProductId = (id: number): boolean => Number.isInteger(id) && id > 0;
 
+/* ── detaily z `raw`: kód, EAN, sklad, varianty ─────────────────────────── */
+
+/** Pomlčka, ktorou sa priznáva nevedomosť. JEDEN znak na celú appku. */
+export const CATALOG_DASH = '—';
+
+/**
+ * Hodnota na obrazovku. `null` → pomlčka, `0` → „0".
+ *
+ * Existuje preto, aby sa „sklad 0" a „sklad nevieme" nedali napísať rovnako
+ * omylom: `String(value ?? '')` aj `value || '—'` z platnej nuly urobia
+ * prázdno, resp. pomlčku. Tu sa nula prepustí.
+ */
+export function catalogDetailText(value: CatalogDetailValue<string | number>): string {
+  return value.value === null ? CATALOG_DASH : String(value.value);
+}
+
+const known = <T>(value: T): CatalogDetailValue<T> => ({ value, gap: null });
+const missing = <T>(gap: CatalogDetailGap): CatalogDetailValue<T> => ({ value: null, gap });
+
+/** Neprázdny text zo shopu; `''` a `'   '` znamenajú „shop nič nevedie". */
+function textOrNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+/** Celé číslo aj z PHP stringu (`'12'`). Nula prejde; nezmysel je `null`. */
+function intOrNull(value: unknown): number | null {
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim().length > 0
+        ? Number(value.trim())
+        : Number.NaN;
+  return Number.isFinite(numeric) ? Math.trunc(numeric) : null;
+}
+
+/** To isté pre desatinné čísla (marža, nákupná cena). */
+function numOrNull(value: unknown): number | null {
+  const numeric =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim().length > 0
+        ? Number(value.trim())
+        : Number.NaN;
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function boolOrNull(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1') return true;
+  if (value === 0 || value === '0') return false;
+  return null;
+}
+
+/**
+ * Ktorou cestou riadok prišiel — z toho, čo v `raw` naozaj leží.
+ *
+ * ROZLIŠOVAČ JE POLE `reduction`, A TO ZÁMERNE
+ * --------------------------------------------
+ * Stĺpec `source` je `enum('list','get','batch')` a `getFull` v ňom NIE JE.
+ * Pridať ho by bola migrácia, a tá sa robiť nemá; `getFull` sa navyše cez
+ * `/api/batch` fanúť nedá (dokumentácia shopu má opt-in len na
+ * `products/get` a `order/get`), takže by aj tak vždy pristál ako `get`
+ * a od jednotlivého `get` by sa nelíšil ničím.
+ *
+ * `reduction` je pole, ktoré NEPOSIELA shop — skladá ho `toShopReduction()`
+ * z trojice `reduction_*`, a tá je v `productFullSchema` POVINNÁ (smie byť
+ * `null`, ale musí prísť). Na `ProductDetail` z `get` teda neexistuje a na
+ * `ProductFullDetail` existuje vždy. Preto je to spoľahlivá značka a nie
+ * hádanie.
+ *
+ * Keby ju niekto z ukladaného objektu odstránil, riadky z `getFull` by sa
+ * začali čítať ako `get` a ich kód by zmizol za „chýba oprávnenie" — presne
+ * to tvrdenie, ktoré sa tu nesmie stať. Stráži to `detaily-katalog.spec.ts`.
+ */
+export function catalogDetailRoute(source: CatalogSource | null, raw: unknown): CatalogDetailRoute {
+  if (source !== 'get' && source !== 'batch') return 'list';
+  if (typeof raw !== 'object' || raw === null) return 'list';
+  return 'reduction' in (raw as Record<string, unknown>) ? 'getFull' : 'get';
+}
+
+function readVariants(raw: unknown): CatalogVariantDetail[] {
+  if (typeof raw !== 'object' || raw === null) return [];
+  const attributes = (raw as { attributes?: unknown }).attributes;
+  if (!Array.isArray(attributes)) return [];
+
+  const out: CatalogVariantDetail[] = [];
+  for (const item of attributes) {
+    if (typeof item !== 'object' || item === null) continue;
+    const attribute = item as Record<string, unknown>;
+    const variantId = intOrNull(attribute.id_product_attribute);
+    if (variantId === null) continue;
+    const values = Array.isArray(attribute.values)
+      ? attribute.values.filter((v): v is string => typeof v === 'string')
+      : [];
+    out.push({
+      variantId,
+      reference: textOrNull(attribute.reference),
+      ean13: textOrNull(attribute.ean13),
+      quantity: intOrNull(attribute.quantity),
+      isDefault: boolOrNull(attribute.is_default),
+      values,
+    });
+  }
+  return out;
+}
+
+/**
+ * Súčet skladu cez varianty — jediné skladové číslo bez `product:read`.
+ *
+ * Známy je LEN vtedy, keď sklad povedal každý variant. Súčet troch známych
+ * z piatich variantov je nižšie číslo vydávané za celkový sklad, a to je
+ * horšie než pomlčka: podľa nižšieho čísla sa rozhodne inak než podľa „nevieme".
+ */
+function readVariantStock(
+  route: CatalogDetailRoute,
+  variants: readonly CatalogVariantDetail[],
+): CatalogDetailValue<number> {
+  if (route === 'list') return missing('not_fetched');
+  if (variants.length === 0) return missing('shop_has_none');
+  if (variants.some((variant) => variant.quantity === null)) return missing('shop_has_none');
+  return known(variants.reduce((sum, variant) => sum + (variant.quantity ?? 0), 0));
+}
+
+/** Pole, ktoré nesie výhradne `getFull`. Dôvod chýbania závisí od cesty. */
+function fullOnly<T>(route: CatalogDetailRoute, value: T | null): CatalogDetailValue<T> {
+  if (route === 'list') return missing('not_fetched');
+  if (route === 'get') return missing('needs_product_read');
+  return value === null ? missing('shop_has_none') : known(value);
+}
+
+function readFullFields(route: CatalogDetailRoute, raw: unknown): CatalogFullDetail | null {
+  if (route !== 'getFull' || typeof raw !== 'object' || raw === null) return null;
+  const full = raw as Record<string, unknown>;
+  const categories = Array.isArray(full.categories)
+    ? full.categories.map(intOrNull).filter((id): id is number => id !== null)
+    : null;
+  return {
+    purchasePrice: numOrNull(full.purchase_price),
+    margin: numOrNull(full.margin),
+    marginPercent: numOrNull(full.margin_percent),
+    sellPrice: numOrNull(full.sell_price),
+    sellPriceWithVat: numOrNull(full.sell_price_with_vat),
+    active: boolOrNull(full.active),
+    dateAdd: textOrNull(full.date_add),
+    lastTimeInOrder: textOrNull(full.last_time_in_order),
+    qtyInOrders: intOrNull(full.qty_in_orders),
+    supplier: textOrNull(full.supplier),
+    categories,
+  };
+}
+
+/**
+ * Riadok zrkadla → detaily aj s priznaním, čo o ňom nevieme.
+ *
+ * Čistá funkcia bez DB, aby sa dala testovať nad ručne zloženým `raw` —
+ * a aby sa dala použiť aj tam, kde riadok príde inou cestou než z `getMany()`.
+ */
+export function catalogDetailFromRecord(record: CatalogCacheRecordV3): CatalogDetailRow {
+  const route = catalogDetailRoute(record.source, record.raw);
+  const raw = (typeof record.raw === 'object' && record.raw !== null ? record.raw : {}) as Record<
+    string,
+    unknown
+  >;
+  const variants = readVariants(record.raw);
+
+  return {
+    productId: record.productId,
+    missing: false,
+    route,
+    source: record.source,
+    fetchedAt: record.fetchedAt,
+    name: record.name,
+    price: record.price,
+    hasAttributes: record.hasAttributes,
+    reference: fullOnly(route, textOrNull(raw.reference)),
+    ean13: fullOnly(route, textOrNull(raw.ean13)),
+    quantity: fullOnly(route, intOrNull(raw.qty)),
+    variants,
+    variantStock: readVariantStock(route, variants),
+    full: readFullFields(route, record.raw),
+  };
+}
+
+/** Produkt, ktorý zrkadlo vôbec nemá — všetko je `not_fetched`, nič nie je nula. */
+export function emptyCatalogDetail(productId: number): CatalogDetailRow {
+  return {
+    productId,
+    missing: true,
+    route: 'list',
+    source: null,
+    fetchedAt: null,
+    name: null,
+    price: null,
+    hasAttributes: false,
+    reference: missing('not_fetched'),
+    ean13: missing('not_fetched'),
+    quantity: missing('not_fetched'),
+    variants: [],
+    variantStock: missing('not_fetched'),
+    full: null,
+  };
+}
+
 /* ── pokrok behu: riadok ⇄ objekt ───────────────────────────────────────── */
 
 interface ProgressRow {
@@ -866,6 +1200,15 @@ export interface CatalogRepoExt extends CatalogRepo {
     productIds: readonly number[],
     opts?: { soldWindowDays?: number; today?: DateOnly; conn?: Queryable },
   ): Promise<CatalogFactsResult>;
+  /**
+   * Doťahnuté detaily (kód, EAN, sklad, varianty) pre konkrétne ID.
+   *
+   * Vracia riadok pre KAŽDÉ platné ID, aj pre to, ktoré zrkadlo nemá — vtedy
+   * je `missing: true` a všetko je `not_fetched`. Chýbajúci kľúč v mape by
+   * volajúceho nútil dopĺňať si prázdno sám a prázdno sa ľahko nakreslí ako
+   * nula. Čisto čítacie, žiadny shop.
+   */
+  detailsFor(productIds: readonly number[], conn?: Queryable): Promise<Map<number, CatalogDetailRow>>;
   /** Koľko riadkov katalóg vôbec má (hlavička „z 41 220 produktov"). */
   totalRows(conn?: Queryable): Promise<number>;
   /** K7: „Dáta k …" — meraný fakt, nie odhad (P7). `null` = katalóg je prázdny. */
@@ -1211,6 +1554,34 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
       }
 
       return { ...empty, facts };
+    },
+
+    /**
+     * Detaily pre konkrétne ID. Žiadne vlastné SQL — `getMany()` už číta
+     * presne tie stĺpce, ktoré treba (`source`, `fetched_at`, `raw`), a druhý
+     * dotaz nad tou istou tabuľkou by bol druhý zdroj pravdy o tom istom.
+     *
+     * Neplatné ID (nula, zápor, necelé číslo) sa ZAHODÍ a v mape nebude —
+     * rovnako ako v `getMany()`. Platné ID, ktoré zrkadlo nemá, naopak V MAPE
+     * JE, len s `missing: true`.
+     */
+    async detailsFor(
+      productIds: readonly number[],
+      conn?: Queryable,
+    ): Promise<Map<number, CatalogDetailRow>> {
+      const unique = [...new Set(productIds.filter(isValidProductId))];
+      const out = new Map<number, CatalogDetailRow>();
+      if (unique.length === 0) return out;
+
+      const records = await repo.getMany([...unique], conn);
+      for (const productId of unique) {
+        const record = records.get(productId);
+        out.set(
+          productId,
+          record === undefined ? emptyCatalogDetail(productId) : catalogDetailFromRecord(record),
+        );
+      }
+      return out;
     },
 
     async totalRows(conn?: Queryable): Promise<number> {
