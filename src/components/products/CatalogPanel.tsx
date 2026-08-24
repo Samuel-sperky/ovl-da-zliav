@@ -98,6 +98,8 @@ import BlockerNotes from '@/components/products/BlockerNotes';
 import CatalogFilters from '@/components/products/CatalogFilters';
 import CatalogStatusPanel from '@/components/products/CatalogStatusPanel';
 import CatalogTable from '@/components/products/CatalogTable';
+import { fetchExtras } from '@/components/products/extras-api';
+import { EMPTY_EXTRAS, mergeExtras, type ExtrasStore } from '@/components/products/product-extras';
 import ProductDetailPanel from '@/components/products/ProductDetailPanel';
 import SelectionBar from '@/components/products/SelectionBar';
 import type {
@@ -371,6 +373,43 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   }, [filter, reloadTick, restored]);
 
   const rows = useMemo(() => (view === null ? [] : view.data), [view]);
+
+  /*
+   * KÓDY A SKLAD PRE VIDITEĽNÚ STRÁNKU.
+   *
+   * Zrkadlo katalógu ich nemá — všetkých 41 220 riadkov prišlo z endpointu
+   * `list`, ktorý vracia len id, názov, cenu a príznak variantov. Doťahujú sa
+   * teda až tu, a VÝHRADNE pre riadky, ktoré má používateľ pred sebou:
+   * stránka po 50 stojí dve dávky z denného rozpočtu 240 čítaní, celý katalóg
+   * by stál 1 649 dávok, teda niekoľko dní.
+   *
+   * Tabuľka na to NEČAKÁ. Kreslí sa hneď z toho, čo zrkadlo vie, a kódy
+   * dobehnú o chvíľu — inak by pri každom prelistovaní zablikalo prázdno
+   * namiesto názvov, ktoré appka pozná okamžite.
+   */
+  const [extras, setExtras] = useState<ExtrasStore>(EMPTY_EXTRAS);
+  const pageIds = useMemo(() => rows.map((r) => r.productId).join(","), [rows]);
+
+  useEffect(() => {
+    if (rows.length === 0) return;
+    const abort = new AbortController();
+    void (async () => {
+      const { view: batch, failed } = await fetchExtras(
+        rows.map((r) => r.productId),
+        abort.signal,
+      );
+      if (abort.signal.aborted) return;
+      if (batch === null) {
+        // Neúspech NIE JE prázdny výsledok: bunky musia ostať „ešte nevieme",
+        // nie „shop nič nemá".
+        if (failed !== null) setExtras((prev) => ({ ...prev, failed: true }));
+        return;
+      }
+      setExtras((prev) => mergeExtras(prev, batch));
+    })();
+    return () => abort.abort();
+    // `pageIds` je odtlačok stránky — pri tých istých ID sa nedoťahuje znova.
+  }, [pageIds]);
 
   /**
    * Načítanie rozdelenia cien — spúšťa ho výhradne otvorenie rozkliku.
@@ -808,6 +847,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
             <div style={{ marginTop: '10px' }}>
               <CatalogTable
                 rows={rows}
+                extras={extras}
                 soldWindowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
                 total={matching}
                 totalIsLowerBound={matchingIsLowerBound}

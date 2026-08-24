@@ -84,6 +84,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import type { CatalogRowView } from '@/components/products/catalog-api';
+import { CodeLine } from '@/components/products/ProductFacts';
+import { codeLine, EMPTY_EXTRAS, type ExtrasStore } from '@/components/products/product-extras';
 import type { ProductReason } from '@/components/products/catalog-status';
 import type { CatalogSort, PerPage } from '@/components/products/catalog-filter';
 import { DEFAULT_CATALOG_FILTER, PER_PAGE_CHOICES } from '@/components/products/catalog-filter';
@@ -218,6 +220,14 @@ export function pageTokens(current: number, pages: number): PageToken[] {
 
 export interface CatalogTableProps {
   rows: readonly CatalogRowView[];
+  /**
+   * Doťahnuté kódy a sklad pre práve zobrazenú stránku.
+   *
+   * Voliteľné zámerne: tabuľka sa kreslí HNEĎ z toho, čo je v zrkadle, a kódy
+   * dobehnú o chvíľu. Keby na ne čakala, používateľ by pri každom prelistovaní
+   * videl prázdno namiesto názvov, ktoré appka pozná okamžite.
+   */
+  extras?: ExtrasStore;
   /** Okno, za ktoré je stĺpec „Predané" — bez neho je číslo nečitateľné (P7). */
   soldWindowDays: number;
   total: number;
@@ -256,6 +266,7 @@ export interface CatalogTableProps {
 
 export function CatalogTable({
   rows,
+  extras = EMPTY_EXTRAS,
   soldWindowDays,
   total,
   totalIsLowerBound = false,
@@ -395,6 +406,12 @@ export function CatalogTable({
                       >
                         {row.name ?? 'bez názvu'}
                       </button>
+                      {/* Kód a EAN — tichý druhý riadok. Pri prázdne nesie
+                          SLOVO, nie len pomlčku: „ešte sa doťahuje",
+                          „vyžaduje kľúč" a „shop ho nevedie" sú tri rôzne veci
+                          a zliať ich by zahodilo jedinú informáciu, ktorá pri
+                          prázdnej bunke niekoho zaujíma. */}
+                      <CodeLine line={codeLine(row, extras.byId.get(row.productId))} />
                       {reason === null ? null : (
                         // `.flag` nesie glyf aj farbu; text je tretí kanál —
                         // stav nikdy nie je len farba.
