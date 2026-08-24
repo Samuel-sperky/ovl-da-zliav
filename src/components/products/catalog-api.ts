@@ -38,11 +38,23 @@
  *
  * Vlastník: V10.
  */
+import {
+  asRecord,
+  readCode,
+  readCount,
+  readFlag,
+  readNumber,
+  readText,
+} from '@/components/dashboard/json';
+import { parseStatusPayload } from '@/components/dashboard/status-payload';
 import type { CatalogFilterState } from '@/components/products/catalog-filter';
 import { catalogSearchQuery } from '@/components/products/catalog-filter';
 import type {
+  CatalogReadsView,
+  CatalogRunOutcomeView,
   CatalogRunReportView,
   CatalogStatusView,
+  CatalogWaiting,
 } from '@/components/products/catalog-status';
 import type { StatusPayload } from '@/lib/status/snapshot';
 
@@ -66,20 +78,34 @@ const OFFLINE: ApiErrorView = {
   message: 'Server neodpovedá. Skúste to znova.',
 };
 
-async function readJson<T>(url: string, signal?: AbortSignal): Promise<Result<T>> {
+/**
+ * Telo prišlo, obálka sedí — ale obsah nie.
+ *
+ * Znenie je to isté ako pri `UNEXPECTED` (používateľ vidí ten istý problém:
+ * server odpovedal inak, než appka čaká), kód je iný, aby sa dva rôzne dôvody
+ * dali od seba odlíšiť v logu a v teste.
+ */
+const UNREADABLE: ApiErrorView = { code: 'shape', message: UNEXPECTED.message };
+
+/** Zrušený dotaz nie je chyba — používateľ len rýchlo klikol ďalej. */
+const ABORTED: ApiErrorView = { code: 'aborted', message: '' };
+
+/**
+ * Surové telo odpovede. `unknown`, nie `T` — TU SA NEPRETYPOVÁVA.
+ *
+ * Do 24. 8. 2026 tu stálo `await res.json() as Result<T>` a celá odpoveď sa tým
+ * stala „overenou" bez toho, aby ju ktokoľvek prečítal. Práve tadiaľto prišiel
+ * kód stavu `writing`, ktorý zhodil obrazovku Zľavy: obrazovka verila typu,
+ * typ neveril ničomu. Tvar overujú `parse*()` funkcie nižšie, rovnako ako
+ * v `dashboard/api.ts` a `dashboard/status-api.ts`.
+ */
+async function readBody(url: string, signal?: AbortSignal): Promise<Result<unknown>> {
   try {
     const res = await fetch(url, { headers: { Accept: 'application/json' }, signal });
-    try {
-      const body = (await res.json()) as Result<T>;
-      if (body !== null && typeof body === 'object' && 'ok' in body) return body;
-    } catch {
-      /* neplatné telo — spadne na `UNEXPECTED` nižšie */
-    }
-    return { ok: false, error: UNEXPECTED };
+    return envelopeOf(await bodyOf(res));
   } catch (error) {
-    // Zrušený dotaz nie je chyba — používateľ len rýchlo klikol ďalej.
     if (error instanceof DOMException && error.name === 'AbortError') {
-      return { ok: false, error: { code: 'aborted', message: '' } };
+      return { ok: false, error: ABORTED };
     }
     return { ok: false, error: OFFLINE };
   }
@@ -89,7 +115,7 @@ async function readJson<T>(url: string, signal?: AbortSignal): Promise<Result<T>
  * `POST` s prázdnym telom. Používa ho výhradne `runCatalogBatch()` — pozri
  * hlavičku modulu, prečo je jedno `POST` v čítacom klientovi v poriadku.
  */
-async function postJson<T>(url: string, signal?: AbortSignal): Promise<Result<T>> {
+async function postBody(url: string, signal?: AbortSignal): Promise<Result<unknown>> {
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -97,19 +123,53 @@ async function postJson<T>(url: string, signal?: AbortSignal): Promise<Result<T>
       body: '{}',
       signal,
     });
-    try {
-      const body = (await res.json()) as Result<T>;
-      if (body !== null && typeof body === 'object' && 'ok' in body) return body;
-    } catch {
-      /* neplatné telo — spadne na `UNEXPECTED` nižšie */
-    }
-    return { ok: false, error: UNEXPECTED };
+    return envelopeOf(await bodyOf(res));
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
-      return { ok: false, error: { code: 'aborted', message: '' } };
+      return { ok: false, error: ABORTED };
     }
     return { ok: false, error: OFFLINE };
   }
+}
+
+/** Telo ako `unknown`; neplatný JSON je `undefined`, nie výnimka. */
+async function bodyOf(res: Response): Promise<unknown> {
+  try {
+    return (await res.json()) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Obálka `{ok, data}` → `Result<unknown>`. Čokoľvek iné je neprečítateľné. */
+function envelopeOf(body: unknown): Result<unknown> {
+  const record = asRecord(body);
+  if (record === null || !('ok' in record)) return { ok: false, error: UNEXPECTED };
+  if (record['ok'] !== true) {
+    const error = asRecord(record['error']);
+    const message = error === null ? null : readText(error, 'message');
+    const code = error === null ? null : readText(error, 'code');
+    return {
+      ok: false,
+      error: {
+        code: code ?? UNEXPECTED.code,
+        message: message ?? UNEXPECTED.message,
+      },
+    };
+  }
+  return { ok: true, data: record['data'] };
+}
+
+/**
+ * Surová odpoveď → overený pohľad, alebo chyba obálky.
+ *
+ * Nečitateľné telo NIKDY nekončí ako prázdny pohľad: prázdna tabuľka je
+ * tvrdenie („nič také nemáme") a to sa z neznalosti povedať nesmie (P7).
+ */
+function shaped<T>(res: Result<unknown>, parse: (raw: unknown) => T | null): Result<T> {
+  if (!res.ok) return res;
+  const data = parse(res.data);
+  return data === null ? { ok: false, error: UNREADABLE } : { ok: true, data };
 }
 
 export const isAborted = (error: ApiErrorView): boolean => error.code === 'aborted';
@@ -210,13 +270,155 @@ export interface CapabilityView {
   readonly note: string | null;
 }
 
-export function searchCatalog(
+/* ── Overenie tvaru (§ „tu sa nepretypováva") ──────────────────────────── */
+
+const SHOP_STATUSES = ['ok', 'not_found', 'unknown'] as const satisfies readonly ShopStatus[];
+const ORIGINS = ['mirror', 'shop'] as const satisfies readonly ProductOrigin[];
+const SOLD_BANDS = ['none', 'low', 'mid', 'high'] as const;
+
+/**
+ * Riadok katalógu. Bez `productId` riadok neexistuje — nedá sa otvoriť ani
+ * vybrať do zľavy, takže sa zahodí celý; kreslený riadok bez identity by bol
+ * ponuka, ktorá pri kliknutí nič neurobí.
+ *
+ * `shopStatus` a `origin` sú UZAVRETÉ zoznamy a fail-closed padajú na to menej
+ * sebavedomé tvrdenie: „nevieme, čo na to shop" a „je to zo zrkadla, nie
+ * čerstvé z eshopu".
+ */
+function parseCatalogRow(raw: unknown): CatalogRowView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const productId = readCount(record, 'productId');
+  if (productId === null) return null;
+  return {
+    productId,
+    name: readText(record, 'name'),
+    price: readText(record, 'price'),
+    hasAttributes: readFlag(record, 'hasAttributes'),
+    shopStatus: readCode(record, 'shopStatus', SHOP_STATUSES) ?? 'unknown',
+    unitsSold: readCount(record, 'unitsSold') ?? 0,
+    everDiscounted: readFlag(record, 'everDiscounted'),
+    discountedNow: readFlag(record, 'discountedNow'),
+    fetchedAt: readText(record, 'fetchedAt') ?? '',
+    origin: readCode(record, 'origin', ORIGINS) ?? 'mirror',
+  };
+}
+
+/** Počty nad celým výsledkom. Nečitateľné počty sú `null`, nie samé nuly (P7). */
+function parseCounts(raw: unknown): CatalogCountsView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const total = readCount(record, 'total');
+  if (total === null) return null;
+  const soldRaw = asRecord(record['sold']);
+  const sold: Record<'none' | 'low' | 'mid' | 'high', number> = {
+    none: 0,
+    low: 0,
+    mid: 0,
+    high: 0,
+  };
+  if (soldRaw !== null) {
+    for (const band of SOLD_BANDS) sold[band] = readCount(soldRaw, band) ?? 0;
+  }
+  return {
+    total,
+    sold,
+    neverDiscounted: readCount(record, 'neverDiscounted') ?? 0,
+    discountedNow: readCount(record, 'discountedNow') ?? 0,
+    soldWindowDays: readCount(record, 'soldWindowDays') ?? 0,
+  };
+}
+
+/** K8 — zamknuté filtre sa preberajú tak, ako prišli; tvar sa len overí. */
+function parseLockedFilters(raw: unknown): Record<string, LockedFilterView> {
+  const record = asRecord(raw);
+  if (record === null) return {};
+  const out: Record<string, LockedFilterView> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const entry = asRecord(value);
+    if (entry === null || entry['locked'] !== true) continue;
+    out[key] = { locked: true, requested: readFlag(entry, 'requested') };
+  }
+  return out;
+}
+
+function parseLookup(raw: unknown): LookupView {
+  const record = asRecord(raw);
+  if (record === null) {
+    return {
+      requested: false,
+      outcome: '',
+      shopTotal: null,
+      addedFromShop: 0,
+      notFetched: 0,
+      readsUsed: 0,
+      at: null,
+      error: null,
+    };
+  }
+  return {
+    requested: readFlag(record, 'requested'),
+    outcome: readText(record, 'outcome') ?? '',
+    // `null` = koľko ich shop má, nevieme. Nula by tvrdila, že nemá žiadne.
+    shopTotal: readCount(record, 'shopTotal'),
+    addedFromShop: readCount(record, 'addedFromShop') ?? 0,
+    notFetched: readCount(record, 'notFetched') ?? 0,
+    readsUsed: readCount(record, 'readsUsed') ?? 0,
+    at: readText(record, 'at'),
+    error: readText(record, 'error'),
+  };
+}
+
+function parseCapabilities(raw: unknown): CapabilityView[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CapabilityView[] = [];
+  for (const entry of raw) {
+    const record = asRecord(entry);
+    if (record === null) continue;
+    const id = readText(record, 'id');
+    if (id === null) continue;
+    out.push({ id, available: readFlag(record, 'available'), note: readText(record, 'note') });
+  }
+  return out;
+}
+
+export function parseCatalogSearch(raw: unknown): CatalogSearchView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const rows = record['data'];
+  // Bez poľa riadkov to nie je odpoveď katalógu. Prázdna tabuľka by tvrdila
+  // „taký produkt tu nie je" a to je pri 41 082 produktoch nebezpečná lož.
+  if (!Array.isArray(rows)) return null;
+  return {
+    data: rows.map(parseCatalogRow).filter((row): row is CatalogRowView => row !== null),
+    page: readCount(record, 'page') ?? 1,
+    perPage: readCount(record, 'perPage') ?? 0,
+    total: readCount(record, 'total') ?? 0,
+    soldWindowDays: readCount(record, 'soldWindowDays') ?? 0,
+    soldFrom: readText(record, 'soldFrom') ?? '',
+    soldTo: readText(record, 'soldTo') ?? '',
+    counts: parseCounts(record['counts']),
+    catalogTotal: readCount(record, 'catalogTotal') ?? 0,
+    // P7 — `null` znamená prázdny katalóg a obrazovka to má povedať pomlčkou.
+    dataAsOf: readText(record, 'dataAsOf'),
+    lockedFilters: parseLockedFilters(record['lockedFilters']),
+    discountSource: 'own_writes',
+    totalSource: 'mirror',
+    lookup: parseLookup(record['lookup']),
+    capabilities: parseCapabilities(record['capabilities']),
+  };
+}
+
+export async function searchCatalog(
   filter: CatalogFilterState,
   signal?: AbortSignal,
 ): Promise<Result<CatalogSearchView>> {
-  return readJson<CatalogSearchView>(
-    `/api/catalog/search?${catalogSearchQuery(filter, { sorting: true })}`,
-    signal,
+  return shaped(
+    await readBody(
+      `/api/catalog/search?${catalogSearchQuery(filter, { sorting: true })}`,
+      signal,
+    ),
+    parseCatalogSearch,
   );
 }
 
@@ -230,13 +432,16 @@ export function searchCatalog(
  * MÍŇA ANONYMNÝ ROZPOČET ČÍTANÍ (30/min, 300/UTC deň na IP), preto sa NIKDY
  * nevolá samo pri písaní — výhradne na kliknutie. Kontrakt UI, bod 26.
  */
-export function lookupInShop(
+export async function lookupInShop(
   filter: CatalogFilterState,
   signal?: AbortSignal,
 ): Promise<Result<CatalogSearchView>> {
-  return readJson<CatalogSearchView>(
-    `/api/catalog/search?${catalogSearchQuery(filter, { sorting: true })}&lookup=1`,
-    signal,
+  return shaped(
+    await readBody(
+      `/api/catalog/search?${catalogSearchQuery(filter, { sorting: true })}&lookup=1`,
+      signal,
+    ),
+    parseCatalogSearch,
   );
 }
 
@@ -244,7 +449,7 @@ export function lookupInShop(
  * Jeden produkt v inom okne predajnosti — do bočného panela („za 360 dní 11").
  * Je to ten istý meraný údaj, len iné okno; nič sa nedopočítava.
  */
-export function catalogRow(
+export async function catalogRow(
   productId: number,
   soldWindowDays: number,
   signal?: AbortSignal,
@@ -255,7 +460,10 @@ export function catalogRow(
     perPage: '1',
     counts: '0',
   });
-  return readJson<CatalogSearchView>(`/api/catalog/search?${params.toString()}`, signal);
+  return shaped(
+    await readBody(`/api/catalog/search?${params.toString()}`, signal),
+    parseCatalogSearch,
+  );
 }
 
 /* ═══════════════════════ 3. História zliav produktu ═══════════════════════ */
@@ -282,11 +490,56 @@ export interface ProductWritesView {
   readonly writes: readonly ProductWriteView[];
 }
 
-export function productWrites(
+/**
+ * Jeden vlastný zápis. Bez `itemId` a `campaignId` sa riadok nedá otvoriť ani
+ * priradiť k zľave, preto sa zahodí. `status` ide ďalej surový — vetu z neho
+ * skladá `itemSentence()` v slovníku a ten neznámy kód rieši sám.
+ */
+function parseProductWrite(raw: unknown): ProductWriteView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const itemId = readCount(record, 'itemId');
+  const campaignId = readCount(record, 'campaignId');
+  if (itemId === null || campaignId === null) return null;
+  return {
+    itemId,
+    campaignId,
+    campaignName: readText(record, 'campaignName') ?? '',
+    status: readText(record, 'status') ?? '',
+    percent: readCount(record, 'percent') ?? 0,
+    dateFrom: readText(record, 'dateFrom') ?? '',
+    dateTo: readText(record, 'dateTo') ?? '',
+    at: readText(record, 'at'),
+  };
+}
+
+export function parseProductWrites(raw: unknown): ProductWritesView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const productId = readCount(record, 'productId');
+  const today = readText(record, 'today');
+  if (productId === null || today === null) return null;
+  const writes = record['writes'];
+  // Prázdny zoznam znamená „appka do tohto produktu nikdy nepísala" (I11).
+  // To sa nesmie povedať o odpovedi, ktorej sme nerozumeli.
+  if (!Array.isArray(writes)) return null;
+  return {
+    productId,
+    today,
+    writes: writes
+      .map(parseProductWrite)
+      .filter((write): write is ProductWriteView => write !== null),
+  };
+}
+
+export async function productWrites(
   productId: number,
   signal?: AbortSignal,
 ): Promise<Result<ProductWritesView>> {
-  return readJson<ProductWritesView>(`/api/insights/product/${productId}`, signal);
+  return shaped(
+    await readBody(`/api/insights/product/${productId}`, signal),
+    parseProductWrites,
+  );
 }
 
 /* ═════════════════ 4. Stav katalógu (koľko z koľkých, prečo sa čaká) ══════ */
@@ -307,8 +560,89 @@ export interface CatalogSyncView {
  * Stav katalógu BEZ toho, aby sa čokoľvek spustilo — na shop neodíde ani jeden
  * request, takže sa to dá volať aj opakovane pri otvorení obrazovky.
  */
-export function catalogSyncStatus(signal?: AbortSignal): Promise<Result<CatalogSyncView>> {
-  return readJson<CatalogSyncView>('/api/catalog/sync', signal);
+const WAITING_KINDS = [
+  'rate_limited',
+  'daily_budget',
+  'error',
+  'catalog_complete',
+] as const satisfies readonly CatalogWaiting[];
+
+/**
+ * Rozpočet čítaní katalógu.
+ *
+ * Keď sa blok nedá prečítať, čísla NIE SÚ pravda a typ na to má vlastné pole:
+ * `known: false` znamená „toto je fail-closed domnienka" a karta katalógu to
+ * na obrazovke prizná. Preto sa tu vracia hodnota a nie `null` — inak by sa
+ * o rozpočte nedalo povedať vôbec nič.
+ */
+function parseCatalogReads(raw: unknown): CatalogReadsView {
+  const record = asRecord(raw);
+  if (record === null) {
+    return {
+      day: '',
+      limit: 0,
+      used: 0,
+      remaining: 0,
+      exhausted: false,
+      resetAt: '',
+      minuteLimit: 0,
+      usedThisMinute: 0,
+      known: false,
+    };
+  }
+  return {
+    day: readText(record, 'day') ?? '',
+    limit: readCount(record, 'limit') ?? 0,
+    used: readCount(record, 'used') ?? 0,
+    remaining: readCount(record, 'remaining') ?? 0,
+    exhausted: readFlag(record, 'exhausted'),
+    resetAt: readText(record, 'resetAt') ?? '',
+    minuteLimit: readCount(record, 'minuteLimit') ?? 0,
+    usedThisMinute: readCount(record, 'usedThisMinute') ?? 0,
+    known: readFlag(record, 'known'),
+  };
+}
+
+/**
+ * Stav katalógu. `shopTotalProducts`, `percent`, `pagesTotal`, `pagesLeft`
+ * a odhady zostávajú `null`, keď ich odpoveď nenesie — karta vtedy kreslí
+ * pomlčku. Dopočítať ich by znamenalo vymyslieť, koľko z eshopu appka má.
+ */
+function parseCatalogStatus(raw: unknown): CatalogStatusView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const loadedProducts = readCount(record, 'loadedProducts');
+  if (loadedProducts === null) return null;
+  return {
+    loadedProducts,
+    shopTotalProducts: readCount(record, 'shopTotalProducts'),
+    percent: readNumber(record, 'percent'),
+    complete: readFlag(record, 'complete'),
+    refreshing: readFlag(record, 'refreshing'),
+    lastFetchedAt: readText(record, 'lastFetchedAt'),
+    lastReadAt: readText(record, 'lastReadAt'),
+    pagesDone: readCount(record, 'pagesDone') ?? 0,
+    pagesTotal: readCount(record, 'pagesTotal'),
+    pagesLeft: readCount(record, 'pagesLeft'),
+    perPage: readCount(record, 'perPage') ?? 0,
+    reads: parseCatalogReads(record['reads']),
+    waiting: readCode(record, 'waiting', WAITING_KINDS),
+    nextBatchAt: readText(record, 'nextBatchAt'),
+    estimatedDaysLeft: readCount(record, 'estimatedDaysLeft'),
+    estimatedFinishAt: readText(record, 'estimatedFinishAt'),
+    lastError: readText(record, 'lastError'),
+  };
+}
+
+export function parseCatalogSync(raw: unknown): CatalogSyncView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const catalog = parseCatalogStatus(record['catalog']);
+  return catalog === null ? null : { catalog };
+}
+
+export async function catalogSyncStatus(signal?: AbortSignal): Promise<Result<CatalogSyncView>> {
+  return shaped(await readBody('/api/catalog/sync', signal), parseCatalogSync);
 }
 
 /** Odpoveď `POST` — čo urobil TENTO beh, plus stav katalógu po ňom. */
@@ -321,8 +655,43 @@ export interface CatalogBatchView extends CatalogRunReportView {
  * sa zmestí do rozpočtu čítaní, uloží pokrok a povie, kde skončil. Pokračovanie
  * od poslednej strany je vlastnosť servera, nie tohto volania.
  */
-export function runCatalogBatch(signal?: AbortSignal): Promise<Result<CatalogBatchView>> {
-  return postJson<CatalogBatchView>('/api/catalog/sync', signal);
+const RUN_OUTCOMES = [
+  'already_running',
+  'too_soon',
+  'peak_hours',
+  'writes_first',
+  'paused',
+  'budget_exhausted',
+  'ran',
+  'failed',
+] as const satisfies readonly CatalogRunOutcomeView[];
+
+export function parseCatalogBatch(raw: unknown): CatalogBatchView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const catalog = parseCatalogStatus(record['catalog']);
+  const outcome = readCode(record, 'outcome', RUN_OUTCOMES);
+  // Bez rozpoznaného výsledku behu sa nedá povedať, čo sa práve stalo — a to je
+  // jediná otázka, na ktorú toto tlačidlo odpovedá.
+  if (catalog === null || outcome === null) return null;
+  const syncRaw = asRecord(record['sync']);
+  return {
+    outcome,
+    // `null` = beh sa vôbec nerozbehol. Nula stránok je iné tvrdenie.
+    sync:
+      syncRaw === null
+        ? null
+        : {
+            pages: readCount(syncRaw, 'pages') ?? 0,
+            products: readCount(syncRaw, 'products') ?? 0,
+          },
+    resumeAt: readText(record, 'resumeAt'),
+    catalog,
+  };
+}
+
+export async function runCatalogBatch(signal?: AbortSignal): Promise<Result<CatalogBatchView>> {
+  return shaped(await postBody('/api/catalog/sync', signal), parseCatalogBatch);
 }
 
 /* ═══════════ 5. Prekážky a stropy — jeden endpoint pre celý obraz ═════════ */
@@ -337,8 +706,8 @@ export function runCatalogBatch(signal?: AbortSignal): Promise<Result<CatalogBat
  * obrazovka vyhýba zámerne — rozišli by sa v okamihu, keď jeden z nich
  * fail-closed spadne na pilotnú desiatku a druhý nie.
  */
-export function appStatus(signal?: AbortSignal): Promise<Result<StatusPayload>> {
-  return readJson<StatusPayload>('/api/status', signal);
+export async function appStatus(signal?: AbortSignal): Promise<Result<StatusPayload>> {
+  return shaped(await readBody('/api/status', signal), parseStatusPayload);
 }
 
 /* ═════════════ 6. Rozdelenie cien — podklad pre histogram ════════════════ */
@@ -381,6 +750,35 @@ export interface CatalogPricesView {
  * Rozdelenie cien v zrkadle katalógu. Na shop neodíde ani jeden request — je to
  * čisto `SELECT` nad `catalog_cache`, takže volanie nemíňa rozpočet čítaní.
  */
-export function catalogPrices(signal?: AbortSignal): Promise<Result<CatalogPricesView>> {
-  return readJson<CatalogPricesView>('/api/insights/catalog-prices', signal);
+export function parseCatalogPrices(raw: unknown): CatalogPricesView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const binsRaw = record['bins'];
+  // Histogram bez pásiem sa nekreslí. Prázdne pole by tvrdilo, že v katalógu
+  // nie je ani jedna cena — a to je meraný fakt, nie náhrada za nečitateľnosť.
+  if (!Array.isArray(binsRaw)) return null;
+  const bins: { from: number; to: number | null; count: number }[] = [];
+  for (const entry of binsRaw) {
+    const bin = asRecord(entry);
+    if (bin === null) continue;
+    const from = readNumber(bin, 'from');
+    const count = readCount(bin, 'count');
+    if (from === null || count === null) continue;
+    // Posledné pásmo je ZBERNÉ (`to: null`) — chýbajúca horná hranica je
+    // súčasť tvaru, nie chyba.
+    bins.push({ from, to: readNumber(bin, 'to'), count });
+  }
+  return {
+    bins,
+    rows: readCount(record, 'rows') ?? 0,
+    withoutPrice: readCount(record, 'withoutPrice') ?? 0,
+    minPrice: readNumber(record, 'minPrice'),
+    maxPrice: readNumber(record, 'maxPrice'),
+    oldestFetchedAt: readText(record, 'oldestFetchedAt'),
+    newestFetchedAt: readText(record, 'newestFetchedAt'),
+  };
+}
+
+export async function catalogPrices(signal?: AbortSignal): Promise<Result<CatalogPricesView>> {
+  return shaped(await readBody('/api/insights/catalog-prices', signal), parseCatalogPrices);
 }

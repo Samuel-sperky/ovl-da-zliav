@@ -12,24 +12,25 @@
  * Vlastník: V9.
  */
 import type { CampaignRow, QueueSnapshot } from '@/components/dashboard/api';
-import type { CampaignSentence, CampaignStatusCode } from '@/lib/ui/vocabulary';
-import { CAMPAIGN_STATUS_CODES, campaignSentence, todayHere } from '@/lib/ui/vocabulary';
+import type { CampaignSentence } from '@/lib/ui/vocabulary';
+import { campaignSentence, toStatusCode, todayHere } from '@/lib/ui/vocabulary';
 
 /* ═════════════════════════ 0. Kód stavu zo servera ════════════════════════ */
 
 /**
  * Kód stavu z API → kód, ktorý slovník pozná.
  *
- * Neznámy kód sa NEPOSIELA ďalej: slovník by zaňho nenašiel slovo a obrazovka
- * by vykreslila prázdnu bodku bez textu. Fail-closed náhrada je `draft`, teda
- * najpasívnejšie možné tvrdenie („pripravená") — appka radšej podcení, čo sa
- * deje, než aby tvrdila, že sa niekde zapisuje.
+ * TENTO MODUL UŽ PREVOD NEROBÍ, LEN HO PODÁVA ĎALEJ. Funkcia sa presťahovala do
+ * `lib/ui/vocabulary.ts`, vedľa zoznamu `CAMPAIGN_STATUS_CODES`, podľa ktorého
+ * sa rozhoduje: prevod patrí k slovníku, nie k jednej obrazovke. Dovtedy si ju
+ * zoznam zliav (`campaigns/discounts-model.ts`) importoval odtiaľto — krížny
+ * import medzi dvomi obrazovkami len preto, aby nevznikla druhá kópia.
+ *
+ * Re-export je DOČASNÝ most pre miesta, ktoré ešte ukazujú sem. Nové miesta
+ * majú siahať rovno po `@/lib/ui/vocabulary` a k volaniu prevodu už nemajú dôvod
+ * vôbec: `campaignSentence()` si neznámy kód ošetrí sám a navyše ho PRIZNÁ.
  */
-export function toStatusCode(status: string): CampaignStatusCode {
-  return (CAMPAIGN_STATUS_CODES as readonly string[]).includes(status)
-    ? (status as CampaignStatusCode)
-    : 'draft';
-}
+export { toStatusCode };
 
 /* ═══════════════════════ 1. Stav dominantnej sekcie ═══════════════════════ */
 

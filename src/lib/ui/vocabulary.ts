@@ -120,11 +120,46 @@ export const CAMPAIGN_STATUS_CODES = [
 
 export type CampaignStatusCode = CampaignStatus | 'queued';
 
+/** Pozná slovník tento kód? Jediná otázka, na ktorú sa dá odpovedať bez hádania. */
+export function isCampaignStatusCode(status: string): status is CampaignStatusCode {
+  return (CAMPAIGN_STATUS_CODES as readonly string[]).includes(status);
+}
+
+/**
+ * Kód stavu odkiaľkoľvek (API, databáza, shop) → kód, ktorý slovník pozná.
+ *
+ * ŽIJE TU, A NIE NA OBRAZOVKE. Do 24. 8. 2026 stála táto funkcia v modeli
+ * Prehľadu a zoznam zliav si ju odtiaľ importoval — krížny import medzi dvomi
+ * obrazovkami len preto, aby nevznikla druhá kópia. Kód stavu prekladá slovník;
+ * on jediný vie, ktoré kódy pozná, takže jedine tu sa dá zaručiť, že sa zoznam
+ * povolených kódov a prevod nikdy nerozídu.
+ *
+ * Fail-closed náhrada je `draft`, teda najpasívnejšie možné tvrdenie
+ * („pripravená") — appka radšej podcení, čo sa deje, než aby tvrdila, že sa
+ * niekde zapisuje. Náhrada NIE JE tichá: `campaignSentence()` ju priznáva
+ * príznakom `UNKNOWN_STATUS_FLAG`.
+ */
+export function toStatusCode(status: string): CampaignStatusCode {
+  return isCampaignStatusCode(status) ? status : 'draft';
+}
+
 /** Príznak = text za bodkou. Nikdy nestojí sám, vždy až za stavom (§4). */
 export interface SurfaceFlag {
   readonly text: string;
   readonly tone: FlagTone;
 }
+
+/**
+ * Príznak pre kód stavu, ktorý appka nepozná.
+ *
+ * Slovník preň vetu nemá a nemôže mať — nepozná ho ani on. Namiesto mlčania
+ * povie, že sa treba pozrieť: tón je jantárový, nie červený (netvrdíme poruchu)
+ * a nie sivý (netvrdíme pokoj). Vnútorný kód sa do textu NEDÁVA (K10).
+ */
+export const UNKNOWN_STATUS_FLAG: SurfaceFlag = {
+  text: 'tento stav nepoznáme',
+  tone: 'attention',
+};
 
 export interface CampaignSentence {
   readonly state: SurfaceState;
@@ -172,7 +207,15 @@ export const CAMPAIGN_STATUS_FLAG: Readonly<Partial<Record<CampaignStatusCode, S
  * voliteľné — obrazovka nikdy nemá dopočítavať, čo nemá.
  */
 export interface CampaignVocabInput {
-  readonly status: CampaignStatusCode;
+  /**
+   * Kód stavu tak, ako prišiel — volajúci ho NEMUSÍ overovať a nemá.
+   *
+   * Typ je zámerne `string`, nie `CampaignStatusCode`: kód prichádza z databázy
+   * a z odpovedí servera, kde ho typ nechráni, a `as CampaignStatusCode` na
+   * strane volajúceho bola presne tá diera, ktorou sa `writing` dostal do
+   * `CAMPAIGN_STATE` a zhodil obrazovku. Prevod robí slovník sám.
+   */
+  readonly status: string;
   /** Okno platnosti zľavy. Bez neho sa `done`/`partial` nedá rozlíšiť. */
   readonly dateFrom?: DateOnly | null;
   readonly dateTo?: DateOnly | null;
@@ -217,26 +260,36 @@ function stateFromWindow(
 /**
  * Zľava → jedna veta pre povrch. Toto je funkcia, ktorú obrazovky volajú;
  * `CAMPAIGN_STATE` je len jej surová tabuľka.
+ *
+ * NEZNÁMY KÓD RIEŠI SLOVNÍK, NIE VOLAJÚCI. `CAMPAIGN_STATE[neznámy]` je
+ * `undefined` a odtiaľ vedie priama cesta k prázdnej obrazovke (tón `undefined`
+ * → značka `undefined` → pád vykresľovača). Kód sa preto najprv prevedie
+ * (`toStatusCode()`) a náhrada sa PRIZNÁ príznakom za bodkou:
+ * `pripravená · tento stav nepoznáme`. Tichá náhrada by predstierala jeden zo
+ * známych stavov.
  */
 export function campaignSentence(input: CampaignVocabInput): CampaignSentence {
   const today = input.today !== undefined ? input.today : todayHere();
 
-  let state = CAMPAIGN_STATE[input.status];
+  const status = toStatusCode(input.status);
+  const unknownStatus = status !== input.status;
+
+  let state = CAMPAIGN_STATE[status];
 
   // Okno platnosti rozhoduje o slove len tam, kde je zľava dopísaná.
-  if (input.status === 'done' || input.status === 'partial') {
+  if (status === 'done' || status === 'partial') {
     state = stateFromWindow(input.dateFrom, input.dateTo, today);
   }
 
   // Fronta, ktorá už niečo zapísala, sa NEVOLÁ „pripravená" ani keď stojí.
   const written = input.itemsWritten !== undefined ? input.itemsWritten : 0;
-  if ((input.status === 'needs_key' || input.status === 'queued') && written > 0) {
+  if ((status === 'needs_key' || status === 'queued') && written > 0) {
     state = 'zapisuje sa';
   }
 
   const flags: SurfaceFlag[] = [];
 
-  const statusFlag = CAMPAIGN_STATUS_FLAG[input.status];
+  const statusFlag = CAMPAIGN_STATUS_FLAG[status];
   if (statusFlag !== undefined) flags.push(statusFlag);
 
   const failed = input.failedCount !== undefined && input.failedCount !== null ? input.failedCount : 0;
@@ -263,6 +316,10 @@ export function campaignSentence(input: CampaignVocabInput): CampaignSentence {
   }
 
   if (input.adminChanged === true) flags.push({ text: 'zmenené v admine?', tone: 'attention' });
+
+  // Až celkom na konci: náhrada kódu je fakt o dátach, nie o zľave, a stojí
+  // teda za všetkým, čo o zľave naozaj vieme.
+  if (unknownStatus) flags.push(UNKNOWN_STATUS_FLAG);
 
   return {
     state,

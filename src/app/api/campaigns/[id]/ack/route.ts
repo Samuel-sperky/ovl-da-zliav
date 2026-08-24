@@ -25,12 +25,7 @@
 import { needsAcknowledgement } from '@/lib/domain/status';
 import { conflict } from '@/lib/http/errors';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
-import {
-  campaignSentence,
-  formatCountSk,
-  pluralSk,
-  type CampaignStatusCode,
-} from '@/lib/ui/vocabulary';
+import { campaignSentence, formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 import {
   idParamSchema,
@@ -74,8 +69,13 @@ export function createAckPost(
 
           if (!needsAcknowledgement(campaign.status, campaign.resultAckAt)) {
             const today = todayOf(d);
+            // Kód stavu ide do slovníka TAK, AKO PRIŠIEL Z DATABÁZY. Do
+            // 24. 8. 2026 tu stálo `as CampaignStatusCode`; pri kóde, ktorý
+            // appka nepozná, bol `state` `undefined`, `join(' · ')` ho zahodil
+            // a hláška končila prázdnou zátvorkou: „Zľava „X" () ešte nemá
+            // výsledok". Slovník kód prevedie sám a náhradu prizná.
             const sentence = campaignSentence({
-              status: campaign.status as CampaignStatusCode,
+              status: campaign.status,
               dateFrom: campaign.dateFrom,
               dateTo: campaign.dateTo,
               today,
