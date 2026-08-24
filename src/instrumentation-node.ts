@@ -27,6 +27,11 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { EnvError, loadEnv, type Env } from '@/env';
+import {
+  expectedSecretFileMode,
+  forbiddenModeBits,
+  permissionsAreVerifiable,
+} from '@/lib/crypto/master-key';
 import { pingDb, query } from '@/db/pool';
 import { auditWriter } from '@/lib/audit/write';
 import { logger } from '@/lib/log/logger';
@@ -139,12 +144,22 @@ export function assertMasterKeyFile(
 
   try {
     const mode = statSync(path).mode & 0o777;
-    if ((mode & 0o077) !== 0) {
+    /* Maska je jedna a žije v `lib/crypto/master-key.ts` — dve kópie toho istého
+     * pravidla tu už boli a rozišli by sa. Prečo je na win32 iná, je
+     * v komentári pri `forbiddenModeBits()`. */
+    if ((mode & forbiddenModeBits()) !== 0) {
       const message =
-        `Master key ${path} má práva ${mode.toString(8)} — group/other nesmie mať prístup ` +
-        '(očakáva sa 400, D61).';
+        `Master key ${path} má práva ${mode.toString(8)} — group/other nesmie mať ` +
+        `${process.platform === 'win32' ? 'právo zápisu' : 'prístup'} ` +
+        `(očakáva sa ${expectedSecretFileMode().toString(8)}, D61).`;
       if (strictPermissions) problems.push(message);
       else console.warn(`[boot] VAROVANIE: ${message}`);
+    }
+    if (!permissionsAreVerifiable() && (mode & 0o077) !== 0) {
+      console.warn(
+        `[boot] VAROVANIE: master key ${path} má práva ${mode.toString(8)}; na Windowse ` +
+          'sa utajenie súboru cez `stat` overiť nedá, drží ho ACL systému (D61, I14).',
+      );
     }
   } catch {
     problems.push(`Nedajú sa zistiť práva master key súboru ${path}.`);

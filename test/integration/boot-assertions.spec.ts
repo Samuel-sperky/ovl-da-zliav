@@ -107,6 +107,13 @@ describe('boot assertions — master key (D61, I1, I14)', () => {
     return path;
   }
 
+  /* POZOR NA PLATFORMU. `chmodSync(path, 0o400)` na Windowse vyrobí súbor, ktorý
+   * `stat` hlási ako 0o444 — NTFS unixové bity nemá. `assertMasterKeyFile()`
+   * preto masku zakázaných bitov nečíta natvrdo, ale z `forbiddenModeBits()`
+   * v `lib/crypto/master-key.ts`, a tá je podľa platformy (0o077 / 0o022).
+   * Rozhodnutie „ktorá maska pre ktorú platformu" sa testuje ako čistá funkcia
+   * v `test/unit/crypto.spec.ts` pre OBE platformy naraz; tu sa prejde len tá,
+   * na ktorej test beží — práva reálneho súboru si platformu vybrať nedajú. */
   it('32 B hex kľúč s právami 400 je v poriadku', () => {
     const path = keyFile('ok.key', 'a'.repeat(64));
     expect(assertMasterKeyFile(path, true)).toEqual({ ok: true, problems: [] });

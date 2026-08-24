@@ -3,7 +3,8 @@
  *
  * Zodpovednosť tohto modulu:
  *  - prečítať master key zo súboru, ktorého cesta je v `MASTER_KEY_FILE`,
- *  - overiť DĹŽKU (32 B) aj PRÁVA (`mode & 0o077 === 0`),
+ *  - overiť DĹŽKU (32 B) aj PRÁVA (`mode & forbiddenModeBits() === 0`; na
+ *    POSIXe je maska 0o077, na Windowse 0o022 — dôvod je pri tej funkcii),
  *  - fail-fast, keď je čokoľvek z toho nesplnené (I14) — appka NESMIE bežať
  *    v režime, v ktorom by nedokázala bezpečne šifrovať API kľúč,
  *  - to isté pre session secret (`SESSION_SECRET_FILE`), z ktorého je podpisovaný
@@ -35,8 +36,66 @@ export const MASTER_KEY_BYTES = 32;
 /** HS256 podpis preview tokenu — minimálne 32 B entropie (§7, O2). */
 export const MIN_SESSION_SECRET_BYTES = 32;
 
-/** Práva, ktoré sa od súboru s tajomstvom očakávajú (D61). */
+/** Práva, ktoré sa od súboru s tajomstvom očakávajú na POSIXe (D61). */
 export const EXPECTED_SECRET_FILE_MODE = 0o400;
+
+/**
+ * Práva, ktoré `stat` ohlási pre read-only súbor na Windowse. `chmod 400` tam
+ * 0o400 NEVYROBÍ — Node vie na NTFS prepnúť jedine atribút read-only a ten sa
+ * hlási ako 0o444.
+ */
+export const EXPECTED_SECRET_FILE_MODE_WIN32 = 0o444;
+
+/* ─────────────────── práva podľa platformy (D61, I14, R-6) ───────────────── */
+
+/**
+ * ČO SA TU MERÍ A ČO SA MERAŤ NEDÁ
+ * --------------------------------
+ * D61 chce od súboru s tajomstvom práva 400: nikto okrem vlastníka ho nesmie
+ * ani prečítať. Na POSIXe je to merateľné a appka to vynucuje — v produkcii
+ * beží v linuxovom kontejneri, takže tam invariant I14 platí bez zľavy a
+ * `mode & 0o077` musí byť nula.
+ *
+ * Na Windowse je `stat().mode` **fikcia**. NTFS prístup neriadi unixovými
+ * bitmi, ale ACL, ktoré `stat` nevidí vôbec; Node z toho modelu vie prepnúť
+ * jedine atribút read-only. `chmodSync(path, 0o400)` tam preto vyrobí súbor,
+ * ktorý sa hlási ako 0o444, a `chmod 0o644` sa hlási ako 0o666. Trvať na
+ * `mode & 0o077 === 0` znamená na Windowse trvať na stave, ktorý sa nastaviť
+ * NEDÁ — kontrola nepadá na zlých právach, ale na tom, že ich nevie zmerať.
+ *
+ * Preto sa maska rozhoduje podľa PLATFORMY, nie podľa `strictPermissions`:
+ *  - POSIX → 0o077, žiadny prístup pre group/other,
+ *  - win32 → 0o022, group/other nesmie súbor prepísať; bity čítania sa
+ *            netestujú, lebo ich `chmod` na NTFS nevypne.
+ *
+ * ČO SA TÝM SMIE TICHO POKAZIŤ. Na Windowse appka o utajení súboru nevie nič —
+ * a keby mlčala, tvrdila by „práva sú v poriadku" tam, kde ich nezmerala.
+ * Preto sa na win32 pri otvorených bitoch čítania pripíše varovanie VŽDY, aj
+ * keď kontrola prešla. Nie je to kozmetika: je to jediné miesto, kde je vidieť,
+ * že invariant I14 tu drží operačný systém, nie appka.
+ *
+ * Rozhodnutie sa dá otestovať na OBOCH platformách bez ohľadu na to, kde test
+ * beží — je to čistá funkcia z názvu platformy. Nad reálnym súborom sa testuje
+ * len tá vetva, na ktorej test práve stojí, lebo práva súboru si platformu
+ * vybrať nedajú.
+ */
+export const FORBIDDEN_MODE_BITS_POSIX = 0o077;
+export const FORBIDDEN_MODE_BITS_WIN32 = 0o022;
+
+/** Bity, ktoré na súbore s tajomstvom nesmú byť — podľa platformy. */
+export function forbiddenModeBits(platform: string = process.platform): number {
+  return platform === 'win32' ? FORBIDDEN_MODE_BITS_WIN32 : FORBIDDEN_MODE_BITS_POSIX;
+}
+
+/** Práva, ktoré sa od súboru s tajomstvom na danej platforme očakávajú. */
+export function expectedSecretFileMode(platform: string = process.platform): number {
+  return platform === 'win32' ? EXPECTED_SECRET_FILE_MODE_WIN32 : EXPECTED_SECRET_FILE_MODE;
+}
+
+/** Vie sa na tejto platforme overiť, že tajomstvo nikto iný neprečíta? */
+export function permissionsAreVerifiable(platform: string = process.platform): boolean {
+  return platform !== 'win32';
+}
 
 export type SecretFileProblemCode =
   | 'unreadable'
@@ -90,6 +149,12 @@ export interface SecretFileOptions {
    * Default kopíruje rozhodnutie A0 v `instrumentation-node.ts`: strict = produkcia.
    */
   strictPermissions?: boolean;
+  /**
+   * Platforma, podľa ktorej sa vyberá maska zakázaných bitov. Default je
+   * `process.platform`; prepína sa VÝHRADNE v testoch, aby sa dala prejsť aj
+   * vetva, na ktorej test práve nestojí.
+   */
+  platform?: string;
 }
 
 /* ────────────────────────────── dekódovanie ────────────────────────────── */
@@ -133,6 +198,7 @@ function isProduction(): boolean {
  */
 export function checkSecretFile(path: string, options: SecretFileOptions = {}): SecretFileCheck {
   const strict = options.strictPermissions ?? isProduction();
+  const platform = options.platform ?? process.platform;
   const problems: string[] = [];
   const codes: SecretFileProblemCode[] = [];
   const warnings: string[] = [];
@@ -151,12 +217,24 @@ export function checkSecretFile(path: string, options: SecretFileOptions = {}): 
     if (!stat.isFile()) {
       fail('not_a_file', `${path} nie je obyčajný súbor.`);
     }
-    if ((mode & 0o077) !== 0) {
+    if ((mode & forbiddenModeBits(platform)) !== 0) {
       const message =
-        `${path} má práva ${mode.toString(8)} — group ani other nesmie mať prístup ` +
-        `(očakáva sa ${EXPECTED_SECRET_FILE_MODE.toString(8)}, D61).`;
+        `${path} má práva ${mode.toString(8)} — group ani other nesmie mať ` +
+        `${platform === 'win32' ? 'právo zápisu' : 'prístup'} ` +
+        `(očakáva sa ${expectedSecretFileMode(platform).toString(8)}, D61).`;
       if (strict) fail('bad_permissions', message);
       else warnings.push(message);
+    }
+    /* Priznanie, nie kozmetika: na win32 sa utajenie súboru zmerať nedá, takže
+     * mlčať by znamenalo tvrdiť „práva sú v poriadku". Viď komentár pri
+     * `forbiddenModeBits()`. */
+    if (!permissionsAreVerifiable(platform) && (mode & 0o077) !== 0) {
+      warnings.push(
+        `${path} má práva ${mode.toString(8)}. Na Windowse sa práva ` +
+          `${EXPECTED_SECRET_FILE_MODE.toString(8)} nastaviť nedajú — NTFS ich riadi cez ACL, ` +
+          'ktoré `stat` nevidí. Appka tu overuje len to, že súbor nikto iný neprepíše; ' +
+          'že ho nikto iný neprečíta, drží operačný systém, nie appka (D61, I14).',
+      );
     }
   } catch {
     fail('stat_failed', `Nedajú sa zistiť práva súboru ${path}.`);
