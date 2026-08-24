@@ -47,7 +47,7 @@ import { describe, expect, it } from 'vitest';
 
 import BudgetSection from '@/components/settings/BudgetSection';
 import WritesSection from '@/components/settings/WritesSection';
-import { ASSUMED_NOTE } from '@/components/settings/blockers-view';
+import { ASSUMED_MARK, ASSUMED_NOTE } from '@/components/settings/blockers-view';
 import {
   toStatusPayload,
   type StatusPayload,
@@ -228,12 +228,17 @@ function detailsText(markup: string): string {
  * Vety, ktoré tieto dve sekcie iba zobrazujú, ale nepíšu.
  *
  * Zoznam sa skladá z toho istého kódu, ktorý vety vyrobil (`blockers.ts` cez
- * stavovú odpoveď, `blockers-view.ts` cez `ASSUMED_NOTE`), nie ručným
- * odpísaním. Keď ich vlastník skráti, test to prijme bez úpravy; keď dlhú
- * vetu napíše niekto do súboru B1, výnimka ju nekryje.
+ * stavovú odpoveď), nie ručným odpísaním. Keď ich vlastník skráti, test to
+ * prijme bez úpravy; keď dlhú vetu napíše niekto do súboru B1, výnimka ju
+ * nekryje.
+ *
+ * `ASSUMED_NOTE` tu už NIE JE. B1 ju vynímal, lebo ju nevlastnil — mala 131
+ * znakov a vykresľovala sa v bunke pri každej podmienke. Teraz má 74 a stojí
+ * pod tabuľkou raz, takže pravidlo o 90 znakoch spĺňa sama a výnimku
+ * nepotrebuje.
  */
 function foreignSentences(...payloads: readonly (StatusPayload | null)[]): ReadonlySet<string> {
-  const out = new Set<string>([ASSUMED_NOTE]);
+  const out = new Set<string>();
   for (const payload of payloads) {
     for (const blocker of payload?.blockers ?? []) {
       out.add(blocker.what);
@@ -360,6 +365,38 @@ describe('P2 — na povrchu nie je blok dlhší než 90 znakov', () => {
 });
 
 /* ══════════════ B. Dôvod sa presunul, nezahodil ═══════════════════════════ */
+
+describe('Priznanie predpokladu stojí na obrazovke raz', () => {
+  /*
+   * Predtým bolo v bunke pri KAŽDEJ podmienke, ktorá stojí na predpoklade —
+   * pri troch takých teda trikrát ten istý 131-znakový odsek v tabuľke.
+   * Doc-blok modulu pritom celý čas tvrdil „jedna veta pre celú obrazovku".
+   * Toto je to tvrdenie vynútené, nie napísané.
+   */
+  it('veta je pod 90 znakov, takže výnimku z P2 nepotrebuje', () => {
+    expect(ASSUMED_NOTE.length).toBeLessThanOrEqual(90);
+  });
+
+  it('na žiadnej obrazovke nie je viac než raz', () => {
+    for (const screen of [...WRITES, ...BUDGETS]) {
+      const kolko = screen.markup.split(ASSUMED_NOTE).length - 1;
+      expect(kolko, `${screen.name}: veta je tam ${kolko}x`).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('kde je značka v bunke, tam je pod tabuľkou aj vysvetlenie', () => {
+    /* Značka bez vysvetlenia by bola šum: „≈ predpoklad" a nikde prečo. */
+    for (const screen of WRITES) {
+      if (!screen.markup.includes(ASSUMED_MARK)) continue;
+      expect(screen.markup, `${screen.name}: značka bez vysvetlenia`).toContain(ASSUMED_NOTE);
+    }
+  });
+
+  it('aspoň jedna obrazovka značku naozaj kreslí', () => {
+    /* Bez tejto poistky by testy vyššie prešli aj vtedy, keby značka zmizla. */
+    expect(WRITES.some((screen) => screen.markup.includes(ASSUMED_MARK))).toBe(true);
+  });
+});
 
 describe('Vysvetlenie sa presunulo pod rozklik, nezmizlo', () => {
   it('zápisy: dôvod vypnutia, osud fronty aj expirácia sú pod rozklikom', () => {

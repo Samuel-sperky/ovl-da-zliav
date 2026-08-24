@@ -44,6 +44,7 @@ import { ToneSigMark } from '@/components/ui/StatusMark';
 import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import {
+  ASSUMED_MARK,
   ASSUMED_NOTE,
   TONE_SIG_CLASS,
   blockerTone,
@@ -260,9 +261,7 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
                         </a>
                       )}
                       {condition.assumed ? (
-                        <div className="lvl-3">
-                          <Icon name={TONE_ICON.attention} size={0.85} /> {ASSUMED_NOTE}
-                        </div>
+                        <div className="lvl-3">{ASSUMED_MARK}</div>
                       ) : null}
                     </>
                   )}
@@ -273,6 +272,13 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
         </table>
         <div className="tbl-foot">
           <span>Appka zľavu nikdy nezruší. Zapísaná zľava vyprší sama.</span>
+          {/* Vysvetlenie k `≈ predpoklad` v bunkách. Raz pre celú obrazovku,
+              nie pri každej podmienke — inak je to trikrát ten istý odsek. */}
+          {conditions.some((condition) => condition.assumed) ? (
+            <span data-testid="writes-assumed-note">
+              <Icon name={TONE_ICON.attention} size={0.85} /> {ASSUMED_NOTE}
+            </span>
+          ) : null}
         </div>
       </div>
 

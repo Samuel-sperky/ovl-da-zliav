@@ -65,10 +65,19 @@ export const RESOLUTION_TONE: Readonly<Record<BlockerWire['resolution'], StatusT
 export const RESOLUTION_WORD: Readonly<Record<BlockerWire['resolution'], string>> =
   lookChannel('word');
 
-/** Veta pri prekážke, ktorá stojí na bezpečnom predpoklade, nie na fakte. */
+/**
+ * Veta pri prekážke, ktorá stojí na bezpečnom predpoklade, nie na fakte.
+ *
+ * Stojí na obrazovke RAZ, pod tabuľkou. Predtým sa vykresľovala v bunke pri
+ * každej takej podmienke — teda až trikrát to isté, a v 131 znakoch, čo je
+ * odsek, nie štítok (P2 dovolí 90). Bunka nesie `ASSUMED_MARK`, vysvetlenie
+ * je jedno a spoločné.
+ */
 export const ASSUMED_NOTE =
-  'Túto vetu appka nepostavila na prečítanom údaji, ale na bezpečnom predpoklade — ' +
-  'keď niečo nevie, počíta s tou prísnejšou možnosťou.';
+  'Nie je to prečítaný údaj — keď appka nevie, počíta s prísnejšou možnosťou.';
+
+/** Čo stojí v bunke pri takej podmienke. Značka, nie veta (P7: odhad je tlmený). */
+export const ASSUMED_MARK = '≈ predpoklad';
 
 /** Tón prekážky — z jediného slovníka appky. */
 export function blockerTone(blocker: Pick<BlockerWire, 'resolution'>): StatusTone {
