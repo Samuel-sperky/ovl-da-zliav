@@ -323,6 +323,8 @@ export function whoamiToProbeResult(outcome: WhoamiOutcome): KeyProbeResult {
       return 'invalid';
     case 'forbidden':
       return 'forbidden';
+    case 'address_banned':
+      return 'address_banned';
     default:
       // 429, 500, timeout, zmenený tvar odpovede — nikdy sa z toho nestane
       // „kľúč platí"; uloží sa ako neoverený (fail-closed).
@@ -355,6 +357,38 @@ export function scopeReport(scopes: readonly ShopScope[] | null): KeyScopeReport
     productReadNote:
       productRead === true ? null : missingScopeSentence('product:read', productRead === false),
   };
+}
+
+/* ═════════════ prečo kľúč nie je overený (bod A kontraktu 24. 8.) ══════════ */
+
+/**
+ * Veta, ktorá povie PRAVDU o tom, prečo sa uložený kľúč nedal overiť.
+ *
+ * `verifyStatus: 'unverified'` je jediné slovo pre dva úplne rôzne stavy:
+ *  - shop bol nedostupný / odpovedal 429, 500, driftom — „skús to znova",
+ *  - shop odmieta našu ADRESU (`ip_banned`) — „nový kľúč nepomôže, treba
+ *    odblokovať adresu".
+ *
+ * Bez tejto vety by používateľ videl „uložený, neoverený" a hľadal chybu
+ * v kľúči, ktorý je možno v poriadku. `null` = kľúč je overený, niet čo dodať.
+ *
+ * ČO SA TU NESMIE POKAZIŤ: veta nesmie tvrdiť príčinu banu. Appka vie, čo shop
+ * odpovedal, nie prečo — rovnaké pravidlo ako v `sales/stop-policy.ts` bod 3.
+ */
+export function verifyNoteFor(probe: KeyProbeResult): string | null {
+  if (probe === 'valid') return null;
+  if (probe === 'address_banned') {
+    return (
+      'Kľúč je uložený, ale overiť sa ho nedalo: shop odmieta našu IP adresu ' +
+      '(403 `ip_banned`), a to aj pri volaní bez kľúča. Nový kľúč s tým nepohne — ' +
+      'treba požiadať správcu shopu o odblokovanie adresy. Zľavy sa dovtedy ' +
+      'nezapisujú a fronta počká; nič sa nestratí.'
+    );
+  }
+  return (
+    'Kľúč je uložený, ale overiť sa ho zatiaľ nedalo — shop neodpovedal ' +
+    'jednoznačne. Appka to skúsi znova sama; zľavy sa dovtedy nezapisujú.'
+  );
 }
 
 /** Rozpočet do odpovede — vždy aj s tým, či je meraný, alebo len odhadnutý. */
@@ -561,6 +595,13 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           probe = await ordersProbe(ephemeralSecretRef(ctx.body.apiKey), { operationId });
         }
 
+        /* 1a. Odmietnutie kľúča — VÝHRADNE keď shop hovorí o KĽÚČI.
+         *
+         * `address_banned` je tu zámerne NIE: je to tiež 403, ale o kľúči
+         * nevypovedá nič (shop ho vráti aj bez kľúča), takže by sa odmietol
+         * kľúč, ktorý je možno v poriadku — a to v jedinom stave, v ktorom sa
+         * žiadny nový kľúč overiť nedá. Pokračuje sa a uloží sa ako neoverený;
+         * prečo je to bezpečné, je pri bode 3. */
         if (probe === 'invalid') {
           throw conflict(PROBE_REJECTION[kind].invalid, 'key_invalid', { logAsError: false });
         }
@@ -596,7 +637,20 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           userId: ctx.claims.sub,
         });
 
-        /* 3. Verify status podľa overenia; `unknown` (sieť) = `unverified`. */
+        /* 3. Verify status podľa overenia; `unknown` (sieť) aj `address_banned`
+         * (zablokovaná adresa) = `unverified`.
+         *
+         * PREČO JE ULOŽENIE NEOVERENÉHO KĽÚČA BEZPEČNÉ. `unverified` nie je
+         * medzistupeň medzi „platí" a „neplatí" — je to priznanie, že sa to
+         * nezmeralo, a appka sa podľa neho chová fail-closed: bod 4 nedopáli
+         * kampane, executor bez overeného kľúča nezapisuje a `verifyNoteFor()`
+         * to napíše na obrazovku. Uložený kľúč teda nič nezapne; jediné, čo
+         * pridá, je že po odblokovaní adresy netreba nič dopisovať.
+         *
+         * ČO SA TÝM SMIE TICHO POKAZIŤ: keby shop niekedy začal vracať
+         * `ip_banned` aj na NEPLATNÝ kľúč, appka by taký kľúč uložila. Nie je
+         * to diera v zápise (ten stojí na `valid`), ale hláška by bola falošne
+         * zmierlivá. Držať to musí test nad správaním, nie dôvera v shop. */
         const verifyStatus = probe === 'valid' ? 'valid' : 'unverified';
         await repo.setVerifyStatus(verifyStatus);
 
@@ -621,6 +675,7 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           last4: stored.last4,
           expiresAt: stored.expiresAt,
           verifyStatus,
+          verifyNote: verifyNoteFor(probe),
           kind,
           scopes: scopes.scopes,
           productRead: scopes.productRead,

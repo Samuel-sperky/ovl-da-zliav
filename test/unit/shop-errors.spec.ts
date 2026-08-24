@@ -46,6 +46,7 @@ import {
   todayInTimeZone,
   validateWriteParams,
   type FetchLike,
+  type ShopClientV5,
 } from '@/lib/shop/client';
 import { CODE_MESSAGES, shopMessageText } from '@/lib/shop/messages.sk';
 import { bodySignalsFailure, readErrorBody } from '@/lib/shop/schemas';
@@ -124,6 +125,28 @@ function fakeKey(value = TEST_KEY): FakeKey {
     },
   };
   return state;
+}
+
+/**
+ * `client()` vracia úzky kontraktový `ShopClient`, aby testy nesiahali na nič
+ * nad kontrakt. `whoami` je až vo `ShopClientV5`, preto pre ne táto druhá,
+ * širšia pomôcka — pretypovanie by tú hranicu len zamlčalo.
+ */
+function clientV5(
+  fetchImpl: FetchLike,
+  extra: Partial<Parameters<typeof createShopClient>[0]> = {},
+): ShopClientV5 {
+  return createShopClient({
+    baseUrl: BASE,
+    fetchImpl,
+    version: '0.0.0-test',
+    readTimeoutMs: 5000,
+    writeTimeoutMs: 5000,
+    timeZone: 'Europe/Bratislava',
+    sleepFn: async () => {},
+    policy: { maxAttempts: 3, retryAfterCapSeconds: 90, backoffMs: [1, 1, 1] },
+    ...extra,
+  });
 }
 
 function client(fetchImpl: FetchLike, extra: Partial<Parameters<typeof createShopClient>[0]> = {}): ShopClient {
@@ -455,6 +478,49 @@ describe('hlavičky a kľúč (D48, D53, D58, I1)', () => {
       expect(onKeyRejected.mock.calls[0][0].kind).toBe(kind);
       // Terminal → žiadny retry.
       expect(h.calls).toHaveLength(1);
+    }
+  });
+
+  /**
+   * `ip_banned` je 403 ako každé iné, ale NIE JE to výrok o kľúči — shop ho
+   * vracia aj na volanie bez kľúča. `onKeyRejected` vedie na wipe kľúča
+   * (D51/D52), takže ohlásiť ho tu by v deň, keď sa D51/D52 dopojí, zmazalo
+   * kľúč, ktorý je možno v poriadku, a to práve v stave, v ktorom sa nový
+   * overiť ani nedá. Zmerané 24. 8. 2026: `403 {"error":"ip_banned"}`.
+   */
+  it('403 `ip_banned` pri zápise NEOHLÁSI odmietnutie kľúča', async () => {
+    const onKeyRejected = vi.fn();
+    const h = harness(() => json({ error: 'ip_banned' }, 403));
+    const shop = client(h.fetchImpl, { onKeyRejected });
+    const result = await shop.setReduction(
+      { id: 123, reduction: 20, ...futureWindow() },
+      fakeKey().ref,
+      ctx(),
+    );
+
+    // Zápis zlyhal a je terminálny — to sa nemení.
+    expect(result.outcome).toBe('failed');
+    expect(h.calls).toHaveLength(1);
+    // Ale kľúč nikto neobvinil.
+    expect(onKeyRejected).not.toHaveBeenCalled();
+  });
+
+  it('`whoami` rozlíši zablokovanú adresu od zakázaného kľúča', async () => {
+    const cases = [
+      [json({ error: 'ip_banned' }, 403), 'address_banned'],
+      [json({ error: 'forbidden' }, 403), 'forbidden'],
+      [json({ error: 'unauthorized' }, 401), 'invalid'],
+    ] as const;
+
+    for (const [response, expected] of cases) {
+      const h = harness(() => response.clone());
+      const outcome = await clientV5(h.fetchImpl).whoami(fakeKey().ref, ctx());
+      expect(outcome.status).toBe(expected);
+      // Sonda musí hovoriť to isté — inak by `/api/key` a rozvrh videli iný svet.
+      const probe = harness(() => response.clone());
+      expect(await client(probe.fetchImpl).probeKey(fakeKey().ref, ctx())).toBe(
+        expected === 'invalid' ? 'invalid' : expected,
+      );
     }
   });
 

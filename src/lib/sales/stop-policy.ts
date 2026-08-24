@@ -33,6 +33,8 @@
  */
 import type { UtcDate } from '@/contracts';
 
+import { isIpBannedCode } from '@/lib/shop/errors';
+
 /* ═══════════════════════════ 1. Druhy prekážky ════════════════════════════ */
 
 /**
@@ -46,12 +48,15 @@ import type { UtcDate } from '@/contracts';
 export type SalesBlockKind = 'permission' | 'ip_ban';
 
 /**
- * Kódy, ktorými shop hlási zablokovanú IP adresu. Zoznam je jednoprvkový
- * zámerne — pozná sa jediný kód, ktorý appka naozaj videla v odpovedi
- * (`sales_sync_state.last_error = 'ip_banned'`). Ďalší názov toho istého stavu
- * pribudne SEM a nikam inam.
+ * Kódy, ktorými shop hlási zablokovanú IP adresu.
+ *
+ * Zoznam sa 24. 8. 2026 presunul do `lib/shop/errors.ts` a tento modul ho už len
+ * re-exportuje. Dôvod: `ip_banned` je SUROVÝ KÓD SHOPU a tie podľa D41 patria do
+ * taxonómie api-clienta, na jedno miesto — nie do modulu, ktorý je iba jedným
+ * z jeho konzumentov. Ten istý kód odvtedy potrebuje aj cesta kľúča
+ * (`/api/key`) a dve kópie zoznamu by sa rozišli.
  */
-export const IP_BAN_CODES: ReadonlySet<string> = new Set(['ip_banned']);
+export { IP_BAN_CODES } from '@/lib/shop/errors';
 
 /**
  * Kódy, po ktorých sa na rozvrhu neskúša. Sú to názvy DRUHOV z taxonómie
@@ -72,7 +77,7 @@ export function classifySalesStop(code: string | null | undefined): SalesBlockKi
   if (typeof code !== 'string') return null;
   const normalized = code.trim().toLowerCase();
   if (normalized.length === 0) return null;
-  if (IP_BAN_CODES.has(normalized)) return 'ip_ban';
+  if (isIpBannedCode(normalized)) return 'ip_ban';
   if (PERMISSION_BLOCK_CODES.has(normalized)) return 'permission';
   return null;
 }

@@ -429,7 +429,17 @@ export type SetReductionResult =
   | { outcome: 'uncertain'; httpStatus: number | null; requestId: Ulid; raw: unknown; attempts: number; error: ShopError }
   | { outcome: 'failed'; httpStatus: number | null; requestId: Ulid; raw: unknown; attempts: number; error: ShopError };
 
-export type KeyProbeResult = 'valid' | 'invalid' | 'forbidden' | 'unknown';
+/**
+ * Výsledok sondy kľúča.
+ *
+ * `address_banned` je od 24. 8. 2026 vlastný člen, hoci ide tiež o 403. Nie je
+ * to výrok o kľúči: kód `ip_banned` shop vracia aj na volanie BEZ kľúča
+ * (zmerané 24. 8. 2026 na verejnom `/api/products`). Zliať ho do `forbidden` by
+ * znamenalo obviniť kľúč z toho, že sa appka k shopu nedostane; zliať ho do
+ * `unknown` by zmazalo jediný rozdiel, ktorý používateľ potrebuje vidieť — že
+ * tu nepomôže nový kľúč, ale odblokovanie adresy.
+ */
+export type KeyProbeResult = 'valid' | 'invalid' | 'forbidden' | 'address_banned' | 'unknown';
 
 export interface CanaryResult {
   ok: boolean;
