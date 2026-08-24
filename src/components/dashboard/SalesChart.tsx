@@ -16,14 +16,22 @@
  *    výmysel.
  *  · **Nie je to celý eshop.** Rad pokrýva len produkty vo výbere, nie
  *    41 000 položiek katalógu. Hovorí to popis nad rámom.
+ *  · **Nemeraný deň nie je nula.** Deň, ktorý sa nestiahol, nedostane bod ani
+ *    nulu — dostane šrafovaný pás, v bubline pomlčku a v legende slovo.
+ *    K 24. 8. 2026 sú merané dva dni a nemeraných šestnásť; keby tých
+ *    šestnásť sadlo na nulu, graf by tvrdil prepad predaja, ktorý nikto
+ *    nezmeral.
  *  · **Dva body nie sú priebeh.** Pri dvoch meraniach graf prepne do režimu
- *    `pair`: dva body, spojnica, obe čísla priamo pri bodoch, žiadna plocha
- *    a žiadny trend. Nepredstiera čiaru tam, kde sú dve merania.
- *  · **Diera v pokrytí je diera.** Deň, ktorý sa nesťahoval, dostane šrafovaný
- *    pás a čiara sa nad ním pretrhne. Nulu nedopĺňame — „predalo sa 0 kusov"
- *    a „ten deň sme nesťahovali" sú dve rôzne vety.
+ *    `pair`: dva body a obe čísla pri nich, žiadna spojnica, žiadna plocha,
+ *    žiadny trend. Čiara medzi dvoma bodmi je sklon, teda trend inou rukou.
+ *  · **Neúplný deň je odhad.** Deň, ktorého sťahovanie spadlo v polovici, nesie
+ *    dolnú hranicu: tlmená prerušovaná značka a `≈` pred číslom (P7).
  *  · **Dnešok nie je celý deň.** Kreslí sa PRÁZDNYM bodom a bodkovanou
  *    spojnicou a do trendu nevstupuje.
+ *
+ * KAŽDÝ STAV NESIE TRI KANÁLY: farbu, značku a slovo v legende. Ani jeden
+ * z nich nie je ozdoba — šrafovanie bez slova je vzorka, ktorú si nikto
+ * nespojí s výpadkom sťahovania.
  *
  * ČO SA TU SMIE TICHO POKAZIŤ
  * ───────────────────────────
@@ -41,13 +49,18 @@
  *  2. **Dnešok dostane vlastnú farbu.** Do 19. 8. 2026 bol zlatý (`--gold2`).
  *     Zlatá je značková farba a v tejto appke nesmie kódovať stav ani rozdiel
  *     v dôveryhodnosti čísla. Dnešok sa preto líši TVAROM (prázdny bod), nie
- *     odtieňom.
+ *     odtieňom. To isté platí o odhade: tlmená prerušovaná značka, nie iný
+ *     odtieň série.
  *
  *  3. **Priamy popisok pri každom bode.** Povolený je LEN v režime `pair`,
  *     kde sú body dva. Pri dlhšom rade sa čísla čítajú z bubliny alebo
  *     z dátovej tabuľky; číslo pri každom bode je hluk, nie informácia.
  *
- *  4. **Bublina prežije opustenie rámu.** Kto zabudne na `onPointerLeave`,
+ *  4. **Bublina nad pásmom neznáma ukáže číslo.** Kríž nájde najbližší deň OSI,
+ *     nie najbližšie meranie — nad nemeraným dňom preto ukazuje pomlčku
+ *     a vetu, nie hodnotu suseda.
+ *
+ *  5. **Bublina prežije opustenie rámu.** Kto zabudne na `onPointerLeave`,
  *     nechá na grafe visieť hodnotu dňa, nad ktorým kurzor už dávno nie je.
  *
  * Geometriu počíta `sales-view.ts`; tu nie je ani jeden výpočet, ktorý by sa
@@ -72,7 +85,7 @@ export interface SalesChartProps {
 }
 
 type HotPoint = ChartGeometry['hover'][number];
-type LegendKind = 'line' | 'trend' | 'today' | 'gap';
+type LegendKind = 'line' | 'dot' | 'trend' | 'today' | 'estimate' | 'gap';
 
 function pieces(value: number): string {
   return `${formatCountSk(value)} ${pluralSk(value, 'kus', 'kusy', 'kusov')}`;
@@ -83,8 +96,10 @@ function LegendMark({ kind, hatchId }: { kind: LegendKind; hatchId: string }) {
   return (
     <svg className={styles.legendMark} width="16" height="12" viewBox="0 0 16 12" aria-hidden="true">
       {kind === 'line' ? <line className="line" x1="0" y1="6" x2="16" y2="6" /> : null}
+      {kind === 'dot' ? <circle className={styles.dot} cx="8" cy="6" r="4" /> : null}
       {kind === 'trend' ? <line className="line trend" x1="0" y1="6" x2="16" y2="6" /> : null}
       {kind === 'today' ? <circle className={styles.dotOpen} cx="8" cy="6" r="4" /> : null}
+      {kind === 'estimate' ? <circle className={styles.dotEstimate} cx="8" cy="6" r="4" /> : null}
       {kind === 'gap' ? <rect x="0" y="1" width="16" height="10" fill={`url(#${hatchId})`} /> : null}
     </svg>
   );
@@ -112,8 +127,16 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
   const onLeave = useCallback(() => setHot(null), []);
 
   const lastClosed = geometry.points[geometry.points.length - 1] ?? null;
+  const hasEstimate =
+    geometry.points.some((point) => point.estimate) || geometry.todayPoint?.estimate === true;
   const showLegend =
-    geometry.trendLine !== null || geometry.todayPoint !== null || geometry.gaps.length > 0;
+    geometry.trendLine !== null ||
+    geometry.todayPoint !== null ||
+    geometry.gaps.length > 0 ||
+    hasEstimate;
+
+  /* Priamy popisok pri bode — len v režime `pair`, a nikdy nad nemeraným dňom. */
+  const labelled = geometry.mode !== 'pair' ? [] : geometry.hover.filter((p) => p.units !== null);
 
   return (
     <div className={styles.frame} ref={frame}>
@@ -129,8 +152,16 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
           data-testid="sales-chart-tip"
         >
           <span className={styles.tipDay}>{axisDay(hot.day)}</span>
-          <span className={styles.tipValue}>{pieces(hot.units)}</span>
-          {hot.isToday ? <span className={styles.tipNote}>deň ešte beží</span> : null}
+          <span className={styles.tipValue}>
+            {hot.units === null ? '—' : `${hot.estimate ? '≈ ' : ''}${pieces(hot.units)}`}
+          </span>
+          {hot.units === null ? <span className={styles.tipNote}>deň sa nesťahoval</span> : null}
+          {hot.units !== null && hot.estimate ? (
+            <span className={styles.tipNote}>neúplný deň, aspoň toľko</span>
+          ) : null}
+          {hot.units !== null && hot.isToday ? (
+            <span className={styles.tipNote}>deň ešte beží</span>
+          ) : null}
         </div>
       )}
 
@@ -168,7 +199,7 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
 
         {/* Nesťahované obdobia sa kreslia POD dáta, aby ich neprekryli. */}
         {geometry.gaps.map((gap) => (
-          <g key={`${gap.afterDay}-${gap.beforeDay}`}>
+          <g key={`${gap.fromDay}-${gap.toDay}`}>
             <rect
               className={styles.gapFill}
               x={gap.x1}
@@ -206,7 +237,7 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
           />
         )}
 
-        {geometry.todayPoint === null || lastClosed === null ? null : (
+        {geometry.todayPoint === null || lastClosed === null || geometry.mode === 'pair' ? null : (
           <polyline
             className="line proj"
             points={`${lastClosed.x},${lastClosed.y} ${geometry.todayPoint.x},${geometry.todayPoint.y}`}
@@ -219,7 +250,13 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
          * pomôcka pre oko.
          */}
         {geometry.points.map((point) => (
-          <circle className={styles.dot} key={point.day} cx={point.x} cy={point.y} r="5" />
+          <circle
+            className={point.estimate ? styles.dotEstimate : styles.dot}
+            key={point.day}
+            cx={point.x}
+            cy={point.y}
+            r="5"
+          />
         ))}
 
         {geometry.todayPoint === null ? null : (
@@ -231,20 +268,17 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
           />
         )}
 
-        {/* Priamy popisok LEN pri dvoch meraniach — inak je to hluk. */}
-        {geometry.mode !== 'pair'
-          ? null
-          : geometry.hover.map((point) => (
-              <text
-                className={styles.pointLabel}
-                key={`hodnota-${point.day}`}
-                x={point.x}
-                y={point.y - 12}
-                textAnchor="middle"
-              >
-                {formatCountSk(point.units)}
-              </text>
-            ))}
+        {labelled.map((point) => (
+          <text
+            className={point.estimate ? styles.pointLabelDim : styles.pointLabel}
+            key={`hodnota-${point.day}`}
+            x={point.x}
+            y={point.y - 12}
+            textAnchor="middle"
+          >
+            {`${point.estimate ? '≈ ' : ''}${formatCountSk(point.units ?? 0)}`}
+          </text>
+        ))}
 
         {hot === null ? null : (
           <g>
@@ -255,7 +289,9 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
               x2={hot.x}
               y2={CHART.baseline}
             />
-            <circle className={styles.hotDot} cx={hot.x} cy={hot.y} r="6.5" />
+            {hot.units === null ? null : (
+              <circle className={styles.hotDot} cx={hot.x} cy={hot.y} r="6.5" />
+            )}
           </g>
         )}
 
@@ -273,7 +309,7 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
       {!showLegend ? null : (
         <div className={styles.legend} data-testid="sales-chart-legend">
           <span className={styles.legendItem}>
-            <LegendMark kind="line" hatchId={hatchId} />
+            <LegendMark kind={geometry.mode === 'pair' ? 'dot' : 'line'} hatchId={hatchId} />
             predané kusy
           </span>
           {geometry.trendLine === null ? null : (
@@ -288,10 +324,16 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
               dnešok, deň ešte beží
             </span>
           )}
+          {!hasEstimate ? null : (
+            <span className={styles.legendItem}>
+              <LegendMark kind="estimate" hatchId={hatchId} />
+              ≈ neúplný deň, aspoň toľko
+            </span>
+          )}
           {geometry.gaps.length === 0 ? null : (
             <span className={styles.legendItem}>
               <LegendMark kind="gap" hatchId={hatchId} />
-              dni, ktoré sa nesťahovali
+              nesťahované dni, predaj nepoznáme
             </span>
           )}
         </div>

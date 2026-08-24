@@ -15,6 +15,15 @@
  * nedostane nulu. Deň, ktorý sa stiahol a nemá ani jeden riadok predaja,
  * naopak nulu dostane, lebo nula je vtedy meraný fakt.
  *
+ * Každý deň nesie aj `status` (24. 8. 2026). Bez neho sa `complete` s nulou
+ * a `partial`, ktorému sťahovanie spadlo skôr, než čokoľvek priniesol, čítali
+ * v UI rovnako — ako nula. K 24. 8. 2026 je taká presne polovica mesiaca:
+ * 5. a 6. 8. sú `complete`, 7.–22. 8. sú `partial` po chybe `forbidden`
+ * a `ip_banned`, teda BEZ RIADKOV. Kto `status` z odpovede odstráni, vráti na
+ * prístrojovú dosku dva týždne vymyslených núl. Rozhodnutie, čo z toho je
+ * meraná nula a čo diera, robí `sales-view.ts`; route len nezahadzuje fakt,
+ * na ktorom to rozhodnutie stojí.
+ *
  * Tie dve veci sa nesmú zliať: „predalo sa 0 kusov" je tvrdenie o eshope,
  * „ten deň sme nesťahovali" je tvrdenie o appke. Graf z toho prvého kreslí bod
  * na nule a z toho druhého dieru. Kto sem doplní chýbajúce dni nulami, urobí
@@ -51,6 +60,17 @@ const querySchema = z.object({
     .refine((v) => isDateOnly(v), 'Očakáva sa existujúci kalendárny deň v tvare RRRR-MM-DD.')
     .optional(),
 });
+
+/**
+ * Jeden deň odpovede. `status` je tu preto, lebo `units: 0` sám o sebe
+ * nerozlíši „stiahli sme deň a nepredalo sa nič" od „sťahovanie spadlo
+ * a neprinieslo ani riadok".
+ */
+export interface SalesDailyRow {
+  day: DateOnly;
+  units: number;
+  status: 'complete' | 'partial';
+}
 
 export interface SalesDailyDeps {
   salesInsights?: {
@@ -92,12 +112,15 @@ export function createInsightsSalesDailyGet(
 
         /* Dni, o ktorých appka NIEČO vie. `pending` medzi nimi nie je. */
         const covered = syncState
-          .filter((row) => row.status === 'complete' || row.status === 'partial')
-          .map((row) => row.saleDay)
-          .sort();
+          .flatMap((row) =>
+            row.status === 'complete' || row.status === 'partial'
+              ? [{ saleDay: row.saleDay, status: row.status }]
+              : [],
+          )
+          .sort((a, b) => (a.saleDay < b.saleDay ? -1 : a.saleDay > b.saleDay ? 1 : 0));
 
         if (!coverage.hasData || coverage.from == null || coverage.to == null) {
-          return { today, coverage, days: [] as Array<{ day: DateOnly; units: number }> };
+          return { today, coverage, days: [] as SalesDailyRow[] };
         }
 
         const products = (await insights.discountDepth())
@@ -112,15 +135,16 @@ export function createInsightsSalesDailyGet(
          * deň bez predaja tak vyjde 0 (meraný fakt) a nestiahnutý deň
          * v odpovedi vôbec nebude (appka o ňom nič netvrdí).
          */
-        const byDay = new Map<DateOnly, number>(covered.map((day) => [day, 0]));
+        const byDay = new Map<DateOnly, number>(covered.map((row) => [row.saleDay, 0]));
         for (const row of rows) {
           const current = byDay.get(row.saleDay);
           if (current === undefined) continue;
           byDay.set(row.saleDay, current + row.unitsSold);
         }
 
-        const days = [...byDay.entries()]
-          .map(([day, units]) => ({ day, units }))
+        const statusByDay = new Map(covered.map((row) => [row.saleDay, row.status]));
+        const days: SalesDailyRow[] = [...byDay.entries()]
+          .map(([day, units]) => ({ day, units, status: statusByDay.get(day) ?? 'complete' }))
           .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 
         return { today, coverage, days };

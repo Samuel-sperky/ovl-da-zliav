@@ -21,6 +21,12 @@
  *  E. **Sekcia a graf počítajú z toho istého poľa.** Dve čísla o tom istom
  *     z dvoch výpočtov sú horšie než jedno.
  *
+ *  G. **`partial` s nulou nie je nula.** Deň, ktorého sťahovanie spadlo skôr,
+ *     než čokoľvek prinieslo, má v tabuľkách nula riadkov — presne ako deň bez
+ *     predaja. Odpoveď preto nesie `status` a UI z neho robí `units: null`.
+ *     K 24. 8. 2026 by bez toho graf ukázal dva dni predaja a šestnásť dní
+ *     tvrdej nuly, teda prepad, ktorý nikto nezmeral.
+ *
  * Bez prehliadača a bez DB: geometria je čistá funkcia, komponenty sa
  * vykresľujú cez `renderToStaticMarkup`, route dostane náhradné závislosti.
  *
@@ -33,13 +39,20 @@ import { describe, expect, it } from 'vitest';
 import type { ProductSalesDay, SalesSyncDay, SessionClaims } from '@/contracts';
 import type { RouteDeps } from '@/lib/http/define-route';
 
-import SalesSection from '@/components/dashboard/SalesSection';
+import SalesSection, {
+  measuredOnly,
+  tableRows,
+  toSeriesDay,
+} from '@/components/dashboard/SalesSection';
+import SalesChart from '@/components/dashboard/SalesChart';
 import type { SalesDay, SalesSnapshot } from '@/components/dashboard/api';
+import type { SeriesDay } from '@/components/dashboard/sales-view';
 import {
   CHART,
   MIN_TREND_POINTS,
   chartGeometry,
   coverageGaps,
+  dayFromNumber,
   dayNumber,
 } from '@/components/dashboard/sales-view';
 import { nearestPoint, pointerToViewBoxX, tipLeftPercent } from '@/components/charts/chart-hover';
@@ -234,7 +247,7 @@ function syncDay(saleDay: string, status: SalesSyncDay['status']): SalesSyncDay 
 async function callDaily(
   sync: readonly SalesSyncDay[],
   rows: readonly ProductSalesDay[],
-): Promise<{ days: Array<{ day: string; units: number }> }> {
+): Promise<{ days: Array<{ day: string; units: number; status: string }> }> {
   const handler = createInsightsSalesDailyGet(
     {
       now: () => NOW,
@@ -269,7 +282,7 @@ async function callDaily(
 
   expect(response.status).toBe(200);
   const body = (await response.json()) as { data?: unknown };
-  return (body.data ?? body) as { days: Array<{ day: string; units: number }> };
+  return (body.data ?? body) as { days: Array<{ day: string; units: number; status: string }> };
 }
 
 describe('GET /api/insights/sales-daily — čo je nula a čo je medzera', () => {
@@ -284,8 +297,8 @@ describe('GET /api/insights/sales-daily — čo je nula a čo je medzera', () =>
     );
 
     expect(body.days).toEqual([
-      { day: '2026-08-05', units: 578 },
-      { day: '2026-08-06', units: 0 },
+      { day: '2026-08-05', units: 578, status: 'complete' },
+      { day: '2026-08-06', units: 0, status: 'complete' },
     ]);
   });
 
@@ -297,12 +310,28 @@ describe('GET /api/insights/sales-daily — čo je nula a čo je medzera', () =>
         { productId: 2, saleDay: '2026-08-05', unitsSold: 278 },
       ],
     );
-    expect(body.days).toEqual([{ day: '2026-08-05', units: 578 }]);
+    expect(body.days).toEqual([{ day: '2026-08-05', units: 578, status: 'complete' }]);
   });
 
   it('bez jediného stiahnutého dňa je rad prázdny, nie plný núl', async () => {
     const body = await callDaily([syncDay('2026-08-05', 'pending')], []);
     expect(body.days).toEqual([]);
+  });
+
+  it('deň nesie stav, aby sa `partial` s nulou nedal čítať ako nula', async () => {
+    // Bez `status` v odpovedi sa 6. 8. (stiahnuté, nepredalo sa) a 7. 8.
+    // (sťahovanie spadlo na 403) líšia iba tým, čo o nich vie server.
+    const body = await callDaily(
+      [
+        syncDay('2026-08-05', 'complete'),
+        syncDay('2026-08-06', 'complete'),
+        syncDay('2026-08-07', 'partial'),
+      ],
+      [{ productId: 1, saleDay: '2026-08-05', unitsSold: 578 }],
+    );
+
+    expect(body.days.map((row) => row.status)).toEqual(['complete', 'complete', 'partial']);
+    expect(body.days[2]).toEqual({ day: '2026-08-07', units: 0, status: 'partial' });
   });
 });
 
@@ -366,5 +395,219 @@ describe('nitkový kríž hľadá bod v mierke rámu, nie v pixeloch', () => {
   it('bublina nikdy neujde mimo rámu', () => {
     expect(tipLeftPercent(-50, CHART.width)).toBe(0);
     expect(tipLeftPercent(CHART.width * 2, CHART.width)).toBe(100);
+  });
+});
+
+/* ═════════ G. „Nula" verzus „nevieme" — stav k 24. 8. 2026 ════════════════ */
+
+const DNES = '2026-08-24';
+
+/**
+ * Presne to, čo appka k 24. 8. 2026 vie: dva stiahnuté dni a potom
+ * `sales_sync_state` plný `partial` po `forbidden` a `ip_banned`.
+ */
+function skutocnost(): SeriesDay[] {
+  const out: SeriesDay[] = [
+    { day: '2026-08-05', units: 578 },
+    { day: '2026-08-06', units: 495 },
+  ];
+  const prvy = dayNumber('2026-08-07') as number;
+  for (let i = 0; i < 12; i += 1) out.push({ day: dayFromNumber(prvy + i), units: null });
+  out.push({ day: '2026-08-19', units: null }, { day: '2026-08-22', units: null });
+  return out;
+}
+
+describe('mapovanie odpovede: kedy je nula fakt a kedy je to diera', () => {
+  it('`complete` s nulou je meraný fakt, `partial` bez kusov je „nevieme"', () => {
+    expect(toSeriesDay({ day: '2026-08-06', units: 0, status: 'complete' })).toEqual({
+      day: '2026-08-06',
+      units: 0,
+    });
+    expect(toSeriesDay({ day: '2026-08-07', units: 0, status: 'partial' })).toEqual({
+      day: '2026-08-07',
+      units: null,
+    });
+  });
+
+  it('`partial` s kusmi je dolná hranica, nie hodnota dňa', () => {
+    expect(toSeriesDay({ day: '2026-08-08', units: 40, status: 'partial' })).toEqual({
+      day: '2026-08-08',
+      units: 40,
+      partial: true,
+    });
+  });
+
+  it('deň bez stavu ostáva meraním — staršia odpoveď `status` neposielala', () => {
+    expect(toSeriesDay({ day: '2026-08-06', units: 0, status: null })).toEqual({
+      day: '2026-08-06',
+      units: 0,
+    });
+  });
+
+  it('do troch čísel nad grafom ide len to, za čo appka stojí', () => {
+    // Priemer, do ktorého by vstúpil nemeraný deň ako nula, by klesal
+    // s každým dňom výpadku a vyzeral by ako klesajúci predaj.
+    expect(measuredOnly(skutocnost())).toEqual([
+      { day: '2026-08-05', units: 578 },
+      { day: '2026-08-06', units: 495 },
+    ]);
+    expect(measuredOnly([{ day: '2026-08-08', units: 40, partial: true }])).toEqual([]);
+  });
+});
+
+describe('graf pri dvoch meraniach a šestnástich nemeraných dňoch', () => {
+  const g = chartGeometry(skutocnost(), DNES) as NonNullable<ReturnType<typeof chartGeometry>>;
+
+  it('bodov je toľko, koľko meraní — nie toľko, koľko dní', () => {
+    expect(g).not.toBeNull();
+    expect(g.measuredDays).toBe(2);
+    expect(g.points).toHaveLength(2);
+    expect(g.points.map((point) => point.units)).toEqual([578, 495]);
+    // Ani jeden bod na nule: nemeraný deň bod nedostane.
+    expect(g.hover.filter((point) => point.units === 0)).toEqual([]);
+    // Štrnásť riadkov `sales_sync_state`; 20. a 21. 8. v ňom nie sú vôbec,
+    // takže kalendárne pásmo je o dva dni širšie než počet riadkov.
+    expect(g.hover.filter((point) => point.units === null)).toHaveLength(14);
+  });
+
+  it('nemerané dni sú jedno šrafované pásmo od 7. do 22. 8.', () => {
+    // Pásmo za POSLEDNÝM meraním je to, ktoré appku dnes usvedčuje —
+    // medzi dvoma meraniami žiadna diera nie je.
+    expect(g.gaps).toHaveLength(1);
+    expect(g.gaps[0]!.fromDay).toBe('2026-08-07');
+    expect(g.gaps[0]!.toDay).toBe('2026-08-22');
+    expect(g.gaps[0]!.days).toBe(16);
+    expect(g.gaps[0]!.x2).toBe(CHART.right);
+  });
+
+  it('dva body nie sú čiara: žiadna spojnica, plocha ani trend', () => {
+    expect(g.mode).toBe('pair');
+    expect(g.segments).toEqual([]);
+    expect(g.areaPath).toBe('');
+    expect(g.trendLine).toBeNull();
+  });
+
+  it('os drží kalendár: obe merania sú vľavo, zvyšok rámu je neznámo', () => {
+    // Keby os niesla poradie, dva susedné dni by roztiahla cez celý rám
+    // a šestnásť dní výpadku by z grafu zmizlo.
+    expect(g.points[0]!.x).toBe(CHART.left);
+    expect(g.points[1]!.x).toBeLessThan(CHART.left + 60);
+    expect(g.spanDays).toBe(18);
+  });
+});
+
+describe('trend nevzniká nad radom, ktorý má diery alebo odhady', () => {
+  const styriDni = (): SeriesDay[] =>
+    ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04'].map((day, i) => ({
+      day,
+      units: 10 + i,
+    }));
+
+  it('štyri súvislé merania trend dostanú', () => {
+    expect(chartGeometry(styriDni(), DNES)!.trendLine).not.toBeNull();
+  });
+
+  it('jeden nemeraný deň uprostred trend zruší', () => {
+    // Sklon by počítal s dňom, ktorý nikto nezmeral.
+    const sDierou = [...styriDni(), { day: '2026-08-05', units: null }, { day: '2026-08-06', units: 20 }];
+    const g = chartGeometry(sDierou, DNES)!;
+    expect(g.gaps).toHaveLength(1);
+    expect(g.trendLine).toBeNull();
+  });
+
+  it('jeden odhad v rade trend tiež zruší', () => {
+    const sOdhadom: SeriesDay[] = [
+      ...styriDni(),
+      { day: '2026-08-05', units: 12, partial: true },
+      { day: '2026-08-06', units: 20 },
+    ];
+    expect(chartGeometry(sOdhadom, DNES)!.trendLine).toBeNull();
+  });
+
+  it('odhad neprilepí spojnicu k susedom a nesie vlastnú značku', () => {
+    const sOdhadom: SeriesDay[] = [
+      { day: '2026-08-01', units: 10 },
+      { day: '2026-08-02', units: 12, partial: true },
+      { day: '2026-08-03', units: 14 },
+    ];
+    const g = chartGeometry(sOdhadom, DNES)!;
+    expect(g.points.map((point) => point.estimate)).toEqual([false, true, false]);
+    expect(g.segments).toEqual([]);
+  });
+});
+
+describe('graf to isté priznáva aj na obrazovke', () => {
+  const html = renderToStaticMarkup(
+    createElement(SalesChart, {
+      geometry: chartGeometry(skutocnost(), DNES)!,
+      caption: '5. 8. – 22. 8. · 2 dni s údajmi · povolené produkty',
+      label: 'Predané kusy povolených produktov po dňoch',
+    }),
+  );
+
+  it('pás nesťahovaného obdobia je v ráme a je pomenovaný slovom', () => {
+    // Šrafovanie je značka; bez slova v legende je to len vzorka.
+    expect(html).toContain('nesťahované');
+    expect(html).toContain('nesťahované dni, predaj nepoznáme');
+    expect(html).toContain('data-testid="sales-chart-legend"');
+  });
+
+  it('v ráme nie je ani jedna spojnica — dve merania nie sú priebeh', () => {
+    expect(html).toContain('data-mode="pair"');
+    expect(html).not.toContain('<polyline');
+    expect(html).not.toContain('line trend');
+  });
+
+  it('bodov je práve toľko, koľko meraní', () => {
+    // Iba rám grafu; legenda kreslí vlastnú marku a tá bodom nie je.
+    const ram = html.slice(html.indexOf('data-testid="sales-chart"'), html.indexOf('</svg>'));
+    expect(ram.match(/<circle/g) ?? []).toHaveLength(2);
+  });
+});
+
+describe('sekcia nikde nepovie číslo, ktoré appka nemá', () => {
+  const g = chartGeometry(skutocnost(), DNES)!;
+  const html = renderToStaticMarkup(
+    createElement(SalesSection, {
+      sales: snapshot({
+        today: DNES,
+        days: measuredOnly(skutocnost()),
+        coverage: {
+          syncEnabled: true,
+          from: '2026-08-05',
+          to: '2026-08-22',
+          daysCovered: 16,
+          lastSyncedAt: '2026-08-22T02:10:00.000Z',
+          hasData: true,
+        },
+      }),
+    }),
+  );
+
+  it('hlavička počíta dni S ÚDAJMI, nie dni v stave synchronizácie', () => {
+    // „16 dní · 1 073 kusov" by z dvoch meraní spravilo dva týždne
+    // slabého predaja.
+    expect(html).toContain('2 dni s údajmi');
+    expect(html).not.toContain('16 dní · ');
+  });
+
+  it('nemerané pásmo má v tabuľke vlastný riadok a prázdnu bunku kusov', () => {
+    // Prázdnu bunku `ChartTable` prepíše na pomlčku. Nula by z nej spravila
+    // tvrdenie o eshope a tabuľka by bola „dôveryhodnejšia" než graf.
+    const riadky = tableRows(g, DNES);
+    const pasmo = riadky.find((row) => row.cells[2]?.startsWith('nesťahované'));
+    expect(pasmo?.cells).toEqual(['7. 8. – 22. 8.', '', 'nesťahované, 16 dní']);
+    expect(riadky.map((row) => row.cells[1])).toEqual(['578', '495', '']);
+  });
+
+  it('odhad si v tabuľke nesie `≈` a slovo, nie holé číslo', () => {
+    const g2 = chartGeometry(
+      [
+        { day: '2026-08-01', units: 10 },
+        { day: '2026-08-02', units: 12, partial: true },
+      ],
+      DNES,
+    )!;
+    expect(tableRows(g2, DNES)[1]?.cells).toEqual(['2. 8.', '≈ 12', 'neúplný deň, aspoň toľko']);
   });
 });

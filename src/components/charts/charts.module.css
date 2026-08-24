@@ -240,3 +240,30 @@
   color: var(--dim);
   margin-top: 6px;
 }
+
+/* ── Odhad: neúplne stiahnutý deň (24. 8. 2026) ────────────────────────── */
+
+/*
+ * Deň, ktorého sťahovanie spadlo v polovici, nesie DOLNÚ HRANICU, nie hodnotu.
+ * Líši sa TVAROM — prerušovaný prstenec — a textom `≈` pri čísle, nie sýtosťou
+ * série. Kto z neho spraví plný bod v `--accent`, postaví odhad vedľa merania
+ * ako rovnocenné číslo a nikto ich už od seba nerozlíši.
+ *
+ * `--dim` je tu bezpečné práve preto, že farba NIE JE jediný kanál: tvar
+ * (prerušovaný prstenec), znak (`≈`) a slovo v legende nesú ten istý rozdiel.
+ * Pri trendovej čiare to neplatí a `--dim` je tam zakázaná — čiara nemá tvar,
+ * ktorým by sa dala odlíšiť.
+ */
+.dotEstimate {
+  fill: var(--paper2);
+  stroke: var(--dim);
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
+}
+
+/* Popisok odhadu je tlmený — meranie a dolná hranica nemajú rovnakú váhu. */
+.pointLabelDim {
+  fill: var(--dim);
+  font-size: 11px;
+  font-weight: 620;
+}
