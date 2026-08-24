@@ -95,9 +95,11 @@ import {
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
 import BudgetMeter from '@/components/ui/BudgetMeter';
+import Icon from '@/components/ui/Icon';
 import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
 import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
+import { TONE_ICON } from '@/components/ui/ToneBadge';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, itemSentence, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -307,6 +309,132 @@ function EndDiscountInShop({
 
 /* ═══════════════════════════ obrazovka ════════════════════════════════════ */
 
+/**
+ * ŠTYRI DLAŽDICE FRONTY ako samostatný, vykresliteľný komponent.
+ *
+ * Oddelené od `DiscountDetail` z toho istého dôvodu, pre ktorý sa 19. 8. 2026
+ * oddelila `PerformanceCard` od `DiscountPerformance`: detail je klientský
+ * komponent, ktorý si čísla ťahá až v efekte, takže `renderToStaticMarkup` ho
+ * zastihne v stave „Načítavam…" a tvrdenia o dlaždiciach nemajú čo merať.
+ * Test tak dokázal nanajvýš to, že v ZDROJI niekde stojí `<Icon>` — a presne
+ * taká hrubosť merania (súbor namiesto výskytu) nechala prejsť značku
+ * odstránenú z jedného z dvoch hostiteľov.
+ *
+ * Komponent je čistý: žiadne hooky, žiadne načítavanie, len čísla dnu a
+ * markup von. `test/unit/znacky-zlavy-fronta.spec.ts` ho vykresľuje naozaj a
+ * pri KAŽDEJ zo štyroch dlaždíc kontroluje tri kanály zvlášť.
+ */
+export function QueueTiles({ campaign }: { campaign: DiscountDetailData['campaign'] }) {
+  /** Má stav čo hlásiť? Prúžok farby dostane len dlaždica s nenulovým číslom. */
+  const anyOf = (units: number): 'ano' | 'nie' => (units > 0 ? 'ano' : 'nie');
+
+  return (
+    <>
+{/*
+       * Štyri dlaždice fronty — nikdy tri (D45, kontrakt UI, bod 22).
+       * „Nevieme, či sa zapísalo" je vlastný stav: zápis odišiel a
+       * odpoveď nedorazila, takže produkt zlacnený BYŤ MÔŽE. Farbu
+       * dostane len dlaždica, ktorá má čo hlásiť — červený prúžok nad
+       * nulou zlyhaní by bol falošný poplach. Stav preto nesie farbu,
+       * značku aj slovo naraz.
+       *
+       * PREČO ZNAČKA STOJÍ VEDĽA `StatTile`, A NIE V JEJ POPISKU
+       * -------------------------------------------------------
+       * Do 20. 8. 2026 tu boli len DVA kanály — farba (`data-state` a
+       * ľavý prúžok) a slovo. Značku dlaždice stratili vtedy, keď sa
+       * stará mapa glyfov po prechode na ikony vyprázdnila namiesto toho,
+       * aby ju niekto nahradil; na obrazovke to vyzeralo ako medzera
+       * navyše, takže si toho nikto nevšimol a nič nespadlo. Meno tej
+       * mapy sa sem zámerne nepíše ani v komentári — `zlava-detail-
+       * priebeh.spec.ts` ho hľadá v celom súbore vrátane komentárov.
+       *
+       * `StatTile` (`ui/StatTile.tsx`) berie `label` ako REŤAZEC, takže
+       * značku doň vložiť nejde — a vložiť ju ako ZNAK do textu sa
+       * nesmie: rodina `.sig` sa práve preto prepísala z `content:`
+       * v `::before` na `<Icon>` (`ui/StatusMark.tsx`). Meniť `StatTile`
+       * na `ReactNode` by zase znamenalo siahnuť na primitív, ktorý
+       * kreslí dlaždice na štyroch ďalších obrazovkách kvôli jednej.
+       *
+       * Ikona preto stojí ako SÚRODENEC dlaždice a `.queueTile` je
+       * mriežka „značka | telo" — presne ten istý útvar, aký má v tomto
+       * tabe riadok prekážky (`.blocker` + `.blockerGlyph` +
+       * `.blockerBody`). Tvar ikony sa berie z koreňového slovníka
+       * značiek `TONE_ICON` (`ui/ToneBadge.tsx`), teda z toho istého
+       * miesta, odkiaľ ho má badge aj `ToneSigMark` — nová tabuľka
+       * „stav fronty → ikona" tu zámerne NEVZNIKÁ. Tón vedľa mena ikony
+       * je ten istý, ktorým `zlavy.module.css` farbí úsek pruhu.
+       *
+       * Značka je `aria-hidden`: slovo stojí v tej istej dlaždici, takže
+       * čítačka by inak prečítala ten istý stav dvakrát.
+       */}
+      <div className={`kpis ${styles.queueTiles}`}>
+        <div className={styles.queueTile} data-state="ok" data-any={anyOf(campaign.itemsOk)}>
+          {/* tón `good` — tá istá farba, akou pruh kreslí úsek `ok` */}
+          <Icon className={styles.queueGlyph} name={TONE_ICON.good} size={0.85} />
+          <StatTile
+            label={`Zapísané`}
+            value={formatCountSk(campaign.itemsOk)}
+            detail={
+              campaign.itemsOk === 0
+                ? null
+                : `z ${formatCountSk(campaign.itemsTotal)} produktov tejto zľavy`
+            }
+            testId="tile-ok"
+          />
+        </div>
+        <div
+          className={styles.queueTile}
+          data-state="pending"
+          data-any={anyOf(campaign.itemsPending)}
+        >
+          {/* tón `progress` — zápis ešte len príde, nie je to chyba */}
+          <Icon className={styles.queueGlyph} name={TONE_ICON.progress} size={0.85} />
+          <StatTile
+            label={`Čaká na zápis`}
+            value={formatCountSk(campaign.itemsPending)}
+            detail={campaign.itemsPending === 0 ? null : 'fronta na ne ešte nedošla'}
+            testId="tile-pending"
+          />
+        </div>
+        <div
+          className={styles.queueTile}
+          data-state="failed"
+          data-any={anyOf(campaign.itemsFailed)}
+        >
+          {/* tón `critical` — zápis sa nepodaril, produkt zlacnený nie je */}
+          <Icon className={styles.queueGlyph} name={TONE_ICON.critical} size={0.85} />
+          <StatTile
+            label={`Nepodarilo sa`}
+            value={formatCountSk(campaign.itemsFailed)}
+            detail={
+              campaign.itemsFailed === 0
+                ? null
+                : 'tieto produkty zlacnené nie sú — dajú sa zopakovať'
+            }
+            testId="tile-failed"
+          />
+        </div>
+        <div
+          className={styles.queueTile}
+          data-state="uncertain"
+          data-any={anyOf(campaign.itemsUncertain)}
+        >
+          {/* tón `attention` — treba sa pozrieť, nie je to zlyhanie */}
+          <Icon className={styles.queueGlyph} name={TONE_ICON.attention} size={0.85} />
+          <StatTile
+            label={`Nevieme, či sa zapísalo`}
+            value={formatCountSk(campaign.itemsUncertain)}
+            detail={
+              campaign.itemsUncertain === 0 ? null : 'zápis odišiel, odpoveď nedorazila'
+            }
+            testId="tile-uncertain"
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function DiscountDetail({ id }: { id: number }) {
   const [data, setData] = useState<DiscountDetailData | null>(null);
   const [queue, setQueue] = useState<QueueSnapshotView | null>(null);
@@ -391,9 +519,6 @@ export function DiscountDetail({ id }: { id: number }) {
   const shareOf = (units: number): string =>
     campaign.itemsTotal <= 0 ? '0' : ((units / campaign.itemsTotal) * 100).toFixed(2);
 
-  /** Má stav čo hlásiť? Prúžok farby dostane len dlaždica s nenulovým číslom. */
-  const anyOf = (units: number): 'ano' | 'nie' => (units > 0 ? 'ano' : 'nie');
-
   return (
     <div className={styles.page} data-testid="discount-detail">
       <div className={styles.dhead}>
@@ -456,70 +581,7 @@ export function DiscountDetail({ id }: { id: number }) {
               <i data-state="pending" style={{ width: `${shareOf(campaign.itemsPending)}%` }} />
             </div>
 
-            {/*
-             * Štyri dlaždice fronty — nikdy tri (D45, kontrakt UI, bod 22).
-             * „Nevieme, či sa zapísalo" je vlastný stav: zápis odišiel a
-             * odpoveď nedorazila, takže produkt zlacnený BYŤ MÔŽE. Farbu
-             * dostane len dlaždica, ktorá má čo hlásiť — červený prúžok nad
-             * nulou zlyhaní by bol falošný poplach. Stav preto nesie farbu,
-             * glyf aj slovo naraz.
-             */}
-            <div className={`kpis ${styles.queueTiles}`}>
-              <div className={styles.queueTile} data-state="ok" data-any={anyOf(campaign.itemsOk)}>
-                <StatTile
-                  label={`Zapísané`}
-                  value={formatCountSk(campaign.itemsOk)}
-                  detail={
-                    campaign.itemsOk === 0
-                      ? null
-                      : `z ${formatCountSk(campaign.itemsTotal)} produktov tejto zľavy`
-                  }
-                  testId="tile-ok"
-                />
-              </div>
-              <div
-                className={styles.queueTile}
-                data-state="pending"
-                data-any={anyOf(campaign.itemsPending)}
-              >
-                <StatTile
-                  label={`Čaká na zápis`}
-                  value={formatCountSk(campaign.itemsPending)}
-                  detail={campaign.itemsPending === 0 ? null : 'fronta na ne ešte nedošla'}
-                  testId="tile-pending"
-                />
-              </div>
-              <div
-                className={styles.queueTile}
-                data-state="failed"
-                data-any={anyOf(campaign.itemsFailed)}
-              >
-                <StatTile
-                  label={`Nepodarilo sa`}
-                  value={formatCountSk(campaign.itemsFailed)}
-                  detail={
-                    campaign.itemsFailed === 0
-                      ? null
-                      : 'tieto produkty zlacnené nie sú — dajú sa zopakovať'
-                  }
-                  testId="tile-failed"
-                />
-              </div>
-              <div
-                className={styles.queueTile}
-                data-state="uncertain"
-                data-any={anyOf(campaign.itemsUncertain)}
-              >
-                <StatTile
-                  label={`Nevieme, či sa zapísalo`}
-                  value={formatCountSk(campaign.itemsUncertain)}
-                  detail={
-                    campaign.itemsUncertain === 0 ? null : 'zápis odišiel, odpoveď nedorazila'
-                  }
-                  testId="tile-uncertain"
-                />
-              </div>
-            </div>
+            <QueueTiles campaign={campaign} />
 
             {/*
              * Pod dlaždicami zostáva už len to, čo v nich NIE JE — deň

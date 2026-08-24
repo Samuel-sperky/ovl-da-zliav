@@ -13,6 +13,14 @@
  *
  * Kreslí sa vnútri sekcie Poistky; v pokojnom stave je to jeden riadok, po
  * zamknutí sa rozvinie na formulár.
+ *
+ * OBA STAVY MAJÚ TRI KANÁLY (A3, šprint 20)
+ * -----------------------------------------
+ * Zamknuté nieslo farbu + značku + slovo, pokojný stav bol holá veta — ten
+ * istý údaj (zapisuje sa / nezapisuje sa) mal raz značku a raz nič. Kto
+ * hľadal očami značku, v pokojnom stave nenašiel odpoveď a musel prečítať
+ * odstavec. Odteraz nesú tri kanály obe vetvy; poučenie o tom, čo sa stane
+ * pri zrýchlení, zostáva vetou pod značkou, kam patrí.
  */
 import { useState } from 'react';
 
@@ -71,9 +79,17 @@ export function UnlockWritesForm({
 
   if (!writesLocked) {
     return (
-      <div className="lvl-3" data-testid="unlock-writes-form">
-        Zápisy nie sú zastavené. Keby appka začala zapisovať rýchlejšie, než je
-        bezpečné, zastaví sa sama a otvoriť to pôjde len tu, heslom.
+      <div className="stack" data-testid="unlock-writes-form">
+        <div className="row">
+          <span className="sig ok" data-testid="unlock-writes-state">
+            <SigMark variant="ok" />
+            Zápisy nie sú zastavené
+          </span>
+        </div>
+        <p className="lvl-3">
+          Keby appka začala zapisovať rýchlejšie, než je bezpečné, zastaví sa
+          sama a otvoriť to pôjde len tu, heslom.
+        </p>
       </div>
     );
   }
@@ -81,7 +97,7 @@ export function UnlockWritesForm({
   return (
     <div className="stack" data-testid="unlock-writes-form">
       <div className="row">
-        <span className="sig bad">
+        <span className="sig bad" data-testid="unlock-writes-state">
           <SigMark variant="bad" />
           Zápisy sú zastavené
         </span>

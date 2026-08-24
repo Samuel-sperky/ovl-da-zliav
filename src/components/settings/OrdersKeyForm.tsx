@@ -15,6 +15,14 @@
  *
  * Jediný rozdiel je platnosť: 30 dní namiesto 48 hodín — kľúč je len na
  * čítanie a nevidí zákaznícke údaje. Červená zóna maže oba kľúče naraz.
+ *
+ * VÝSLEDOK OVERENIA JE STAV, TAKŽE MÁ TRI KANÁLY (A3, šprint 20)
+ * -------------------------------------------------------------
+ * Rovnaká oprava ako v `ApiKeyForm.tsx` a z rovnakého dôvodu: hlásenie hneď
+ * po uložení nieslo výsledok overenia ako holé slovo v zátvorke, kým riadok
+ * o už uloženom kľúči ho niesol s farbou aj značkou. Jeden stav, dve podoby.
+ * Obe miesta teraz kreslia `<SigMark>` z `verifyLook()` a neznámy kód sa
+ * prizná, namiesto aby ticho zmizol.
  */
 import { useState } from 'react';
 
@@ -30,12 +38,37 @@ import {
   type KeyMetaView,
 } from '@/components/settings/api';
 
-const VERIFY_LABELS: Record<string, { label: string; tone: SigVariant }> = {
+/** Vzhľad výsledku overenia: slovo na povrch a tón, z ktorého ide farba aj značka. */
+interface VerifyLook {
+  readonly label: string;
+  readonly tone: SigVariant;
+}
+
+const VERIFY_LABELS: Record<string, VerifyLook> = {
   valid: { label: 'overený čítaním objednávok', tone: 'ok' },
   unverified: { label: 'neoverený', tone: 'idle' },
   invalid: { label: 'eshop ho neprijal', tone: 'bad' },
   forbidden: { label: 'nemá právo čítať objednávky', tone: 'bad' },
 };
+
+/**
+ * Kód overenia, ktorý slovník nepozná.
+ *
+ * `putOrdersKey()` vracia `verifyStatus` ako obyčajný reťazec, takže sem vie
+ * doraziť kód, o ktorom obrazovka nič nevie. Predtým sa vtedy stav ticho
+ * stratil. Jantár znamená „treba sa na to pozrieť" — nie zelenú (netvrdíme
+ * overenie) a nie červenú (netvrdíme odmietnutie).
+ */
+const UNKNOWN_VERIFY: VerifyLook = { label: 'stav overenia neznámy', tone: 'warn' };
+
+/**
+ * Výsledok overenia na vzhľad. `null` znamená, že sonda ešte nebežala — vtedy
+ * appka nekreslí nič, lebo nemá čo tvrdiť.
+ */
+function verifyLook(status: string | null | undefined): VerifyLook | null {
+  if (status === null || status === undefined || status === '') return null;
+  return VERIFY_LABELS[status] ?? UNKNOWN_VERIFY;
+}
 
 export interface OrdersKeyFormProps {
   keyMeta: KeyMetaView | null;
@@ -84,7 +117,10 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
     fail(res.error);
   }
 
-  const verify = keyMeta?.verifyStatus ? VERIFY_LABELS[keyMeta.verifyStatus] : null;
+  const verify = verifyLook(keyMeta?.verifyStatus);
+  /* Po uložení je výsledok overenia STAV, nie vsuvka: nesie farbu, značku aj
+     slovo rovnako ako riadok o už uloženom kľúči. Neznámy kód sa prizná. */
+  const storedVerify = stored === null ? null : (verifyLook(stored.verifyStatus) ?? UNKNOWN_VERIFY);
 
   return (
     <div data-testid="orders-key-form">
@@ -94,7 +130,7 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
           {verify ? (
             <>
               {' · '}
-              <span className={`sig ${verify.tone}`}>
+              <span className={`sig ${verify.tone}`} data-testid="orders-key-verify">
                 <SigMark variant={verify.tone} />
                 {verify.label}
               </span>
@@ -138,11 +174,14 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
         </div>
       </form>
 
-      {stored ? (
+      {stored && storedVerify ? (
         <p className="set-note" data-testid="orders-key-stored">
           Kľúč končiaci na {stored.last4} je uložený (
-          {VERIFY_LABELS[stored.verifyStatus]?.label ?? 'stav overenia neznámy'}). Predané
-          kusy sa doplnia pri najbližšom načítaní.
+          <span className={`sig ${storedVerify.tone}`} data-testid="orders-key-stored-verify">
+            <SigMark variant={storedVerify.tone} />
+            {storedVerify.label}
+          </span>
+          ). Predané kusy sa doplnia pri najbližšom načítaní.
         </p>
       ) : null}
 

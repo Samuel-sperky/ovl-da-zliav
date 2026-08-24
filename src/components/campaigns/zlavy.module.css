@@ -859,22 +859,70 @@
   background: var(--paper2);
   border-left: 3px solid transparent;
   min-width: 0;
+  /* Mriežka „značka | telo" — pozri `.queueGlyph` nižšie. */
+  display: grid;
+  grid-template-columns: auto 1fr;
+}
+
+/*
+ * ZNAČKA STAVU DLAŽDICE — TRETÍ KANÁL (A2, 20. 8. 2026)
+ * -----------------------------------------------------
+ * Dlaždice fronty niesli do tohto dátumu len farbu (ľavý prúžok) a slovo.
+ * `StatTile` (`ui/StatTile.tsx`) berie popisok ako reťazec, takže značka doň
+ * nejde vložiť, a znak v texte je presne to, čo rodina `.sig` prechodom na
+ * `<Icon>` opustila. Ikona preto stojí ako súrodenec dlaždice a odsadenie jej
+ * dáva táto mriežka — nie `.kpi`, ktorá patrí celej appke.
+ *
+ * Ten istý útvar má o pár stoviek riadkov vyššie riadok prekážky
+ * (`.blocker` + `.blockerGlyph` + `.blockerBody`). Je to zámer: v jednom tabe
+ * jeden vzor.
+ */
+.queueGlyph {
+  /* `Icon` meria v `em`, veľkosť teda nesie písmo — rovnako ako `.blockerGlyph`. */
+  font-size: 12px;
+  /* Na riadok popisku: `.kpi` má hore 11 px odsadenia, `.k` je malé písmo. */
+  margin: 12px 0 0 11px;
+  align-self: start;
+  /* Bez čísla nesie značka len TVAR. Farba prichádza nižšie, a len keď je čo hlásiť. */
+  color: var(--dim);
+}
+
+/* O odsadenie tela zľava sa stará mriežka, nie vlastná ľavá výplň dlaždice. */
+.queueTile :global(.kpi) {
+  padding-left: 6px;
+  min-width: 0;
 }
 
 .queueTile[data-any='ano'][data-state='ok'] {
   border-left-color: var(--st-good);
 }
 
+.queueTile[data-any='ano'][data-state='ok'] .queueGlyph {
+  color: var(--st-good);
+}
+
 .queueTile[data-any='ano'][data-state='pending'] {
   border-left-color: var(--st-progress);
+}
+
+.queueTile[data-any='ano'][data-state='pending'] .queueGlyph {
+  color: var(--st-progress);
 }
 
 .queueTile[data-any='ano'][data-state='failed'] {
   border-left-color: var(--st-critical);
 }
 
+.queueTile[data-any='ano'][data-state='failed'] .queueGlyph {
+  color: var(--st-critical);
+}
+
 .queueTile[data-any='ano'][data-state='uncertain'] {
   border-left-color: var(--st-attention);
+}
+
+.queueTile[data-any='ano'][data-state='uncertain'] .queueGlyph {
+  color: var(--st-attention);
 }
 
 /* ───────────────── poznámka pod akciou (štart, fronta, opakovanie) ─────── */

@@ -16,6 +16,18 @@
  *
  * Formulár sa kreslí vnútri sekcie Kľúče, preto nemá vlastný rám ani nadpis
  * sekcie — hostiteľ ich dodáva.
+ *
+ * VÝSLEDOK OVERENIA JE STAV, TAKŽE MÁ TRI KANÁLY (A3, šprint 20)
+ * -------------------------------------------------------------
+ * „overený u eshopu", „neoverený", „eshop ho neprijal" a „nemá právo meniť
+ * produkty" sú stavy kľúča, nie poznámky. Do 20. 8. 2026 mal riadok o už
+ * uloženom kľúči farbu + značku + slovo, ale hlásenie hneď po uložení nieslo
+ * to isté tvrdenie ako holé slovo v zátvorke — bez farby aj bez značky. Ten
+ * istý stav tak vyzeral na dvoch miestach jednej obrazovky inak a „eshop ho
+ * neprijal" splynulo s pokojnou vetou o úspechu. Obe miesta preto kreslia
+ * `<SigMark>` z `verifyLook()`.
+ *
+ * Neznámy kód overenia sa PRIZNÁ, nezmizne — pozri `UNKNOWN_VERIFY`.
  */
 import { useState } from 'react';
 
@@ -31,13 +43,76 @@ import {
   type KeyMetaView,
 } from '@/components/settings/api';
 
+/** Vzhľad výsledku overenia: slovo na povrch a tón, z ktorého ide farba aj značka. */
+export interface VerifyLook {
+  readonly label: string;
+  readonly tone: SigVariant;
+}
+
 /** Výsledok overenia kľúča → veta. Kód overenia na povrch nepatrí. */
-const VERIFY_LABELS: Record<string, { label: string; tone: SigVariant }> = {
+export const VERIFY_LABELS: Record<string, VerifyLook> = {
   valid: { label: 'overený u eshopu', tone: 'ok' },
   unverified: { label: 'neoverený', tone: 'idle' },
   invalid: { label: 'eshop ho neprijal', tone: 'bad' },
   forbidden: { label: 'nemá právo meniť produkty', tone: 'bad' },
 };
+
+/**
+ * Kód overenia, ktorý slovník nepozná.
+ *
+ * `putKey()` vracia `verifyStatus` ako obyčajný reťazec, takže sem naozaj vie
+ * doraziť kód, o ktorom táto obrazovka nič nevie. Predtým sa vtedy stav ticho
+ * stratil — indexácia mapy vrátila `undefined` a na obrazovke nezostalo nič.
+ * Teraz sa prizná: jantár znamená „treba sa na to pozrieť", nie zelenú
+ * (netvrdíme, že je overený) a nie červenú (netvrdíme, že ho eshop odmietol).
+ */
+export const UNKNOWN_VERIFY: VerifyLook = { label: 'stav overenia neznámy', tone: 'warn' };
+
+/**
+ * Výsledok overenia na vzhľad. `null` znamená, že sonda ešte nebežala — vtedy
+ * appka nekreslí nič, lebo nemá čo tvrdiť.
+ */
+export function verifyLook(status: string | null | undefined): VerifyLook | null {
+  if (status === null || status === undefined || status === '') return null;
+  return VERIFY_LABELS[status] ?? UNKNOWN_VERIFY;
+}
+
+/**
+ * Stav overenia ako JEDEN uzol — farba (trieda), značka (ikona) a slovo spolu.
+ *
+ * Je to komponent, a nie dvakrát opísaný `<span>`, z dvoch dôvodov. Prvý:
+ * ten istý stav sa na tejto obrazovke kreslí na dvoch miestach (riadok
+ * o uloženom kľúči a hlásenie hneď po uložení) a dve kópie sa časom rozídu —
+ * presne tak vznikla podoba, kde jedno miesto malo tri kanály a druhé jeden.
+ * Druhý: stav, ktorý vzniká až po odpovedi servera, sa v statickom renderi
+ * nedá vykresliť, takže bez samostatného uzla by ho žiadny test nevidel.
+ */
+export function VerifyState({ look, testId }: { look: VerifyLook; testId: string }) {
+  return (
+    <span className={`sig ${look.tone}`} data-testid={testId}>
+      <SigMark variant={look.tone} />
+      {look.label}
+    </span>
+  );
+}
+
+/**
+ * Hlásenie o NEULOŽENOM kľúči.
+ *
+ * Vlastný uzol z rovnakého dôvodu ako `VerifyState`: je to najdôležitejší stav
+ * tejto obrazovky (do produkčného eshopu sa nič nezapísalo) a zároveň jediný,
+ * ktorý vzniká až po odpovedi servera — bez samostatného uzla ho statický
+ * render nevykreslí a test nevidí, či mu nechýba značka.
+ */
+export function NotStoredState() {
+  return (
+    <p className="sig bad" data-testid="api-key-not-stored">
+      <SigMark variant="bad" />
+      Kľúč sa NEULOŽIL — v appke zostáva pôvodný stav a do eshopu sa nič
+      neposlalo.
+    </p>
+  );
+}
 
 export interface ApiKeyFormProps {
   keyMeta: KeyMetaView | null;
@@ -90,7 +165,10 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
     fail(res.error);
   }
 
-  const verify = keyMeta?.verifyStatus ? VERIFY_LABELS[keyMeta.verifyStatus] : null;
+  const verify = verifyLook(keyMeta?.verifyStatus);
+  /* Po uložení je výsledok overenia STAV, nie vsuvka: nesie farbu, značku aj
+     slovo rovnako ako riadok o už uloženom kľúči. Neznámy kód sa prizná. */
+  const storedVerify = stored === null ? null : (verifyLook(stored.verifyStatus) ?? UNKNOWN_VERIFY);
 
   return (
     <div data-testid="api-key-form">
@@ -100,10 +178,7 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
           {verify ? (
             <>
               {' · '}
-              <span className={`sig ${verify.tone}`}>
-                <SigMark variant={verify.tone} />
-                {verify.label}
-              </span>
+              <VerifyState look={verify} testId="api-key-verify" />
             </>
           ) : null}
         </div>
@@ -145,21 +220,17 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
         </div>
       </form>
 
-      {stored ? (
+      {stored && storedVerify ? (
         <p className="set-note" data-testid="api-key-stored">
           Kľúč končiaci na {stored.last4} je uložený (
-          {VERIFY_LABELS[stored.verifyStatus]?.label ?? 'stav overenia neznámy'}). Zľavy,
-          ktoré na kľúč čakali a sú ešte vo svojom okne, appka dopísala sama.
+          <VerifyState look={storedVerify} testId="api-key-stored-verify" />
+          ). Zľavy, ktoré na kľúč čakali a sú ešte vo svojom okne, appka dopísala sama.
         </p>
       ) : null}
 
       {failure ? (
         <div className="stack">
-          <p className="sig bad" data-testid="api-key-not-stored">
-            <SigMark variant="bad" />
-            Kľúč sa NEULOŽIL — v appke zostáva pôvodný stav a do eshopu sa nič
-            neposlalo.
-          </p>
+          <NotStoredState />
           <ActionFailurePanel failure={failure} testId="api-key-failure" />
         </div>
       ) : null}
