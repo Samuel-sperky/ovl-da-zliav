@@ -21,6 +21,12 @@ export default tseslint.config(
       // Pracovné git worktree agentov majú vlastné node_modules — bez tohto
       // ignoru ich lint zosnímkuje a vyrobí stotisíce hlásení z cudzieho kódu.
       '.claude/**',
+      // Výstup snímkovača (`npm run snimky`): PNG a zabalená stránka, v ktorej
+      // je celý Vite bundle. `.gitignore` ho drží mimo repa, ale eslint sa
+      // `.gitignore` nepýta — a bez tohto riadka `npm run lint` po prvom
+      // snímkovaní vyhlási takmer šesťtisíc chýb vo vygenerovanom kóde a tie
+      // skutočné v `src/` sa v tom stratia (zmerané 25. 8. 2026).
+      'snimky/**',
     ],
   },
   js.configs.recommended,

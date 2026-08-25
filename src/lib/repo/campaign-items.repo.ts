@@ -73,6 +73,8 @@ const SQL_NEXT_PENDING =
   `SELECT ${COLUMNS} FROM campaign_items WHERE campaign_id = ? AND status = 'pending' ` +
   'ORDER BY position ASC LIMIT ?';
 
+const SQL_COUNT = 'SELECT COUNT(*) AS total FROM campaign_items WHERE campaign_id = ?';
+
 const SQL_COUNT_BY_STATUS =
   'SELECT status, COUNT(*) AS total FROM campaign_items WHERE campaign_id = ? GROUP BY status';
 
@@ -277,6 +279,12 @@ export interface CampaignItemsRepoExt extends CampaignItemsRepo {
   ): Promise<CampaignItemRecordV3[]>;
   /** K2: ďalších N `pending` položiek podľa `position` — vstup fronty. */
   nextPending(campaignId: number, limit: number, conn?: Queryable): Promise<CampaignItemRecordV3[]>;
+  /**
+   * Koľko položiek zľava má. Protipól `listPage()`: bez neho by sa celkový
+   * počet dal zistiť len tak, že sa natiahnu VŠETKY riadky a spočíta sa dĺžka
+   * poľa — teda presne to, čomu sa stránkovanie vyhýba.
+   */
+  countByCampaign(campaignId: number, conn?: Queryable): Promise<number>;
   countByStatus(campaignId: number, conn?: Queryable): Promise<ItemStatusCounts>;
   /** K2: súhrn fronty naprieč živými kampaňami (hlavička „Fronta X/Y"). */
   queueTotals(conn?: Queryable): Promise<QueueTotals>;
@@ -388,6 +396,13 @@ export function createCampaignItemsRepo(deps: CampaignItemsRepoDeps = {}): Campa
       if (!isValidId(campaignId)) return [];
       const capped = Math.min(1000, Math.max(1, Math.trunc(limit)));
       return selectMany(conn, SQL_NEXT_PENDING, [campaignId, capped]);
+    },
+
+    async countByCampaign(campaignId: number, conn?: Queryable): Promise<number> {
+      if (!isValidId(campaignId)) return 0;
+      const rows = await run<Array<{ total: number | bigint }>>(conn, SQL_COUNT, [campaignId]);
+      const row = Array.isArray(rows) ? rows[0] : undefined;
+      return row === undefined ? 0 : Number(row.total);
     },
 
     async countByStatus(campaignId: number, conn?: Queryable): Promise<ItemStatusCounts> {

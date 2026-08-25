@@ -158,9 +158,17 @@ const SQL_PLANNED_FOR_PRODUCT =
  * D28: prekryv okna s inou NEterminálnou/aktívnou kampaňou na tých produktoch.
  * `queued` je v zozname (K2) — kampaň čakajúca na rozpočet má okno rovnako
  * záväzné ako tá, ktorá práve zapisuje.
+ *
+ * `i.product_id` je v SELECTe zámerne a `DISTINCT` zámerne NIE JE. Kým dotaz
+ * vracal iba stĺpce kampane, z hromadnej odpovede sa nedalo zistiť, KTORÝ
+ * produkt koliduje — a náhľad sa preto po každom náleze pýtal ešte raz na
+ * každý produkt bloku zvlášť (500 dotazov na blok, pri 10 000 produktoch až
+ * 10 020 namiesto 20). Zoskupenie podľa produktu robí `findFutureOverlapsByProduct()`,
+ * deduplikáciu kampaní (to, čo predtým robil `DISTINCT`) robí `findFutureOverlaps()`
+ * cez `id`. Poradie riadkov drží `ORDER BY` rovnako ako predtým.
  */
 const SQL_FUTURE_OVERLAPS_PREFIX =
-  `SELECT DISTINCT ${COLUMNS.replace(/(^|, )/g, '$1c.')} FROM campaigns c ` +
+  `SELECT i.product_id, ${COLUMNS.replace(/(^|, )/g, '$1c.')} FROM campaigns c ` +
   'JOIN campaign_items i ON i.campaign_id = c.id WHERE i.product_id IN ';
 const SQL_FUTURE_OVERLAPS_SUFFIX =
   " AND c.status IN ('scheduled','needs_key','running','missed','queued','done','partial') " +
@@ -216,6 +224,24 @@ const SQL_SYNC_COUNTERS =
   "c.items_uncertain = (SELECT COUNT(*) FROM campaign_items i WHERE i.campaign_id = c.id AND i.status = 'uncertain') " +
   'WHERE c.id = ?';
 
+/**
+ * I11: posledný VLASTNÝ úspešný zápis pre CELÚ sadu produktov naraz.
+ *
+ * Tvar aj poradie stĺpcov sú zámerne rovnaké ako v `insights.repo.ts`
+ * (`SQL_LAST_OWN_WRITES_PREFIX`, G2) — je to tá istá otázka nad tými istými
+ * tabuľkami a dva rôzne tvary by sa časom rozišli. Zoradenie
+ * `product_id ASC, finished_at DESC, id DESC` znamená, že prvý výskyt produktu
+ * v odpovedi je jeho najnovší zápis; `LIMIT 1` na produkt sa v jednom dotaze
+ * spraviť nedá, robí to volajúci prvým výskytom.
+ */
+const SQL_LAST_OWN_WRITES_PREFIX =
+  'SELECT i.product_id, c.id AS campaign_id, c.percent, c.date_from, c.date_to, i.finished_at ' +
+  'FROM campaign_items i JOIN campaigns c ON c.id = i.campaign_id ' +
+  "WHERE i.status = 'ok' AND i.finished_at IS NOT NULL AND i.product_id IN ";
+
+const SQL_LAST_OWN_WRITES_SUFFIX =
+  ' ORDER BY i.product_id ASC, i.finished_at DESC, i.id DESC';
+
 /** I11: posledný VLASTNÝ úspešný zápis (`campaign_items.status = 'ok'`). */
 const SQL_LAST_OWN_WRITE =
   'SELECT c.id AS campaign_id, c.percent, c.date_from, c.date_to, i.finished_at ' +
@@ -256,6 +282,21 @@ interface CampaignRow {
   created_by: number;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+/** Riadok prekryvu (D28) — kampaň PLUS produkt, ktorý ju do odpovede pritiahol. */
+interface OverlapRow extends CampaignRow {
+  product_id: number;
+}
+
+/** Riadok dávkového `lastOwnWrites()` (I11). */
+interface LastOwnWriteRow {
+  product_id: number;
+  campaign_id: number;
+  percent: number;
+  date_from: Date | string;
+  date_to: Date | string;
+  finished_at: Date | string;
 }
 
 const toDate = (value: Date | string): Date => (value instanceof Date ? value : new Date(value));
@@ -434,7 +475,24 @@ export interface CampaignsRepoExt {
     to: DateOnly,
     conn?: Queryable,
   ): Promise<CampaignRecordV3[]>;
+  /**
+   * D28 + U3: to isté, čo `findFutureOverlaps()`, ale s odpoveďou na otázku
+   * „KTORÝ produkt s KTOROU kampaňou". Jeden dotaz na celý blok produktov —
+   * bez neho sa dá presnosť dosiahnuť len dotazom na každý produkt zvlášť.
+   */
+  findFutureOverlapsByProduct(
+    productIds: number[],
+    from: DateOnly,
+    to: DateOnly,
+    conn?: Queryable,
+  ): Promise<Map<number, CampaignRecordV3[]>>;
   lastOwnWrite(productId: number, conn?: Queryable): Promise<LastOwnWrite | null>;
+  /**
+   * I11: `lastOwnWrite()` pre celú sadu naraz. Produkt bez vlastného zápisu
+   * v mape jednoducho nie je — `null` sa nedopĺňa, aby sa „nič sme nezapísali"
+   * nedalo pomýliť s „zapísali sme nič".
+   */
+  lastOwnWrites(productIds: number[], conn?: Queryable): Promise<Map<number, LastOwnWrite>>;
   findScheduled(conn?: Queryable): Promise<CampaignRecordV3[]>;
   /** K2: kampane čakajúce na denný rozpočet, najskorší `date_from` prvý. */
   findQueued(limit?: number, conn?: Queryable): Promise<CampaignRecordV3[]>;
@@ -477,6 +535,28 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
   ): Promise<CampaignRecordV3[]> => {
     const rows = await run<CampaignRow[]>(conn, sql, values);
     return (Array.isArray(rows) ? rows : []).map(mapRow);
+  };
+
+  /**
+   * D28: surové riadky prekryvu — jeden dotaz na celú sadu. Oba verejné tvary
+   * (`findFutureOverlaps`, `findFutureOverlapsByProduct`) sa líšia už len tým,
+   * ako tie isté riadky poskladajú; SQL sa nesmie rozdvojiť.
+   */
+  const overlapRows = async (
+    productIds: number[],
+    from: DateOnly,
+    to: DateOnly,
+    conn: Queryable | undefined,
+  ): Promise<OverlapRow[]> => {
+    const unique = [...new Set(productIds.filter(isValidId))];
+    if (unique.length === 0) return [];
+    const sql =
+      SQL_FUTURE_OVERLAPS_PREFIX +
+      `(${unique.map(() => '?').join(', ')})` +
+      SQL_FUTURE_OVERLAPS_SUFFIX;
+    // Prekryv okien: c.date_from <= to AND c.date_to >= from.
+    const rows = await run<OverlapRow[]>(conn, sql, [...unique, to, from]);
+    return Array.isArray(rows) ? rows : [];
   };
 
   const repo: CampaignsRepoExt = {
@@ -681,14 +761,72 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
       to: DateOnly,
       conn?: Queryable,
     ): Promise<CampaignRecordV3[]> {
+      const rows = await overlapRows(productIds, from, to, conn);
+      // `DISTINCT` v SQL nahradilo zoskupenie podľa `id` — jeden riadok na
+      // kampaň, v poradí, v akom ich vrátil `ORDER BY` (prvý výskyt vyhráva).
+      const seen = new Set<number>();
+      const out: CampaignRecordV3[] = [];
+      for (const row of rows) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        out.push(mapRow(row));
+      }
+      return out;
+    },
+
+    async findFutureOverlapsByProduct(
+      productIds: number[],
+      from: DateOnly,
+      to: DateOnly,
+      conn?: Queryable,
+    ): Promise<Map<number, CampaignRecordV3[]>> {
+      const rows = await overlapRows(productIds, from, to, conn);
+      const out = new Map<number, CampaignRecordV3[]>();
+      // Jeden `mapRow()` na kampaň, nie na riadok — tá istá kampaň sa v odpovedi
+      // opakuje raz za každý kolidujúci produkt a mapovanie nie je zadarmo.
+      const byCampaign = new Map<number, CampaignRecordV3>();
+      for (const row of rows) {
+        let record = byCampaign.get(row.id);
+        if (record === undefined) {
+          record = mapRow(row);
+          byCampaign.set(row.id, record);
+        }
+        const productId = Number(row.product_id);
+        const list = out.get(productId);
+        if (list === undefined) {
+          out.set(productId, [record]);
+        } else if (!list.includes(record)) {
+          list.push(record);
+        }
+      }
+      return out;
+    },
+
+    async lastOwnWrites(
+      productIds: number[],
+      conn?: Queryable,
+    ): Promise<Map<number, LastOwnWrite>> {
       const unique = [...new Set(productIds.filter(isValidId))];
-      if (unique.length === 0) return [];
+      const out = new Map<number, LastOwnWrite>();
+      if (unique.length === 0) return out;
       const sql =
-        SQL_FUTURE_OVERLAPS_PREFIX +
+        SQL_LAST_OWN_WRITES_PREFIX +
         `(${unique.map(() => '?').join(', ')})` +
-        SQL_FUTURE_OVERLAPS_SUFFIX;
-      // Prekryv okien: c.date_from <= to AND c.date_to >= from.
-      return selectMany(conn, sql, [...unique, to, from]);
+        SQL_LAST_OWN_WRITES_SUFFIX;
+      const rows = await run<LastOwnWriteRow[]>(conn, sql, unique);
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const productId = Number(row.product_id);
+        // Zoradené DESC — prvý výskyt produktu je jeho najnovší zápis.
+        if (out.has(productId)) continue;
+        out.set(productId, {
+          percent: Number(row.percent),
+          from: toDateOnly(row.date_from),
+          to: toDateOnly(row.date_to),
+          at: toDate(row.finished_at),
+          campaignId: Number(row.campaign_id),
+        });
+      }
+      return out;
     },
 
     async lastOwnWrite(productId: number, conn?: Queryable): Promise<LastOwnWrite | null> {
