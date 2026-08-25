@@ -139,6 +139,25 @@ export interface KeyMetaView {
   expiresAt: string | null;
   secondsLeft: number | null;
   verifyStatus: 'unverified' | 'valid' | 'invalid' | 'forbidden' | null;
+  /**
+   * Prečo kľúč nie je overený, vetou. `null` = overený je, niet čo dodať.
+   *
+   * Stav (`verifyStatus`) a dôvod sú dve rôzne veci a obe treba: slovo v tabuľke
+   * hovorí ČO, táto veta hovorí, čo s tým. Pri zablokovanej adrese je to
+   * jediné miesto, kde sa človek dozvie, že nový kľúč nepomôže.
+   *
+   * Voliteľné v type, lebo staršie odpovede ho nemajú a chýbajúca veta nesmie
+   * zhodiť obrazovku.
+   */
+  verifyNote?: string | null;
+  /**
+   * Vyzerá to, že v oboch slotoch je ten istý kľúč? Porovnáva sa `last4`, takže
+   * `true` je domnienka, nie fakt — a preto sa to menuje `looksLike…`.
+   * `null` = jeden zo slotov je prázdny, niet čo porovnávať.
+   */
+  looksLikeSameKey?: boolean | null;
+  /** Veta k tomu porovnaniu; `null` = niet čo dodať. */
+  sameKeyNote?: string | null;
 }
 
 export interface CanaryView {
