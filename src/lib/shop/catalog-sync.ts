@@ -30,11 +30,17 @@
  * ČO SA V TOMTO MODULE NESMIE POKAZIŤ
  * -----------------------------------
  *  - **Synchronizácia je ČÍTANIE a NESMIE konzumovať zápisový rozpočet (K7).**
- *    Modul volá výhradne `listProducts()` a v celom súbore sa nevyskytuje
- *    `setReduction` ani audit event `write_attempt` — a je na to test, ktorý
- *    skenuje zdroj. Denný strop 200 zápisov (K2) sa počíta z auditu, takže keby
- *    sem `write_attempt` niekedy pribudol, ticho by ukradol rozpočet fronte,
- *    ktorá beží týždne.
+ *    Modul volá výhradne `listProducts()`. Denný strop 200 zápisov (K2) sa
+ *    počíta z auditu, takže keby sem `write_attempt` niekedy pribudol, ticho by
+ *    ukradol rozpočet fronte, ktorá beží týždne.
+ *
+ *    Do 25. 8. 2026 tu stálo, že „je na to test, ktorý skenuje zdroj". Ten test
+ *    bol zmazaný a je to správne: hľadanie reťazca `setReduction` v tomto súbore
+ *    prežije hociktorý spôsob, ako ten zápis zavolať nepriamo, a `toContain` nad
+ *    podreťazcom neprežije ani premenovanie (poučenie zo Sprintu 20). Nahradil
+ *    ho `test/unit/catalog-sync.spec.ts`, ktorý pustí celý `syncCatalog()` proti
+ *    shopu, ktorého zápisové metódy hodia, a rozpočet prečíta PRODUKČNÝM
+ *    `createBudget()`. Meria sa teda spotreba, nie text.
  *  - **Kľúč sa nikdy nedotkne.** Čítacie volania shop klienta nemajú parameter
  *    pre `SecretRef` (D48), takže `X-Api-Key` sa pri synchronizácii vôbec
  *    nezostaví (I1). Sync teda funguje aj vtedy, keď kľúč nie je vložený.
@@ -201,7 +207,27 @@ export interface CatalogSyncResult {
 const defaultSleep = (ms: number): Promise<void> =>
   ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
 
-/** `ProductListItem` → riadok `catalog_cache`. Cena je DECIMAL, nikdy float (§2). */
+/**
+ * `ProductListItem` → riadok `catalog_cache`. Cena je DECIMAL, nikdy float (§2).
+ *
+ * TENTO RIADOK JE CHUDOBNÝ A VIE O TOM (24. 8. 2026)
+ * --------------------------------------------------
+ * `source: 'list'` a `raw` = `{id, name, price, has_attributes}` je všetko, čo
+ * zoznamový endpoint dá. Riadok, ktorý už má doťahnutý detail (`get`/`batch`),
+ * je bohatší a tento prechod ho NESMIE prepísať späť na seba — inak sa detail
+ * platí znova na každom prechode (≈ 42 869 čítaní ≈ 179 dní rozpočtu; presne
+ * to sa 13.–20. 8. dialo a skončilo to banom na IP).
+ *
+ * Zabraňuje tomu podmienka v `SQL_UPSERT_SUFFIX` (`repo/catalog.repo.ts`), a je
+ * TAM ZÁMERNE, nie tu: rozhodnúť sa dá len s vedomím, čo v riadku UŽ leží, a to
+ * vie iba `ON DUPLICATE KEY UPDATE`. Tento modul by na to potreboval `SELECT`
+ * pred každou dávkou — 413 dotazov navyše a stále s pretekom medzi nimi.
+ *
+ * Ochrana platí len dovtedy, kým sa `name`, `price` a `has_attributes` z tohto
+ * riadku zhodujú s uloženými. Keď sa produkt v shope naozaj zmení, zoznam to
+ * ohlási zadarmo, detail sa uvoľní a doťahovanie ho obnoví — dôvod a hranice
+ * sú rozpísané pri `SQL_UPSERT_SUFFIX`.
+ */
 export function toCatalogRow(
   product: ProductListItem,
   fetchedAt: UtcDate,

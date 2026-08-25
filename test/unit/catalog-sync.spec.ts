@@ -8,8 +8,9 @@
  *  - beh sa zastaví PRED prekročením denného rozpočtu čítaní (A4) a skončí
  *    pokojne s časom, kedy pokračuje (polnoc UTC), nie chybou,
  *  - 429 pozastaví CELÝ beh podľa `Retry-After` (A3), neopakuje jednu stránku,
- *  - synchronizácia je ČÍTANIE: v module sa nevyskytuje `setReduction` ani
- *    `write_attempt`, takže nemá ako minúť zápisový rozpočet (K7 vs. K2),
+ *  - synchronizácia je ČÍTANIE: po plnom behu je zápisový rozpočet (K2)
+ *    nezmenený a v audite nepribudol ani jeden `write_attempt` (K7 vs. K2) —
+ *    meria sa beh, nie výskyt reťazca v zdrojáku,
  *  - zlyhanie uprostred nechá zapísané riadky platné (`partial`) a NIKDY
  *    nehádže,
  *  - shop, ktorý ignoruje `page`, sa nezacyklí,
@@ -17,14 +18,12 @@
  *    počítači, ktorý je v noci vypnutý — a nedokončený prechod nesmie čakať na
  *    nočné okno vôbec.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { Paged, ProductListItem, ShopCtx } from '@/contracts';
+import type { AuditInput, AuditWriter, Paged, ProductListItem, ShopCtx } from '@/contracts';
 
 import { todayInZone } from '@/lib/domain/dates';
+import { createBudget, type WriteAttemptCounter } from '@/lib/engine/budget';
 import {
   DEFAULT_CATALOG_PER_PAGE,
   emptyCatalogProgress,
@@ -916,18 +915,128 @@ describe('syncCatalog — 429 pozastaví celý beh (A3)', () => {
 
 /* ═════════════ K7 vs. K2 — sync nesmie minúť zápisový rozpočet ════════════ */
 
-describe('K7 — synchronizácia nekonzumuje zápisový rozpočet', () => {
-  it('modul neobsahuje setReduction ani write_attempt', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/lib/shop/catalog-sync.ts'),
-      'utf8',
-    );
-    // Sken zdroja, nie správania: keby sem niekto pridal zápis alebo audit
-    // event `write_attempt`, ticho by ukradol rozpočet fronte (K2) a žiadny
-    // behový test by si toho nemusel všimnúť.
-    const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    expect(withoutComments).not.toMatch(/setReduction/);
-    expect(withoutComments).not.toMatch(/write_attempt/);
+/**
+ * Shop s PASCOU na zápis. `syncCatalog` dostáva typovo len `listProducts`, ale
+ * v behu je klient jeden objekt — keby si niekto zápisovú metódu vytiahol,
+ * zaznamená sa to tu.
+ */
+interface PastShop extends FakeShop {
+  /** Zápisové metódy, ktoré sa (ne)zavolali. Prázdne pole = K7 platí. */
+  writeCalls: string[];
+  setReduction: (...args: unknown[]) => never;
+  probeKey: (...args: unknown[]) => never;
+  getProductFull: (...args: unknown[]) => never;
+}
+
+function pastShop(base: FakeShop): PastShop {
+  const writeCalls: string[] = [];
+  const trap =
+    (name: string) =>
+    (...args: unknown[]): never => {
+      writeCalls.push(`${name}(${args.length})`);
+      throw new Error(`K7: synchronizácia zavolala zápisovú metódu ${name}`);
+    };
+  return {
+    writeCalls,
+    pagesRequested: base.pagesRequested,
+    listProducts: base.listProducts.bind(base),
+    setReduction: trap('setReduction'),
+    probeKey: trap('probeKey'),
+    getProductFull: trap('getProductFull'),
+  };
+}
+
+describe('K7 — synchronizácia nekonzumuje zápisový rozpočet (K2)', () => {
+  /*
+   * Do 24. 8. 2026 tu stál sken zdrojáku:
+   * `expect(source).not.toMatch(/setReduction/)` a to isté pre `write_attempt`.
+   * Nemeral nič, čo by sa nedalo obísť: stačilo zápis delegovať do nového
+   * helpera (reťazec sa v tomto module neobjaví) alebo napísať
+   * `const EV = 'write_' + 'attempt'` — a sync by ticho zožral zápisový
+   * rozpočet fronte, zatiaľ čo test svieti zeleno.
+   *
+   * Meria sa preto SPRÁVANIE: rozpočet K2 sa počíta VÝHRADNE z počtu udalostí
+   * `write_attempt` v audite (`src/lib/engine/budget.ts`), takže sa pustí plný
+   * sync a porovná sa stav rozpočtu pred ním a po ňom — tým istým počítadlom,
+   * z akého žije produkcia.
+   */
+  it('plný sync prebehne a zápisový rozpočet ostane nedotknutý', async () => {
+    const now = (): Date => new Date('2026-08-12T10:00:00.000Z');
+
+    /** Audit behu. `write_attempt` sa tu NESMIE objaviť. */
+    const events: AuditInput[] = [];
+    const audit: AuditWriter = {
+      async appendAudit(input: AuditInput): Promise<void> {
+        events.push(input);
+      },
+    };
+
+    /** Presne to počítadlo, z ktorého žije K2 — len nad zoznamom v pamäti. */
+    const counter: WriteAttemptCounter = {
+      async countWriteAttemptsOn(): Promise<number> {
+        return events.filter((e) => e.eventType === 'write_attempt').length;
+      },
+    };
+    const writeBudget = createBudget({ counter, dailyBudget: 200, now });
+    const pred = await writeBudget.remainingToday();
+
+    const catalog = fakeCatalog({ now });
+    const shop = pastShop(fakeShop(23));
+
+    const result = await syncCatalog({
+      shopClient: shop,
+      catalog,
+      progress: catalog,
+      budget: catalog,
+      audit,
+      now,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+
+    // Poistka: keby sync nič neurobil, tvrdenia nižšie by boli falošne zelené.
+    expect(result.outcome).toBe('ok');
+    expect(result.pages).toBeGreaterThan(1);
+    expect(catalog.rows.size).toBe(23);
+    expect(catalog.reads).toBeGreaterThan(0);
+    expect(events.length).toBeGreaterThan(0);
+
+    // A teraz to, o čo ide: zápisová strana sa nepohla ani o jedno.
+    const po = await writeBudget.remainingToday();
+    expect(events.map((e) => e.eventType)).not.toContain('write_attempt');
+    expect(po.spent).toBe(0);
+    expect(po.remaining).toBe(pred.remaining);
+    expect(shop.writeCalls).toEqual([]);
+  });
+
+  it('to isté platí aj pre beh, ktorý sa zastaví na minutom rozpočte čítaní', async () => {
+    // Prerušený beh je iná cesta kódom (skorý návrat, iný audit) — a práve
+    // takou cestou by sa zápis dal prepašovať nepovšimnuto.
+    const now = (): Date => new Date('2026-08-12T10:00:00.000Z');
+    const events: AuditInput[] = [];
+    const audit: AuditWriter = {
+      async appendAudit(input: AuditInput): Promise<void> {
+        events.push(input);
+      },
+    };
+    const catalog = fakeCatalog({ now, readsAlreadyUsed: ANON_READS_PER_UTC_DAY });
+    const shop = pastShop(fakeShop(50));
+
+    const result = await syncCatalog({
+      shopClient: shop,
+      catalog,
+      progress: catalog,
+      budget: catalog,
+      audit,
+      now,
+      perPage: 5,
+      sleepFn: noSleep,
+    });
+
+    expect(result.stoppedBy).toBe('daily_budget');
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.map((e) => e.eventType)).not.toContain('write_attempt');
+    expect(shop.writeCalls).toEqual([]);
   });
 });
 
