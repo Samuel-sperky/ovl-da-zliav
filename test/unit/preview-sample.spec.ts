@@ -186,6 +186,41 @@ function makeWorld(options: {
       },
     } as never,
     catalogRepo,
+    /*
+     * K7 — ZDIEĽANÝ denný rozpočet anonymných čítaní shopu MUSÍ byť tu falošný.
+     *
+     * Bez tejto dep si ho `buildPreview()` vezme z `defaultCatalogRepo`, čo je
+     * skutočná tabuľka `shop_read_budget` v databáze. Unit test by tak závisel
+     * na stave, ktorý sa (a) delí so všetkým, čo dnes bežalo, a (b) nuluje sa
+     * až na UTC polnoci. Presne to sa 25. 8. 2026 stalo: „malá sada číta ceny
+     * zo shopu" ráno prešla a po niekoľkých behoch balíka padla, lebo rozpočet
+     * bol vyčerpaný a náhľad si ceny správne vzal z katalógu. Chyba nebola ani
+     * v náhľade, ani v tvrdení testu — bola v tom, že test o rozpočte nevedel.
+     *
+     * Rozpočet je zámerne veľký a nemenný: tento súbor meria, ODKIAĽ prišli
+     * ceny a koľko dotazov odišlo. Správanie pri vyčerpanom rozpočte je iná
+     * otázka a patrí jej vlastný test s vlastným, malým rozpočtom.
+     */
+    readBudget: {
+      async reserveShopReads(count = 1) {
+        return {
+          requested: count,
+          granted: count,
+          status: {
+            lane: 'anon' as const,
+            day: '2026-08-14',
+            limit: 10_000,
+            used: 0,
+            remaining: 10_000,
+            exhausted: false,
+            resetAt: new Date('2026-08-15T00:00:00.000Z'),
+            minuteLimit: 24,
+            usedThisMinute: 0,
+            known: true,
+          },
+        };
+      },
+    } as never,
     previewTokens: createPreviewTokenService({ secret: Buffer.alloc(32, 7) }),
     guards: {
       settingsRepo: {

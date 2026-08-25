@@ -44,7 +44,6 @@ import type {
   ApiKeyRepo,
   CampaignKind,
   CampaignRecord,
-  CampaignStatus,
   CampaignsRepo,
   CatalogRepo,
   DateOnly,
@@ -74,12 +73,21 @@ import {
   previewTokenService as defaultPreviewTokens,
   type PreviewTokenServiceV3,
 } from '@/lib/crypto/preview-token';
+import { anonReadCost } from '@/lib/catalog/product-details';
 import { allowlistRepo as defaultAllowlistRepo } from '@/lib/repo/allowlist.repo';
-import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
-import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
+import {
+  campaignsRepo as defaultCampaignsRepo,
+  type CampaignsRepoExt,
+  type CampaignStatusV3,
+} from '@/lib/repo/campaigns.repo';
+import {
+  catalogRepo as defaultCatalogRepo,
+  type CatalogRepoExt,
+} from '@/lib/repo/catalog.repo';
 import { checkScope, type GuardsDeps } from '@/lib/engine/guards';
 import { numberToMoney } from '@/lib/engine/snapshot';
 import { isShopError } from '@/lib/shop/errors';
+import type { ReadBudgetStatus } from '@/lib/shop/read-budget';
 
 /** Koľko riadkov ide do potvrdenia. Šesť — mockup `nova-zlava.html`. */
 export const PREVIEW_SAMPLE_SIZE = 6;
@@ -138,9 +146,23 @@ export interface PreviewInput {
 export interface PreviewDeps {
   shopClient: Pick<ShopClient, 'batchGetProducts'>;
   allowlistRepo?: Pick<AllowlistRepo, 'areAllActive' | 'listActive'>;
-  campaignsRepo?: Pick<CampaignsRepo, 'lastOwnWrite' | 'findFutureOverlaps'>;
+  /**
+   * Dávkové tvary (`findFutureOverlapsByProduct`, `lastOwnWrites`) sú tu
+   * VOLITEĽNÉ len kvôli starým fakes v testoch — produkčný repozitár ich má
+   * vždy a `test/unit/preview-davkove-dotazy.spec.ts` to nad reálnym
+   * `campaignsRepoV3` stráži. Keď chýbajú, náhľad sa vráti k dotazu na produkt
+   * (správny výsledok, N+1 počet dotazov).
+   */
+  campaignsRepo?: Pick<CampaignsRepo, 'lastOwnWrite' | 'findFutureOverlaps'> &
+    Partial<Pick<CampaignsRepoExt, 'findFutureOverlapsByProduct' | 'lastOwnWrites'>>;
   /** `getMany` je voliteľné — bez kľúča aj pri veľkej sade z neho vieme ceny. */
   catalogRepo?: (Pick<CatalogRepo, 'upsert'> & Partial<Pick<CatalogRepo, 'getMany'>>) | null;
+  /**
+   * K7 — ZDIEĽANÝ denný rozpočet anonymných čítaní shopu. Náhľad z neho platí
+   * rovnako ako synchronizácia katalógu a `/api/catalog/details`; bez neho by
+   * čítal mimo rozpočtu a vyrobil IP ban, ktorý zoberie so sebou aj frontu.
+   */
+  readBudget?: Pick<CatalogRepoExt, 'reserveShopReads'>;
   apiKeyMeta?: Pick<ApiKeyRepo, 'getMeta'>;
   previewTokens?: PreviewTokenServiceV3;
   guards?: GuardsDeps;
@@ -155,7 +177,21 @@ export interface PreviewConflict {
   campaignName: string;
   from: DateOnly;
   to: DateOnly;
-  status: CampaignStatus;
+  /**
+   * `CampaignStatusV3`, nie `CampaignStatus` — teda vrátane `queued` (25. 8. 2026).
+   *
+   * Nie je to rozšírenie správania, je to priznanie existujúceho. Odkedy je
+   * zápis fronta (K2), kampaň smie stáť v stave `queued`, a `campaigns.repo.ts`
+   * na to sám upozorňuje: „cez tento pohľad môže v `status` prísť aj runtime
+   * hodnota `queued`, ktorú typ nevie pomenovať." Kolízia s čakajúcou kampaňou
+   * je pritom úplne rovnaká kolízia ako s naplánovanou — tá kampaň na ten
+   * produkt zapíše, len sa k nemu ešte nedostala.
+   *
+   * Užší typ tu teda nič nechránil; skrýval hodnotu, ktorá cez neho prechádzala.
+   * Zahodiť taký konflikt by znamenalo pustiť dve zľavy na jeden produkt, a
+   * pomenovať ho iným stavom by bola nepravda o tom, čo sa v shope chystá.
+   */
+  status: CampaignStatusV3;
 }
 
 /** Položka náhľadu s percentom svojho pásma (K3). */
@@ -201,6 +237,9 @@ export interface PreviewResultEx extends PreviewResult {
 }
 
 export const KEY_MISSING_BLOCKER_CODE = 'key_missing';
+
+/** Náhľad nedostal z rozpočtu (K7) dosť čítaní na to, aby overil ceny v shope. */
+export const SHOP_READ_BUDGET_BLOCKER_CODE = 'shop_read_budget';
 
 const KEY_MISSING_MESSAGE =
   'API kľúč chýba alebo expiroval — bez neho appka nevie prečítať ceny zo shopu ani nič zapísať. Vlož nový kľúč v Nastaveniach; rozpracovanú kampaň si medzitým môžeš uložiť ako koncept.';
@@ -405,6 +444,92 @@ const priceCentsOf = (price: MoneyString | null): number | null => {
 };
 
 /**
+ * Náhrada `findFutureOverlapsByProduct()` pre deps, ktoré dávkový tvar nemajú
+ * (staré fakes v testoch). Výsledok je ZHODNÝ, počet dotazov nie — preto je to
+ * záchranná brzda, nie cesta, po ktorej má produkčný kód chodiť.
+ *
+ * NAJPRV DÁVKA, ROZPIS LEN PRI NÁLEZE. Prvá verzia tejto funkcie sa pýtala na
+ * každý produkt zvlášť, čo bol návrat pod úroveň kódu, ktorý nahrádzala:
+ * pri 8 000 produktoch 8 000 dotazov namiesto 16. Presne to strážil
+ * `preview-sample.spec.ts` („nerobí dotaz na kampaň per produkt") a padal na
+ * tom — chyba nebola v teste. Je to tá trieda defektu, ktorú tento projekt
+ * berie vážne: na desiatich produktoch ju nikto neuvidí, na desiatich tisícoch
+ * je z náhľadu minútové čakanie.
+ *
+ * Rozpis na produkty je potrebný len preto, že starý `findFutureOverlaps()`
+ * nevracia `product_id`, takže z hromadnej odpovede sa nedá zistiť, koho sa
+ * nález týka. Kým odpoveď na celý blok je prázdna, netreba ho vôbec — a to je
+ * bežný prípad.
+ *
+ * Cena voči pôvodnému kódu: rozpisuje sa aj vtedy, keď sú všetky nálezy
+ * nakoniec nezaujímavé (`relevant()` ich zahodí), lebo tá filtrácia patrí
+ * volajúcemu a táto funkcia o nej nevie. Je to o dotazy viac v prípade, ktorý
+ * nie je bežný — a lepšie než dva rôzne miesta, kde sa rozhoduje, čo je nález.
+ */
+async function overlapsByProductFallback(
+  repo: Pick<CampaignsRepo, 'findFutureOverlaps'>,
+  productIds: number[],
+  from: DateOnly,
+  to: DateOnly,
+): Promise<Map<number, CampaignRecord[]>> {
+  const out = new Map<number, CampaignRecord[]>();
+  if (productIds.length === 0) return out;
+
+  const inChunk = await repo.findFutureOverlaps(productIds, from, to);
+  if (inChunk.length === 0) return out;
+
+  for (const productId of productIds) {
+    const found = await repo.findFutureOverlaps([productId], from, to);
+    if (found.length > 0) out.set(productId, found);
+  }
+  return out;
+}
+
+/**
+ * To isté pre `lastOwnWrites()`. Mapa neobsahuje produkty bez vlastného zápisu
+ * — rovnako ako dávkový tvar v repozitári.
+ */
+async function lastOwnWritesFallback(
+  repo: Pick<CampaignsRepo, 'lastOwnWrite'>,
+  productIds: number[],
+): Promise<Map<number, LastOwnWrite>> {
+  const out = new Map<number, LastOwnWrite>();
+  for (const productId of productIds) {
+    const found = await repo.lastOwnWrite(productId);
+    if (found !== null) out.set(productId, found);
+  }
+  return out;
+}
+
+/**
+ * Hláška blokátora rozpočtu čítaní (K7). Hovorí MERANÉ čísla — koľko produktov
+ * sa nedalo overiť, koľko čítaní by to stálo a koľko ich zostáva — nie „skús to
+ * neskôr".
+ */
+function shopReadBudgetMessage(
+  productCount: number,
+  cost: number,
+  status: ReadBudgetStatus,
+): string {
+  const tail =
+    'Ceny nižšie sú z posledného známeho zrkadla katalógu, nie zo shopu, a sada sa preto nedá potvrdiť: ' +
+    'do potvrdenia by šli ceny, ktoré appka teraz nevidela.';
+  if (!status.known) {
+    return (
+      `Rozpočet čítaní zo shopu sa nedá prečítať, takže appka nevie, či smie shop osloviť — ` +
+      `${productCount} ${productCount === 1 ? 'produkt neoverila' : 'produktov neoverila'}. ${tail}`
+    );
+  }
+  return (
+    `Dnešný rozpočet čítaní zo shopu nestačí na overenie ${productCount} ` +
+    `${productCount === 1 ? 'produktu' : 'produktov'}: potrebných je ${cost} čítaní, voľných zostáva ` +
+    `${status.remaining} z ${status.limit}. Strop sa obnoví ${formatDateOnlySk(
+      todayInZone(status.resetAt, 'UTC'),
+    )} o polnoci UTC. ${tail}`
+  );
+}
+
+/**
  * Dry-run: NIKDY nič nezapisuje — všetky volania shopu sú čítacie
  * (`batchGetProducts`, D56/D57).
  */
@@ -414,8 +539,16 @@ export async function buildPreview(
   ctx: ShopCtx,
 ): Promise<PreviewResultEx> {
   const allowlistRepo = deps.allowlistRepo ?? defaultAllowlistRepo;
-  const campaignsRepo = deps.campaignsRepo ?? defaultCampaignsRepo;
+  /* Typ je vypísaný zámerne. Bez neho je to únia s `CampaignsRepoLegacy`, ktorý
+   * dávkové tvary nepriznáva (je to `CampaignsRepo` + dve staré metódy), takže
+   * `campaignsRepo.findFutureOverlapsByProduct` na únii neexistuje a `tsc` to
+   * odmietne. Singleton tie metódy za behu MÁ — je to ten istý objekt ako
+   * `campaignsRepoV3` — len ho starý typ nepomenúva. Tvar `PreviewDeps` je tu
+   * teda presnejší než typ defaultu a rozdiel patrí sem, nie do `as`. */
+  const campaignsRepo: NonNullable<PreviewDeps['campaignsRepo']> =
+    deps.campaignsRepo ?? defaultCampaignsRepo;
   const catalogRepo = deps.catalogRepo === undefined ? defaultCatalogRepo : deps.catalogRepo;
+  const readBudget = deps.readBudget ?? defaultCatalogRepo;
   const previewTokens = deps.previewTokens ?? defaultPreviewTokens;
   const now = deps.now ?? (() => new Date());
   const timeZone = deps.timeZone ?? LOGIC_TIME_ZONE;
@@ -466,7 +599,15 @@ export async function buildPreview(
    *    VŽDY zablokovaný. */
   const conflicts: PreviewConflict[] = [];
   if (allowCheck.ok) {
-    const relevant = (campaign: CampaignRecord): boolean => {
+    /* Signatúra je úmyselne len tie dva údaje, ktoré funkcia naozaj číta —
+     * musí prijať aj `CampaignRecord`, aj `CampaignRecordV3` (ten pripúšťa
+     * `queued`). Čakať tu celý `CampaignRecord` by znamenalo, že kolízia
+     * s čakajúcou kampaňou sa cez typ nedostane, hoci je to plnohodnotná
+     * kolízia: tá kampaň na produkt zapíše, len sa k nemu ešte nedostala. */
+    const relevant = (campaign: {
+      readonly id: number;
+      readonly status: CampaignStatusV3;
+    }): boolean => {
       if (campaign.id === input.parentCampaignId) return false;
       // D28: `kind='overwrite'` je EXPLICITNÝ prepis už ZAPÍSANEJ zľavy. Okno
       // dobehnutej kampane (`done`/`partial`) nie je „budúca kampaň" — je to
@@ -482,19 +623,27 @@ export async function buildPreview(
       return true;
     };
 
+    const byProduct = campaignsRepo.findFutureOverlapsByProduct;
     for (let offset = 0; offset < sortedIds.length; offset += PREVIEW_OVERLAP_CHUNK) {
       const chunk = sortedIds.slice(offset, offset + PREVIEW_OVERLAP_CHUNK);
-      const found = (await campaignsRepo.findFutureOverlaps(chunk, input.from, input.to)).filter(
-        relevant,
-      );
-      if (found.length === 0) continue;
+
+      /*
+       * JEDEN dotaz na blok, aj keď sa niečo našlo. Predtým sa po prvom náleze
+       * blok rozpísal na dotaz za každý produkt (500 na blok, pri 10 000
+       * produktoch 10 020 dotazov namiesto 20) — a to len preto, že SQL
+       * nevracalo `product_id` a z hromadnej odpovede sa nedalo zistiť, koho
+       * sa nález týka. Teraz ho vracia; zoskupenie robí repozitár.
+       */
+      const found =
+        byProduct === undefined
+          ? await overlapsByProductFallback(campaignsRepo, chunk, input.from, input.to)
+          : await byProduct.call(campaignsRepo, chunk, input.from, input.to);
+
+      // Poradie je poradie `sortedIds`, nie poradie mapy — odpoveď náhľadu
+      // musí byť deterministická rovnako ako predtým.
       for (const productId of chunk) {
-        const perProduct = await campaignsRepo.findFutureOverlaps(
-          [productId],
-          input.from,
-          input.to,
-        );
-        for (const campaign of perProduct.filter(relevant)) {
+        for (const campaign of found.get(productId) ?? []) {
+          if (!relevant(campaign)) continue;
           conflicts.push({
             productId,
             campaignId: campaign.id,
@@ -538,7 +687,54 @@ export async function buildPreview(
   /* 6. Zdroj cien. Malá sada = čerstvo zo shopu (D57). Veľká sada = zrkadlo
    *    katalógu (K7): 10 000 produktov po 25 na batch by bolo 400 requestov na
    *    jeden náhľad, a katalóg je presne na to, aby to nebolo treba. */
-  const useShop = allowCheck.ok && !keyMissing && sortedIds.length <= PREVIEW_SHOP_DETAIL_MAX;
+  const wantShop = allowCheck.ok && !keyMissing && sortedIds.length <= PREVIEW_SHOP_DETAIL_MAX;
+
+  /*
+   * ROZPOČET ČÍTANÍ (K7). Náhľad platí za detaily z tej istej anonymnej kvóty
+   * ako synchronizácia katalógu a `/api/catalog/details` — a doteraz z nej
+   * bral bez toho, aby si čokoľvek rezervoval. Sada 100 produktov stojí podľa
+   * `anonReadCost()` 104 hitov (100 položiek + 4 obálky dávok), takže pár
+   * kliknutí na `POST /api/campaigns/preview` (route bez rate-limitu) vyčerpalo
+   * denný strop 240 a privolalo IP ban, ktorý zoberie so sebou synchronizáciu
+   * katalógu aj bežiacu frontu.
+   *
+   * REZERVUJE SA VŠETKO NARAZ ALEBO NIČ. `batchGetProducts()` číta celú sadu;
+   * čiastočná rezervácia by znamenala náhľad postavený nad časťou sady, ktorý
+   * sa tvári ako celý obraz — presne to, čo sa stať nesmie. Stav sa najprv
+   * PREČÍTA (`reserveShopReads(0)` nič nemíňa) a rezervuje sa až vtedy, keď je
+   * na celú cenu miesto; inak by zablokovaný náhľad ešte aj minul zvyšok kvóty.
+   *
+   * Keď sa nezmestí: shop sa NEVOLÁ (minie sa 0 čítaní), ceny idú zo zrkadla
+   * katalógu ako pri veľkej sade (K7) a pribudne BLOKÁTOR. Blokátor, nie tiché
+   * prepnutie zdroja — `pricesAtPreview` v tokene sú to, proti čomu executor
+   * pri zápise porovnáva (D39c), takže vydať token nad cenami, ktoré appka
+   * nikdy nevidela, by z I3 spravilo prázdne gesto. Sada nad `PREVIEW_SHOP_
+   * DETAIL_MAX` je iný prípad: tam je zrkadlo NAVRHNUTÝ zdroj, tu je to núdza.
+   */
+  let useShop = false;
+  if (wantShop) {
+    const cost = anonReadCost(sortedIds.length);
+    const peek = await readBudget.reserveShopReads(0);
+    if (peek.status.known && peek.status.remaining >= cost) {
+      const reservation = await readBudget.reserveShopReads(cost);
+      if (reservation.granted >= cost) {
+        useShop = true;
+      } else {
+        // Súbeh s iným čítačom medzi náhľadom a rezerváciou. Pridelené čítania
+        // sa nevracajú — chyba smerom k opatrnosti, rovnako ako v `product-details`.
+        blockers.push({
+          code: SHOP_READ_BUDGET_BLOCKER_CODE,
+          message: shopReadBudgetMessage(sortedIds.length, cost, reservation.status),
+        });
+      }
+    } else {
+      blockers.push({
+        code: SHOP_READ_BUDGET_BLOCKER_CODE,
+        message: shopReadBudgetMessage(sortedIds.length, cost, peek.status),
+      });
+    }
+  }
+
   const useCatalog = allowCheck.ok && !useShop && Boolean(catalogRepo?.getMany);
 
   let details = new Map<number, ProductDetail | import('@/contracts').ShopError>();
@@ -699,11 +895,18 @@ export async function buildPreview(
     ? rows.filter((row) => sampleIds.has(row.productId) || row.problem !== null)
     : rows;
 
-  /* 10. `lastOwnWrite` (I11) len pre zobrazené riadky. */
-  const lastWrites = new Map<number, LastOwnWrite | null>();
-  for (const row of visible) {
-    lastWrites.set(row.productId, await campaignsRepo.lastOwnWrite(row.productId));
-  }
+  /* 10. `lastOwnWrite` (I11) len pre zobrazené riadky — JEDNÝM dotazom.
+   *
+   *     „Zobrazené riadky" nie je šesť: `visible` je vzorka PLUS každý riadok
+   *     s problémom, takže pri sade, kde zlyhá všetko (napríklad produkty, ktoré
+   *     zrkadlo katalógu nemá), je to celá sada. Dotaz na produkt tam znamenal
+   *     10 000 sekvenčných dotazov na jeden náhľad. */
+  const visibleIds = visible.map((row) => row.productId);
+  const batchWrites = campaignsRepo.lastOwnWrites;
+  const lastWrites =
+    batchWrites === undefined
+      ? await lastOwnWritesFallback(campaignsRepo, visibleIds)
+      : await batchWrites.call(campaignsRepo, visibleIds);
 
   const overwriteIds: number[] = [];
   const items: PreviewItemEx[] = visible.map((row) => {
