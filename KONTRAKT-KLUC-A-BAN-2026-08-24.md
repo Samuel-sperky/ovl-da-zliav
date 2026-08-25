@@ -295,8 +295,10 @@ zlúčenie vezme, keď sa mu strom ustáli.
 | **A** (server) | `ec152db` | `ip_banned` sa odlíšil od `forbidden`; kľúč sa pri bane uloží ako neoverený a veta hovorí pravdu; zavretá mína pri wipe kľúča |
 | **E2, E3** | `e5b55a1` | Nečitateľné zrkadlo už nezakladá riadky (`mirror_unreadable`); `ordersSeen` je povinné |
 | **E1** | `f3fb2df` | Nečitateľný zoznam zliav prestal znamenať „žiadne zľavy" |
+| **B** (server) | `85aab53` | Jeden kľúč v oboch slotoch sa prizná z `last4`, bez dotyku I8'; GET dostal `verifyNote` |
+| **F** | `e2ba5ce` | Spustenie z ikony skriptom namiesto Tauri (rozhodnutie R-4 upravené 25. 8.) |
 
-Testy: **2840 prešlo, 0 padlo, 0 preskočených** na Windows hostovi. `typecheck`
+Testy: **2843 prešlo, 0 padlo, 0 preskočených** na Windows hostovi. `typecheck`
 aj `lint` čisté. Každý nový test bol overený mutáciou — po odstránení opravy
 spadne.
 
@@ -312,15 +314,27 @@ spadne.
    dostáva. Neoverený kľúč — a taký je dnes ten objednávkový v DB — sa na
    obrazovke hlási ako **„vložený a platný"**. Appka tvrdí platnosť, ktorú
    nikdy nezmerala. NEOPRAVENÉ, viď nižšie.
+4. **Spúšťač zhodil bežiacu appku.** `docker compose up` z git worktree
+   neštartuje druhú appku — kontejnery majú pevné mená, takže tie bežiace
+   prevezme a znovu postaví pod iným compose projektom. 24. 8. tým vypadol
+   Caddy. Dáta prežili (žijú v named volume) a `docker compose up -d`
+   z hlavného checkoutu všetko vrátilo. Oba skripty to odteraz odmietnu.
+5. **`.cmd` nemalo v `.gitattributes` pravidlo pre koncovky riadkov**, hoci
+   `.ps1` ho má aj s vysvetlením. Doplnené.
+6. **Zdieľaná testovacia DB robí súbežné behy nespoľahlivými.** Obe sessions
+   testujú proti tej istej `ovl-zliav-test-db`, takže súbežný beh zhodil
+   `executor.spec.ts` dvakrát na `not_in_catalog`. Samostatne prejde. Nie je to
+   chyba kódu, je to zdieľaný stav — a kritérium „0 padlo" sa preto nedá merať,
+   kým testuje niekto iný.
 
 ### Neuzavreté a prečo
 
 | Bod | Stav |
 | --- | --- |
 | **A** (UI) | `src/components/settings/KeysSection.tsx` drží agent UX4 druhej session (potvrdené 24. 8.). Chýba tam vykreslenie `verifyNote` **a oprava `keyRowState()`**, ktorá je vážnejšia než pôvodné zadanie: bez nej obrazovka o neoverenom kľúči tvrdí, že je platný. Pravdivá veta je zatiaľ len v odpovedi API. |
-| **B** | **Zastavené na invariante.** R-2 („appka prizná, že je to jeden kľúč") sa nedá splniť cez `whoami`: `client.ts` má podľa I8' zakázané vedieť čokoľvek o scope objednávok — `SHOP_SCOPES` obsahuje len `product:read` a `product:edit`, ostatné sa len spočítajú ako „iné", a stráži to grep test. Splniť R-2 podľa scopes by znamenalo porušiť I8', a invarianty sú nadradené. Reverzibilná cesta bez dotyku I8': porovnať `last4` oboch slotov (rovnaké → ten istý kľúč). Nesie riziko zhody `last4` u dvoch rôznych kľúčov, takže veta by musela byť opatrná. **Čaká na rozhodnutie používateľa.** |
+| **B** (UI) | Serverová polovica je hotová (`85aab53`) — `looksLikeSameKey` a `sameKeyNote` sú v odpovedi. Vykreslenie čaká na uvolnenie `KeysSection.tsx`, spolu s bodom A. |
 | **E4** | `overview.module.css` drží agent UX5 druhej session. |
-| **F** | **Zastavené vo vlne 0.** `rustc`, `cargo` ani `rustup` na tomto PC nie sú. Inštalácia Rust toolchainu je veľká nová závislosť a na tomto stroji už raz Windows Application Control zablokovala binárku (`argon2`), takže niet dôvodu čakať, že prejde. **Čaká na rozhodnutie používateľa.** |
+| **F** | **Hotové inak, než hovoril kontrakt.** Rust na tomto PC nie je a rozhodnutie R-4 sa 25. 8. zmenilo: namiesto Tauri je to `.cmd` + `.ps1` + zástupca v Starte. Tauri zostáva ako možnosť, keď bude `cargo` k dispozícii. |
 | **C** | **Vyhodené z rozsahu** — druhá session ho zavrela commitmi `2e96b54` a `3833c14`. |
 
 ### Čo sa nezmenilo
@@ -332,7 +346,7 @@ ho doplniť.
 
 ### Ostro neoverené
 
-Nič z bodu A sa nedalo overiť proti ostrému shopu: platí ban. Testy idú proti
+Nič z bodu A ani B sa nedalo overiť proti ostrému shopu: platí ban. Testy idú proti
 mock shopu (I6). Preklik v prehliadači sa nerobil — UI polovica je odložená a
 `argon2` je blokovaná Windows Application Control, takže appka mimo kontejnera
 lokálne nenaštartuje. Akceptačné kritériá 9, 10 a 12 teda splnené nie sú;
