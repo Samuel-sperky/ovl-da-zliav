@@ -58,6 +58,8 @@ import {
 import type { BlockerResolutionCode, BlockerSeverityCode } from '@/components/ui/blocker-look';
 import type { StatusTone } from '@/components/ui/ToneBadge';
 
+import { stavovePravidlo } from '../helpers/css-stavy';
+
 /** Päť tónov škály `--st-*`. Šiesty by znamenal farbu, ktorú nikto nezmeral. */
 const TONES: readonly StatusTone[] = ['critical', 'attention', 'progress', 'good', 'idle'];
 
@@ -245,15 +247,28 @@ describe('C — piaty stav „prebieha" už nesplýva s „nečinný"', () => {
     for (const cls of classes) expect(cls).toMatch(/^sig\b/);
   });
 
-  it('trieda, ktorú appka žiada, v `globals.css` naozaj existuje', () => {
-    // Bez tejto kontroly by sa dal `progress` „opraviť" na triedu, ktorú nikto
-    // nenadefinoval, a stav by zmizol úplne namiesto toho, aby splynul.
+  it('trieda, ktorú appka žiada, v `globals.css` naozaj existuje a kreslí', () => {
+    /*
+     * Bez tejto kontroly by sa dal `progress` „opraviť" na triedu, ktorú nikto
+     * nenadefinoval, a stav by zmizol úplne namiesto toho, aby splynul.
+     *
+     * Pôvodne to bolo `expect(css).toContain('.sig.progress')` — teda hľadanie
+     * PODREŤAZCA. Premenovanie bloku na `.sig.progress-strong {` by ho nechalo
+     * v súbore, test by prešiel a appka by emitovala triedu bez štýlu. Pýtame
+     * sa preto na blok s PRESNE tým selektorom, ktorý appka emituje, a na to,
+     * že nesie `color:` (parser je v `test/helpers/css-stavy.ts`, ten istý,
+     * ktorý v `paleta.spec.ts` stráži, odkiaľ tá farba je).
+     */
     const css = readFileSync(
       fileURLToPath(new URL('../../src/app/globals.css', import.meta.url)),
       'utf8',
     );
     for (const cls of TONES.map(toneSigClass)) {
-      expect(css, cls).toContain(`.${cls.replace(' ', '.')}`);
+      const selektor = `.${cls.replace(' ', '.')}`;
+      expect(
+        stavovePravidlo(css, selektor),
+        `${selektor} { color: … } v globals.css chýba — trieda "${cls}" nekreslí nič`,
+      ).toBeDefined();
     }
   });
 

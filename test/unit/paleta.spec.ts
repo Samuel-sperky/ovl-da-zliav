@@ -41,6 +41,7 @@ import {
   simulate,
   tightestPairs,
 } from '../helpers/palette-math';
+import { stavovePravidla, stavovePravidlo } from '../helpers/css-stavy';
 
 const CSS = readFileSync(
   fileURLToPath(new URL('../../src/app/globals.css', import.meta.url)),
@@ -244,17 +245,12 @@ describe('základňa je neutrálna (R5)', () => {
  * ════════════════════════════════════════════════════════════════════════
  */
 describe('farba, ktorá kóduje stav, ide výhradne zo stavovej škály', () => {
-  /** Pravidlá, ktorých selektor je stavový. */
-  function stavovePravidla(): { selektor: string; farba: string }[] {
-    const out: { selektor: string; farba: string }[] = [];
-    const re = /^(\.(?:state|sig)\.[a-z0-9-]+)\s*\{([^}]*)\}/gim;
-    for (const m of CSS.matchAll(re)) {
-      const telo = m[2]!;
-      const farba = telo.match(/(?:^|\s)color:\s*([^;]+);/);
-      if (farba) out.push({ selektor: m[1]!.trim(), farba: farba[1]!.trim() });
-    }
-    return out;
-  }
+  /*
+   * Parser býval tu; od 24. 8. 2026 žije v `test/helpers/css-stavy.ts`, aby ho
+   * mohol použiť aj `stavy-slovnik.spec.ts` a nevznikla tretia kópia. Navyše
+   * si teraz strihá komentáre — `globals.css` v nich stavové triedy spomína.
+   */
+  const pravidla = (): { selektor: string; farba: string }[] => stavovePravidla(CSS);
 
   /*
    * Povolene su stavova skala a NEUTRALY. Neutral (--dim) je v poriadku:
@@ -274,11 +270,11 @@ describe('farba, ktorá kóduje stav, ide výhradne zo stavovej škály', () => 
 
   it('nájde sa vôbec nejaké stavové pravidlo', () => {
     // Poistka proti tomu, aby test prešiel preto, že nič nenašiel.
-    expect(stavovePravidla().length).toBeGreaterThan(4);
+    expect(pravidla().length).toBeGreaterThan(4);
   });
 
   it('žiadny stav nekreslí značková farba (teal ani zlatá)', () => {
-    const hriesnici = stavovePravidla().filter(
+    const hriesnici = pravidla().filter(
       (p) =>
         p.farba.includes('--accent') ||
         p.farba.includes('--gold') ||
@@ -292,7 +288,7 @@ describe('farba, ktorá kóduje stav, ide výhradne zo stavovej škály', () => 
   });
 
   it('každý stav berie farbu zo škály, ktorá je zmeraná', () => {
-    const mimo = stavovePravidla().filter(
+    const mimo = pravidla().filter(
       (p) => !POVOLENE.some((t) => p.farba.includes(t)),
     );
     expect(
@@ -302,9 +298,22 @@ describe('farba, ktorá kóduje stav, ide výhradne zo stavovej škály', () => 
   });
 
   it('stav „prebieha" sa dá nakresliť — nesplýva s „nečinný"', () => {
-    // Do 19. 8. mapoval blockers-view.ts progress na sig idle, lebo .sig
-    // variantu progress nemal. Piaty stav tým prestal existovať.
-    expect(CSS).toContain('.sig.progress');
+    /*
+     * Do 19. 8. mapoval blockers-view.ts progress na sig idle, lebo .sig
+     * variantu progress nemal. Piaty stav tým prestal existovať.
+     *
+     * Pôvodne tu stálo `expect(CSS).toContain('.sig.progress')`. To sa dalo
+     * obísť premenovaním bloku na `.sig.progress-strong {` — reťazec by
+     * v súbore ostal ako podreťazec, test by svietil a appka by emitovala
+     * triedu bez štýlu. Pýtame sa preto na BLOK s presne týmto selektorom
+     * a na to, že nesie farbu.
+     */
+    const pravidlo = stavovePravidlo(CSS, '.sig.progress');
+    expect(
+      pravidlo,
+      '.sig.progress { color: … } v globals.css chýba — trieda, ktorú appka emituje, nekreslí nič',
+    ).toBeDefined();
+    expect(pravidlo?.farba).toContain('--st-progress');
   });
 });
 
