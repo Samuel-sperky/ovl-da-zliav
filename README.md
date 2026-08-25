@@ -95,6 +95,32 @@ scripts/backup.sh        # denná záloha bez api_key (D76, D90)
 scripts/restore-test.sh  # test obnoviteľnosti zálohy
 ```
 
+## Spustenie z ikony (Windows)
+
+```powershell
+scripts\vytvorit-zastupcu.ps1   # raz: zástupca „Aura Zľavy" v Starte
+scripts\spustit-appku.cmd       # zdvihne kontejnery, počká a otvorí :3070
+```
+
+Zástupca nič neinštaluje — je to jeden `.lnk` v Starte aktuálneho používateľa a
+jeho zmazaním sa všetko vráti. Keď appka už beží, spúšťač sa kontejnerov
+**nedotkne** a len otvorí prehliadač, takže dvojklik navyše nič nepokazí.
+
+Oba skripty **odmietnu bežať z git worktree**: kontejnery majú v compose pevné
+mená, takže `docker compose up` z druhého checkoutu tie bežiace prevezme a
+znovu postaví (24. 8. 2026 tým spadol Caddy; dáta prežili, appka bežala ďalej
+až po `docker compose up -d` z hlavného checkoutu). Spúšťaj ich z
+`C:\Aura\ovl-da-zliav`.
+
+> Prečo nie Tauri: desktopový obal by potreboval Rust toolchain, ktorý na tomto
+> počítači nie je a ktorému Windows Application Control už raz zablokovala
+> binárku (`argon2`). Na okno, ktorého celá práca je zobraziť `:3070`, to nestojí
+> za novú závislosť — rozhodnutie R-4 v `KONTRAKT-KLUC-A-BAN-2026-08-24.md`.
+
+**Pozor na kódovanie:** `.ps1` v tomto repe musí zostať UTF-8 **s BOM** a CRLF
+(vynucuje `.gitattributes`). Windows PowerShell 5.1 číta súbor bez BOM ako ANSI
+a na diakritike sa rozsype parsovanie — chyba potom ukazuje na nevinný riadok.
+
 ## Dokumentácia
 
 Poradie, v akom to čítať, keď si tu prvý raz: `50-KONTRAKT-V3.md` (čo appka

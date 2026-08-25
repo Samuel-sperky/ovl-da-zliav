@@ -13,6 +13,10 @@ Caddyfile.example text eol=lf
 # rozsype parsovanie — preto .ps1 zostáva CRLF a v repe má UTF-8 BOM.
 *.ps1 text eol=crlf
 
+# cmd.exe číta dávkový súbor po riadkoch a pri LF koncovkách sa vie rozsypať na
+# návestiach a `goto` — tá istá rodina problému ako .ps1 vyššie.
+*.cmd text eol=crlf
+
 *.png binary
 *.jpg binary
 *.ico binary
