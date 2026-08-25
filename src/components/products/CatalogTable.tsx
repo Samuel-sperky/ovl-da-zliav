@@ -60,20 +60,31 @@
  *    stránkach je to 825 rôznych mriežok. Pevná mriežka to zastaví: čísla
  *    stoja na tom istom mieste na každej stránke a na každom filtri.
  * 2. **Názov je JEDEN riadok s výpustkou; celý je v `title` aj v bočnom
- *    paneli.** Pri 1440 px má stĺpec názvu ≈ 745 px, teda ≈ 112 znakov —
- *    priemerný názov (64) sa doň zmestí aj s rezervou a oreže sa len chvost
- *    tých najdlhších. Zalamovanie sa zamietlo: rôzne vysoké riadky rozbijú
- *    zvislý rytmus, podľa ktorého sa stĺpec Cena skenuje, a stránku z 50
- *    riadkov predĺžia z ≈ 1 600 px na až 2 600 px. Pevné dvojriadkové bunky
- *    by rytmus udržali a zmestili by každý názov, ale platili by +50 % výšky
- *    na KAŽDOM riadku za chvost, ktorý je pri týchto názvoch ozdoba —
- *    rozlišovacia časť („Prevliekací strieborný náhrdelník 925 …") stojí na
- *    začiatku. Na úzkej obrazovke (≤ 640 px) sa riadky menia na karty a názov
- *    sa zalamuje celý; preto tu `white-space` DEDÍ z bunky a nediktuje sa.
- *    Od K1 stojí panel detailu ako druhý stĺpec vedľa tabuľky, takže pri
- *    OTVORENOM kuse padne stĺpec názvu na ≈ 340 px (≈ 50 znakov). Mriežka to
- *    prežije — štyri číselné stĺpce sú pevné a zúži sa výhradne názov —
- *    a orezaný chvost je čitateľný v `title` aj v samotnom paneli vedľa.
+ *    paneli.** Zalamovanie sa zamietlo: rôzne vysoké riadky rozbijú zvislý
+ *    rytmus, podľa ktorého sa stĺpec Cena skenuje, a stránku z 50 riadkov
+ *    predĺžia z ≈ 1 600 px na až 2 600 px. Pevné dvojriadkové bunky by rytmus
+ *    udržali a zmestili by každý názov, ale platili by +50 % výšky na KAŽDOM
+ *    riadku za chvost, ktorý je pri týchto názvoch ozdoba — rozlišovacia časť
+ *    („Prevliekací strieborný náhrdelník 925 …") stojí na začiatku. Na úzkej
+ *    obrazovke (≤ 640 px) sa riadky menia na karty a názov sa zalamuje celý;
+ *    preto tu `white-space` DEDÍ z bunky a nediktuje sa.
+ *
+ *    KOĽKO MIESTA NÁZOV NAOZAJ DOSTANE (premerané 24. 8. 2026, UX3 — pôvodné
+ *    čísla „≈ 745 px / ≈ 112 znakov" v tejto hlavičke boli nadhodnotené a
+ *    nikdy nesedeli). Pri 1440 × 900 má obsah pod pásom filtrov 886 px a štyri
+ *    pevné stĺpce z neho zoberú 368 px (34 + 130 + 100 + 104), takže:
+ *
+ *      panel zavretý          → názov 516 px, orezané 3 mená z 50
+ *      panel otvorený, 317 px → názov 185 px, orezaných 50 z 50
+ *      panel otvorený, 400 px → názov 102 px, orezaných 50 z 50
+ *
+ *    Výpustka teda ZÁMER JE — chvost sa dá prečítať v `title` aj v paneli
+ *    vedľa a mriežka drží. Pri OTVORENOM paneli to však už nie je „oreže sa
+ *    chvost najdlhších", ale „z každého mena zostane začiatok": 886 px sa
+ *    medzi 400 px panel a skenovateľnú tabuľku rozdeliť nedá. Nie je to
+ *    vlastnosť tabuľky — rozhoduje o tom `flex-basis` v `.catalog-split`
+ *    (`globals.css`, vlastní UX1) a šírka pásu filtrov. Kto bude tie čísla
+ *    meniť, nech premeria toto, nie hlavičku.
  * 3. **Virtualizácia sa nepridáva.** V DOM nikdy nie je 41 220 riadkov —
  *    server stránkuje po 50/100/200. Chýbal spôsob, ako sa na riadok 30 000
  *    DOSTAŤ, nie ako ho vykresliť. Preto skok na stránku a poradie stĺpcov,
@@ -129,7 +140,10 @@ const NAME_BUTTON: CSSProperties = {
  *  · `1 758,46 €` je najdrahší produkt v katalógu — 59 px,
  *  · `ZĽAVA TERAZ` je nadpis širší než ktorákoľvek jeho hodnota — 78 px.
  * Šípka sa počíta aj tam, kde práve nie je: keď sa poradie prehodí, stĺpec sa
- * NESMIE zúžiť ani preliať. Názov dostáva celý zvyšok — pri 1440 px ≈ 725 px.
+ * NESMIE zúžiť ani preliať. Názov dostáva celý zvyšok — pri 1440 px a zavretom
+ * paneli 516 px, pri otvorenom 185 px (premerané 24. 8. 2026; rozpis v bode 2
+ * hlavičky). Zužovať tieto tri stĺpce, aby názov dostal viac, sa NEDÁ bez
+ * skrátenia ich nadpisov: 130/100/104 px je presne to, čo nadpis potrebuje.
  */
 const COLUMNS: CSSProperties = { tableLayout: 'fixed' };
 const COL_SELECT: CSSProperties = { width: '34px' };

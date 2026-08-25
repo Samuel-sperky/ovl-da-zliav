@@ -34,6 +34,31 @@
  *    riadok: keby riadok chýbal, nedalo by sa zistiť, že tá informácia vôbec
  *    existuje. Nadpis sa mení podľa toho, či hodnoty naozaj prišli.
  *
+ * ČO JE NA POVRCHU A ČO POD ROZKLIKOM (24. 8. 2026, UX3)
+ * ──────────────────────────────────────────────────────
+ * Panel mal 1 148 px obsahu v stĺpci, ktorý má 620 px (`max-height:
+ * calc(100vh - 280px)`). Vyše 500 px teda nedržal skrol, ale odseknutá hrana,
+ * a posledný viditeľný riadok bol preseknutý vodorovne — to sa nečíta ako
+ * „ide sa posúvať", ale ako chyba vykreslenia.
+ *
+ * NEUBRAL SA ANI JEDEN RIADOK. Zmenilo sa, čo je otvorené:
+ *
+ *   povrch  · hlavička (názov, cena, výhrady) · DOMINANTA: predané kusy
+ *           · prekážky · zľavy podľa vlastných zápisov (šesť riadkov)
+ *   rozklik · údaje o produkte · varianty · podrobnosti z eshopu
+ *           · všetky naše zápisy · technický detail
+ *
+ * Zavretá skupina NIE JE chýbajúca skupina: nesie svoj vlastný nadpis v tom
+ * istom tvare ako otvorená a vedľa neho POČET riadkov, ktorý sa počíta z
+ * obsahu (`facts`, `keyedRows`) — nikdy nie je napísaný ručne. Z povrchu sa
+ * teda dá prečítať, že skupina existuje aj koľko toho v nej je, a to je presne
+ * to, čo výnimka z 18. 8. 2026 chránila. Rozklik je P6 a je to `details.tech`,
+ * teda ten istý tvar, aký má „Technický detail" a rozkliky inde v appke.
+ *
+ * Čo zostalo otvorené a prečo: prekážky rozhodujú, či sa kus dá zlacniť,
+ * a „zľavy podľa vlastných zápisov" sú otázka, kvôli ktorej celá appka je.
+ * Zvyšok je pôvod údaja a referencia — pomáha, ale nie je to dôvod otvorenia.
+ *
  * ČO SA TU NESMIE POKAZIŤ
  * ───────────────────────
  *
@@ -68,7 +93,7 @@
  * Vlastník: V10 (rozšírenie na „všetky údaje": P2 kontraktu produktov).
  */
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 /*
@@ -100,7 +125,7 @@ import Icon from '@/components/ui/Icon';
 import type { Blocker } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk, formatDateTimeSk, formatEur, formatPercentSk } from '@/lib/ui/format';
-import { formatCountSk, itemSentence, SURFACE_TERMS } from '@/lib/ui/vocabulary';
+import { formatCountSk, itemSentence, pluralSk, SURFACE_TERMS } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Pomôcky ═══════════════════════════════════ */
 
@@ -171,24 +196,100 @@ function asSoldWindow(days: number): SoldWindow {
   return (SOLD_WINDOWS as readonly number[]).includes(days) ? (days as SoldWindow) : 30;
 }
 
-function DetailGroup({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * Nadpis skupiny. JEDEN tvar pre otvorenú aj zavretú skupinu — keby zavretá
+ * skupina vyzerala inak, čítalo by sa to ako iná vec, nie ako tá istá vec
+ * zabalená.
+ */
+const GROUP_TITLE = {
+  fontSize: '10px',
+  letterSpacing: '0.13em',
+  textTransform: 'uppercase',
+  color: 'var(--dim)',
+  fontWeight: 650,
+} as const;
+
+/**
+ * Skupina panela — otvorená, alebo pod rozklikom (P6).
+ *
+ * PREČO SA SKUPINY ZAVIERAJÚ A PREČO TO NIE JE STRATA ÚDAJOV
+ * ──────────────────────────────────────────────────────────
+ * Panel vypisuje všetko, čo appka o kuse vie, a pri kuse s variantmi to je
+ * vyše tisíc pixelov obsahu v 620 px vysokom stĺpci. Zvyšok potom nedržal
+ * skrol, ale odseknutá hrana — a odseknutý riadok sa nečíta ako „pokračuje",
+ * ale ako chyba vykreslenia.
+ *
+ * Riešenie NIE JE vynechať riadky. Z chýbajúceho riadku sa nedá zistiť, že tá
+ * informácia existuje, a práve preto panel vznikol (architektúra, výnimka
+ * z 18. 8. 2026). Zavretá skupina nechýba: nesie SVOJ VLASTNÝ NADPIS v tom
+ * istom tvare ako otvorená a vedľa neho POČET, ktorý sa počíta z toho, čo je
+ * naozaj vnútri (`hint`). Z povrchu sa teda dá prečítať aj to, že skupina je,
+ * aj koľko je v nej riadkov — a jeden klik ich ukáže všetky naraz.
+ *
+ * Zavretá skupina stojí jeden riadok namiesto 160–350 px. Tvar rozkliku je
+ * `details.tech`, teda TEN ISTÝ, aký má „Technický detail" na konci panela
+ * a rozkliky na ostatných obrazovkách — nie druhý podobný.
+ */
+function DetailGroup({
+  title,
+  hint,
+  fold,
+  testId,
+  children,
+}: {
+  title: string;
+  /** Čo je vnútri, keď je skupina zavretá. Počíta sa z obsahu, nepíše ručne. */
+  hint?: string;
+  fold?: true;
+  testId?: string;
+  children: ReactNode;
+}) {
+  if (fold !== true) {
+    return (
+      <div style={{ borderTop: '1px solid var(--line)', padding: '12px 0 4px' }}>
+        <h3 style={{ ...GROUP_TITLE, marginBottom: '8px' }}>{title}</h3>
+        {children}
+      </div>
+    );
+  }
   return (
-    <div style={{ borderTop: '1px solid var(--line)', padding: '12px 0 4px' }}>
-      <h3
-        style={{
-          fontSize: '10px',
-          letterSpacing: '0.13em',
-          textTransform: 'uppercase',
-          color: 'var(--dim)',
-          fontWeight: 650,
-          marginBottom: '8px',
-        }}
-      >
-        {title}
-      </h3>
-      {children}
-    </div>
+    <details className="tech" data-testid={testId}>
+      <summary>
+        <h3 style={{ ...GROUP_TITLE, margin: 0 }}>{title}</h3>
+        {hint === undefined ? null : <span style={{ fontWeight: 500 }}>· {hint}</span>}
+      </summary>
+      <div style={{ marginTop: '8px' }}>{children}</div>
+    </details>
   );
+}
+
+/**
+ * `13` → `13 údajov`. Počet do nadpisu zavretej skupiny.
+ *
+ * Exportované kvôli meraniu: test si ním overí, že číslo v nadpise sedí s tým,
+ * koľko riadkov je vnútri. Číslo sa NIKDY nepíše ručne — pozri `keyedRows`.
+ */
+export function fieldCount(count: number): string {
+  return `${formatCountSk(count)} ${pluralSk(count, 'údaj', 'údaje', 'údajov')}`;
+}
+
+/**
+ * Čo je v zavretej skupine variantov.
+ *
+ * TRI STAVY, TRI RÔZNE VETY — a to je celý dôvod, prečo je to funkcia a nie
+ * `extra?.variants.length ?? 0`. Nedoťahaný zoznam sa nesmie tváriť ako
+ * zoznam, v ktorom nič nie je (bod 4 hlavičky modulu); nula v nadpise by bola
+ * tvrdenie, ktoré appka pri `undefined` nemá čím kryť.
+ *
+ * Meria sa priamo nad ňou: `extra` sa do panela dostane až efektom a efekty
+ * v `renderToStaticMarkup` nebežia, takže cez panel by sa dala odmerať jediná
+ * z troch vetiev — presne tá istá pasca, akú má `SoldDominant`.
+ */
+export function variantsHint(extra: ProductExtraView | undefined): string {
+  if (extra === undefined) return 'zatiaľ nenačítané';
+  const count = extra.variants.length;
+  if (count === 0) return 'shop ich nevedie';
+  return `${formatCountSk(count)} ${pluralSk(count, 'variant', 'varianty', 'variantov')}`;
 }
 
 /**
@@ -481,6 +582,23 @@ export function ProductDetailPanel({
   const keyedShown = extra !== undefined && extra.keyed !== null;
 
   /**
+   * Zrkadlo katalógu ako ZOZNAM, nie ako natvrdo napísané `<dt>`/`<dd>` páry.
+   * Počet v nadpise zavretej skupiny sa počíta z tohto poľa, takže sa nedá
+   * rozísť s tým, čo je vnútri: kto riadok pridá alebo uberie, zmení oboje
+   * naraz.
+   */
+  const facts: readonly { label: string; value: ReactNode }[] = [
+    { label: 'Názov', value: row.name ?? DASH },
+    { label: 'Cena', value: formatEur(row.price) },
+    { label: 'Varianty', value: row.hasAttributes ? 'má varianty' : 'bez variantov' },
+    { label: 'Stav v eshope', value: SHOP_STATUS_TEXT[row.shopStatus] },
+    { label: 'Odkiaľ je tento riadok', value: ORIGIN_TEXT[row.origin] },
+  ];
+
+  /** Čo je v zavretej skupine variantov — tri stavy, tri vety (`variantsHint`). */
+  const variantHint = variantsHint(extra);
+
+  /**
    * Marža ako jeden údaj: eurá a percentá vedľa seba. Percento samo o sebe je
    * bez sumy nečitateľné a suma bez percenta sa nedá porovnať naprieč cenami.
    * Nič sa nedopočítava — keď shop percento nepošle, riadok ho neuvedie.
@@ -492,6 +610,94 @@ export function ProductDetailPanel({
     if (percent === null) return known(formatEur(eur.value));
     return known(`${formatEur(eur.value)} · ${formatPercentSk(percent)}`);
   })();
+
+  /**
+   * TRINÁSŤ RIADKOV SPOZA KĽÚČA AKO ZOZNAM.
+   *
+   * Dôvod je ten istý ako pri `facts`: počet v nadpise zavretej skupiny sa
+   * počíta z `keyedRows.length`, takže sa NEDÁ dostať do stavu, keď nadpis
+   * sľubuje trinásť údajov a vnútri ich je dvanásť. Riadok sa tu pridáva aj
+   * uberá práve raz.
+   */
+  const keyedRows: readonly ReactNode[] = [
+    <KeyedRow
+      key="reference"
+      legacy
+      label="Kód produktu"
+      field={keyedField(extra, (k) => k.reference)}
+      render={(value) => <span className="num">{value}</span>}
+    />,
+    <KeyedRow
+      key="ean13"
+      label="EAN produktu"
+      field={keyedField(extra, (k) => k.ean13)}
+      render={(value) => <span className="num">{value}</span>}
+    />,
+    <KeyedRow
+      key="stock"
+      legacy
+      label="Sklad"
+      field={keyedField(extra, (k) => k.stockQuantity)}
+      render={(value) => <span className="num">{stockText(value)}</span>}
+    />,
+    <KeyedRow
+      key="wholesale"
+      legacy
+      label="Nákupná cena"
+      field={keyedField(extra, (k) => k.wholesalePrice)}
+      render={(value) => formatEur(value)}
+    />,
+    <KeyedRow key="margin" legacy label="Marža" field={marginField} render={(value) => value} />,
+    <KeyedRow
+      key="price-tax"
+      label="Cena s DPH"
+      field={keyedField(extra, (k) => k.priceWithTax)}
+      render={(value) => formatEur(value)}
+    />,
+    <KeyedRow
+      key="supplier"
+      label="Dodávateľ"
+      field={keyedField(extra, (k) => k.supplier)}
+      render={(value) => value}
+    />,
+    <KeyedRow
+      key="categories"
+      legacy
+      label="Kategórie"
+      field={keyedList(extra, (k) => k.categories)}
+      render={(value) => value.join(' · ')}
+    />,
+    <KeyedRow
+      key="active"
+      label="Zapnutý v eshope"
+      field={keyedField(extra, (k) => k.active)}
+      render={(value) => (value ? 'áno' : 'nie')}
+    />,
+    <KeyedRow
+      key="added"
+      label="Pridané do eshopu"
+      field={keyedField(extra, (k) => k.addedAt)}
+      render={(value) => formatDateSk(value)}
+    />,
+    <KeyedRow
+      key="last-ordered"
+      label="Naposledy objednané"
+      field={keyedField(extra, (k) => k.lastOrderedAt)}
+      render={(value) => formatDateSk(value)}
+    />,
+    <KeyedRow
+      key="ordered-total"
+      label="Objednané kusy spolu"
+      field={keyedField(extra, (k) => k.orderedTotal)}
+      render={(value) => <span className="num">{formatCountSk(value)}</span>}
+    />,
+    /*
+     * Skutočnú zľavu v eshope zatiaľ nenesie ANI cesta `getFull`, ktorú appka
+     * číta — nie je to teda „shop nemá", ale „appka nedovidí". Preto zostáva
+     * pevne zamknutá, kým to doťahovanie nedoplní.
+     */
+    <LockedRow key="real-discount" label="Skutočná zľava v eshope" />,
+  ];
 
   return (
     <aside className="drawer" data-testid="product-detail" aria-label="Detail produktu">
@@ -539,46 +745,73 @@ export function ProductDetailPanel({
         Vlastný výpočet z objednávok.
       </div>
 
-      <DetailGroup title="Prekážky">
-        {nothingInTheWay ? (
-          <div className="lvl-3" data-testid="product-no-blockers">
-            Appka pri tomto produkte nevidí nič, čo by zápisu zľavy bránilo.
-          </div>
-        ) : (
-          <>
-            {reasons.map((reason) => (
-              <div
-                key={reason.id}
-                style={{ padding: '4px 0' }}
-                data-testid={`product-reason-${reason.id}`}
-              >
-                <div className={reason.tone === 'attention' ? 'flag' : 'flag neutral'}>
-                  <FlagMark tone={reason.tone === 'attention' ? 'attention' : 'neutral'} />
-                  {reason.short}
-                </div>
-                <div className="lvl-2" style={{ marginTop: '3px' }}>
-                  {reason.what}
-                </div>
-                <div className="lvl-3">{reason.nextStep}</div>
+      {/*
+       * PREKÁŽKY MAJÚ NADPIS LEN VTEDY, KEĎ JE ČO VYMENOVAŤ.
+       *
+       * Skupina s vlastným nadpisom nad JEDINOU vetou „nič tu nie je" stála
+       * 55 px, z toho 34 px na chróm nad nulovým obsahom. Nadpis skupiny je
+       * sľub, že pod ním je zoznam; nad jednou vetou je to prázdna miestnosť
+       * s menovkou na dverách. Presne to isté rozhodnutie má D8 v `CatalogTiles`
+       * (dlaždica bez hodnoty nekreslí vysvetlivku, prázdny rozklik sa nekreslí
+       * vôbec).
+       *
+       * Nič sa tým nestráca: veta si tému pomenuje sama a nesie aj to, ČIE je
+       * to pozorovanie — appka nehovorí „nič nebráni", hovorí „appka nevidí
+       * nič". Len čo je prekážka naozaj čo vymenovať, nadpis je späť aj so
+       * skupinou. Jeden riadok, nie dva: slová „pri tomto produkte" povedal
+       * panel už tým, že je otvorený nad kusom.
+       */}
+      {nothingInTheWay ? (
+        <div
+          className="lvl-3"
+          style={{ borderTop: '1px solid var(--line)', marginTop: '10px', paddingTop: '8px' }}
+          data-testid="product-no-blockers"
+        >
+          Appka nevidí nič, čo by zápisu zľavy bránilo.
+        </div>
+      ) : (
+        <DetailGroup title="Prekážky">
+          {reasons.map((reason) => (
+            <div
+              key={reason.id}
+              style={{ padding: '4px 0' }}
+              data-testid={`product-reason-${reason.id}`}
+            >
+              <div className={reason.tone === 'attention' ? 'flag' : 'flag neutral'}>
+                <FlagMark tone={reason.tone === 'attention' ? 'attention' : 'neutral'} />
+                {reason.short}
               </div>
-            ))}
-            <BlockerNotes blockers={stopping} here="/produkty" testId="product-blockers" />
-          </>
-        )}
-      </DetailGroup>
+              <div className="lvl-2" style={{ marginTop: '3px' }}>
+                {reason.what}
+              </div>
+              <div className="lvl-3">{reason.nextStep}</div>
+            </div>
+          ))}
+          <BlockerNotes blockers={stopping} here="/produkty" testId="product-blockers" />
+        </DetailGroup>
+      )}
 
-      <DetailGroup title="Údaje o produkte">
+      {/*
+       * Zrkadlo katalógu je pod rozklikom, a to zámerne: názov aj cena stoja
+       * o 200 px vyššie v hlavičke panela v čitateľnejšej veľkosti, takže
+       * otvorená skupina ich na povrchu opakovala. Zvyšok (varianty, stav
+       * v eshope, pôvod riadku, čas načítania) je pôvod údaja — pomáha
+       * rozhodnúť, či sa cene dá veriť, ale nie je to dôvod, prečo sa panel
+       * otvára. Nadpis a počet zostávajú na povrchu.
+       */}
+      <DetailGroup
+        title="Údaje o produkte"
+        hint={fieldCount(facts.length)}
+        fold
+        testId="detail-facts-fold"
+      >
         <dl className="dl" data-testid="detail-facts">
-          <dt>Názov</dt>
-          <dd>{row.name ?? DASH}</dd>
-          <dt>Cena</dt>
-          <dd>{formatEur(row.price)}</dd>
-          <dt>Varianty</dt>
-          <dd>{row.hasAttributes ? 'má varianty' : 'bez variantov'}</dd>
-          <dt>Stav v eshope</dt>
-          <dd>{SHOP_STATUS_TEXT[row.shopStatus]}</dd>
-          <dt>Odkiaľ je tento riadok</dt>
-          <dd>{ORIGIN_TEXT[row.origin]}</dd>
+          {facts.map((fact) => (
+            <Fragment key={fact.label}>
+              <dt>{fact.label}</dt>
+              <dd>{fact.value}</dd>
+            </Fragment>
+          ))}
         </dl>
         <div className="lvl-3" style={{ marginTop: '6px' }} data-testid="detail-row-fetched-at">
           Načítané {formatDateTimeSk(row.fetchedAt)}.
@@ -589,9 +822,14 @@ export function ProductDetailPanel({
        * Varianty sú jediné miesto, kde je kód a sklad vidieť BEZ kľúča. Kus
        * bez variantov ich nemá o čom povedať — to už hovorí riadok „Varianty"
        * vyššie a druhá veta o tom istom by bola šum.
+       *
+       * Zoznam je pod rozklikom: kus s ôsmimi variantmi má osem dvojriadkových
+       * položiek, teda vyše 200 px, a to je pri kuse, ktorý sa otvára kvôli
+       * predajnosti, príliš veľa miesta. Koľko variantov to je, hovorí nadpis
+       * — a to je práve tá informácia, kvôli ktorej by sa zoznam otváral.
        */}
       {row.hasAttributes ? (
-        <DetailGroup title="Varianty">
+        <DetailGroup title="Varianty" hint={variantHint} fold testId="detail-variants-fold">
           <ProductVariants extra={extra} />
         </DetailGroup>
       ) : null}
@@ -621,18 +859,38 @@ export function ProductDetailPanel({
             Načítavam…
           </div>
         ) : writes.length === 0 ? (
+          /*
+           * Stav zápisov a výhrada pod ním sú DVE VETY O TOM ISTOM (o tom, čo
+           * appka o zľavách vie), takže stoja v jednom bloku s jedným
+           * odsadením. Dva samostatné 8 px odstupy z nich robili dve
+           * nesúvisiace poznámky a stáli výšku, ktorá v paneli nie je.
+           */
           <div className="lvl-3" style={{ marginTop: '8px' }}>
             Tento produkt sme ešte nezlacňovali.
           </div>
         ) : (
-          <div style={{ marginTop: '8px' }}>
-            {writes.map((write) => (
-              <WriteRow key={write.itemId} write={write} />
-            ))}
-          </div>
+          /*
+           * Zoznam zápisov je LOG, a log patrí pod rozklik (P6). Šesť riadkov
+           * dl nad ním už povedalo, čo z neho človek potrebuje — čo platí
+           * teraz, kedy sa naposledy zlacňovalo a o koľko. Celá história je
+           * odpoveď na inú otázku a pri kuse s desiatimi zápismi vytlačila
+           * z panela všetko ostatné. Počet je v nadpise, takže sa dá zistiť,
+           * že tam je, aj bez otvorenia.
+           */
+          <details className="tech" data-testid="detail-writes-fold">
+            <summary>
+              Všetky naše zápisy · {formatCountSk(writes.length)}{' '}
+              {pluralSk(writes.length, 'zápis', 'zápisy', 'zápisov')}
+            </summary>
+            <div style={{ marginTop: '6px' }}>
+              {writes.map((write) => (
+                <WriteRow key={write.itemId} write={write} />
+              ))}
+            </div>
+          </details>
         )}
 
-        <div className="lvl-3" style={{ marginTop: '8px' }}>
+        <div className="lvl-3" style={{ marginTop: '4px' }}>
           Appka vidí len to, čo sama zapísala — nie stav eshopu.
         </div>
       </DetailGroup>
@@ -643,79 +901,14 @@ export function ProductDetailPanel({
        * podrobnosti z eshopu. Nadpis, ktorý by nad vypísanými hodnotami tvrdil
        * „nedostupné", by bol nepravdivý.
        */}
-      <DetailGroup title={keyedShown ? 'Podrobnosti z eshopu' : 'Zatiaľ nedostupné'}>
+      <DetailGroup
+        title={keyedShown ? 'Podrobnosti z eshopu' : 'Zatiaľ nedostupné'}
+        hint={fieldCount(keyedRows.length)}
+        fold
+        testId="detail-locked-fold"
+      >
         <dl className="dl" data-testid="detail-locked">
-          <KeyedRow
-            legacy
-            label="Kód produktu"
-            field={keyedField(extra, (k) => k.reference)}
-            render={(value) => <span className="num">{value}</span>}
-          />
-          <KeyedRow
-            label="EAN produktu"
-            field={keyedField(extra, (k) => k.ean13)}
-            render={(value) => <span className="num">{value}</span>}
-          />
-          <KeyedRow
-            legacy
-            label="Sklad"
-            field={keyedField(extra, (k) => k.stockQuantity)}
-            render={(value) => <span className="num">{stockText(value)}</span>}
-          />
-          <KeyedRow
-            legacy
-            label="Nákupná cena"
-            field={keyedField(extra, (k) => k.wholesalePrice)}
-            render={(value) => formatEur(value)}
-          />
-          <KeyedRow
-            legacy
-            label="Marža"
-            field={marginField}
-            render={(value) => value}
-          />
-          <KeyedRow
-            label="Cena s DPH"
-            field={keyedField(extra, (k) => k.priceWithTax)}
-            render={(value) => formatEur(value)}
-          />
-          <KeyedRow
-            label="Dodávateľ"
-            field={keyedField(extra, (k) => k.supplier)}
-            render={(value) => value}
-          />
-          <KeyedRow
-            legacy
-            label="Kategórie"
-            field={keyedList(extra, (k) => k.categories)}
-            render={(value) => value.join(' · ')}
-          />
-          <KeyedRow
-            label="Zapnutý v eshope"
-            field={keyedField(extra, (k) => k.active)}
-            render={(value) => (value ? 'áno' : 'nie')}
-          />
-          <KeyedRow
-            label="Pridané do eshopu"
-            field={keyedField(extra, (k) => k.addedAt)}
-            render={(value) => formatDateSk(value)}
-          />
-          <KeyedRow
-            label="Naposledy objednané"
-            field={keyedField(extra, (k) => k.lastOrderedAt)}
-            render={(value) => formatDateSk(value)}
-          />
-          <KeyedRow
-            label="Objednané kusy spolu"
-            field={keyedField(extra, (k) => k.orderedTotal)}
-            render={(value) => <span className="num">{formatCountSk(value)}</span>}
-          />
-          {/*
-           * Skutočnú zľavu v eshope zatiaľ nenesie ANI cesta `getFull`, ktorú
-           * appka číta — nie je to teda „shop nemá", ale „appka nedovidí".
-           * Preto zostáva pevne zamknutá, kým to doťahovanie nedoplní.
-           */}
-          <LockedRow label="Skutočná zľava v eshope" />
+          {keyedRows}
         </dl>
         <div className="lvl-3" style={{ marginTop: '6px' }}>
           {SURFACE_TERMS.lockedFeature} · <Link href="/nastavenia#zamknute">viac</Link>
@@ -756,7 +949,7 @@ export function ProductDetailPanel({
         </div>
       </details>
 
-      <div className="row" style={{ marginTop: '14px' }}>
+      <div className="row" style={{ marginTop: '10px' }}>
         <Link
           className="btn primary"
           href={newDiscountHref({ kind: 'products', productIds: [row.productId] })}
