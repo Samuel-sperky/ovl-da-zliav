@@ -13,10 +13,14 @@
  *   2. **Inline scan textu** — hodnota v serializovanom tvare
  *      (`Authorization: Bearer …`, `?api_key=…`) sa maskuje aj vtedy, keď je
  *      zaliata v jednom stringu (raw odpoveď, stacktrace, curl príkaz).
- *   3. **Substring scan na aktuálny kľúč** — `setActiveSecretForScan()` uloží
- *      aktuálne použitý kľúč; ak sa on alebo jeho posledných 8 znakov objaví
- *      kdekoľvek v serializovanom výstupe, redaktor ho nahradí a nahlási
- *      `redaction_hit` (§6).
+ *   3. **Substring scan na aktuálne uložené kľúče** — `lib/repo/api-key.repo.ts`
+ *      ohlási kľúč pri uložení a pri načítaní na použitie; ak sa on alebo jeho
+ *      posledných 8 znakov objaví kdekoľvek v serializovanom výstupe, redaktor
+ *      ho nahradí a nahlási `redaction_hit` (§6).
+ *
+ *      Vrstva je ZÁMERNE viac-tajomstvová (`setScanSecretForOwner()`): appka
+ *      drží DVA kľúče naraz (`shop_write`, `orders_read`, P5) a keby bol slot
+ *      jediný, načítanie jedného kľúča by zhaslo alarm tomu druhému.
  *
  * Fail-closed pravidlá:
  *   - binárne dáta (`Buffer`, `Uint8Array`) sa NIKDY neserializujú — vracia sa
@@ -143,59 +147,86 @@ export function setRedactionHitSink(sink: RedactionHitSink | null): void {
   hitSink = sink ?? fallbackSink;
 }
 
-interface ScanState {
+interface ScanEntry {
   /** Celý kľúč. */
-  secret: string | null;
+  secret: string;
   /** Posledných 8 znakov kľúča (§6). */
-  tail: string | null;
+  tail: string;
 }
 
-const scan: ScanState = { secret: null, tail: null };
+/**
+ * Aktívne tajomstvá podľa VLASTNÍKA (`owner`). Vlastníkom je druh kľúča
+ * (`shop_write` / `orders_read`, P5), takže načítanie objednávkového kľúča
+ * nezhasne scan zápisového a naopak. `Map` je zámerne bez stropu veľkosti —
+ * vlastníkov je uzavretý číselník a každý má práve jednu položku.
+ */
+const scan = new Map<string, ScanEntry>();
+
+/** Vlastník pre jedno-tajomstvové volanie `setActiveSecretForScan()`. */
+export const DEFAULT_SCAN_OWNER = 'default';
 
 let totalHits = 0;
 
 /**
- * Nastaví aktuálne uložený kľúč pre substring scan; `null` ho zabudne (D66).
- * Volá sa z `lib/repo/api-key.repo.ts` (A1) pri uložení, načítaní a wipe kľúča.
+ * Zapne substring scan na kľúč jedného vlastníka; `null` ho zabudne (D66).
+ * Volá sa z `lib/repo/api-key.repo.ts` (A1) pri uložení, načítaní na použitie
+ * a pri wipe kľúča — `owner` je druh kľúča.
  *
  * Samotný kľúč tu žije ako `string` VÝHRADNE preto, aby ho redaktor vedel
  * rozpoznať v už serializovanom texte — nikam sa neloguje ani nevracia.
  */
-export function setActiveSecretForScan(secret: string | null): void {
-  if (secret === null || secret.length === 0) {
-    scan.secret = null;
-    scan.tail = null;
-    return;
-  }
-  if (secret.length < MIN_SCANNABLE_SECRET_LENGTH) {
+export function setScanSecretForOwner(owner: string, secret: string | null): void {
+  if (secret === null || secret.length < MIN_SCANNABLE_SECRET_LENGTH) {
     // Kratšie „tajomstvo" by pri substring scane zmazalo pol logu (napr. sekvencia
     // 2 znakov). Kľúč shopu má min. 16 znakov (§5, `/api/key`), takže sem sa dá
     // dostať len omylom — scan sa nezapne a `getRedactionState()` to prizná.
-    scan.secret = null;
-    scan.tail = null;
+    scan.delete(owner);
     return;
   }
-  scan.secret = secret;
-  scan.tail = secret.slice(-SECRET_TAIL_LENGTH);
+  scan.set(owner, { secret, tail: secret.slice(-SECRET_TAIL_LENGTH) });
+}
+
+/**
+ * Jedno-tajomstvová podoba (kontrakt `RedactorModule`, A0).
+ *
+ * `null` je ZÁMERNE „zabudni všetko", nie „zabudni default": je to jediná
+ * panic/reset cesta, akú kontrakt pozná, a zúžiť ju na jedného vlastníka by
+ * znamenalo, že po nej v redaktore ticho zostane kľúč.
+ */
+export function setActiveSecretForScan(secret: string | null): void {
+  if (secret === null || secret.length === 0) {
+    scan.clear();
+    return;
+  }
+  setScanSecretForOwner(DEFAULT_SCAN_OWNER, secret);
+}
+
+/** Zabudne kľúče VŠETKÝCH vlastníkov (panic wipe, D67). */
+export function clearScanSecrets(): void {
+  scan.clear();
 }
 
 /** Diagnostika pre testy a pre `/api/health` — nikdy nevracia samotný kľúč. */
 export function getRedactionState(): {
   hasActiveSecret: boolean;
+  /** Koľko kľúčov (vlastníkov) scan práve stráži. */
+  activeSecrets: number;
+  /** Dĺžka kľúča, keď je aktívny práve jeden; inak `null`. */
   secretLength: number | null;
   totalHits: number;
 } {
+  const only = scan.size === 1 ? scan.values().next().value : undefined;
   return {
-    hasActiveSecret: scan.secret !== null,
-    secretLength: scan.secret?.length ?? null,
+    hasActiveSecret: scan.size > 0,
+    activeSecrets: scan.size,
+    secretLength: only ? only.secret.length : null,
     totalHits,
   };
 }
 
 /** Výhradne pre testy. */
 export function resetRedactionState(): void {
-  scan.secret = null;
-  scan.tail = null;
+  scan.clear();
   totalHits = 0;
 }
 
@@ -281,10 +312,10 @@ function scrub(input: string, state: PassState): string {
   );
   out = out.replace(INLINE_QUERY_RE, (_match, prefix: string) => `${prefix}${REDACTED}`);
 
-  // 3. vrstva — aktuálny kľúč a jeho posledných 8 znakov (§6, D66).
-  if (scan.secret !== null) {
-    out = replaceAll(out, scan.secret, state, 'secret');
-    if (scan.tail !== null) out = replaceAll(out, scan.tail, state, 'tail');
+  // 3. vrstva — aktuálne uložené kľúče a ich posledných 8 znakov (§6, D66).
+  for (const entry of scan.values()) {
+    out = replaceAll(out, entry.secret, state, 'secret');
+    out = replaceAll(out, entry.tail, state, 'tail');
   }
 
   return out;

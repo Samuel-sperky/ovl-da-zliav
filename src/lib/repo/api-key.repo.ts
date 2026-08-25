@@ -44,10 +44,28 @@
  *          Tento súbor neobsahuje žiadny `INSERT INTO audit_log`.
  *  - I14 — chýbajúci/zlý master key = výnimka, nikdy „uložím to nešifrovane".
  *
- * Prepojenie na audit (A2) a logger (A2) je ZÁMERNE injektované cez
- * `configureApiKeyRepo()`: A1 nesmie zapisovať do cudzích súborov a v čase jeho
- * vlny `src/lib/audit/write.ts` ešte neexistuje. Kým sa wiring nespraví, wipe
- * a uloženie kľúča sa nestratia mlčky — vypíšu sa ako `audit_fallback` na stdout.
+ * Prepojenie na audit (A2) a logger (A2) sa dá injektovať cez
+ * `configureApiKeyRepo()`, ale repozitár sa naň UŽ NESPOLIEHA: `configureApiKeyRepo()`
+ * volá výhradne `src/instrumentation-node.ts` a Next.js kompiluje instrumentation
+ * do VLASTNÉHO module grafu, takže nakonfigurovaný singleton NIE JE ten, ktorý
+ * vidia route handlery. Audit si preto repozitár dotiahne sám (`resolveAudit()`)
+ * a rovnako aj logger (`resolveLogger()`). Bez toho bolo `if (logger)` v produkcii
+ * VŽDY `false`: `audit_fallback`, `audit_write_failed` aj `api_key_last4_mismatch`
+ * padali do `console.*`, teda MIMO centrálneho redaktora (I1) — a `last4 mismatch`
+ * sa nezobrazilo nikde.
+ *
+ * TRETIA VRSTVA REDAKTORA (§6, D66, I1)
+ * -------------------------------------
+ * Substring scan redaktora na hodnotu kľúča vie zapnúť JEDINE tento súbor — je
+ * jediné miesto, kde plaintext kľúča existuje. Preto sa `setScanSecretForOwner()`
+ * volá pri `store()` (hneď po INSERTe), pri `loadForUse()` (hneď po TTL kontrole,
+ * teda skôr, než sa kľúč vôbec dostane na drôt) a `clearScanSecrets()` /
+ * `setScanSecretForOwner(kind, null)` pri wipe. Kým sa to nevolalo, vrstva 3
+ * nikdy nebežala a `redaction_hit` sa nemohol vyvolať ani raz.
+ *
+ * Vlastníkom scanu je DRUH kľúča, nie inštancia: appka drží dva kľúče naraz
+ * (P5) a jediný slot v redaktore by znamenal, že načítanie jedného zhasne alarm
+ * druhému.
  */
 import type {
   ApiKeyMeta,
@@ -71,6 +89,11 @@ import {
   wipeBuffer,
   type SecretBoxOptions,
 } from '@/lib/crypto/secret-box';
+// Logger a redaktor sú tu STATICKY: `lib/log/logger.ts` závisí len na
+// `contracts`, `lib/log/redact.ts` a `version`, takže cyklus nevzniká (na rozdiel
+// od `lib/audit/write.ts`, ktoré sa preto ťahá dynamicky v `resolveAudit()`).
+import { logger as defaultLogger } from '@/lib/log/logger';
+import { clearScanSecrets, redactString, setScanSecretForOwner } from '@/lib/log/redact';
 // Typ scopes je len typ (`import type` — žiadna runtime závislosť repozitára na
 // klientovi shopu). Číselník vlastní `shop/client.ts`, lebo tam sa odpoveď
 // `whoami` parsuje; repozitár si ho len pamätá.
@@ -256,11 +279,27 @@ export interface ApiKeyRepoDeps {
 }
 
 /**
+ * Posledná záchrana, keď logger nie je k dispozícii (volajúci ho vypol cez
+ * `logger: null`). `console.*` NEPRECHÁDZA centrálnym redaktorom, preto sa
+ * riadok prežene `redactString()` — inak by táto vetva bola jediná cesta
+ * v appke, ktorá obchádza I1.
+ */
+function consoleFallback(level: 'warn' | 'error', payload: Record<string, unknown>): void {
+  const line = redactString(JSON.stringify({ ...payload, ts: new Date().toISOString() }));
+  if (level === 'error') console.error(line);
+  else console.warn(line);
+}
+
+/**
  * Fallback audit: nikdy nemlčí. `appendAudit()` sa nesmie stať dôvodom
  * zlyhania wipe (rovnaká politika ako A2), preto len logujeme.
  */
 function fallbackAudit(logger: MinimalLogger | null, input: AuditInput): void {
-  const line = JSON.stringify({
+  if (logger) {
+    logger.warn('audit_fallback', { eventType: input.eventType });
+    return;
+  }
+  consoleFallback('warn', {
     level: 'warn',
     msg: 'audit_fallback',
     detail:
@@ -269,10 +308,7 @@ function fallbackAudit(logger: MinimalLogger | null, input: AuditInput): void {
     actor: input.actor,
     ok: input.ok ?? null,
     message: input.message ?? null,
-    ts: new Date().toISOString(),
   });
-  if (logger) logger.warn('audit_fallback', { eventType: input.eventType });
-  else console.warn(line);
 }
 
 /* ─────────────────────────────── pomocníci ─────────────────────────────── */
@@ -364,8 +400,66 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
    */
   const auditExplicit = 'audit' in deps;
   let logger = deps.logger ?? null;
+  /** To isté pravidlo ako pri audite: explicitný `logger` (aj `null`) je rozkaz. */
+  const loggerExplicit = 'logger' in deps;
   const now = deps.now ?? (() => new Date());
   const boxOptions: SecretBoxOptions = deps.masterKey ? { masterKey: deps.masterKey } : {};
+
+  /**
+   * Logger PRE PRODUKČNÝ SINGLETON — rovnaká záchrana ako `resolveAudit()`.
+   *
+   * `configureApiKeyRepo()` volá len boot (`src/instrumentation-node.ts`), ktorý
+   * je v inom module grafe než route handlery, takže `logger` v singletone
+   * zostával `null` a všetky vetvy `if (logger)` boli mŕtve. Import je statický
+   * (žiadny cyklus), takže riešenie je synchrónne a nemôže sa „nestihnúť".
+   */
+  const resolveLogger = (): MinimalLogger | null => {
+    if (loggerExplicit) return logger;
+    if (logger === null) logger = defaultLogger;
+    return logger;
+  };
+
+  /**
+   * Zapne 3. vrstvu redaktora (§6, D66) na plaintext kľúča tohto druhu.
+   *
+   * Plaintext sa tu mení na `string` VÝHRADNE preto, aby ho redaktor vedel
+   * rozpoznať v už serializovanom texte (viď `lib/log/redact.ts`) — nikam sa
+   * neloguje, nevracia ani neukladá. Zlyhanie redaktora NESMIE zhodiť prácu
+   * s kľúčom, preto `try`.
+   */
+  const armRedactionScan = (plain: Buffer): void => {
+    try {
+      setScanSecretForOwner(kind, plain.toString('utf8'));
+    } catch {
+      // Redaktor je obrana, nie dôvod pádu; `getRedactionState()` to prizná.
+    }
+  };
+
+  /**
+   * To isté, ale zo zašifrovaného riadku — používa `loadForUse()`, ktorý sám
+   * o sebe nedešifruje (D64). Buffer sa hneď nuluje; kľúč prežije len ako
+   * `string` v redaktore, presne ako pri `store()`.
+   */
+  const armRedactionScanFromRow = (row: ApiKeyRow): void => {
+    let plain: Buffer | null = null;
+    try {
+      plain = decryptApiKey(
+        {
+          ciphertext: row.ciphertext,
+          iv: row.iv,
+          authTag: row.auth_tag,
+          keyVersion: row.key_version,
+        },
+        boxOptions,
+      );
+      armRedactionScan(plain);
+    } catch {
+      // Nedešifrovateľný kľúč aj tak nie je použiteľný — scan sa nezapne
+      // a volajúci narazí na tú istú chybu pri skutočnom použití.
+    } finally {
+      if (plain) wipeBuffer(plain);
+    }
+  };
 
   const runInTx = async <T>(
     conn: Queryable | undefined,
@@ -404,7 +498,7 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
   const writeAudit = async (input: AuditInput, conn?: Queryable): Promise<void> => {
     await resolveAudit();
     if (!audit) {
-      fallbackAudit(logger, input);
+      fallbackAudit(resolveLogger(), input);
       return;
     }
     try {
@@ -412,17 +506,15 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
     } catch (error) {
       // Audit nikdy nesmie zhodiť operáciu (politika A2) — ale ani zmiznúť.
       const message = error instanceof Error ? error.message : String(error);
-      if (logger) logger.error('audit_write_failed', { eventType: input.eventType, message });
+      const log = resolveLogger();
+      if (log) log.error('audit_write_failed', { eventType: input.eventType, message });
       else
-        console.error(
-          JSON.stringify({
-            level: 'error',
-            msg: 'audit_write_failed',
-            eventType: input.eventType,
-            detail: message,
-            ts: new Date().toISOString(),
-          }),
-        );
+        consoleFallback('error', {
+          level: 'error',
+          msg: 'audit_write_failed',
+          eventType: input.eventType,
+          detail: message,
+        });
     }
   };
 
@@ -479,6 +571,13 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
       if (allKinds) await conn.query(SQL_WIPE_DELETE_ALL, []);
       else await conn.query(SQL_WIPE_DELETE, [kind]);
     }
+
+    // 3. vrstva redaktora: kľúč, ktorý už neexistuje, netreba skenovať (D66).
+    // Odzbrojuje sa AŽ po zmazaní — keby wipe zlyhal, scan zostane zapnutý
+    // a redaktor bude maskovať navyše. To je tá správna strana omylu.
+    // Panic wipe (D67) zhasína scan VŠETKÝCH druhov, presne ako SCOPE_MEMORY.
+    if (allKinds) clearScanSecrets();
+    else setScanSecretForOwner(kind, null);
 
     const baseMessage = context?.message ?? reason;
     const auditEntry = (message: string) => ({
@@ -564,8 +663,20 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
       // `last4` z UI je len kontrolná hodnota; smerodajný je plaintext (D65).
       const computed = computeLast4(plain);
       if (typeof last4 === 'string' && last4.length === 4 && last4 !== computed) {
-        if (logger) logger.warn('api_key_last4_mismatch');
+        // Varovanie MUSÍ byť niekde vidieť: znamená, že to, čo appka ukáže
+        // používateľovi ako „posledné 4 znaky", nesedí s tým, čo naozaj uloží.
+        // Do polí NEJDE ani jedna z tých hodnôt (I1) — stačí druh kľúča.
+        const log = resolveLogger();
+        if (log) log.warn('api_key_last4_mismatch', { kind });
+        else consoleFallback('warn', { level: 'warn', msg: 'api_key_last4_mismatch', kind });
       }
+
+      /**
+       * Kľúč pre 3. vrstvu redaktora (§6) sa musí odložiť PRED zašifrovaním —
+       * `encryptApiKey()` buffer vzápätí vynuluje. Scan sa ale zapne až po
+       * INSERTe: `wipeWithConn('replaced_by_new_key')` nižšie ho vzápätí zhasína.
+       */
+      const plaintextForScan = plain.toString('utf8');
 
       const record: EncryptedSecret = ((): EncryptedSecret => {
         try {
@@ -596,6 +707,9 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
           expiresAt,
           'unverified',
         ]);
+        // Alarm sa zapína EŠTE PRED prvým auditným zápisom — `writeAudit()` už
+        // ide cez redaktor s aktívnou 3. vrstvou (§6, D66, I1).
+        setScanSecretForOwner(kind, plaintextForScan);
         await writeAudit(
           {
             actor: 'user',
@@ -624,6 +738,21 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
         return null;
       }
 
+      /**
+       * TU sa zapína 3. vrstva redaktora (§6, D66, I1).
+       *
+       * Prečo už tu a nie až vnútri `SecretRef`: od tejto chvíle je kľúč
+       * „vydaný na použitie" a všetko, čo volajúci od teraz zaloguje (chybová
+       * hláška knižnice, `nonJsonBody` z `shop/client.ts`, hláška z `mariadb`),
+       * má byť pod alarmom — vrátane cesty, kde volajúci `SecretRef` nakoniec
+       * ani nezavolá, lebo predtým spadol.
+       *
+       * Cena je jedno dešifrovanie navyše. NIE JE to porušenie D64 (nulová
+       * cache): buffer sa hneď nuluje a plaintext prežije len ako `string`
+       * v redaktore, čo je presne to, čo `redact.ts` na svoju prácu potrebuje.
+       */
+      armRedactionScanFromRow(row);
+
       // ŽIADNA cache (D64): `SecretRef` si riadok načíta znova pri každom volaní
       // a znova skontroluje TTL — medzi `loadForUse()` a zápisom mohlo TTL vypršať.
       return async () => {
@@ -638,17 +767,20 @@ export function createApiKeyRepo(deps: ApiKeyRepoDeps = {}): ApiKeyRepository {
             `API kľúč expiroval (TTL ${maxTtlHours} h) — zadaj nový v UI (R2, P2).`,
           );
         }
-        return createSecretHandle(
-          decryptApiKey(
-            {
-              ciphertext: fresh.ciphertext,
-              iv: fresh.iv,
-              authTag: fresh.auth_tag,
-              keyVersion: fresh.key_version,
-            },
-            boxOptions,
-          ),
+        const plain = decryptApiKey(
+          {
+            ciphertext: fresh.ciphertext,
+            iv: fresh.iv,
+            authTag: fresh.auth_tag,
+            keyVersion: fresh.key_version,
+          },
+          boxOptions,
         );
+        // Riadok sa medzitým mohol vymeniť (rotácia kľúča) — alarm musí strážiť
+        // ten kľúč, ktorý sa práve ide použiť. Dešifrované je aj tak, takže
+        // toto je zadarmo.
+        armRedactionScan(plain);
+        return createSecretHandle(plain);
       };
     },
 
