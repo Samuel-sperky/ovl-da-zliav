@@ -175,6 +175,14 @@ npm run test        3111 prešlo / 0 padlo / 0 preskočených  (153 súborov)
 Pred začiatkom to bolo 15 padajúcich z 3084 a strom nesledovaných zmien v 26 +
 7 súboroch.
 
+### Chyba v mojom rozdelení klastrov
+
+`test/unit/first-run.spec.ts` nepatril ani do jedného z desiatich klastrov
+v sekcii 3. Vypadol mi pri delení, triáž ho teda vôbec neposúdila a posúdil som
+ho sám (commit `deef971`). Desať klastrov nad tridsiatimi tromi súbormi je ručné
+delenie a ručné delenie zabúda — nabudúce vypísať `git status` do zoznamu a
+odškrtávať položky, nie ich prepisovať po pamäti.
+
 ### Verdikty triáže
 
 Desať agentov, ~1 M tokenov, 8,5 minúty. **4× `commit`** (K4, K7, K8, K9),
