@@ -14,7 +14,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { closePool } from '@/db/pool';
 import { allowlistRepo } from '@/lib/repo/allowlist.repo';
 import { campaignItemsRepo, MAX_ITEMS_PER_CAMPAIGN } from '@/lib/repo/campaign-items.repo';
-import { campaignsRepo } from '@/lib/repo/campaigns.repo';
+import {
+  campaignsRepo,
+  /* Dávkové tvary priznáva len pohľad V3 — `campaignsRepo` je ten istý objekt,
+   * ale starý typ ich nepomenúva (viď komentár pri `CampaignsRepoLegacy`). */
+  campaignsRepoV3,
+} from '@/lib/repo/campaigns.repo';
 import { catalogRepo } from '@/lib/repo/catalog.repo';
 import { schedulerStateRepo } from '@/lib/repo/scheduler-state.repo';
 import { settingsRepo } from '@/lib/repo/settings.repo';
@@ -392,7 +397,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
         { productId: 812, position: 2, percent: 10, priceAtPreview: null, hasAttributes: false },
       ]);
 
-      const found = await campaignsRepo.findFutureOverlapsByProduct(
+      const found = await campaignsRepoV3.findFutureOverlapsByProduct(
         [811, 812, 813],
         testDay(5),
         testDay(9),
@@ -407,7 +412,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
       expect(found.get(811)?.[0]).toBe(found.get(812)?.[0]);
 
       // Mimo okna nenájde nič — rovnaká hranica ako `findFutureOverlaps()`.
-      const mimo = await campaignsRepo.findFutureOverlapsByProduct(
+      const mimo = await campaignsRepoV3.findFutureOverlapsByProduct(
         [811, 812],
         testDay(7),
         testDay(9),
@@ -425,12 +430,12 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
         { productId: 811, position: 1, percent: 20, priceAtPreview: null, hasAttributes: false },
       ]);
 
-      const obe = await campaignsRepo.findFutureOverlapsByProduct(
+      const obe = await campaignsRepoV3.findFutureOverlapsByProduct(
         [811, 812],
         testDay(5),
         testDay(9),
       );
-      expect(obe.get(811)?.map((c) => c.id).sort((a, b) => a - b)).toEqual(
+      expect(obe.get(811)?.map((c) => c.id).sort((a: number, b: number) => a - b)).toEqual(
         [campaign.id, druha.id].sort((a, b) => a - b),
       );
       expect(obe.get(812)?.map((c) => c.id)).toEqual([campaign.id]);
@@ -442,7 +447,7 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
      * volajúci sa na to spolieha (`lastWrites.get(id) ?? null`).
      */
     it('lastOwnWrites() vynechá produkty bez vlastného zápisu, nedá im null', async () => {
-      const written = await campaignsRepo.lastOwnWrites([821, 822]);
+      const written = await campaignsRepoV3.lastOwnWrites([821, 822]);
       expect(written.size).toBe(0);
       expect(written.has(821)).toBe(false);
     });
