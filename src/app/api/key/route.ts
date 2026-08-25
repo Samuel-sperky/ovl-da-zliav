@@ -54,10 +54,12 @@
 import { z } from 'zod';
 
 import type {
+  ApiKeyMeta,
   CampaignRecord,
   CampaignStatus,
   CampaignsRepo,
   KeyProbeResult,
+  KeyVerifyStatus,
   SecretRef,
   ShopCtx,
   Ulid,
@@ -323,6 +325,8 @@ export function whoamiToProbeResult(outcome: WhoamiOutcome): KeyProbeResult {
       return 'invalid';
     case 'forbidden':
       return 'forbidden';
+    case 'address_banned':
+      return 'address_banned';
     default:
       // 429, 500, timeout, zmenený tvar odpovede — nikdy sa z toho nestane
       // „kľúč platí"; uloží sa ako neoverený (fail-closed).
@@ -355,6 +359,118 @@ export function scopeReport(scopes: readonly ShopScope[] | null): KeyScopeReport
     productReadNote:
       productRead === true ? null : missingScopeSentence('product:read', productRead === false),
   };
+}
+
+/* ══════════ jeden kľúč v oboch slotoch (bod B kontraktu 24. 8.) ═══════════ */
+
+/**
+ * Vyzerá to, že v oboch slotoch je ten ISTÝ kľúč?
+ *
+ * PREČO SA TO ZISŤUJE Z `last4` A NIE ZO SCOPES. Zdanlivo priamočiara cesta by
+ * bola opýtať sa `whoami`, či kľúč má `product:edit` aj `orders:read` — a je
+ * ZAKÁZANÁ. Invariant I8' hovorí, že objednávkovú cestu vlastní výhradne
+ * `shop/orders-client.ts` a `shop/client.ts` o nej nevie ani slovo; `SHOP_SCOPES`
+ * preto obsahuje len `product:read` a `product:edit` a ostatné scopes sa iba
+ * spočítajú ako „iné". Stráži to grep test. Appka teda z `whoami` o objednávkovom
+ * oprávnení NEZISTÍ nič a ani nesmie.
+ *
+ * `last4` je oproti tomu v odpovedi tejto route beztak (I1 ho pripúšťa) a
+ * porovnanie sa nedotkne ani I8', ani schémy, ani plaintextu kľúča — ten appka
+ * po uložení neprečíta ani sama sebe.
+ *
+ * ČO SA TÝM SMIE TICHO POKAZIŤ: štyri znaky nie sú odtlačok. Dva RÔZNE kľúče
+ * s rovnakými poslednými štyrmi znakmi sú nepravdepodobné, nie nemožné, a appka
+ * ten rozdiel nemá ako zistiť. Preto veta hovorí „vyzerá to na ten istý kľúč"
+ * a nikdy „je to ten istý" — a preto sa pole menuje `looksLikeSameKey`, nie
+ * `sameKey`. Kto to meno skrátí, urobí z domnienky tvrdenie.
+ */
+export interface DualSlotReport {
+  /**
+   * `true` = oba sloty majú kľúč a `last4` sa zhoduje. `false` = nezhoduje sa.
+   * `null` = jeden zo slotov je prázdny, takže niet čo porovnávať.
+   */
+  looksLikeSameKey: boolean | null;
+  /** Veta pre používateľa; `null` = niet čo dodať. */
+  note: string | null;
+}
+
+export function dualSlotReport(
+  write: Pick<ApiKeyMeta, 'present' | 'last4'>,
+  orders: Pick<ApiKeyMeta, 'present' | 'last4'>,
+): DualSlotReport {
+  if (!write.present || !orders.present) return { looksLikeSameKey: null, note: null };
+  if (write.last4 === null || orders.last4 === null) {
+    return { looksLikeSameKey: null, note: null };
+  }
+  if (write.last4 !== orders.last4) return { looksLikeSameKey: false, note: null };
+
+  return {
+    looksLikeSameKey: true,
+    note:
+      'Oba kľúče končia rovnako, takže to vyzerá na ten istý kľúč použitý na zápis ' +
+      'aj na objednávky. Appka si ho drží v dvoch slotoch zvlášť, lebo každý má inú ' +
+      'platnosť — zápis 48 hodín, objednávky 30 dní. Keď vyprší jeden, druhý platí ' +
+      'ďalej a treba ho vložiť znova samostatne.',
+  };
+}
+
+/* ═════════════ prečo kľúč nie je overený (bod A kontraktu 24. 8.) ══════════ */
+
+/**
+ * Veta, ktorá povie PRAVDU o tom, prečo sa uložený kľúč nedal overiť.
+ *
+ * `verifyStatus: 'unverified'` je jediné slovo pre dva úplne rôzne stavy:
+ *  - shop bol nedostupný / odpovedal 429, 500, driftom — „skús to znova",
+ *  - shop odmieta našu ADRESU (`ip_banned`) — „nový kľúč nepomôže, treba
+ *    odblokovať adresu".
+ *
+ * Bez tejto vety by používateľ videl „uložený, neoverený" a hľadal chybu
+ * v kľúči, ktorý je možno v poriadku. `null` = kľúč je overený, niet čo dodať.
+ *
+ * ČO SA TU NESMIE POKAZIŤ: veta nesmie tvrdiť príčinu banu. Appka vie, čo shop
+ * odpovedal, nie prečo — rovnaké pravidlo ako v `sales/stop-policy.ts` bod 3.
+ */
+export function verifyNoteFor(probe: KeyProbeResult): string | null {
+  if (probe === 'valid') return null;
+  if (probe === 'address_banned') {
+    return (
+      'Kľúč je uložený, ale overiť sa ho nedalo: shop odmieta našu IP adresu ' +
+      '(403 `ip_banned`), a to aj pri volaní bez kľúča. Nový kľúč s tým nepohne — ' +
+      'treba požiadať správcu shopu o odblokovanie adresy. Zľavy sa dovtedy ' +
+      'nezapisujú a fronta počká; nič sa nestratí.'
+    );
+  }
+  return (
+    'Kľúč je uložený, ale overiť sa ho zatiaľ nedalo — shop neodpovedal ' +
+    'jednoznačne. Appka to skúsi znova sama; zľavy sa dovtedy nezapisujú.'
+  );
+}
+
+/**
+ * To isté pre GET, ktorý pozná len STAV, nie príčinu.
+ *
+ * Príčina (`ip_banned` vs. „shop neodpovedal jednoznačne") sa NIKAM neukladá —
+ * `api_key` nesie `verify_status`, nie dôvod. Po znovunačítaní obrazovky teda
+ * appka vie len to, že overený nie je. Veta preto príčinu **netvrdí**; hádať ju
+ * z posledného známeho stavu shopu by znamenalo vyrobiť tvrdenie z ničoho.
+ *
+ * `invalid` a `forbidden` sú v tomto číselníku dedičstvo starších verzií —
+ * odkedy sa taký kľúč vôbec neuloží, nemajú ako vzniknúť. Ak by sa v DB objavili,
+ * je to stav horší než `unverified`, nie lepší, a veta to musí povedať.
+ */
+export function verifyNoteForStatus(status: KeyVerifyStatus | null): string | null {
+  if (status === null || status === 'valid') return null;
+  if (status === 'unverified') {
+    return (
+      'Kľúč je uložený, ale appka ho nemá overený, takže zľavy sa nezapisujú. ' +
+      'Dôvod si appka nepamätá — pri vložení ho povie a po reštarte už nie. ' +
+      'Keď má byť platný, vlož ho znova.'
+    );
+  }
+  return (
+    'Shop tento kľúč pri poslednom overení odmietol, takže zľavy sa nezapisujú. ' +
+    'Vlož platný kľúč, alebo si vypýtaj nový od správcu shopu.'
+  );
 }
 
 /** Rozpočet do odpovede — vždy aj s tým, či je meraný, alebo len odhadnutý. */
@@ -495,6 +611,14 @@ export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
         const remembered = meta.present ? (repo.recallScopes?.() ?? null) : null;
         const scopes = scopeReport(remembered?.scopes ?? null);
 
+        /* Bod B — jeden kľúč v oboch slotoch. Číta sa `getMeta()` OBOCH
+         * repozitárov, nie `kind` z požiadavky: obe obrazovky (aj riadok zápisu,
+         * aj riadok objednávok) musia povedať to isté, inak si protirečia. */
+        const dual = dualSlotReport(
+          await resolved.apiKey.getMeta(),
+          await resolved.ordersKey.getMeta(),
+        );
+
         return {
           present: meta.present,
           last4: meta.last4,
@@ -502,11 +626,14 @@ export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           expiresAt: meta.expiresAt,
           secondsLeft: meta.secondsLeft,
           verifyStatus: meta.verifyStatus,
+          verifyNote: verifyNoteForStatus(meta.verifyStatus),
           // Uzavretý číselník scopes — nič, z čoho sa dá odvodiť kľúč (I1).
           scopes: scopes.scopes,
           productRead: scopes.productRead,
           productReadNote: scopes.productReadNote,
           scopesCheckedAt: remembered?.checkedAt ?? null,
+          looksLikeSameKey: dual.looksLikeSameKey,
+          sameKeyNote: dual.note,
         };
       },
     },
@@ -561,6 +688,13 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           probe = await ordersProbe(ephemeralSecretRef(ctx.body.apiKey), { operationId });
         }
 
+        /* 1a. Odmietnutie kľúča — VÝHRADNE keď shop hovorí o KĽÚČI.
+         *
+         * `address_banned` je tu zámerne NIE: je to tiež 403, ale o kľúči
+         * nevypovedá nič (shop ho vráti aj bez kľúča), takže by sa odmietol
+         * kľúč, ktorý je možno v poriadku — a to v jedinom stave, v ktorom sa
+         * žiadny nový kľúč overiť nedá. Pokračuje sa a uloží sa ako neoverený;
+         * prečo je to bezpečné, je pri bode 3. */
         if (probe === 'invalid') {
           throw conflict(PROBE_REJECTION[kind].invalid, 'key_invalid', { logAsError: false });
         }
@@ -596,7 +730,20 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
           userId: ctx.claims.sub,
         });
 
-        /* 3. Verify status podľa overenia; `unknown` (sieť) = `unverified`. */
+        /* 3. Verify status podľa overenia; `unknown` (sieť) aj `address_banned`
+         * (zablokovaná adresa) = `unverified`.
+         *
+         * PREČO JE ULOŽENIE NEOVERENÉHO KĽÚČA BEZPEČNÉ. `unverified` nie je
+         * medzistupeň medzi „platí" a „neplatí" — je to priznanie, že sa to
+         * nezmeralo, a appka sa podľa neho chová fail-closed: bod 4 nedopáli
+         * kampane, executor bez overeného kľúča nezapisuje a `verifyNoteFor()`
+         * to napíše na obrazovku. Uložený kľúč teda nič nezapne; jediné, čo
+         * pridá, je že po odblokovaní adresy netreba nič dopisovať.
+         *
+         * ČO SA TÝM SMIE TICHO POKAZIŤ: keby shop niekedy začal vracať
+         * `ip_banned` aj na NEPLATNÝ kľúč, appka by taký kľúč uložila. Nie je
+         * to diera v zápise (ten stojí na `valid`), ale hláška by bola falošne
+         * zmierlivá. Držať to musí test nad správaním, nie dôvera v shop. */
         const verifyStatus = probe === 'valid' ? 'valid' : 'unverified';
         await repo.setVerifyStatus(verifyStatus);
 
@@ -617,15 +764,25 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
         const remaining: RemainingFromWhoami | null = inspected?.remaining ?? null;
         const scopes = scopeReport(inspected?.scopes ?? null);
 
+        /* Bod B — až TU, po uložení: pred ním by sa porovnávalo `last4` kľúča,
+         * ktorý sa práve prepisuje. */
+        const dual = dualSlotReport(
+          await resolved.apiKey.getMeta(),
+          await resolved.ordersKey.getMeta(),
+        );
+
         return {
           last4: stored.last4,
           expiresAt: stored.expiresAt,
           verifyStatus,
+          verifyNote: verifyNoteFor(probe),
           kind,
           scopes: scopes.scopes,
           productRead: scopes.productRead,
           productReadNote: scopes.productReadNote,
           budget: budgetReport(resolveKeyedBudget(remaining)),
+          looksLikeSameKey: dual.looksLikeSameKey,
+          sameKeyNote: dual.note,
         };
       },
     },

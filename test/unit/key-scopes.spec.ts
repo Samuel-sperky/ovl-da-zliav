@@ -36,8 +36,10 @@ import type { ShopScope, WhoamiOutcome } from '@/lib/shop/client';
 import {
   createKeyGetRoute,
   createKeyPutRoute,
+  dualSlotReport,
   requiredScopeForKind,
   scopeReport,
+  verifyNoteForStatus,
   whoamiToProbeResult,
   type KeyRouteDeps,
 } from '@/app/api/key/route';
@@ -288,6 +290,51 @@ describe('pomôcky pre oprávnenia kľúča', () => {
     ).toBe('unknown');
   });
 
+  /* ── Jeden kľúč v oboch slotoch (bod B, 24. 8. 2026) ──────────────────────
+   *
+   * Zisťuje sa z `last4`, nie zo scopes: I8' zakazuje, aby `shop/client.ts`
+   * o objednávkovom oprávnení vedel čokoľvek, takže `whoami` ho nepovie a
+   * povedať nesmie. Štyri znaky ale nie sú odtlačok, a práve to sem patrí
+   * napísať ako test — nie ako želanie. */
+  it('rovnaké `last4` v oboch slotoch sa prizná ako domnienka, nie ako fakt', () => {
+    const withLast4 = (last4: string | null, present = true) => ({ present, last4 });
+
+    const same = dualSlotReport(withLast4('9x2Q'), withLast4('9x2Q'));
+    expect(same.looksLikeSameKey).toBe(true);
+    // Veta smie hovoriť „vyzerá to", nikdy „je to".
+    expect(String(same.note)).toContain('vyzerá');
+    // A musí povedať dôsledok: TTL sa líšia, takže vkladať treba dvakrát.
+    expect(String(same.note)).toContain('48 hodín');
+    expect(String(same.note)).toContain('30 dní');
+
+    const different = dualSlotReport(withLast4('9x2Q'), withLast4('7bC1'));
+    expect(different.looksLikeSameKey).toBe(false);
+    expect(different.note).toBeNull();
+  });
+
+  it('prázdny slot nie je „iný kľúč" — je to „niet čo porovnávať"', () => {
+    const present = { present: true, last4: '9x2Q' };
+    const missing = { present: false, last4: null };
+
+    // Toto je jadro: `false` by znamenalo „sú to dva rôzne kľúče", čo je pri
+    // prázdnom slote nepravda. Musí to byť `null`.
+    expect(dualSlotReport(present, missing).looksLikeSameKey).toBeNull();
+    expect(dualSlotReport(missing, present).looksLikeSameKey).toBeNull();
+    expect(dualSlotReport(missing, missing).looksLikeSameKey).toBeNull();
+    // Riadok s kľúčom a `last4 === null` je stav, ktorý appka nevie posúdiť.
+    expect(dualSlotReport(present, { present: true, last4: null }).looksLikeSameKey).toBeNull();
+  });
+
+  it('veta o neovereniu z GET netvrdí príčinu, ktorú appka nepamätá', () => {
+    // GET pozná len stav — dôvod (`ip_banned` vs. „shop neodpovedal") sa nikam
+    // neukladá, takže veta ho nesmie hádať.
+    const note = String(verifyNoteForStatus('unverified'));
+    expect(note).toContain('nepamätá');
+    expect(note.toLowerCase()).not.toContain('adres');
+    expect(verifyNoteForStatus('valid')).toBeNull();
+    expect(verifyNoteForStatus(null)).toBeNull();
+  });
+
   it('`scopeReport` rozlišuje má / nemá / nevieme', () => {
     const ma = scopeReport(['product:read', 'product:edit']);
     expect(ma.productRead).toBe(true);
@@ -480,6 +527,89 @@ describe('PUT /api/key — oprávnenia rozhodujú, či sa kľúč uloží', () =
     expect(rows.has('shop_write')).toBe(true);
   });
 
+  /* ── 403: dve rôzne odpovede v jednom stavovom kóde (bod A, 24. 8. 2026) ──
+   *
+   * Meria sa SPRÁVANIE route: uložil sa kľúč, alebo nie, aký je `verifyStatus`
+   * a či veta hovorí o adrese, alebo o kľúči. Poučenie zo Sprintu 20 — test,
+   * ktorý hľadá reťazec v zdrojovom kóde, nemeria nič. */
+  function forbidden403(code: string | null): WhoamiOutcome {
+    return {
+      status: code === 'ip_banned' ? 'address_banned' : 'forbidden',
+      error: { kind: 'forbidden', code, message: '', httpStatus: 403, retryable: false },
+    };
+  }
+
+  it('403 o kľúči kľúč NEULOŽÍ a veta hovorí o kľúči', async () => {
+    const { conn, rows } = makeDb();
+    const { write } = makeRepos(conn);
+    const route = createKeyPutRoute(
+      baseDeps({ apiKey: write, inspectKey: inspecting(forbidden403('forbidden')) }),
+    );
+
+    const response = await route(makeRequest({ method: 'PUT', body: { apiKey: FAKE_KEY } }));
+    expect(response.status).toBe(409);
+    const body = await readBody(response);
+    expect(body.error?.code).toBe('key_invalid');
+    expect(rows.has('shop_write')).toBe(false);
+    // Tu je obviňovanie kľúča správne — shop hovoril o kľúči.
+    expect(String(body.error?.message)).toContain('kľúč');
+  });
+
+  it('403 `ip_banned` kľúč ULOŽÍ ako neoverený a nikdy neobviní kľúč', async () => {
+    const { conn, rows } = makeDb();
+    const { write } = makeRepos(conn);
+    const route = createKeyPutRoute(
+      baseDeps({ apiKey: write, inspectKey: inspecting(forbidden403('ip_banned')) }),
+    );
+
+    const response = await route(makeRequest({ method: 'PUT', body: { apiKey: FAKE_KEY } }));
+    expect(response.status).toBe(200);
+    const body = await readBody(response);
+
+    // 1. Kľúč sa uložil — používateľ s novým kľúčom má kam ísť.
+    expect(rows.has('shop_write')).toBe(true);
+    // 2. Ale NIE ako platný. Na tom stojí bezpečnosť celej výnimky.
+    expect(body.data?.verifyStatus).toBe('unverified');
+    // 3. Veta hovorí o adrese, nie o kľúči.
+    const note = String(body.data?.verifyNote);
+    expect(note).toContain('adres');
+    expect(note.toLowerCase()).not.toContain('neplatn');
+    // 4. Scopes zostávajú „nevieme" — počas banu ich shop nepovedal.
+    expect(body.data?.scopes).toBeNull();
+  });
+
+  it('uložený neoverený kľúč zápis NEODOMKNE (fail-closed)', async () => {
+    const { conn } = makeDb();
+    const { write } = makeRepos(conn);
+    const route = createKeyPutRoute(
+      baseDeps({ apiKey: write, inspectKey: inspecting(forbidden403('ip_banned')) }),
+    );
+    await route(makeRequest({ method: 'PUT', body: { apiKey: FAKE_KEY } }));
+
+    /* Toto je tá vlastnosť, kvôli ktorej sa uloženie neovereného kľúča smie
+     * vôbec pripustiť: rozvrh aj fronta žiadajú `verifyStatus === 'valid'`
+     * (`scheduler/due.ts`, `scheduler/queue.ts`), takže uložený kľúč sám
+     * nezapne nič. Keby sa tam podmienka zmenila na „kľúč je prítomný",
+     * appka by po vložení kľúča začala zapisovať uprostred banu. */
+    const meta = await write.getMeta();
+    expect(meta.present).toBe(true);
+    expect(meta.verifyStatus).toBe('unverified');
+  });
+
+  it('overený kľúč vetu o neoverení nemá', async () => {
+    const { conn } = makeDb();
+    const { write } = makeRepos(conn);
+    const route = createKeyPutRoute(
+      baseDeps({ apiKey: write, inspectKey: inspecting(whoamiOk(['product:edit'])) }),
+    );
+
+    const body = await readBody(
+      await route(makeRequest({ method: 'PUT', body: { apiKey: FAKE_KEY } })),
+    );
+    expect(body.data?.verifyStatus).toBe('valid');
+    expect(body.data?.verifyNote).toBeNull();
+  });
+
   it('vlastné overenie (`probeKey`) prebije `whoami` a oprávnenia sú „nevieme"', async () => {
     const { conn } = makeDb();
     const { write } = makeRepos(conn);
@@ -651,6 +781,13 @@ describe('I1 — z `whoami` sa do odpovede route nedostane nič o kľúči', () 
         'scopesCheckedAt',
         'secondsLeft',
         'verifyStatus',
+        // Pribudlo 24. 8. 2026 (body A a B). Ani jedno nenesie nič, z čoho by
+        // sa dal odvodiť kľúč: `verifyNote` je veta o STAVE overenia,
+        // `looksLikeSameKey` je porovnanie `last4`, ktoré v odpovedi beztak je,
+        // a `sameKeyNote` je veta nad tým porovnaním.
+        'verifyNote',
+        'looksLikeSameKey',
+        'sameKeyNote',
       ].sort(),
     );
   });

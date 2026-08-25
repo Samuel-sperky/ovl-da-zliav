@@ -57,6 +57,7 @@ import {
   ShopConfigError,
   ShopRequestError,
   classifyFailure,
+  isIpBanned,
   isShopRequestError,
   makeShopError,
   schemaDriftError,
@@ -656,7 +657,11 @@ export function createOrdersKeyProbe(client: OrdersClient, timeZone?: string): O
       if (!isShopRequestError(error)) return 'unknown';
       const { kind } = error.shopError;
       if (kind === 'unauthorized') return 'invalid';
-      if (kind === 'forbidden') return 'forbidden';
+      if (kind === 'forbidden') {
+        // `ip_banned` je tiež 403, ale o kľúči nehovorí nič — shop ho vráti aj
+        // na volanie bez kľúča. Rozlišuje telo, nie status.
+        return isIpBanned(error.shopError) ? 'address_banned' : 'forbidden';
+      }
       return 'unknown';
     }
   };

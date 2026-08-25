@@ -59,8 +59,44 @@ export function keyRowState(meta: KeyMetaView | null): {
   readonly tone: StatusTone;
 } {
   if (meta?.present !== true) return { label: 'chýba', tone: 'attention' };
+
+  /*
+   * OVERENIE SA ČÍTA PRED ČASOM (24. 8. 2026).
+   *
+   * Do 24. 8. sa tu rozhodovalo VÝHRADNE podľa `secondsLeft`. `verifyStatus`
+   * pritom v `KeyMetaView` je a route ho posiela — len ho nikto nečítal. Kľúč,
+   * ktorý shop nikdy nepotvrdil, tak dostal zelené „vložený a platný"; stačilo
+   * mu mať pred sebou dosť času. Na živých dátach to bol objednávkový kľúč
+   * s `verify_status = 'unverified'`: appka tvrdila platnosť, ktorú nikdy
+   * nezmerala, a človek podľa toho slova hľadal príčinu inde.
+   *
+   * Poradie je preto takéto a nie opačné: „nevieme, či funguje" je dôležitejšia
+   * správa než „a mimochodom mu za dva dni vyprší platnosť". Čas má zmysel až
+   * pri kľúči, o ktorom vieme, že funguje.
+   *
+   * TRI STAVY, KTORÉ SA NESMÚ ZLIAŤ:
+   *   neoverený        — NEVIEME, či funguje. Priznanie, nie verdikt → `idle`.
+   *   shop ho neprijal — VIEME, že nefunguje → `critical`.
+   *   čoskoro vyprší   — VIEME, že funguje, ale nie dlho → `attention`.
+   *
+   * Zelená patrí jedinému stavu: shop kľúč potvrdil A čas mu nedochádza.
+   * Na povrch nesmie ísť vnútorný kód ani príčina (K10, P8) — appka tu vie ČO,
+   * nie PREČO; prečo sa overiť nedalo, hovorí `verifyNote` z `/api/key`.
+   */
+  const verified = meta.verifyStatus;
+  if (verified === 'invalid') return { label: 'shop ho neprijal', tone: 'critical' };
+  if (verified === 'forbidden') return { label: 'shop mu prístup zakázal', tone: 'critical' };
+  if (verified === 'unverified' || verified === null) {
+    return { label: 'vložený, ale neoverený', tone: 'idle' };
+  }
+  if (verified !== 'valid') {
+    // Server je za typom, ale za behu cezeň dorazí čokoľvek. Neznámy kód sa
+    // PRIZNÁ — nikdy sa mlčky nepovažuje za platnosť.
+    return { label: 'vložený, stav neznámy', tone: 'attention' };
+  }
+
   const left = meta.secondsLeft;
-  if (left === null) return { label: 'vložený', tone: 'good' };
+  if (left === null) return { label: 'vložený, platnosť neznáma', tone: 'attention' };
   if (left <= 0) return { label: 'už neplatí', tone: 'critical' };
   if (left < KEY_WARNING_HOURS * 3600) return { label: 'vložený, čoskoro vyprší', tone: 'attention' };
   return { label: 'vložený a platný', tone: 'good' };
@@ -103,12 +139,23 @@ function KeyRow({ label, purpose, meta, open, onToggle, testId }: KeyRowProps) {
         )}
       </td>
       <td data-l="Stav">
-        <span className={TONE_SIG_CLASS[state.tone]}>
+        {/* Pomenovaný uzol: bez `data-testid` sa stav kľúča nedá zmerať inak
+            než hľadaním slova v celom markupe, a taký test prežije aj to, keď
+            sa slovo presunie do iného riadka tabuľky. */}
+        <span className={TONE_SIG_CLASS[state.tone]} data-testid={`${testId}-state`}>
           <ToneSigMark tone={state.tone} />
           {state.label}
         </span>
         {present && meta?.last4 !== null && meta?.last4 !== undefined ? (
           <div className="lvl-3">končí na {meta.last4}</div>
+        ) : null}
+        {/* Slovo hovorí ČO, veta hovorí, čo s tým. Bez nej sa pri zablokovanej
+            adrese nedá tušiť, že nový kľúč nepomôže — a človek by ho skúšal
+            vkladať znova a znova. */}
+        {present && typeof meta?.verifyNote === 'string' ? (
+          <div className="lvl-3" data-testid={`${testId}-verify-note`}>
+            {meta.verifyNote}
+          </div>
         ) : null}
       </td>
       <td className="act">
@@ -130,6 +177,11 @@ export function KeysSection({ writeKey, ordersKey, onStored }: KeysSectionProps)
 
   const toggle = (which: Exclude<OpenForm, null>) =>
     setOpen((current) => (current === which ? null : which));
+
+  /* Route posiela to isté porovnanie v oboch odpovediach, takže je jedno,
+   * z ktorého riadka sa prečíta — a keby jedno chýbalo (staršia odpoveď),
+   * použije sa druhé. */
+  const sameKeyNote = writeKey?.sameKeyNote ?? ordersKey?.sameKeyNote ?? null;
 
   return (
     <section className="sec" id="kluce" data-testid="keys-section">
@@ -171,6 +223,14 @@ export function KeysSection({ writeKey, ordersKey, onStored }: KeysSectionProps)
           <span>Kľúče sú uložené zašifrované. Nikdy sa nezobrazia ani nezapíšu do histórie.</span>
         </div>
       </div>
+
+      {/* Jeden kľúč v oboch slotoch. Veta stojí RAZ pod tabuľkou, nie v oboch
+          riadkoch: je to tvrdenie o tej dvojici, nie o jednom kľúči, a v každom
+          riadku by to bolo to isté povedané dvakrát. Zdroj je `sameKeyNote`
+          z `/api/key`, aby obidva riadky nemohli hovoriť inak. */}
+      {typeof sameKeyNote === 'string' ? (
+        <Note testId="keys-same-key-note">{sameKeyNote}</Note>
+      ) : null}
 
       <Note testId="keys-expiry-note">
         <b>Keď kľúč na zápis vyprší:</b> fronta sa zastaví a počká, <b>nič sa nestratí</b>

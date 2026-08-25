@@ -163,6 +163,12 @@ export type DetailFillOutcome =
   | 'budget_unknown'
   /** Cesta `getFull` bola zvolená, ale kľúč sa nedá načítať. */
   | 'no_key'
+  /**
+   * Zrkadlo katalógu sa nedá prečítať, takže sa nedá zistiť, ktoré ID v ňom SÚ.
+   * Doťahovanie by v tom stave založilo riadky, ktoré synchronizácia nikdy
+   * nevidela — od 24. 8. 2026 sa preto nedoťahuje nič (bod E2).
+   */
+  | 'mirror_unreadable'
   /** Shop neodpovedal, alebo odpovedal inak, než appka čaká. */
   | 'failed';
 
@@ -173,6 +179,7 @@ export type DetailFillStop =
   | 'budget_minute'
   | 'budget_day'
   | 'budget_unknown'
+  | 'mirror_unreadable'
   | 'failed';
 
 export interface ProductDetailsResult {
@@ -380,9 +387,31 @@ export async function fillProductDetails(
 
     pending = unique.filter((id) => !skip.has(id) && !outside.has(id));
   } catch (cause) {
-    // Nečitateľné zrkadlo nie je dôvod nedoplniť — nanajvýš sa zaplatí za
-    // detail, ktorý appka možno už má. Chybu vidí log, nie používateľ.
+    /*
+     * NEČITATEĽNÉ ZRKADLO ZASTAVÍ DOŤAHOVANIE (bod E2, 24. 8. 2026).
+     *
+     * Do 24. 8. tu stálo „nečitateľné zrkadlo nie je dôvod nedoplniť —
+     * nanajvýš sa zaplatí za detail, ktorý appka možno už má". To bol zlý
+     * odhad ceny. Keď tento dotaz spadne, `pending` zostane na VŠETKÝCH ID
+     * a `notInMirror` prázdne, takže `upsertMany` založí riadok pre každý
+     * produkt, ktorý v zrkadle nie je — presne tá diera, ktorej má
+     * `notInMirror` zabrániť, a presne tá, ktorá nafukuje `COUNT(*)`
+     * zrkadla a s ním tvrdenie „koľko katalógu už appka má".
+     *
+     * Zaplatiť dvakrát za jeden detail je drobnosť. Založiť riadok, ktorý
+     * synchronizácia nikdy nevidela, je nepravda v čísle, na ktoré sa
+     * používateľ pozerá — a nedá sa odlíšiť od pravdy. Preto fail-closed:
+     * nedotiahne sa nič a volajúci dostane dôvod.
+     *
+     * Cena tohto rozhodnutia: pri nečitateľnej DB sa detaily nedoplnia vôbec.
+     * Je to v poriadku — appka, ktorá si nevie prečítať vlastné zrkadlo, má
+     * väčší problém než chýbajúci detail, a ten problém je vidieť v logu.
+     */
     log?.warn('detail_fill_mirror_unreadable', { error: errorCode(cause) });
+    return report('mirror_unreadable', {
+      notFilled: unique,
+      notFilledReason: 'mirror_unreadable',
+    });
   }
 
   /*

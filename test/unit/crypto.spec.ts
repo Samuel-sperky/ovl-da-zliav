@@ -25,13 +25,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { AuditInput, AuditWriter, EncryptedSecret, Queryable } from '@/contracts';
 import {
+  EXPECTED_SECRET_FILE_MODE,
+  EXPECTED_SECRET_FILE_MODE_WIN32,
+  FORBIDDEN_MODE_BITS_POSIX,
+  FORBIDDEN_MODE_BITS_WIN32,
   MASTER_KEY_BYTES,
   SecretFileError,
   checkSecretFile,
   decodeSecretMaterial,
+  expectedSecretFileMode,
+  forbiddenModeBits,
   loadMasterKey,
   loadSessionSecret,
   masterKeyAvailable,
+  permissionsAreVerifiable,
   resetSecretCache,
 } from '@/lib/crypto/master-key';
 import {
@@ -60,6 +67,19 @@ import {
 /* ────────────────────────────── pomôcky ────────────────────────────────── */
 
 const MASTER_KEY = randomBytes(MASTER_KEY_BYTES);
+
+/**
+ * Práva, ktoré na TEJTO platforme po `chmod 400` reálne vzniknú.
+ *
+ * Na Windowse `chmodSync(path, 0o400)` vyrobí 0o444 a `chmod 0o644` vyrobí
+ * 0o666 — NTFS unixové bity nemá a Node z nich prepne len atribút read-only.
+ * Testy nad reálnym súborom preto nesmú porovnávať s 0o400 naprosto, inak
+ * merajú platformu, nie kód. Rozhodnutie samo (ktorá maska pre ktorú platformu)
+ * sa testuje zvlášť, ako čistá funkcia, na oboch platformách naraz.
+ */
+const WIN32 = process.platform === 'win32';
+const MODE_AFTER_CHMOD_400 = WIN32 ? 0o444 : 0o400;
+const MODE_AFTER_CHMOD_644 = WIN32 ? 0o666 : 0o644;
 const BOX = { masterKey: MASTER_KEY };
 const API_KEY_PLAINTEXT = 'fake-shop-key-ABCDEFGHIJKLMNOPQRSTUV1234';
 
@@ -95,6 +115,60 @@ describe('master-key: dekódovanie materiálu', () => {
   });
 });
 
+describe('master-key: maska zakázaných bitov podľa platformy (D61, I14, R-6)', () => {
+  it('na POSIXe zakazuje akýkoľvek prístup group/other, na win32 len zápis', () => {
+    expect(forbiddenModeBits('linux')).toBe(FORBIDDEN_MODE_BITS_POSIX);
+    expect(forbiddenModeBits('darwin')).toBe(FORBIDDEN_MODE_BITS_POSIX);
+    expect(forbiddenModeBits('win32')).toBe(FORBIDDEN_MODE_BITS_WIN32);
+
+    // Jadro rozhodnutia: 444 je na Linuxe chyba a na Windowse nie, lebo tam
+    // sa 400 nastaviť nedá. 666 je chyba na oboch — zápis vidno všade.
+    expect(0o444 & forbiddenModeBits('linux')).not.toBe(0);
+    expect(0o444 & forbiddenModeBits('win32')).toBe(0);
+    expect(0o666 & forbiddenModeBits('linux')).not.toBe(0);
+    expect(0o666 & forbiddenModeBits('win32')).not.toBe(0);
+  });
+
+  it('očakávané práva a merateľnosť sa hlásia podľa platformy', () => {
+    expect(expectedSecretFileMode('linux')).toBe(EXPECTED_SECRET_FILE_MODE);
+    expect(expectedSecretFileMode('win32')).toBe(EXPECTED_SECRET_FILE_MODE_WIN32);
+    expect(permissionsAreVerifiable('linux')).toBe(true);
+    expect(permissionsAreVerifiable('win32')).toBe(false);
+  });
+
+  it('vetva pre Linux odmietne 444 aj vtedy, keď test beží na Windowse', () => {
+    const path = writeKeyFile('ok.key', `${MASTER_KEY.toString('hex')}\n`);
+    const check = checkSecretFile(path, {
+      exactBytes: 32,
+      strictPermissions: true,
+      platform: 'linux',
+    });
+
+    if (MODE_AFTER_CHMOD_400 === 0o400) {
+      // Na POSIXe je súbor naozaj 400, takže linuxová vetva ho prijme.
+      expect(check.ok).toBe(true);
+    } else {
+      // Na Windowse je súbor 444 — linuxová vetva ho musí odmietnuť. Toto je
+      // jediný spôsob, ako sa dá prísna vetva prejsť z Windows hosta.
+      expect(check.ok).toBe(false);
+      expect(check.codes).toContain('bad_permissions');
+    }
+  });
+
+  it('na win32 sa otvorené bity čítania priznajú varovaním, aj keď kontrola prešla', () => {
+    const path = writeKeyFile('ok.key', `${MASTER_KEY.toString('hex')}\n`);
+    const check = checkSecretFile(path, {
+      exactBytes: 32,
+      strictPermissions: true,
+      platform: 'win32',
+    });
+
+    expect(check.ok).toBe(true);
+    // Mlčanie by znamenalo tvrdiť „práva sú v poriadku" tam, kde sa nezmerali.
+    expect(check.warnings.join(' ')).toContain('ACL');
+  });
+});
+
 describe('master-key: kontrola dĺžky a práv (D61, I14)', () => {
   it('prijme 32 B kľúč s právami 400', () => {
     const path = writeKeyFile('ok.key', `${MASTER_KEY.toString('hex')}\n`);
@@ -102,7 +176,7 @@ describe('master-key: kontrola dĺžky a práv (D61, I14)', () => {
     expect(check.ok).toBe(true);
     expect(check.problems).toEqual([]);
     expect(check.bytes).toBe(32);
-    expect(check.mode).toBe(0o400);
+    expect(check.mode).toBe(MODE_AFTER_CHMOD_400);
   });
 
   it('odmietne zlú dĺžku', () => {
@@ -122,13 +196,15 @@ describe('master-key: kontrola dĺžky a práv (D61, I14)', () => {
   it('práva 644 sú v strict režime chyba a mimo neho varovanie', () => {
     const path = writeKeyFile('loose.key', MASTER_KEY.toString('hex'), 0o644);
 
+    // Zapisovateľný súbor je chyba na KAŽDEJ platforme — bit zápisu vidno aj
+    // na NTFS, takže tu sa nezľavuje ani na Windowse.
     const strict = checkSecretFile(path, { exactBytes: 32, strictPermissions: true });
     expect(strict.ok).toBe(false);
     expect(strict.codes).toContain('bad_permissions');
 
     const lenient = checkSecretFile(path, { exactBytes: 32, strictPermissions: false });
     expect(lenient.ok).toBe(true);
-    expect(lenient.warnings.join(' ')).toContain('644');
+    expect(lenient.warnings.join(' ')).toContain(MODE_AFTER_CHMOD_644.toString(8));
   });
 
   it('chýbajúci súbor je chyba, nie prázdny kľúč', () => {

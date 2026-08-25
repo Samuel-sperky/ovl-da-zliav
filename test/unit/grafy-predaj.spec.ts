@@ -240,8 +240,18 @@ function sessionDeps(): RouteDeps {
   };
 }
 
-function syncDay(saleDay: string, status: SalesSyncDay['status']): SalesSyncDay {
-  return { saleDay, status, finishedAt: '2026-08-07T02:10:00.000Z', updatedAt: null };
+/**
+ * `ordersSeen` je od 24. 8. 2026 povinné, takže sa musí NAPÍSAŤ aj tu.
+ * Predvolené `null` je presne to, čo tieto testy merali dovtedy, keď pole
+ * vynechávali: „nevieme, z koľkých objednávok deň je" — a `partial` s takou
+ * hodnotou sa za zmeraný deň nepočíta.
+ */
+function syncDay(
+  saleDay: string,
+  status: SalesSyncDay['status'],
+  ordersSeen: number | null = null,
+): SalesSyncDay {
+  return { saleDay, status, ordersSeen, finishedAt: '2026-08-07T02:10:00.000Z', updatedAt: null };
 }
 
 async function callDaily(

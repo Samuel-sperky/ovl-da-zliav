@@ -257,6 +257,54 @@ export function isFlashSaleBlocked(error: ShopError): boolean {
   return isFlashSaleBlockedCode(error.code);
 }
 
+/* ─────────────── zablokovaná IP adresa (403 `ip_banned`) ────────────────── */
+
+/**
+ * Kódy, ktorými shop hlási, že odmieta celú NAŠU ADRESU, nie našu požiadavku.
+ *
+ * Zoznam je jednoprvkový zámerne — appka videla v odpovedi jediný kód
+ * (`sales_sync_state.last_error = 'ip_banned'`, 19. a 22. 8. 2026). Ďalší názov
+ * toho istého stavu pribudne SEM a nikam inam. Do 24. 8. 2026 zoznam býval
+ * v `lib/sales/stop-policy.ts`; presunul sa sem, lebo `ip_banned` je surový kód
+ * shopu, a tie podľa D41 patria do taxonómie api-clienta. `stop-policy.ts` ho
+ * re-exportuje, aby jeho konzumenti nemuseli vedieť, kde presne bývá.
+ *
+ * VLASTNÝ `ShopErrorKind` NEDOSTAL — z rovnakého dôvodu ako
+ * `blocked_by_flash_sale` (viď hlavičku): `ShopErrorKind` je uzavretý zoznam
+ * DÔSLEDKOV, nie príčin. Dôsledok je presne dôsledok `forbidden`: shop
+ * požiadavku odmietol, nič nevykonal a okamžité zopakovanie dopadne rovnako.
+ *
+ * ČO SA V TEJTO ČASTI NESMIE POKAZIŤ, a je to iné než pri akcii:
+ * `ip_banned` NIE JE výrok o kľúči. Shop ho vráti aj na volanie BEZ kľúča
+ * (zmerané 24. 8. 2026 na verejnom `/api/products`), takže z neho nikdy nesmie
+ * vzniknúť wipe kľúča (D51/D52), hláška „kľúč je neplatný" ani odobranie
+ * oprávnení. Kľúč sa v tom stave nedá overiť — a „nedá sa overiť" je iná
+ * odpoveď než „neplatí".
+ */
+export const IP_BAN_CODES: ReadonlySet<string> = new Set(['ip_banned']);
+
+/**
+ * True pre kód, ktorým shop hlási zablokovanú adresu.
+ *
+ * Vstup je `string | null | undefined` z rovnakého dôvodu ako pri
+ * `isFlashSaleBlockedCode()`: ten istý kód sa číta aj z DB
+ * (`sales_sync_state.last_error`), kde chýbať smie.
+ */
+export function isIpBannedCode(code: string | null | undefined): boolean {
+  if (typeof code !== 'string') return false;
+  return IP_BAN_CODES.has(code.trim().toLowerCase());
+}
+
+/**
+ * True, keď shop odmietol našu adresu, nie našu požiadavku.
+ *
+ * Pre UI, pre cestu kľúča a pre rozvrh: je to prekážka NÁŠHO PRÍSTUPU. Kľúč pri
+ * nej nie je ani platný, ani neplatný — je neoverený.
+ */
+export function isIpBanned(error: ShopError): boolean {
+  return isIpBannedCode(error.code);
+}
+
 /**
  * HTTP status + kódy z tela → druh chyby (D41).
  *

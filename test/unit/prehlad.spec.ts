@@ -188,6 +188,26 @@ describe('Prehľad — dominanta hovorí pravdu o fronte', () => {
     expect(queueProgress({ snapshot, campaigns: [], today: TODAY }).mode).toBe('empty');
   });
 
+  /**
+   * Bod E1 (24. 8. 2026). `campaigns: null` je „zoznam sa nepodarilo prečítať",
+   * `campaigns: []` je „žiadne zľavy nie sú". Do 24. 8. z oboch vychádzal
+   * `mode: 'empty'`, takže appka na nečitateľnú odpoveď kreslila pokojnú
+   * prázdnu obrazovku a tvrdila stav, ktorý nezmerala.
+   *
+   * Celý test je ten ROZDIEL, preto sa oba vstupy porovnávajú vedľa seba —
+   * tvrdenie „null dá unknown" samo o sebe by prežilo aj to, keby `empty`
+   * prestalo vznikať vôbec.
+   */
+  it('nečitateľný zoznam zliav NIE JE prázdny stav', () => {
+    const snapshot = queueSnapshot({
+      queue: { pending: 0, total: 0, done: 0, campaigns: 0 },
+      current: null,
+    });
+
+    expect(queueProgress({ snapshot, campaigns: null, today: TODAY }).mode).toBe('unknown');
+    expect(queueProgress({ snapshot, campaigns: [], today: TODAY }).mode).toBe('empty');
+  });
+
   it('prázdna fronta so zľavami je pokojný stav', () => {
     const snapshot = queueSnapshot({
       queue: { pending: 0, total: 8000, done: 8000, campaigns: 0 },

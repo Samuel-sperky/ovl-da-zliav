@@ -68,6 +68,7 @@ import {
   ShopConfigError,
   ShopRequestError,
   classifyFailure,
+  isIpBanned,
   isTerminalKind,
   isUncertainKind,
   makeShopError,
@@ -375,6 +376,11 @@ export type WhoamiOutcome =
   | { readonly status: 'invalid'; readonly error: ShopError }
   /** 403 — kľúč existuje, ale shop mu volanie zakázal. */
   | { readonly status: 'forbidden'; readonly error: ShopError }
+  /**
+   * 403 s kódom `ip_banned` — shop odmieta našu ADRESU, nie náš kľúč. Kľúč
+   * v tomto stave nie je platný ani neplatný; je NEOVERENÝ.
+   */
+  | { readonly status: 'address_banned'; readonly error: ShopError }
   /** 429, 500, timeout, zmenený tvar odpovede, nedostupná doména. */
   | { readonly status: 'unknown'; readonly error: ShopError };
 
@@ -1494,13 +1500,21 @@ export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
     meta: { resendAfterTimeout: boolean },
   ): SetReductionResult {
     if (error.kind === 'unauthorized' || error.kind === 'forbidden') {
-      // D51/D52 — wipe kľúča robí volajúci (A9/A11); klient len ohlási.
-      log.error('shop_key_rejected', {
+      /* `ip_banned` je 403, ale NIE JE to výrok o kľúči — shop ho vráti aj na
+       * volanie bez kľúča. `onKeyRejected` vedie na wipe kľúča (D51/D52), takže
+       * ohlásiť ho tu by znamenalo zmazať kľúč, ktorý je možno v poriadku, a to
+       * v stave, v ktorom sa nový overiť ani nedá. Zablokovaná adresa nie je
+       * odmietnutý kľúč — hlási sa preto len do logu, iným menom.
+       *
+       * Callback dnes nikto nezapája, ale mína je nastražená na deň, keď sa
+       * D51/D52 dopojí; strážia to `test/unit/shop-errors.spec.ts`. */
+      const addressBanned = isIpBanned(error);
+      log.error(addressBanned ? 'shop_address_banned' : 'shop_key_rejected', {
         ...correlationLogFields(ctx, error.requestId),
         kind: error.kind,
         httpStatus: error.httpStatus ?? undefined,
       });
-      deps.onKeyRejected?.({ kind: error.kind, ctx, error });
+      if (!addressBanned) deps.onKeyRejected?.({ kind: error.kind, ctx, error });
     }
     if (error.kind === 'schema_drift') reportDrift(SHOP_PATHS.setReduction, ctx, error);
 
@@ -1572,7 +1586,13 @@ export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
         httpStatus: result.error.httpStatus ?? undefined,
       });
       if (kind === 'unauthorized') return { status: 'invalid', error: result.error };
-      if (kind === 'forbidden') return { status: 'forbidden', error: result.error };
+      if (kind === 'forbidden') {
+        // Dve rôzne odpovede v jednom stavovom kóde. Rozlíšenie robí telo
+        // (`ip_banned`), nie status — viď `isIpBanned()` v `errors.ts`.
+        return isIpBanned(result.error)
+          ? { status: 'address_banned', error: result.error }
+          : { status: 'forbidden', error: result.error };
+      }
       return { status: 'unknown', error: result.error };
     }
 
@@ -1622,6 +1642,8 @@ export function createShopClient(deps: ShopClientDeps): ShopClientV5 {
         return 'invalid';
       case 'forbidden':
         return 'forbidden';
+      case 'address_banned':
+        return 'address_banned';
       default:
         return 'unknown';
     }

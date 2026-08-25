@@ -118,8 +118,23 @@ export function queueProgress(input: QueueProgressInput): QueueProgress {
   if (snapshot === null) return base;
 
   const { queue, current } = snapshot;
-  const hasCampaigns = input.campaigns !== null && input.campaigns.length > 0;
+  /*
+   * `campaigns: null` je „NEVIEME" — zoznam kampaní sa nepodarilo prečítať.
+   * `campaigns: []` je „nič tam nie je". Do 24. 8. 2026 z oboch vychádzalo
+   * `hasCombination === false`, a s prázdnou frontou teda `mode: 'empty'`:
+   * appka na nečitateľnú odpoveď povedala „žiadne zľavy" a používateľ videl
+   * pokojnú prázdnu obrazovku namiesto priznania, že nič nevie. To je tá istá
+   * rodina chýb, akú Sprint 20 našiel štyrikrát — tvrdiť číslo (alebo tu stav),
+   * ktorý appka nezmerala.
+   *
+   * `mode: 'unknown'` je pritom už hotový a `StatusSection` preň kreslí
+   * `UnknownBody`, takže priznanie nič nové nepotrebuje.
+   */
+  const campaigns = input.campaigns;
+  const campaignsKnown = campaigns !== null;
+  const hasCampaigns = campaigns !== null && campaigns.length > 0;
 
+  if (queue.total === 0 && !campaignsKnown) return base;
   if (queue.total === 0 && !hasCampaigns) return { ...base, mode: 'empty' };
 
   // Fronta nemá čo zapisovať — pokojný stav, nie prázdny.

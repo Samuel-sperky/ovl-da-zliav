@@ -309,6 +309,9 @@ describe('GET /api/key', () => {
         'scopesCheckedAt',
         'secondsLeft',
         'verifyStatus',
+        'verifyNote',
+        'looksLikeSameKey',
+        'sameKeyNote',
       ].sort(),
     );
     expect(JSON.stringify(body)).not.toContain(VALID_API_KEY);

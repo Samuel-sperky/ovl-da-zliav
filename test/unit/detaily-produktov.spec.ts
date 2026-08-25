@@ -1079,4 +1079,43 @@ describe('POST /api/catalog/details', () => {
     expect(mirror.log.created).toEqual([]);
     expect([...mirror.rows.keys()]).toEqual([1]);
   });
+
+  /**
+   * Bod E2 (24. 8. 2026). Keď `detailsFor()` hodí, appka NEVIE, ktoré ID sú
+   * v zrkadle — a doťahovanie by práve preto založilo riadok pre každé z nich.
+   * Do 24. 8. sa v tom stave doťahovalo ďalej („nanajvýš zaplatíme dvakrát"),
+   * čím sa hranica zrkadla obchádzala rovnako, ako ju predtým obchádzal `force`.
+   *
+   * Meria sa zrkadlo a počet čítaní, nie text v zdroji.
+   */
+  it('nečitateľné zrkadlo doťahovanie ZASTAVÍ a riadok nezaloží', async () => {
+    const budget = memoryBudget();
+    const mirror = fakeMirror([listRow(1)], budget);
+    const { shop, calls } = fakeShop({ products: { 1: plain(1), 777: plain(777) } });
+
+    const broken: ProductDetailsDeps['catalog'] = {
+      ...mirror.catalog,
+      async detailsFor() {
+        throw new Error('mirror down');
+      },
+    };
+
+    const result = await fillProductDetails([1, 777], {
+      shop,
+      catalog: broken,
+      apiKey: fakeApiKey([]),
+      now: () => NOW,
+    });
+
+    // 1. Nič sa nezaložilo ani neprepísalo — to je jadro veci.
+    expect(mirror.log.created).toEqual([]);
+    expect(mirror.log.upserts).toEqual([]);
+    expect([...mirror.rows.keys()]).toEqual([1]);
+    // 2. Ani sa za to nezaplatilo čítanie shopu.
+    expect(calls).toHaveLength(0);
+    // 3. A volajúci dostane dôvod, nie tiché „done".
+    expect(result.outcome).toBe('mirror_unreadable');
+    expect(result.notFilledReason).toBe('mirror_unreadable');
+    expect([...result.notFilled]).toEqual([1, 777]);
+  });
 });
