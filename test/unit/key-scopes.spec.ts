@@ -36,8 +36,10 @@ import type { ShopScope, WhoamiOutcome } from '@/lib/shop/client';
 import {
   createKeyGetRoute,
   createKeyPutRoute,
+  dualSlotReport,
   requiredScopeForKind,
   scopeReport,
+  verifyNoteForStatus,
   whoamiToProbeResult,
   type KeyRouteDeps,
 } from '@/app/api/key/route';
@@ -286,6 +288,51 @@ describe('pomôcky pre oprávnenia kľúča', () => {
         error: { kind: 'server_error', code: null, message: '', httpStatus: 500, retryable: true },
       }),
     ).toBe('unknown');
+  });
+
+  /* ── Jeden kľúč v oboch slotoch (bod B, 24. 8. 2026) ──────────────────────
+   *
+   * Zisťuje sa z `last4`, nie zo scopes: I8' zakazuje, aby `shop/client.ts`
+   * o objednávkovom oprávnení vedel čokoľvek, takže `whoami` ho nepovie a
+   * povedať nesmie. Štyri znaky ale nie sú odtlačok, a práve to sem patrí
+   * napísať ako test — nie ako želanie. */
+  it('rovnaké `last4` v oboch slotoch sa prizná ako domnienka, nie ako fakt', () => {
+    const withLast4 = (last4: string | null, present = true) => ({ present, last4 });
+
+    const same = dualSlotReport(withLast4('9x2Q'), withLast4('9x2Q'));
+    expect(same.looksLikeSameKey).toBe(true);
+    // Veta smie hovoriť „vyzerá to", nikdy „je to".
+    expect(String(same.note)).toContain('vyzerá');
+    // A musí povedať dôsledok: TTL sa líšia, takže vkladať treba dvakrát.
+    expect(String(same.note)).toContain('48 hodín');
+    expect(String(same.note)).toContain('30 dní');
+
+    const different = dualSlotReport(withLast4('9x2Q'), withLast4('7bC1'));
+    expect(different.looksLikeSameKey).toBe(false);
+    expect(different.note).toBeNull();
+  });
+
+  it('prázdny slot nie je „iný kľúč" — je to „niet čo porovnávať"', () => {
+    const present = { present: true, last4: '9x2Q' };
+    const missing = { present: false, last4: null };
+
+    // Toto je jadro: `false` by znamenalo „sú to dva rôzne kľúče", čo je pri
+    // prázdnom slote nepravda. Musí to byť `null`.
+    expect(dualSlotReport(present, missing).looksLikeSameKey).toBeNull();
+    expect(dualSlotReport(missing, present).looksLikeSameKey).toBeNull();
+    expect(dualSlotReport(missing, missing).looksLikeSameKey).toBeNull();
+    // Riadok s kľúčom a `last4 === null` je stav, ktorý appka nevie posúdiť.
+    expect(dualSlotReport(present, { present: true, last4: null }).looksLikeSameKey).toBeNull();
+  });
+
+  it('veta o neovereniu z GET netvrdí príčinu, ktorú appka nepamätá', () => {
+    // GET pozná len stav — dôvod (`ip_banned` vs. „shop neodpovedal") sa nikam
+    // neukladá, takže veta ho nesmie hádať.
+    const note = String(verifyNoteForStatus('unverified'));
+    expect(note).toContain('nepamätá');
+    expect(note.toLowerCase()).not.toContain('adres');
+    expect(verifyNoteForStatus('valid')).toBeNull();
+    expect(verifyNoteForStatus(null)).toBeNull();
   });
 
   it('`scopeReport` rozlišuje má / nemá / nevieme', () => {
@@ -734,6 +781,13 @@ describe('I1 — z `whoami` sa do odpovede route nedostane nič o kľúči', () 
         'scopesCheckedAt',
         'secondsLeft',
         'verifyStatus',
+        // Pribudlo 24. 8. 2026 (body A a B). Ani jedno nenesie nič, z čoho by
+        // sa dal odvodiť kľúč: `verifyNote` je veta o STAVE overenia,
+        // `looksLikeSameKey` je porovnanie `last4`, ktoré v odpovedi beztak je,
+        // a `sameKeyNote` je veta nad tým porovnaním.
+        'verifyNote',
+        'looksLikeSameKey',
+        'sameKeyNote',
       ].sort(),
     );
   });

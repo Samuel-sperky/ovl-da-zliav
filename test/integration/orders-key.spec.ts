@@ -522,6 +522,9 @@ describe('GET /api/key?kind=orders_read', () => {
         'scopesCheckedAt',
         'secondsLeft',
         'verifyStatus',
+        'verifyNote',
+        'looksLikeSameKey',
+        'sameKeyNote',
       ].sort(),
     );
     // Presne to zlyhalo v minulosti: redaktor zamaskoval celý stav kľúča a UI
