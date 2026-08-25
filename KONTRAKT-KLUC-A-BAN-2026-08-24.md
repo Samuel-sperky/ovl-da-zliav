@@ -297,8 +297,9 @@ zlúčenie vezme, keď sa mu strom ustáli.
 | **E1** | `f3fb2df` | Nečitateľný zoznam zliav prestal znamenať „žiadne zľavy" |
 | **B** (server) | `85aab53` | Jeden kľúč v oboch slotoch sa prizná z `last4`, bez dotyku I8'; GET dostal `verifyNote` |
 | **F** | `e2ba5ce` | Spustenie z ikony skriptom namiesto Tauri (rozhodnutie R-4 upravené 25. 8.) |
+| **A + B** (UI) | `20b4d4f` | Neoverený kľúč sa prestal hlásiť ako platný; `verifyNote` a `sameKeyNote` sú na obrazovke |
 
-Testy: **2843 prešlo, 0 padlo, 0 preskočených** na Windows hostovi. `typecheck`
+Testy: **2861 prešlo, 0 padlo, 0 preskočených** na Windows hostovi. `typecheck`
 aj `lint` čisté. Každý nový test bol overený mutáciou — po odstránení opravy
 spadne.
 
@@ -331,9 +332,7 @@ spadne.
 
 | Bod | Stav |
 | --- | --- |
-| **A** (UI) | `src/components/settings/KeysSection.tsx` drží agent UX4 druhej session (potvrdené 24. 8.). Chýba tam vykreslenie `verifyNote` **a oprava `keyRowState()`**, ktorá je vážnejšia než pôvodné zadanie: bez nej obrazovka o neoverenom kľúči tvrdí, že je platný. Pravdivá veta je zatiaľ len v odpovedi API. |
-| **B** (UI) | Serverová polovica je hotová (`85aab53`) — `looksLikeSameKey` a `sameKeyNote` sú v odpovedi. Vykreslenie čaká na uvolnenie `KeysSection.tsx`, spolu s bodom A. |
-| **E4** | `overview.module.css` drží agent UX5 druhej session. |
+| **E4** | `overview.module.css` držal agent UX5 druhej session. Tá session 25. 8. skončila, takže bod je voľný — nezavretý len preto, že mŕtva CSS trieda je najmenej dôležitá vec v tomto zozname. |
 | **F** | **Hotové inak, než hovoril kontrakt.** Rust na tomto PC nie je a rozhodnutie R-4 sa 25. 8. zmenilo: namiesto Tauri je to `.cmd` + `.ps1` + zástupca v Starte. Tauri zostáva ako možnosť, keď bude `cargo` k dispozícii. |
 | **C** | **Vyhodené z rozsahu** — druhá session ho zavrela commitmi `2e96b54` a `3833c14`. |
 
@@ -346,8 +345,19 @@ ho doplniť.
 
 ### Ostro neoverené
 
-Nič z bodu A ani B sa nedalo overiť proti ostrému shopu: platí ban. Testy idú proti
-mock shopu (I6). Preklik v prehliadači sa nerobil — UI polovica je odložená a
-`argon2` je blokovaná Windows Application Control, takže appka mimo kontejnera
-lokálne nenaštartuje. Akceptačné kritériá 9, 10 a 12 teda splnené nie sú;
-kritérium 11 (review) nebolo súčasťou tohto behu.
+Nič z bodu A ani B sa nedalo overiť proti ostrému shopu: platí ban. Testy idú
+proti mock shopu (I6).
+
+**Preklik v prehliadači sa nerobil a nedá sa spraviť skôr než po zlúčení.** Na
+`:3070` beží hlavný checkout, teda kód BEZ tejto vetvy. Postaviť ju znamená
+`docker compose up` — a to z worktree tie bežiace kontejnery prevezme, čo je
+presne chyba, ktorá 24. 8. zhodila Caddy. Lokálny `npm run dev` to nezachráni:
+DB nemá publikovaný port (I5) a `argon2` je blokovaná Windows Application
+Control. Namiesto screenshotu teda stoja testy, ktoré vykresľujú komponent
+a čítajú z markupu farbu, značku aj slovo (`test/unit/kluc-neovereny-stav.spec.ts`)
+— na túto konkrétnu vec je to silnejší dôkaz než obrázok, ale **nie je to
+preklik** a kritérium 10 splnené nie je.
+
+Kritérium 11 (review agentom) nebolo súčasťou tohto behu. Kritérium 2 („0 padlo")
+platí pre samostatný beh; pri súbežnom behu druhej session nad zdieľanou
+`ovl-zliav-test-db` sa merať nedá.
