@@ -139,10 +139,6 @@
   white-space: nowrap;
 }
 
-.queueOf {
-  color: var(--dim);
-  font-weight: 550;
-}
 
 .queueName {
   min-width: 0;
