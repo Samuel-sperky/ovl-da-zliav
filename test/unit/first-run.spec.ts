@@ -12,17 +12,56 @@
  *   1. čistú logiku stavu prvého behu (fail-closed pri neznámom počte),
  *   2. že hláška pri chýbajúcej session VÝSLOVNE hovorí, že sa nič neuložilo,
  *      a nasmeruje na prihlásenie — a že `sudo_required` sa s ňou nezamieňa,
- *   3. že `/login` a `ApiKeyForm` sú na tieto stavy naozaj zapojené (kontrola
- *      zdrojáku — komponenty sa v `environment: 'node'` renderovať nedajú).
+ *   3. že `/login` a `ApiKeyForm` to naozaj KRESLIA — meria sa vykreslený
+ *      strom (`renderToStaticMarkup`), nie text zdrojáku.
  *
  * Hranica, ktorú test drží tiež: stav sa odvodzuje z POČTU účtov, nikdy
  * z ich údajov (I1), a hlášky NEúspešného prihlásenia zostávajú generické.
+ *
+ * ČO SA TU ZMENILO 24. 8. 2026 (audit kvality testov)
+ * ---------------------------------------------------
+ *  - `read()` prehĺtalo chýbajúci súbor a vracalo `''`. Nad prázdnym reťazcom
+ *    prejde KAŽDÉ negatívne tvrdenie, takže premenovanie komponentu by tieto
+ *    testy nechalo zelené. Teraz chýbajúci alebo prázdny súbor PADNE.
+ *  - Zmizol describe „bootstrap endpoint je read-only…". Bol to blocklist troch
+ *    mien (`getByUsername`, `getById`, `passwordHash`), teda nie invariant:
+ *    keby endpoint začal vracať `usernames: await users.listUsers()`, všetkých
+ *    päť tvrdení by ostalo zelených a verejný endpoint s `auth: 'none'` by
+ *    enumeroval účty. To isté sa MERIA v `test/integration/routes-bootstrap.spec.ts`
+ *    (`expect(Object.keys(res.body.data)).toEqual(['needsAdmin'])`), takže tu
+ *    ostal len duplikát v textovej podobe, ktorý vedel byť falošne zelený.
+ *  - Grepy nad `/login/page.tsx` a `ApiKeyForm.tsx` (vrátane porovnania
+ *    `setupIndex < formIndex`, čo meralo poradie ZNAKOV v súbore, nie strom)
+ *    nahradilo skutočné vykreslenie.
+ *
+ * ČO SA VYKRESLIŤ NEDÁ A PREČO
+ * ----------------------------
+ * `environment` je `node` bez DOM a šprint zakazuje pribrať jsdom. Efekty sa
+ * pri serverovom renderi nespúšťajú, takže stav, ktorý vzniká až z odpovede
+ * servera (`firstRun` po `/api/auth/bootstrap`, `failure`/`stored` po `putKey`),
+ * sa nakresliť nedá. `ApiKeyForm.tsx` si preto svoje dva takéto stavy vyčlenil
+ * do samostatných komponentov (`NotStoredState`, `VerifyState`) — a tie sa už
+ * renderujú priamo. `/login/page.tsx` to zatiaľ neurobil; jeho vetva
+ * „needs-admin" ostáva jediné miesto, kde sa meria zdroják, a je to poznačené
+ * pri každom takom tvrdení.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { describe, expect, it, vi } from 'vitest';
 
+// `/login` je klientská stránka a volá `useRouter()`. Bez app routera to
+// v teste hodí „invariant expected app router to be mounted"; navigáciu tu
+// nič nemeria, takže stačí prázdna náhrada.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: () => {}, refresh: () => {}, push: () => {} }),
+}));
+
+import LoginPage from '@/app/login/page';
+import { ApiKeyForm, NotStoredState } from '@/components/settings/ApiKeyForm';
+import ActionFailurePanel from '@/components/ui/ActionFailure';
 import {
   LOGIN_PATH,
   SEED_ADMIN_COMMAND,
@@ -35,13 +74,27 @@ import {
 } from '@/lib/ui/first-run';
 
 const SRC = join(process.cwd(), 'src');
-/** Chýbajúci súbor = prázdny zdroják, takže padne konkrétna asercia, nie celý suite. */
+
+/**
+ * Zdroják komponentu. Chýbajúci alebo prázdny súbor je CHYBA, nie prázdny
+ * reťazec: `''` prejde cez každé `not.toContain(...)` a cez každé
+ * `not.toMatch(...)`, takže by z testu urobil ozdobu. Predtým to tu bolo
+ * `catch { return '' }`.
+ */
 function read(...parts: string[]): string {
+  const path = join(SRC, ...parts);
+  let text: string;
   try {
-    return readFileSync(join(SRC, ...parts), 'utf8');
-  } catch {
-    return '';
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new Error(
+      `Zdroják ${path} sa nedá prečítať, takže tvrdenia nad ním nič nemerajú: ${String(error)}`,
+    );
   }
+  if (text.trim().length === 0) {
+    throw new Error(`Zdroják ${path} je prázdny — negatívne tvrdenia nad ním sú falošne zelené.`);
+  }
+  return text;
 }
 
 /* ═════════════════════════ 1. Stav prvého behu ════════════════════════════ */
@@ -133,7 +186,50 @@ describe('describeActionFailure — 401 bez session je ľudská veta, nie poruch
 
 /* ═══════════════ 3. Zapojenie do UI (`/login`, `ApiKeyForm`) ══════════════ */
 
+describe('/login kým sa prvý beh nezistí, netvrdí NIČ (vykreslený strom)', () => {
+  /**
+   * Prvý render stránky — efekt s `/api/auth/bootstrap` v serverovom renderi
+   * nebeží, takže je to presne ten stav, ktorý používateľ vidí v prvom okamihu.
+   */
+  const html = renderToStaticMarkup(createElement(LoginPage));
+
+  it('vykreslí sa čakací stav, nie prázdno', () => {
+    // Poistka: keby render vrátil prázdno, negatívne tvrdenia nižšie by boli
+    // falošne zelené.
+    expect(html.length).toBeGreaterThan(50);
+    expect(html).toContain('data-testid="login-loading"');
+    expect(html).toContain('aria-busy="true"');
+  });
+
+  it('prihlasovací formulár NIE JE bezpodmienečne v strome', () => {
+    /*
+     * Toto je to, čo pôvodne skúšalo porovnanie `setupIndex < formIndex` nad
+     * textom súboru — a čo nemeralo. Formulár stojí za podmienkou; keby ho
+     * niekto vytiahol pred vetvenie (alebo zmazal skorý návrat pri
+     * `firstRun === null`), objaví sa TU, ešte kým appka nevie, či nejaký účet
+     * existuje. Presne to bola chyba zo 6. 8. 2026: slepý formulár.
+     */
+    expect(html).not.toContain('login-username');
+    expect(html).not.toContain('login-password');
+    expect(html).not.toContain('login-submit');
+  });
+
+  it('a nekreslí ani návod na vytvorenie admina, kým to nevie', () => {
+    // Fail-closed má dve strany: netvrdiť „účet neexistuje" je rovnako dôležité
+    // ako netvrdiť „prihlás sa".
+    expect(html).not.toContain('login-needs-admin');
+    expect(html).not.toContain(SEED_ADMIN_COMMAND);
+  });
+});
+
 describe('/login pri users=0 povie, čo robiť — namiesto slepého formulára', () => {
+  /*
+   * Vetva „needs-admin" vzniká až z odpovede `/api/auth/bootstrap`, teda
+   * z efektu — a ten sa v `renderToStaticMarkup` nespúšťa (viď hlavička).
+   * Preto sú tieto tri tvrdenia jediné v tomto súbore, ktoré merajú ZDROJÁK.
+   * `read()` už chýbajúci súbor neprehltne, takže aspoň nevedia byť falošne
+   * zelené nad prázdnym reťazcom.
+   */
   const source = read('app', 'login', 'page.tsx');
 
   it('zisťuje stav prvého behu z bootstrap endpointu', () => {
@@ -141,20 +237,10 @@ describe('/login pri users=0 povie, čo robiť — namiesto slepého formulára'
     expect(source).toMatch(/firstRunStateFromCount|showsAdminSetup|needsAdmin/);
   });
 
-  it('zobrazí presný príkaz na vytvorenie admina', () => {
+  it('vetva prvého behu existuje a ukazuje presný príkaz na vytvorenie admina', () => {
     expect(source).toContain('SEED_ADMIN_COMMAND');
     expect(source).toContain('login-needs-admin');
-  });
-
-  it('v stave `needs-admin` NEzobrazí prihlasovací formulár', () => {
-    // Formulár je za podmienkou, nie bezpodmienečne v strome.
     expect(source).toMatch(/needsAdmin\s*\?|showsAdminSetup\(/);
-    const setupIndex = source.indexOf('login-needs-admin');
-    const formIndex = source.indexOf('login-username');
-    expect(setupIndex).toBeGreaterThan(-1);
-    expect(formIndex).toBeGreaterThan(-1);
-    // Návod je vetvou PRED formulárom (early return / ternár), nie pod ním.
-    expect(setupIndex).toBeLessThan(formIndex);
   });
 
   it('hlášky NEúspešného prihlásenia zostávajú generické (žiadna enumerácia mien)', () => {
@@ -162,45 +248,82 @@ describe('/login pri users=0 povie, čo robiť — namiesto slepého formulára'
   });
 });
 
-describe('bootstrap endpoint je read-only a vracia LEN príznak, nie údaje účtov', () => {
-  const source = read('app', 'api', 'auth', 'bootstrap', 'route.ts');
+describe('ApiKeyForm — tichý neúspech uloženia kľúča je nemožný (vykreslený strom)', () => {
+  const prazdny = renderToStaticMarkup(
+    createElement(ApiKeyForm, { keyMeta: null, onStored: () => {} }),
+  );
 
-  it('je `auth: \'none\'` a výhradne GET — inak by ho prvý beh nedosiahol', () => {
-    expect(source).toContain("auth: 'none'");
-    expect(source).toContain("method: 'GET'");
+  it('kým sa nič neodoslalo, formulár netvrdí ani úspech, ani neúspech', () => {
+    expect(prazdny).toContain('data-testid="api-key-form"');
+    expect(prazdny).toContain('data-testid="api-key-missing"');
+    // Ani zelené „uložené", ani červené „neuložené" — nič sa zatiaľ nestalo.
+    expect(prazdny).not.toContain('api-key-stored');
+    expect(prazdny).not.toContain('api-key-not-stored');
   });
 
-  it('číta výhradne POČET účtov (`countUsers`), nikdy `getByUsername`/`getById`', () => {
-    expect(source).toContain('countUsers');
-    expect(source).not.toContain('getByUsername');
-    expect(source).not.toContain('getById');
-    expect(source).not.toContain('passwordHash');
-  });
-});
-
-describe('ApiKeyForm — tichý neúspech uloženia kľúča je nemožný', () => {
-  const source = read('components', 'settings', 'ApiKeyForm.tsx');
-
-  it('používa `describeActionFailure` a panel, ktorý ponúkne prihlásenie', () => {
-    expect(source).toContain('describeActionFailure');
-    expect(source).toContain('ActionFailurePanel');
+  it('pole na kľúč je typu heslo a hodnota sa nikam nevypisuje', () => {
+    expect(prazdny).toContain('data-testid="api-key-input"');
+    expect(prazdny).toMatch(/<input[^>]*type="password"[^>]*data-testid="api-key-input"/);
   });
 
-  it('po neúspechu zobrazí výslovné „kľúč sa NEULOŽIL"', () => {
-    expect(source).toContain('api-key-not-stored');
+  it('po neúspechu je na obrazovke výslovné „kľúč sa NEULOŽIL" — s farbou aj značkou', () => {
+    /*
+     * `NotStoredState` je samostatný komponent práve preto, aby sa tento stav
+     * dal vykresliť bez prehliadača (hlavička `ApiKeyForm.tsx` to hovorí
+     * rovnako). Meria sa teda výstup, nie výskyt reťazca v zdrojáku.
+     */
+    const html = renderToStaticMarkup(createElement(NotStoredState));
+    expect(html).toContain('data-testid="api-key-not-stored"');
+    expect(html).toContain('NEULOŽIL');
+    // Tri kanály: farba (trieda), značka (ikona) a slovo.
+    expect(html).toContain('class="sig bad"');
+    expect(html).toContain('ovl-ic');
   });
 
   it('panel neúspechu vedie na prihlásenie, keď chýba session', () => {
-    const panel = read('components', 'ui', 'ActionFailure.tsx');
+    const failure = describeActionFailure(
+      { code: UNAUTHENTICATED_CODE, message: 'Session chýba alebo expirovala.' },
+      { action: 'Uloženie kľúča na zápis zliav' },
+    );
+    const html = renderToStaticMarkup(
+      createElement(ActionFailurePanel, { failure, testId: 'api-key-failure' }),
+    );
     expect(LOGIN_PATH).toBe('/login');
-    expect(panel).toContain('LOGIN_PATH');
-    expect(panel).toContain('href={LOGIN_PATH}');
-    expect(panel).toContain('needsLogin');
+    expect(html).toContain(`href="${LOGIN_PATH}"`);
+    expect(html).toContain('data-testid="action-failure-login-link"');
+    expect(html).toContain('data-tone="attention"');
+  });
+
+  it('a pri chybe, ktorá s prihlásením nesúvisí, odkaz na prihlásenie NEponúka', () => {
+    // Bez tejto druhej strany by tvrdenie vyššie prešlo aj nad panelom, ktorý
+    // dáva odkaz na prihlásenie pri každej chybe — a to je zavádzanie.
+    const failure = describeActionFailure(
+      { code: 'shop_error', message: 'Shop odmietol kľúč.' },
+      { action: 'Uloženie kľúča na zápis zliav' },
+    );
+    const html = renderToStaticMarkup(
+      createElement(ActionFailurePanel, { failure, testId: 'api-key-failure' }),
+    );
+    expect(html).toContain('Shop odmietol kľúč.');
+    expect(html).toContain('data-tone="critical"');
+    expect(html).not.toContain(`href="${LOGIN_PATH}"`);
   });
 
   it('pri chybe zahodí prípadné staré hlásenie o úspechu', () => {
-    // `stored` sa musí resetovať, inak by na obrazovke zostal zelený badge
-    // „kľúč uložený" spolu s chybou a používateľ by veril tomu zelenému.
-    expect(source).toMatch(/setStored\(null\)/);
+    /*
+     * Jediné tvrdenie tejto sekcie, ktoré meria zdroják: reset `stored` sa deje
+     * v obsluhe chyby a tú bez prehliadača nespustíme. Nepýtame sa preto na
+     * výskyt v CELOM súbore (to by prešlo, aj keby `setStored(null)` stálo
+     * kdekoľvek inde), ale na TELO funkcie `fail()` — tej, ktorou prechádza
+     * každá chybová cesta. Inak by na obrazovke zostal zelený badge „kľúč
+     * uložený" spolu s červenou chybou a používateľ by veril tomu zelenému.
+     */
+    const source = read('components', 'settings', 'ApiKeyForm.tsx');
+    // Telo `fail()` = od hlavičky po prvú zatváraciu zátvorku na úrovni
+    // funkcie (dve medzery odsadenia vnútri komponentu).
+    const fail = /function fail\([\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    expect(fail, 'funkcia fail() sa v ApiKeyForm.tsx nenašla').not.toBe('');
+    expect(fail).toMatch(/setStored\(null\)/);
+    expect(fail).toMatch(/setFailure\(/);
   });
 });
