@@ -97,9 +97,18 @@ describe('D33b — statická kontrola zdrojákov schedulera', () => {
       .map((f) => ({ file: f, text: readFileSync(join(dir, f), 'utf8') }));
 
     expect(sources.length).toBeGreaterThanOrEqual(6);
+    /*
+     * POISTKA (24. 8. 2026, audit kvality testov). Keby sa `claim()`
+     * premenoval alebo prestal volať bodkou, `claimCalls` by bolo všade
+     * prázdne, vnútorná slučka by nezbehla ani raz a test by tvrdil „scheduler
+     * neclaimuje z missed" bez toho, aby videl jediný claim. Scheduler bez
+     * claimu nefunguje, takže aspoň jeden tam MUSÍ byť.
+     */
+    let claimCallsTotal = 0;
     for (const { file, text } of sources) {
       // claim() sa v schedulery volá VÝHRADNE so ['scheduled'] — nikdy 'missed'.
       const claimCalls = text.match(/\.claim\([^)]*\)/g) ?? [];
+      claimCallsTotal += claimCalls.length;
       for (const call of claimCalls) {
         expect(call, `${file}: ${call}`).not.toContain('missed');
       }
@@ -108,5 +117,9 @@ describe('D33b — statická kontrola zdrojákov schedulera', () => {
       expect(text.toLowerCase(), file).not.toContain('catch_up');
       expect(text.toLowerCase(), file).not.toContain('catch-up okno: áno');
     }
+    expect(
+      claimCallsTotal,
+      'v src/lib/scheduler/ sa nenašlo ani jedno volanie .claim( — sken prestal merať',
+    ).toBeGreaterThan(0);
   });
 });

@@ -184,6 +184,21 @@ describe('I7 — v zdrojoch neexistuje rušenie zľavy v shope', () => {
     const shopWritePaths = [...paths].filter(
       (p) => p.startsWith('/api/products/') || p.startsWith('/api/batch'),
     );
+    /*
+     * POISTKA (24. 8. 2026, audit kvality testov). Bez nej whitelist nižšie
+     * nestráži nič: keby klient prešiel na skladanie cesty
+     * (`` `/api/products/${op}` ``), literál by z regexu vypadol,
+     * `shopWritePaths` by ostalo prázdne, slučka by nezbehla ani raz a test by
+     * bol zelený — pritom `op` môže byť pokojne `clearReduction`.
+     *
+     * Nestačí „aspoň jedna cesta": zápisová cesta je práve JEDNA a musí byť
+     * medzi nimi, inak sa `setReduction` skladá a I7 sa nedá merať.
+     */
+    expect(shopWritePaths.length, 'nenašla sa ani jedna cesta k shopu — regex prestal chytať').toBeGreaterThan(0);
+    expect(
+      shopWritePaths,
+      '`/api/products/setReduction` sa v zdrojoch nevyskytuje ako literál — cesta sa skladá a whitelist nemá čo strážiť',
+    ).toContain('/api/products/setReduction');
     // `getFull`, `search` a `searchIndex` pribudli 13. 8. 2026 s API v5 a sú to
     // všetko ČÍTACIE cesty — vracajú stav, nie ho menia. `searchIndex` je
     // dokonca verejný. V zozname sú preto, že filter nižšie berie všetko pod

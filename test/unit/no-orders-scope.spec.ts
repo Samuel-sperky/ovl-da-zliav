@@ -202,6 +202,17 @@ describe("I8' — objednávky len na súčty predaja, nikdy zákaznícke dáta",
         if (/^(product|order|customer|cart|invoice|user)s?:/.test(value)) scopes.add(value);
       }
     }
+    /*
+     * POISTKA (24. 8. 2026, audit kvality testov). Slučka nad prázdnou
+     * množinou nezbehne ani raz a test je zelený bez toho, aby čokoľvek
+     * zmeral: stačí, aby sa scope prestal písať ako literál (skladanie,
+     * konštanta z inej vetvy) a regex nechytí nič. Produktový scope na zápis
+     * v zdrojoch BYŤ MUSÍ — appka bez neho zľavu nezapíše.
+     */
+    expect(scopes.size, 'v zdrojoch sa nenašiel ani jeden scope — regex prestal chytať').toBeGreaterThan(0);
+    expect([...scopes], 'chýba `product:edit` — scopes sa už nepíšu ako literál').toContain(
+      'product:edit',
+    );
     for (const scope of scopes) expect(ALLOWED_SCOPES).toContain(scope);
   });
 

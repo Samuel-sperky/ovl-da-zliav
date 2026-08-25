@@ -5,12 +5,29 @@
  *  - `applyMigrations()` — spustí `scripts/migrate.ts` proti testovacej DB
  *    (rovnaký runner ako v produkcii, žiadna druhá cesta k schéme),
  *  - `truncateAll()`     — vyčistí dáta medzi testami a obnoví singletony,
- *  - `dbAvailable()`     — testy, ktoré potrebujú DB, sa vedia korektne preskočiť,
+ *  - `probeTestDb()` / `dbAvailable()` — je testovacia DB vôbec pripojiteľná,
  *  - `withMigrationConn()` / `withAppConn()` — spojenia pod správnym DB userom,
  *    aby sa dal overiť aj invariant I4 (app user nesmie `UPDATE`/`DELETE`
  *    na `audit_log`).
  *
  * Testovacia DB je vždy `DB_NAME` z `test/setup.ts` (default `ovl_zliav_test`).
+ *
+ * TICHÉ PRESKOČENIE JE ZAKÁZANÉ (24. 8. 2026)
+ * -------------------------------------------
+ * `dbAvailable()` vracalo pri chybe spojenia `false` a chybu prehltlo. Štrnásť
+ * súborov v `test/integration/` sa na tú hodnotu vešia cez
+ * `describe.skipIf(!available)`, takže bez bežiacej MariaDB zmizlo 129 testov,
+ * `vitest run` skončil s exit kódom 0 a balík bol „zelený" BEZ jediného dôkazu
+ * o grantoch auditu (I4), strope allowlistu (I2), redakcii kľúča (I1) a
+ * migráciách (A0). To isté platilo v CI: keby service kontajner MariaDB
+ * nenabehol, `npm run test` by prešiel.
+ *
+ * Preto `dbAvailable()` teraz **HÁDŽE** — nedostupná DB je porucha prostredia,
+ * nie dôvod tvrdiť menej. Kto naozaj chce bežať bez DB, musí to povedať
+ * nahlas cez `ALLOW_SKIP_DB_TESTS=1`; vtedy sa preskočenie vypíše na stderr,
+ * takže sa o ňom aspoň dozvie. `npm test` má navyše bránu ešte pred vitestom
+ * (`scripts/require-test-db.ts`), aby z toho bola jedna zrozumiteľná veta a nie
+ * štrnásť rovnakých pádov.
  */
 import { execFile } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -118,16 +135,90 @@ export async function withAppConn<T>(fn: (conn: Connection) => Promise<T>): Prom
   }
 }
 
-/** Je testovacia DB dostupná? Integračné testy sa podľa toho preskočia. */
-export async function dbAvailable(): Promise<boolean> {
+/**
+ * ENV premenná, ktorou sa dá preskočenie integračných testov POVOLIŤ. Bez nej
+ * je nedostupná DB tvrdá chyba. Meno je zámerne dlhé a nepríjemné — nemá sa
+ * dostať do žiadneho skriptu, ktorý beží v CI.
+ */
+export const SKIP_DB_TESTS_ENV = 'ALLOW_SKIP_DB_TESTS';
+
+export interface TestDbProbe {
+  ok: boolean;
+  /** Prečo sa nedá pripojiť. `null` = dá sa. Heslá sú vyREDIGOVANÉ (I1). */
+  reason: string | null;
+  /** `host:port/db` ako `ovl_zliav_mig` — bez hesla. */
+  target: string;
+}
+
+/**
+ * Vyredaguje hodnoty, ktoré sa do hlášky nikdy nesmú dostať (I1). Ovládač
+ * MariaDB síce heslá do `Error.message` bežne nedáva, ale hláška ide do CI logu
+ * a do terminálu, takže sa na „bežne" nespoliehame.
+ */
+function redactSecrets(text: string): string {
   const config = testDbConfig();
+  let out = text;
+  for (const secret of [config.appPassword, config.migrationPassword, config.rootPassword]) {
+    if (typeof secret === 'string' && secret.length > 0) {
+      out = out.split(secret).join('***');
+    }
+  }
+  return out;
+}
+
+/**
+ * Skúsi sa pripojiť migračným userom a POVIE, ako to dopadlo — vrátane dôvodu.
+ * Nič nehádže; je to meranie, na ktorom stojí `dbAvailable()` aj brána
+ * `scripts/require-test-db.ts`.
+ */
+export async function probeTestDb(): Promise<TestDbProbe> {
+  const config = testDbConfig();
+  const target = `${config.host}:${config.port}/${config.database}`;
   try {
     const conn = await connectAs(config.migrationUser, config.migrationPassword);
     await conn.end();
-    return true;
-  } catch {
-    return false;
+    return { ok: true, reason: null, target };
+  } catch (error) {
+    const raw = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: redactSecrets(raw), target };
   }
+}
+
+/** Vypísané už bolo? Varovanie stačí raz na proces, nie raz na súbor. */
+let skipWarningPrinted = false;
+
+/**
+ * Je testovacia DB dostupná?
+ *
+ * `true` alebo VÝNIMKA — tretia možnosť („false a ticho") je presne tá diera,
+ * pre ktorú tento komentár existuje. `false` sa vráti len vtedy, keď človek
+ * vedome nastavil `ALLOW_SKIP_DB_TESTS=1`, a aj vtedy to ide nahlas na stderr.
+ */
+export async function dbAvailable(): Promise<boolean> {
+  const probe = await probeTestDb();
+  if (probe.ok) return true;
+
+  const detail =
+    `Testovacia MariaDB na ${probe.target} neodpovedá, takže integračné testy ` +
+    `nemajú čo merať.\n  Dôvod: ${probe.reason ?? 'neznámy'}\n` +
+    '  Spusti kontajner: docker compose up -d ovl-zliav-test-db';
+
+  if (process.env[SKIP_DB_TESTS_ENV] !== '1') {
+    throw new Error(
+      `[DB] ${detail}\n` +
+        `  Vedomé preskočenie: ${SKIP_DB_TESTS_ENV}=1 — potom ale balík NIE JE ` +
+        'dôkazom o migráciách, grantoch auditu, strope allowlistu ani redakcii kľúča.',
+    );
+  }
+
+  if (!skipWarningPrinted) {
+    skipWarningPrinted = true;
+    process.stderr.write(
+      `\n[DB] ${SKIP_DB_TESTS_ENV}=1 — integračné testy sa PRESKAKUJÚ.\n  ${detail}\n` +
+        '  Zelený výsledok tohto behu nehovorí nič o schéme, grantoch ani redakcii.\n\n',
+    );
+  }
+  return false;
 }
 
 /**

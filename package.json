@@ -12,7 +12,10 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "pretest": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/require-test-db.ts",
     "test": "vitest run",
+    "test:db-check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/require-test-db.ts",
+    "test:unit": "vitest run test/unit",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:build": "vitest run --config vitest.smoke.config.ts",
@@ -20,7 +23,8 @@
     "migrate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/migrate.ts",
     "gen-master-key": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/gen-master-key.ts",
     "seed-admin": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-admin.ts",
-    "check-compose-bind": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-compose-bind.ts"
+    "check-compose-bind": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-compose-bind.ts",
+    "snimky": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/snimky.ts"
   },
   "dependencies": {
     "@date-fns/tz": "^1.5.0",
