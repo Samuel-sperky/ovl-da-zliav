@@ -174,12 +174,6 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
             </tr>
           </tbody>
         </table>
-        <div className="tbl-foot">
-          <span>
-            Zmena rozsahu nezapíše ani nezruší nič. Mení len to, čo appka pustí pri
-            najbližšom potvrdení zľavy.
-          </span>
-        </div>
       </div>
 
       {settings.scopeFailClosed ? (
@@ -231,11 +225,10 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
         </div>
       ) : (
         <div className="set-form" data-testid="scope-to-pilot">
-          <p className="set-note">
-            Sprísnenie je vždy voľné: návrat do pilotného rozsahu heslo
-            nevyžaduje. Už zapísané zľavy zostanú v eshope a dobehnú — appka ich
-            zrušiť nedokáže.
-          </p>
+          {/* Rovnaký tvar ako pri opačnom prechode vyššie: tlačidlo a vedľa
+              neho jedno slovo o hesle. Čo sa pri sprísnení stane s už
+              zapísanými zľavami, stojí pod rozklikom (P6) — na povrchu by to
+              bol štvrtý odstavec tejto sekcie. */}
           <div className="row">
             <Button
               onClick={() => void switchTo('pilot')}
@@ -244,6 +237,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
             >
               {busy ? 'Prepínam…' : 'Vrátiť pilotný rozsah'}
             </Button>
+            <span className="lvl-3">heslo netreba</span>
           </div>
         </div>
       )}
@@ -253,6 +247,19 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
       <details className="tech">
         <summary>Technický detail</summary>
         <div className="body">
+          {/* Dve vety, ktoré do 24. 8. 2026 stáli na povrchu sekcie: pätka pod
+              tabuľkou a odstavec nad tlačidlom „Vrátiť pilotný rozsah". Obe
+              boli nad stropom P2 (99 a 150 znakov) a obe hovoria o dôsledku,
+              nie o tom, čo teraz platí. Nezmizli — sú o jedno kliknutie ďalej
+              (P6). Kto ich vráti na povrch, poruší P2. */}
+          <p data-testid="scope-why-no-write">
+            Zmena rozsahu nezapíše ani nezruší nič. Mení len to, čo appka pustí pri
+            najbližšom potvrdení zľavy.
+          </p>
+          <p data-testid="scope-why-pilot-free">
+            Sprísnenie je vždy voľné: návrat do pilotného rozsahu heslo nevyžaduje. Už
+            zapísané zľavy zostanú v eshope a dobehnú — appka ich zrušiť nedokáže.
+          </p>
           <table>
             <tbody>
               <tr>

@@ -14,7 +14,7 @@
  *
  * Vlastník: V12.
  */
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 import Button from '@/components/ui/Button';
 
@@ -66,29 +66,22 @@ export function LockedFeatures() {
           </Button>
         </div>
       </div>
-      <div className="tbl-frame">
-        <table className="tbl plain">
-          <thead>
-            <tr>
-              <th>Funkcia</th>
-              <th>Chýba</th>
-            </tr>
-          </thead>
-          <tbody>
-            {LOCKED_FEATURES.map((row) => (
-              <tr key={row.feature}>
-                <td className="name">{row.feature}</td>
-                <td className="locked" data-l="Chýba">
-                  {row.missing}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="tbl-foot">
-          <span>Predané kusy fungujú vždy — tie appka počíta z objednávok.</span>
-        </div>
+      {/* Zoznam, nie rámovaná tabuľka. Slovo „chýba" nesie každý riadok sám,
+          takže hlavička „Funkcia / Chýba" ani rám nemajú čo pridať — a na
+          podstránke s piatimi sekciami bolo tých 192 px cítiť. Text je do
+          písmena ten istý; zmenilo sa iba, ako je poskladaný, a ostáva celý
+          na POVRCHU: pod rozklik tento zoznam nesmie (kontrakt bod 18). */}
+      <div className="locked-list" data-testid="locked-list">
+        {LOCKED_FEATURES.map((row) => (
+          <Fragment key={row.feature}>
+            <span className="lf-f">{row.feature}</span>
+            <span className="lf-m">chýba {row.missing}</span>
+          </Fragment>
+        ))}
       </div>
+      <p className="set-note gap-t" data-testid="locked-sold">
+        Predané kusy fungujú vždy — tie appka počíta z objednávok.
+      </p>
     </section>
   );
 }
