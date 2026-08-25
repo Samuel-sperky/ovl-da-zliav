@@ -569,10 +569,89 @@ const SQL_GET_MANY_PREFIX = `SELECT ${COLUMNS} FROM catalog_cache WHERE product_
 const SQL_UPSERT_PREFIX =
   'INSERT INTO catalog_cache ' +
   '(product_id, name, price, has_attributes, shop_status, source, fetched_at, raw) VALUES ';
+/*
+ * ZOZNAMOVÝ PRECHOD NESMIE ZAHODIŤ DOŤAHNUTÝ DETAIL (24. 8. 2026)
+ * ---------------------------------------------------------------
+ * Predtým tu stálo `source = VALUES(source), raw = VALUES(raw)` BEZ podmienky.
+ * Riadok obohatený cez `product-details` (`source` = `get`/`batch`, `raw` =
+ * celá odpoveď shopu) tak pri najbližšom prechode synchronizácie spadol späť na
+ * `source = 'list'` a `raw = {id, name, price, has_attributes}` — detail sa
+ * stratil a `fillProductDetails()` ho vyhodnotil ako nedoplnený a zaplatil zaň
+ * znova. Zmerané v prevádzkovej DB: `list: 41 220, get: 0, batch: 0` po ôsmich
+ * dňoch, počas ktorých bol `shop_read_budget` každý deň na `240/240` a beh
+ * skončil na `ip_banned`. Doplniť katalóg raz stojí ≈ 42 869 čítaní ≈ 179 dní
+ * rozpočtu; bez tejto podmienky sa tá čiastka platí na KAŽDOM prechode.
+ *
+ * ČO ZNAMENÁ „BOHATŠÍ": VÝHRADNE `source`, NIE dĺžka `raw` ani `fetched_at`
+ * ------------------------------------------------------------------------
+ * Rozhoduje `source`, lebo presne z neho (a z prítomnosti poľa `reduction`)
+ * číta `catalogDetailRoute()`, ktorá určuje, na ktoré otázky riadok vôbec vie
+ * odpovedať: `list` < `get`/`batch`. Je to vlastnosť CESTY, ktorou riadok
+ * prišiel, a tá sa nemení podľa toho, aký produkt to je.
+ *
+ *  - **Nie dĺžka `raw`.** Dĺžka meria produkt, nie cestu. `get` na produkte bez
+ *    variantov a bez popisu je kratší než zoznamová položka s dlhým názvom —
+ *    a porovnávanie dĺžok by ho zahodilo. Navyše by to bol odhad tam, kde je
+ *    k dispozícii meraný fakt.
+ *  - **Nie `fetched_at`.** Ten meria čerstvosť, nie obsah — a v tomto poli je
+ *    novší riadok práve ten CHUDOBNEJŠÍ (zoznamový prechod beží denne, detail
+ *    raz). „Novší vyhráva" je presne pravidlo, ktoré tú chybu spôsobilo.
+ *
+ * KEĎ SA PRODUKT V SHOPE NAOZAJ ZMENÍ
+ * -----------------------------------
+ * Zastaraný detail je tiež nepravda, takže ochrana NIE JE bezpodmienečná.
+ * Zoznam nesie `{id, name, price, has_attributes}` — a to je zadarmo dostupný
+ * dôkaz o zmene: keď sa ktorékoľvek z troch polí líši od uloženého riadku,
+ * produkt sa v shope zmenil, uložený detail je preukázateľne neaktuálny a
+ * ochrana sa VYPNE. Riadok spadne na `list`, `fillProductDetails()` ho uvidí
+ * ako nedoplnený a doťahne ho znova — raz, za jedno čítanie, a až vtedy, keď
+ * na to naozaj bol dôvod. Žiadny ďalší mechanizmus (TTL, príznak, fronta) na
+ * to netreba a žiadne čítanie navyše to nestojí.
+ *
+ * Porovnáva sa kolláciou stĺpca (`name` je `utf8mb4_unicode_ci`), teda zmena
+ * veľkosti písmen či diakritiky v názve detail NEZHODÍ. Je to vedomé: názov
+ * nie je detailové pole (má vlastný stĺpec a obnovuje sa vždy), kým hromadná
+ * normalizácia názvov v shope by pri binárnom porovnaní zhodila celý katalóg
+ * naraz — 42 869 čítaní za preklep. `price` a `has_attributes` sú tie silné
+ * signály: s cenou sa hýbe `sell_price`, `margin` aj `reduction`, s
+ * `has_attributes` celé pole `attributes` a z neho skladové číslo.
+ *
+ * ČO TÁTO OPRAVA NERIEŠI (a vedome nechávam otvorené)
+ * ---------------------------------------------------
+ * Detail môže zostarnúť aj bez toho, aby sa zmenil názov, cena či
+ * `has_attributes` — typicky sklad variantu alebo EAN. Riadok si pritom drží
+ * `fetched_at` posledného ZOZNAMOVÉHO čítania, lebo ten stĺpec je podklad pre
+ * `MAX(fetched_at)` v `lastFetchedAt()` (rozhoduje o novom prechode),
+ * pre `dataAsOf` v `engine/preview` a pre pásma cien — a všetky tri sa pýtajú
+ * na cenu, ktorú prechod naozaj obnovil. Zmraziť ho spolu s `raw` by z appky
+ * spravilo klamára v opačnom smere a runner by prechádzal katalóg donekonečna.
+ * Vek SAMOTNÉHO detailu sa v tejto schéme nedá vyjadriť; chce to stĺpec
+ * `detail_fetched_at`, čo je migrácia nad 41 220 riadkami — a tá sa nerobí
+ * mimochodom. Je to navrhnuté, nie spravené.
+ *
+ * ZÁLEŽÍ NA PORADÍ PRIRADENÍ — NEPREHADZOVAŤ
+ * ------------------------------------------
+ * MariaDB vykonáva priradenia v `ON DUPLICATE KEY UPDATE` ZĽAVA DOPRAVA a
+ * neskoršie výrazy už vidia PREPÍSANÉ hodnoty. Keby `name`/`price`/
+ * `has_attributes` stáli pred `source`/`raw`, podmienka by porovnávala novú
+ * hodnotu samu so sebou, vyšla by vždy „nezmenené" a detail by prežil aj
+ * skutočnú zmenu ceny. Zmerané na MariaDB 11.4: pri opačnom poradí zmena ceny
+ * 10,00 → 20,00 detail NEzhodila. Preto `source` a `raw` idú PRVÉ.
+ * Stráži to `test/integration/katalog-nedegraduje.spec.ts` skutočným behom.
+ */
+const SQL_KEEP_DETAIL =
+  "VALUES(source) = 'list' AND source IN ('get', 'batch') " +
+  'AND name <=> VALUES(name) AND price <=> VALUES(price) ' +
+  'AND has_attributes <=> VALUES(has_attributes)';
 const SQL_UPSERT_SUFFIX =
-  ' ON DUPLICATE KEY UPDATE name = VALUES(name), price = VALUES(price), ' +
+  ' ON DUPLICATE KEY UPDATE ' +
+  // Detailové stĺpce PRVÉ — podmienka musí vidieť ešte STARÝ názov a cenu.
+  `source = IF(${SQL_KEEP_DETAIL}, source, VALUES(source)), ` +
+  `raw = IF(${SQL_KEEP_DETAIL}, raw, VALUES(raw)), ` +
+  // Až potom to, čo zoznam nesie vždy a čo teda smie prepísať bez podmienky.
+  'name = VALUES(name), price = VALUES(price), ' +
   'has_attributes = VALUES(has_attributes), shop_status = VALUES(shop_status), ' +
-  'source = VALUES(source), fetched_at = VALUES(fetched_at), raw = VALUES(raw)';
+  'fetched_at = VALUES(fetched_at)';
 
 /** D49: produkt, ktorý shop nenašiel. Ostatné stĺpce sa NEPREPISUJÚ. */
 const SQL_MARK_SHOP_STATUS = 'UPDATE catalog_cache SET shop_status = ? WHERE product_id = ?';
