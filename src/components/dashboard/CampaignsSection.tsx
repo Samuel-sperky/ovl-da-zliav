@@ -166,9 +166,13 @@ export function CampaignsSection({ campaigns, insights }: CampaignsSectionProps)
           „Zatiaľ nie je žiadna zľava" už povedala dominanta a druhá kópia tej
           istej vety na jednej obrazovke je šum. Návrhy sú vtedy najpotrebnejšie
           a dostanú celú šírku.
+
+          `styles.liveCol` nesie priestor pre presah podfarbenia riadkov: bez
+          neho `.campRow` so záporným okrajom `0 -8px` vylezie 8 px von zo
+          stĺpca a snímkovač to hlási ako pretekanie aj ako tri presahy.
         */}
         {firstRun ? null : (
-          <div data-testid="overview-live">
+          <div className={styles.liveCol} data-testid="overview-live">
             <div className={`${styles.colh} lvl-3`}>Beží teraz</div>
             {campaigns === null ? (
               <div className="suggest">
