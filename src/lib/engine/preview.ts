@@ -461,22 +461,29 @@ const priceCentsOf = (price: MoneyString | null): number | null => {
  * nález týka. Kým odpoveď na celý blok je prázdna, netreba ho vôbec — a to je
  * bežný prípad.
  *
- * Cena voči pôvodnému kódu: rozpisuje sa aj vtedy, keď sú všetky nálezy
- * nakoniec nezaujímavé (`relevant()` ich zahodí), lebo tá filtrácia patrí
- * volajúcemu a táto funkcia o nej nevie. Je to o dotazy viac v prípade, ktorý
- * nie je bežný — a lepšie než dva rôzne miesta, kde sa rozhoduje, čo je nález.
+ * BRÁNA SA PÝTA NA FILTROVANÝ VÝSLEDOK, nie na surové riadky. Prvá verzia tejto
+ * funkcie brala `inChunk.length === 0` nad surovou odpoveďou a komentár to
+ * obhajoval tým, že „je to o dotazy viac v prípade, ktorý nie je bežný". To bolo
+ * nesprávne dvakrát. Pôvodný kód (pred 24. 8.) filtroval PRED rozhodnutím, a
+ * prípady, kedy blok nájde a `relevant()` všetko zahodí, sú práve tie DVA, pre
+ * ktoré ten predikát existuje: rodič pri „zopakovať zlyhané" / „predĺžiť"
+ * (D15, D16, D19) a `kind='overwrite'` nad dobehnutou kampaňou (D28). Zmerané:
+ * 1203 dotazov tam, kde starý kód urobil 3. Predikát preto dostáva sem — jedno
+ * miesto, kde sa rozhoduje, čo je nález, zostáva volajúci, ale brána sa jeho
+ * odpovede musí spýtať.
  */
 async function overlapsByProductFallback(
   repo: Pick<CampaignsRepo, 'findFutureOverlaps'>,
   productIds: number[],
   from: DateOnly,
   to: DateOnly,
+  relevant: (campaign: { readonly id: number; readonly status: CampaignStatusV3 }) => boolean,
 ): Promise<Map<number, CampaignRecord[]>> {
   const out = new Map<number, CampaignRecord[]>();
   if (productIds.length === 0) return out;
 
   const inChunk = await repo.findFutureOverlaps(productIds, from, to);
-  if (inChunk.length === 0) return out;
+  if (!inChunk.some(relevant)) return out;
 
   for (const productId of productIds) {
     const found = await repo.findFutureOverlaps([productId], from, to);
@@ -636,7 +643,7 @@ export async function buildPreview(
        */
       const found =
         byProduct === undefined
-          ? await overlapsByProductFallback(campaignsRepo, chunk, input.from, input.to)
+          ? await overlapsByProductFallback(campaignsRepo, chunk, input.from, input.to, relevant)
           : await byProduct.call(campaignsRepo, chunk, input.from, input.to);
 
       // Poradie je poradie `sortedIds`, nie poradie mapy — odpoveď náhľadu

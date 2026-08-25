@@ -97,7 +97,14 @@ export interface PreviewConflictView {
   campaignName: string;
   from: string;
   to: string;
-  status: CampaignStatus;
+  /**
+   * Vrátane `queued` (25. 8. 2026). Server tu posiela `CampaignStatusV3`
+   * a tento typ dovtedy hovoril `CampaignStatus` — čo bola nepravda o dátach,
+   * ktoré cez HTTP naozaj chodia. Tie dva typy nie sú štrukturálne spojené,
+   * takže `tsc` ten rozpor nevidel a videl by ho až človek pri prvej kampani
+   * vo fronte. Kolízia s čakajúcou kampaňou je plnohodnotná kolízia.
+   */
+  status: CampaignStatus | 'queued';
 }
 
 export interface PreviewResponse {

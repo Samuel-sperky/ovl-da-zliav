@@ -446,10 +446,61 @@ describe.skipIf(!available)('repozitáre (A8)', () => {
      * dala `null`. Je to rozdiel medzi „nič sme nezapísali" a „nevieme" (I11) a
      * volajúci sa na to spolieha (`lastWrites.get(id) ?? null`).
      */
-    it('lastOwnWrites() vynechá produkty bez vlastného zápisu, nedá im null', async () => {
-      const written = await campaignsRepoV3.lastOwnWrites([821, 822]);
-      expect(written.size).toBe(0);
-      expect(written.has(821)).toBe(false);
+    /**
+     * `lastOwnWrites()` je dávková podoba `lastOwnWrite()` a náhľad na nej stojí
+     * pri každom riadku, ktorý zobrazí. Do 25. 8. 2026 mala jediné tvrdenie —
+     * že prázdna vstupná sada dá prázdnu mapu — čím prešla aj implementácia,
+     * ktorá vracia prázdno VŽDY. Volajúci ju číta ako `?? null`, takže taká
+     * implementácia by ticho tvrdila „nič sme nezapísali" o produktoch, kde
+     * zápis je: presne zámena „nevieme" za „nič", ktorú I11 zakazuje.
+     */
+    it('lastOwnWrites() vráti posledný ok zápis pre KAŽDÝ dotknutý produkt (I11)', async () => {
+      const stara = await campaignsRepo.create(
+        scheduledInput({ percent: 10, dateFrom: testDay(0), dateTo: testDay(2) }),
+      );
+      const nova = await campaignsRepo.create(
+        scheduledInput({ percent: 30, dateFrom: testDay(3), dateTo: testDay(5) }),
+      );
+      // Produkt 831 má dva zápisy (v dvoch kampaniach), 832 jeden, 833 žiadny.
+      await campaignItemsRepo.createMany(stara.id, [
+        { productId: 831, position: 1, percent: 10, priceAtPreview: null, hasAttributes: false },
+        { productId: 832, position: 2, percent: 10, priceAtPreview: null, hasAttributes: false },
+      ]);
+      const staraItems = await campaignItemsRepo.listByCampaign(stara.id);
+      for (const it of staraItems) {
+        await campaignItemsRepo.update(it.id, {
+          status: 'ok',
+          finishedAt: new Date('2026-08-05T08:00:00.000Z'),
+        });
+      }
+      await campaignItemsRepo.createMany(nova.id, [
+        { productId: 831, position: 1, percent: 30, priceAtPreview: null, hasAttributes: false },
+      ]);
+      const novaItems = await campaignItemsRepo.listByCampaign(nova.id);
+      const novejsi = new Date('2026-08-09T10:00:00.000Z');
+      for (const it of novaItems) {
+        await campaignItemsRepo.update(it.id, { status: 'ok', finishedAt: novejsi });
+      }
+
+      const written = await campaignsRepoV3.lastOwnWrites([831, 832, 833]);
+
+      // Nie prázdna mapa — toto je to, čo doterajšie tvrdenie nemeralo.
+      expect([...written.keys()].sort((a: number, b: number) => a - b)).toEqual([831, 832]);
+      // A pre 831 je to NOVŠÍ z dvoch zápisov, nie prvý nájdený.
+      expect(written.get(831)).toMatchObject({ percent: 30, campaignId: nova.id });
+      expect(written.get(831)?.at.toISOString()).toBe(novejsi.toISOString());
+      expect(written.get(832)).toMatchObject({ percent: 10, campaignId: stara.id });
+      // Produkt bez zápisu v mape NIE JE — „nevieme" sa nesmie zmeniť na „nič".
+      expect(written.has(833)).toBe(false);
+
+      // A zhoda s jednotnou podobou, aby sa tie dva tvary nerozišli.
+      const single = await campaignsRepo.lastOwnWrite(831);
+      expect(written.get(831)).toEqual(single);
+    });
+
+    it('lastOwnWrites() na prázdnu sadu nesiaha do DB', async () => {
+      expect((await campaignsRepoV3.lastOwnWrites([])).size).toBe(0);
+      expect((await campaignsRepoV3.lastOwnWrites([0, -1])).size).toBe(0);
     });
 
     it('lastOwnWrite() vracia posledný VLASTNÝ ok zápis (I11)', async () => {

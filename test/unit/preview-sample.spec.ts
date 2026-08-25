@@ -120,6 +120,13 @@ function makeWorld(options: {
   priceOf?: (productId: number) => number;
   /** Ktoré ID sú v zrkadle katalógu (K7). Default: všetky. */
   inCatalog?: Set<number>;
+  /**
+   * Kolidujúce budúce kampane, ktoré má fake vrátiť. Bez nich fake vracia
+   * prázdno a rozpisovacia vetva záložnej cesty sa NIKDY nespustí — presne to
+   * bolo 25. 8. 2026 nájdené pri review: `[productId]` sa dalo zameniť za
+   * `productIds` a balík zostal zelený.
+   */
+  overlaps?: Array<{ id: number; status: string; productIds: number[] }>;
 }): World {
   const priceOf = options.priceOf ?? ((id: number) => 10 + (id % 500));
   const inCatalog = options.inCatalog ?? new Set(options.productIds);
@@ -182,7 +189,15 @@ function makeWorld(options: {
       },
       async findFutureOverlaps(ids: number[]) {
         overlapCalls.push([...ids]);
-        return [];
+        return (options.overlaps ?? [])
+          .filter((c) => ids.some((id) => c.productIds.includes(id)))
+          .map((c) => ({
+            id: c.id,
+            name: `Kampaň ${c.id}`,
+            status: c.status,
+            dateFrom: TOMORROW,
+            dateTo: LATER,
+          }));
       },
     } as never,
     catalogRepo,
@@ -366,6 +381,51 @@ describe('buildPreview: veľká sada (K1, K7)', () => {
     // `lastOwnWrite` len pre riadky, ktoré sa naozaj zobrazia.
     expect(world.lastOwnWriteCalls).toHaveLength(result.items.length);
     expect(result.items.length).toBeLessThanOrEqual(PREVIEW_SAMPLE_SIZE);
+  });
+
+  /**
+   * Rozpisovacia vetva záložnej cesty. Testy vyššie ju nespúšťali vôbec: fake
+   * vracal prázdno, takže sa vždy skončilo pri dotaze na blok. Zámena
+   * `[productId]` za `productIds` na riadku rozpisu preto zostávala zelená —
+   * nájdené pri review 25. 8. 2026.
+   */
+  it('pri náleze sa blok rozpíše a kolízia sadne na SPRÁVNY produkt', async () => {
+    const ids = [11, 12, 13];
+    const world = makeWorld({
+      productIds: ids,
+      overlaps: [{ id: 900, status: 'scheduled', productIds: [12] }],
+    });
+    const result = await buildPreview(baseInput(ids), world.deps, CTX);
+
+    // Jeden dotaz na blok + rozpis na tri produkty.
+    expect(world.overlapCalls[0]).toEqual(ids);
+    expect(world.overlapCalls.slice(1)).toEqual([[11], [12], [13]]);
+    // A kolízia je pripísaná produktu 12, nie prvému z bloku.
+    const conflicts = result.blockers.filter((b) => b.code === 'future_overlap');
+    expect(conflicts.map((b) => b.productId)).toEqual([12]);
+  });
+
+  /**
+   * Brána rozpisu sa musí pýtať na FILTROVANÝ výsledok. Kampaň, ktorú
+   * `relevant()` zahodí (tu rodič pri „zopakovať zlyhané"), nesmie spustiť
+   * rozpis — inak je to 1203 dotazov tam, kde stačia 3.
+   */
+  it('nález, ktorý `relevant()` zahodí, blok NEROZPÍŠE', async () => {
+    const ids = [11, 12, 13];
+    const world = makeWorld({
+      productIds: ids,
+      overlaps: [{ id: 900, status: 'scheduled', productIds: [12] }],
+    });
+    const result = await buildPreview(
+      { ...baseInput(ids), kind: 'retry', parentCampaignId: 900 },
+      world.deps,
+      CTX,
+    );
+
+    // Jediný nález je rodič, ktorý sa vylučuje (D15, D16, D19) — takže zostal
+    // jeden dotaz na blok a nič viac.
+    expect(world.overlapCalls).toEqual([ids]);
+    expect(result.blockers.filter((b) => b.code === 'future_overlap')).toEqual([]);
   });
 
   it('produkt mimo zrkadla katalógu neprejde rozsahom, token sa nevydá (K1 bod 2)', async () => {

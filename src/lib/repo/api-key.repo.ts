@@ -93,7 +93,7 @@ import {
 // `contracts`, `lib/log/redact.ts` a `version`, takže cyklus nevzniká (na rozdiel
 // od `lib/audit/write.ts`, ktoré sa preto ťahá dynamicky v `resolveAudit()`).
 import { logger as defaultLogger } from '@/lib/log/logger';
-import { clearScanSecrets, redactString, setScanSecretForOwner } from '@/lib/log/redact';
+import { clearScanSecrets, redact, redactString, setScanSecretForOwner } from '@/lib/log/redact';
 // Typ scopes je len typ (`import type` — žiadna runtime závislosť repozitára na
 // klientovi shopu). Číselník vlastní `shop/client.ts`, lebo tam sa odpoveď
 // `whoami` parsuje; repozitár si ho len pamätá.
@@ -285,7 +285,19 @@ export interface ApiKeyRepoDeps {
  * v appke, ktorá obchádza I1.
  */
 function consoleFallback(level: 'warn' | 'error', payload: Record<string, unknown>): void {
-  const line = redactString(JSON.stringify({ ...payload, ts: new Date().toISOString() }));
+  /*
+   * `redact()` NAD OBJEKTOM, až potom `JSON.stringify`. Do 25. 8. 2026 to bolo
+   * opačne — `redactString()` nad hotovým reťazcom — a tým bola prvá vrstva
+   * redaktora (denylist podľa MENA poľa) štrukturálne nedosiahnuteľná: potrebuje
+   * objekt. Pole ako `shopSecret` sa serializuje na `"shopSecret":"…"`, kde pred
+   * `Secret` nie je hranica slova, takže `INLINE_ASSIGNMENT_RE` ho nechytí a
+   * prešlo by nemaskované. Žiadne dnešné volanie tu tajomstvo nenesie, ale
+   * v súbore, ktorého celá úloha je I1, je fail-open poradie zlá predvoľba.
+   * `redactString()` zostáva navrchu kvôli vrstvám 2 a 3 nad hotovým textom.
+   */
+  const line = redactString(
+    JSON.stringify(redact({ ...payload, ts: new Date().toISOString() })),
+  );
   if (level === 'error') console.error(line);
   else console.warn(line);
 }

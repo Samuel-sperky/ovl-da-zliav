@@ -52,13 +52,10 @@ describe('produkčný repozitár kampaní nesie dávkové tvary náhľadu', () =
     expect(typeof (campaignsRepo as unknown as Record<string, unknown>)[name]).toBe('function');
   });
 
-  /**
-   * Toto tvrdenie je tu zámerne, hoci vyzerá zbytočne: keby niekto dávkový tvar
-   * „opravil" tak, že ho pridá do rozhrania a nie do objektu, `typeof` vyššie by
-   * to zachytilo, ale hláška by nepovedala, čo s tým. Tu je vidieť, ktoré tvary
-   * sa vlastne čakajú.
+  /*
+   * Tautologické tvrdenie `expect(DAVKOVE_TVARY.length).toBe(2)` tu do 25. 8.
+   * 2026 stálo a bolo zmazané: kontrolovalo `const` o tridsať riadkov vyššie,
+   * takže ho nemohla zhodiť žiadna zmena v `src/`. Test, ktorý nemôže padnúť,
+   * nie je poistka — je to riadok, ktorý budí falošný pocit pokrytia.
    */
-  it('zoznam strážených tvarov sa nezúžil na prázdno', () => {
-    expect(DAVKOVE_TVARY.length).toBe(2);
-  });
 });
