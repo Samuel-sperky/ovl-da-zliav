@@ -13,6 +13,7 @@
 import { z } from 'zod';
 
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
+import type { CampaignItemsRepoExt } from '@/lib/repo/campaign-items.repo';
 
 import {
   campaignView,
@@ -24,7 +25,21 @@ import {
   todayOf,
   withRouteErrors,
   type RoutesDeps,
+  type RoutesItemsRepo,
 } from '../_shared';
+
+/**
+ * Repozitár položiek tak, ako ho potrebuje detail. `listPage`/`countByCampaign`
+ * sú VOLITEĽNÉ len kvôli starým fakes v testoch (`RoutesItemsRepo` ich nemá);
+ * produkčný `campaignItemsRepo` ich má vždy.
+ *
+ * Testy detailu idú DÁVKOVOU cestou: fake v `test/integration/routes-harness.ts`
+ * oba tvary má. Do 25. 8. 2026 ich nemal, takže všetky tiekli záložnou vetvou a
+ * produkčnú nespustil nikto — chyba v nej by sa v zelenom balíku nebola ukázala.
+ * Kto ten fake okleští, otvorí tú dieru znova.
+ */
+type DetailItemsRepo = RoutesItemsRepo &
+  Partial<Pick<CampaignItemsRepoExt, 'listPage' | 'countByCampaign'>>;
 
 const detailQuerySchema = z.object({
   /** Koľko položiek vrátiť. Default 100 — detail nie je export katalógu. */
@@ -48,20 +63,49 @@ export function createCampaignGet(
           const record = await loadCampaignOr404(d, ctx.params.id);
           const view = campaignView(record, todayOf(d));
           const tiers = await d.tiersRepo.listByCampaign(record.id);
-          const allItems = await d.campaignItemsRepo.listByCampaign(record.id);
           const audit = await d.auditRepo.list({ campaignId: record.id, perPage: 100 });
 
-          const items = allItems.slice(
-            ctx.query.itemsOffset,
-            ctx.query.itemsOffset + ctx.query.itemsLimit,
-          );
+          /*
+           * Stránka sa berie z DB, nie z poľa v pamäti. Predtým tu bolo
+           * `listByCampaign()` (bez `LIMIT`, so `sent_payload` a `raw_response`)
+           * a hneď za ním `.slice(offset, offset + limit)` — pri 10 000
+           * položkách teda ~1 MB riadkov cez driver a filesort nad celou
+           * kampaňou len na to, aby sa 99 % z nich zahodilo. `listPage()`
+           * existoval o dva riadky nižšie v tom istom repozitári.
+           */
+          const itemsRepo: DetailItemsRepo = d.campaignItemsRepo;
+          const { items, itemsTotal } =
+            itemsRepo.listPage === undefined || itemsRepo.countByCampaign === undefined
+              ? await (async () => {
+                  const all = await itemsRepo.listByCampaign(record.id);
+                  return {
+                    items: all.slice(
+                      ctx.query.itemsOffset,
+                      ctx.query.itemsOffset + ctx.query.itemsLimit,
+                    ),
+                    itemsTotal: all.length,
+                  };
+                })()
+              : {
+                  // `itemsLimit=0` je platná požiadavka „len počet, žiadne
+                  // riadky" — `listPage()` má spodný strop 1, tak sa nevolá.
+                  items:
+                    ctx.query.itemsLimit === 0
+                      ? []
+                      : await itemsRepo.listPage(
+                          record.id,
+                          ctx.query.itemsLimit,
+                          ctx.query.itemsOffset,
+                        ),
+                  itemsTotal: await itemsRepo.countByCampaign(record.id),
+                };
 
           return {
             campaign: view,
             tiers: tiers.map(tierView),
             estimate: await estimateFinishFor(d, view.itemsPending),
             items,
-            itemsTotal: allItems.length,
+            itemsTotal,
             itemsOffset: ctx.query.itemsOffset,
             auditTrail: audit.data,
           };

@@ -461,6 +461,20 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     async listByCampaign(campaignId: number) {
       return listItems(campaignId);
     },
+    /*
+     * `listPage` a `countByCampaign` tu MUSIA byť, aj keď ich väčšina testov
+     * nepotrebuje. `GET /api/campaigns/[id]` má dve cesty: dávkovú, keď ich
+     * repozitár má, a záložnú `listByCampaign().slice()`, keď nie. Kým tento
+     * fake obe metódy nemal, tiekli VŠETKY testy detailu záložnou cestou a
+     * produkčnú nespustil nikto — takže sa v nej mohla schovať chyba, ktorú by
+     * zelený balík nikdy neukázal (nález K5, 25. 8. 2026).
+     */
+    async listPage(campaignId: number, limit: number, offset: number) {
+      return listItems(campaignId).slice(offset, offset + limit);
+    },
+    async countByCampaign(campaignId: number) {
+      return listItems(campaignId).length;
+    },
     async update(id: number, patch: Partial<CampaignItemRecord>) {
       const record = items.get(id);
       if (!record) throw new Error(`campaign item ${id} neexistuje`);
