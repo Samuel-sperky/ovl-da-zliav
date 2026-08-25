@@ -43,6 +43,10 @@ npm-debug.log*
 # nie zdroj. Regenerujú sa na požiadanie, do repa nepatria (2,5 MB a starnú).
 /screenshots/
 
+# Statický snímkovač (`npm run snimky`) — PNG obrazoviek aj zabalená stránka,
+# z ktorej vznikli. Obrázky do repozitára nepatria; vyrobia sa jedným príkazom.
+/snimky/
+
 # Živý lokálny override je strojovo špecifický — v repe žijú len *.example.yml (R1w).
 docker-compose.override.yml
 
