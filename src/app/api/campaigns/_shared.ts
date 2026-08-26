@@ -139,6 +139,13 @@ export interface RoutesItemsRepo {
     reason: string,
     conn?: Queryable,
   ): Promise<void>;
+  /**
+   * K2/K5 — koľko položiek drží CELÁ fronta, naprieč živými kampaňami.
+   * Voliteľné len preto, aby staršie fakes v testoch zostali platné; produkčný
+   * `campaignItemsRepo` ho má vždy. Keď chýba, `readQueuePending()` sa vráti
+   * k veľkosti samotnej kampane — a to je horšie číslo, viď jeho komentár.
+   */
+  queueTotals?(conn?: Queryable): Promise<{ pending: number }>;
 }
 
 /** Podmnožiny kontraktov, ktoré A12 skutočne používa — testy dodajú len tieto. */
@@ -534,6 +541,37 @@ export function estimateWith(
 ): FinishEstimate | null {
   if (pending <= 0 || budget === null) return null;
   return estimateFinish(pending, budget.budget, { remainingToday: budget.remaining, now });
+}
+
+/**
+ * K5 — koľko položiek fronta ešte drží, VRÁTANE práve zaradenej kampane.
+ *
+ * Odhad dobehnutia sa nesmie počítať z veľkosti jednej kampane. Fronta má
+ * JEDNU spoločnú dennú kvótu (K2), takže nová zľava dobehne až po tom, čo sa
+ * vybaví všetko, čo stojí pred ňou — a stáť pred ňou niečo môže je normálny,
+ * zdokumentovaný stav (ARCHITEKTURA §3.3, Z-2: „Zapisovať začnem, keď dobehne
+ * Ležiaky striebro"). Z veľkosti kampane by odhad vyšiel OPTIMISTICKY, teda
+ * skôr, než sa naozaj dopíše — a podľa toho dátumu sa plánuje produkcia aj
+ * varovanie K6 o kľúči.
+ *
+ * `fallback` (veľkosť kampane) je spodná hranica: keď fronta z akéhokoľvek
+ * dôvodu ohlási menej, než čo sme práve vložili, číslo je zastarané a odhad sa
+ * radšej oprie o vlastné položky, než by tvrdil menej práce, než je istá.
+ */
+export async function readQueuePending(
+  d: ResolvedRoutesDeps,
+  fallback: number,
+): Promise<number> {
+  const repo = d.campaignItemsRepo;
+  if (repo.queueTotals === undefined) return fallback;
+  try {
+    const totals = await repo.queueTotals();
+    return Math.max(totals.pending, fallback);
+  } catch {
+    // Fronta je informácia do UI, nie brzda zápisu — nečitateľné číslo
+    // nezhodí zaradenie, len sa odhad vráti k vlastným položkám.
+    return fallback;
+  }
 }
 
 /** Jednorazový odhad (POST) — jedno čítanie rozpočtu, jeden výsledok. */

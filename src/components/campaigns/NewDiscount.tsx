@@ -50,6 +50,11 @@
  *     `/api/queue` (presne, z položiek) aj zoznam zliav (odhadom, z počítadiel).
  *     Zmieruje ich `resolveAhead()` a rozklik prizná, ktorý zdroj to bol.
  *     Keď sa nedá prečítať ani jeden, dátum dobehnutia sa NEDOPOČÍTA (P7).
+ *     „Jedno číslo" platí aj cez potvrdenie: odhad tu je nad `aheadPending +
+ *     itemsCount`, a `POST /api/campaigns` počíta ten istý súčet z celej fronty
+ *     (`readQueuePending()`), takže karta „Zaradené do fronty" nevypíše skorší
+ *     dátum, než aký ukázala táto obrazovka. Kto zmení jednu stranu, musí
+ *     druhú — inak sa dva dátumy tej istej fronty rozídu.
  *  7. **Nič sa neobnovuje samo** (kontrakt UI, bod 4). Čísla sa načítajú pri
  *     otvorení a potom vždy, keď o to požiada tlačidlo Obnoviť v stavovom
  *     pruhu — obrazovka je registrovaná cez `useRefreshable()` a vlastné
