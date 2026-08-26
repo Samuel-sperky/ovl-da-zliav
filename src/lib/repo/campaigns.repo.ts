@@ -525,7 +525,24 @@ export interface CampaignsRepoExt {
   findLateCandidates(today: DateOnly, conn?: Queryable): Promise<CampaignRecordV3[]>;
   /** K5: nastaví príznak meškania. `true` = práve teraz sa zmenil z 0 na 1. */
   markLate(id: number, conn?: Queryable): Promise<boolean>;
-  /** K2: prepočíta počítadlá z `campaign_items` (jediný zdroj pravdy). */
+  /**
+   * K2: prepočíta počítadlá z `campaign_items` (jediný zdroj pravdy).
+   *
+   * ⚠ **NEMÁ PRODUKČNÉHO VOLAJÚCEHO** (zistené 25. 8. 2026, nález B5) — grep ho
+   * nájde len v `test/integration/repo-fronta.spec.ts`. Kto ho zapojí, musí
+   * najprv zladiť DVE definície tých istých počítadiel, lebo dnes sa rozchádzajú
+   * s `finishCampaign()` v `lib/engine/executor.ts`:
+   *
+   *  - `items_ok` tu počíta VÝHRADNE `status = 'ok'`, takže kampaň, ktorej
+   *    všetky položky skončili ako `skipped` (opravný beh, D36), vykáže
+   *    0 úspešných a 0 zlyhaných z N — čo nie je ani jedno z toho, čo sa stalo;
+   *  - `items_failed` tu vynecháva `interrupted`, kým `finishCampaign()` ich
+   *    do zlyhaných zahrnie (`total − ok − uncertain`).
+   *
+   * Kým je nezapojený, nič nekazí. V deň zapojenia by appka začala o dobehnutej
+   * kampani tvrdiť iné čísla než pri jej dokončení — a to bez toho, aby čokoľvek
+   * spadlo. Preto to stojí tu a nie v issue.
+   */
   syncCountersFromItems(id: number, conn?: Queryable): Promise<void>;
   /**
    * K2 / odpoveď 43: prepadnutá kampaň späť do fronty po odstávke počítača.

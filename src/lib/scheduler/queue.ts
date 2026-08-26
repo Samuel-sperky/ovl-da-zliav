@@ -132,6 +132,8 @@ export interface QueueOutcome {
   markedLate: number;
   /** Koľko kampaní čaká vo fronte (po tomto ticku známy stav zo vstupu). */
   queuedCampaigns: number;
+  /** `true` = `queuedCampaigns` narazilo na `maxCampaignsPerTick`, teda je to strop, nie počet. */
+  queuedCampaignsCapped: boolean;
   /**
    * Prečo sa (ďalej) nezapisuje. `null` = fronta bežala bez prekážky.
    *
@@ -151,6 +153,7 @@ const emptyOutcome = (): QueueOutcome => ({
   lapsed: 0,
   markedLate: 0,
   queuedCampaigns: 0,
+  queuedCampaignsCapped: false,
   skipped: null,
   budget: null,
 });
@@ -352,7 +355,22 @@ export async function processQueue(
 
   /* 2. Prázdna fronta — nič na zapisovanie. */
   const queued = await deps.campaigns.findQueued(config.maxCampaignsPerTick);
+  /*
+   * `queuedCampaigns` je OREZANÉ číslo, nie počet (nález B5, 25. 8. 2026).
+   *
+   * `findQueued()` má `LIMIT maxCampaignsPerTick` (20), takže pri 25 čakajúcich
+   * kampaniach tu vyjde 20 — a `tick.ts` to vydáva ako `queueWaiting`, čo znie
+   * ako počet. Kým sú kampane jednotky, je to jedno; pri väčšom počte je to
+   * číslo, ktoré appka NEZMERALA, a to je presne to, čo prvé pravidlo projektu
+   * zakazuje.
+   *
+   * Menší z dvoch problémov je vyriešený: pole sa menuje tak, ako sa chová, a
+   * `queuedCampaignsCapped` hovorí, či sa strop dosiahol. Kto potrebuje skutočný
+   * počet, musí sa naň spýtať zvlášť — dotaz s `COUNT(*)` tu nie je, lebo tento
+   * tik ho na svoju prácu nepotrebuje a druhý dotaz za tik nie je zadarmo.
+   */
   outcome.queuedCampaigns = queued.length;
+  outcome.queuedCampaignsCapped = queued.length >= config.maxCampaignsPerTick;
   if (queued.length === 0) {
     outcome.skipped = 'queue_empty';
     return finish(outcome);
