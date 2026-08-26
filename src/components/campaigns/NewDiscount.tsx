@@ -132,6 +132,7 @@ import {
   previewDiscount,
   scopeLimits,
   searchCatalog,
+  type ApiError,
   type BudgetView,
   type CreateResult,
   type KeyMetaView,
@@ -245,7 +246,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [typed, setTyped] = useState('');
   // Obrazovka sa otvára do načítania — nie do prázdneho výberu.
   const [busy, setBusy] = useState<Busy>('loading');
-  const [error, setError] = useState<string | null>(null);
+  // Celá obálka chyby, nie len jej správa: karta rozhodnutia prekladá vetu
+  // servera podľa KÓDU (K10) a bez kódu by ju vykreslila verbatim.
+  const [error, setError] = useState<ApiError | null>(null);
   const [created, setCreated] = useState<CreateResult | null>(null);
 
   const [sudoUntil, setSudoUntil] = useState<string | null>(null);
@@ -618,7 +621,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     if (!res.ok) {
       setPreview(null);
       setPreviewSig(null);
-      setError(res.error.message);
+      setError(res.error);
       return;
     }
     setPreview(res.data);
@@ -659,7 +662,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       // Token je jednorazový — po neúspechu sa musí skúška zopakovať (I3).
       setPreview(null);
       setPreviewSig(null);
-      setError(res.error.message);
+      setError(res.error);
       return;
     }
     setCreated(res.data);

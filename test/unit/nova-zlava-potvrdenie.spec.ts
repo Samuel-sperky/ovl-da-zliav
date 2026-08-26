@@ -39,6 +39,21 @@
  * počet má 28 px v ráme. Najťažší prvok karty tak bol krok, ktorý sa nedal
  * urobiť.
  *
+ * ČO SA 26. 8. 2026 DOPLNILO A PREČO (nález U2)
+ * ---------------------------------------------
+ * Skupina **H** meria, čo karta vypíše, keď potvrdenie zlyhá. Do 26. 8. sem
+ * šla `error.message` z odpovede servera VERBATIM — a najčastejšia chyba tejto
+ * obrazovky (platnosť skúšky naprázdno uplynula, kým človek rozhodoval o
+ * tisícoch produktov) je na serveri napísaná presne tým slovníkom, ktorý K10
+ * a P3 na povrchu zakazujú. Prekladač pre susedný prípad (blokátory) pritom
+ * o dva riadky vyššie existoval.
+ *
+ * Test preto nemeria zdroj servera ani text prekladača, ale VYKRESLENÝ obsah
+ * riadku `confirm-error` pri tých kódoch, ktoré server na tejto ceste naozaj
+ * vracia. Padne v oboch smeroch: keď sa preklad odstráni, aj keď stratí ďalší
+ * krok. Pätnásť minút v tej vete je pripnuté na `PREVIEW_TOKEN_TTL_SECONDS`,
+ * aby sa číslo v texte nerozišlo s tým, ktoré token naozaj drží.
+ *
  * Vlastník: O2, kontrakt UX/dizajn 19. 8. 2026.
  */
 import { readFileSync } from 'node:fs';
@@ -51,7 +66,8 @@ import { describe, expect, it } from 'vitest';
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import { queueBlockedReason, type QueueGateState } from '@/components/campaigns/NewDiscount';
 import { buildTiers, type SelectableRow } from '@/components/campaigns/discounts-model';
-import type { BlockerCard } from '@/components/campaigns/queue-model';
+import { previewBlockerText, type BlockerCard } from '@/components/campaigns/queue-model';
+import { PREVIEW_TOKEN_TTL_SECONDS } from '@/lib/crypto/preview-token';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
@@ -399,5 +415,84 @@ describe('G — pri neznámom počte zostáva dominanta dominantou (P1)', () => 
     expect(html).toContain('data-testid="confirm-count-input"');
     expect(html).not.toContain('data-testid="confirm-count-locked"');
     expect(openingTagOf(html, 'confirm-count-input')).toContain('gateInput');
+  });
+});
+
+/* ═════ H. U2 — chyba potvrdenia sa prekladá, nevykresľuje sa verbatim ════ */
+
+/**
+ * Presné vety, ktoré na tejto ceste vracia server (`lib/crypto/preview-token.ts`
+ * a `app/api/campaigns/_shared.ts`). Sú tu VERBATIM zámerne: test nemeria, čo
+ * je v zdroji servera napísané, ale čo z toho príde na obrazovku, keď to server
+ * pošle. Keby sa serverová veta zmenila, tento test nepadne — a nemá, lebo
+ * pravidlo je „obrazovka vetu servera neopakuje", nie „server hovorí toto".
+ */
+const SERVER_MESSAGES: Readonly<Record<string, string>> = {
+  preview_token_expired: 'Preview token expiroval (TTL 15 min) — spusti dry-run znova (I3).',
+  preview_token_invalid: 'Preview token je neplatný alebo pozmenený — zápis sa odmieta (I3).',
+  preview_token_used:
+    'Preview token už bol použitý — každý zápis potrebuje vlastný dry-run (I3, D16).',
+};
+
+/** Čo K10/P3 na povrchu zakazuje a čo práve tieto vety niesli. */
+const ZAKAZANE = ['dry-run', 'dry run', 'preview token', 'ttl', '(i3', 'payloadhash', 'jwt'];
+
+/** Text vnútri prvku s daným `data-testid` — bez značiek. */
+function textOf(html: string, testId: string): string {
+  const at = html.indexOf(`data-testid="${testId}"`);
+  expect(at, testId).toBeGreaterThan(-1);
+  const open = html.indexOf('>', at) + 1;
+  return html.slice(open, html.indexOf('<', open));
+}
+
+const errorTextFor = (code: string): string =>
+  textOf(render({ error: { code, message: SERVER_MESSAGES[code] ?? 'x' } }), 'confirm-error');
+
+describe('H — chyba pri potvrdení nejde na povrch jazykom servera (K10, P3)', () => {
+  for (const code of Object.keys(SERVER_MESSAGES)) {
+    it(`\`${code}\` — na karte nezostane ani jedno zakázané slovo`, () => {
+      const shown = errorTextFor(code);
+      for (const slovo of ZAKAZANE) {
+        expect(shown.toLowerCase(), `žargón „${slovo}" na povrchu: „${shown}"`).not.toContain(
+          slovo,
+        );
+      }
+    });
+
+    it(`\`${code}\` — obrazovka vetu servera neopakuje, ale povie ďalší krok`, () => {
+      const shown = errorTextFor(code);
+      expect(shown).not.toBe(SERVER_MESSAGES[code]);
+      // Ďalší krok je vždy ten istý a appka pre neho má svoje slovo (K10).
+      expect(shown.toLowerCase()).toContain('naprázdno');
+    });
+
+    it(`\`${code}\` — veta sa zmestí do 90 znakov (P2)`, () => {
+      expect(errorTextFor(code).length, errorTextFor(code)).toBeLessThanOrEqual(90);
+    });
+  }
+
+  it('pätnásť minút v tej vete je TTL tokenu, nie číslo z hlavy', () => {
+    expect(errorTextFor('preview_token_expired')).toContain(
+      `${PREVIEW_TOKEN_TTL_SECONDS / 60} minút`,
+    );
+  });
+
+  it('neznámy kód si necháva vetu servera — hotovú slovenskú vetu appka neprepíše', () => {
+    const message = 'Adresa eshopu nie je nastavená.';
+    const shown = textOf(render({ error: { code: 'shop_not_configured', message } }), 'confirm-error');
+    expect(shown).toBe(message);
+  });
+
+  it('kód brány ide slovníkom brány, nie správou servera', () => {
+    const shown = textOf(
+      render({ error: { code: 'budget_exhausted', message: 'daily write cap reached' } }),
+      'confirm-error',
+    );
+    expect(shown).toBe(previewBlockerText('budget_exhausted', 'nepoužité'));
+    expect(shown).not.toContain('cap');
+  });
+
+  it('bez chyby sa riadok nekreslí vôbec', () => {
+    expect(render()).not.toContain('data-testid="confirm-error"');
   });
 });
