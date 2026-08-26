@@ -282,6 +282,34 @@ describe('D51/D52 — 401/403 uprostred dávky', () => {
     expect(items[0]?.errorMessage).not.toContain('scope');
   });
 
+  /**
+   * X1, druhá polovica. Skutočný ban platí aj na ČÍTANIE, takže padne povinný
+   * pre-write GET (D48) — a dovtedy tá vetva robila `continue`, čiže appka by
+   * proti zabanovanej adrese poslala jeden GET na KAŽDÚ položku fronty. Pri
+   * 8 000 produktoch je to 8 000 odsúdených requestov, čo ban zhoršuje.
+   *
+   * Prvá taká odpoveď musí zastaviť celú dávku — a kľúč sa nesmie dotknúť.
+   */
+  it('ban na ČÍTANÍ zastaví dávku po prvej položke a kľúč nechá', async () => {
+    const { executor, apiKeyRepo, world } = makeWorld({ productIds: [201, 202, 203] });
+    mock.state.ipBanned(true, { reads: true });
+
+    const result = await executor.executeCampaign(1);
+
+    expect(result.status).toBe('needs_key');
+    expect(apiKeyRepo.wipedWith).toEqual([]);
+    expect(apiKeyRepo.plaintext).not.toBeNull();
+    expect(world.campaignsRepo.campaigns.get(1)?.statusReason).toBe('shop_ip_banned');
+
+    // Jadro: prvá položka `failed`, ZVYŠOK `interrupted` — nie tri zlyhané.
+    const items = await world.campaignItemsRepo.listByCampaign(1);
+    expect(items.map((i) => i.status)).toEqual(['failed', 'interrupted', 'interrupted']);
+    expect(items[0]?.errorMessage).toContain('adresu');
+
+    // A na shop odišlo práve jedno čítanie, nie tri.
+    expect(mock.state.readCount).toBe(1);
+  });
+
   it('403 má rovnaký účinok s dôvodom key_forbidden (D52)', async () => {
     const { executor, apiKeyRepo, world } = makeWorld({ productIds: [201, 202] });
     mock.state.failNth(2, 'forbidden', { target: 'write', times: 1 });

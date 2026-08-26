@@ -179,8 +179,11 @@ export class MockShopState {
   /** Trvalý 403 `forbidden` na zápise — `forbidden()`. */
   forbiddenAll = false;
 
-  /** Trvalý 403 `ip_banned` na VŠETKOM — `ipBanned()`. */
+  /** Trvalý 403 `ip_banned` — `ipBanned()`. */
   ipBannedAll = false;
+
+  /** `true` = ban zasiahne aj ČÍTANIE, ako skutočný ban. */
+  ipBanReads = false;
   /** Od tejto (1-based) požiadavky vracia mock 401 — `unauthorizedAfter()`. */
   unauthorizedAfterN: number | null = null;
   /** Trvalý nesmyselný tvar s HTTP 200 — `returnGarbage()`. */
@@ -300,8 +303,11 @@ export class MockShopState {
    * shop tento kód vracia aj na volanie BEZ kľúča, takže z neho NESMIE vzniknúť
    * wipe kľúča. Zmerané na ostrom shope 24. 8. 2026.
    */
-  ipBanned(enabled = true): this {
+  ipBanned(enabled = true, opts: { reads?: boolean } = {}): this {
     this.ipBannedAll = enabled;
+    // `reads: true` = ban platí na VŠETKO, ako v skutočnosti. Default je len
+    // zápis, aby sa dala zmerať zápisová vetva (viď komentár nižšie).
+    this.ipBanReads = opts.reads === true;
     return this;
   }
 
@@ -352,6 +358,7 @@ export class MockShopState {
     this.rateLimitRetryAfter = null;
     this.forbiddenAll = false;
     this.ipBannedAll = false;
+    this.ipBanReads = false;
     this.unauthorizedAfterN = null;
     this.garbageAll = false;
     this.hangWrites = false;
@@ -387,7 +394,7 @@ export class MockShopState {
     if (this.unauthorizedAfterN !== null && kindOf.seq > this.unauthorizedAfterN) {
       return { kind: 'unauthorized' };
     }
-    if (this.ipBannedAll && kindOf.isWrite) {
+    if (this.ipBannedAll && (this.ipBanReads || kindOf.isWrite)) {
       /*
        * ÚMYSELNE len na ZÁPISE, hoci skutočný ban platí na všetko.
        *

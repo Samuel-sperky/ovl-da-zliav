@@ -842,6 +842,60 @@ export function createExecutor(deps: ExecutorDeps): {
           continue;
         }
 
+        if (outcome.kind === 'error' && isIpBanned(outcome.error)) {
+          /*
+           * ZABLOKOVANÁ ADRESA UŽ NA ČÍTANÍ (X1, druhá polovica, 26. 8. 2026).
+           *
+           * Prvá oprava X1 dala banu vlastnú vetvu na ZÁPISE. Verifikácia ju
+           * označila za v reálnom stave nedosiahnuteľnú a mala pravdu: skutočný
+           * ban platí aj na čítanie, takže padne povinný pre-write GET (D48) —
+           * a tá vetva robila `continue`. Dôsledok: appka by proti zabanovanej
+           * adrese vystrieľala jeden GET NA KAŽDÚ položku fronty, teda pri 8 000
+           * produktoch 8 000 odsúdených requestov, čo je presne to, čím sa ban
+           * zhoršuje. A položky by hovorili „Pre-write GET zlyhal (forbidden)",
+           * teda nič o adrese.
+           *
+           * Prvá taká odpoveď preto zastaví celú dávku, rovnako ako na zápise:
+           * zvyšok `interrupted`, kampaň `needs_key` s dôvodom `shop_ip_banned`,
+           * a KĽÚČ SA NEDOTKNE. Nič sa nestratí — po odblokovaní fronta
+           * pokračuje tam, kde stála (K6).
+           */
+          item.status = 'failed';
+          await itemsRepo.update(item.id, {
+            status: 'failed',
+            errorCode: outcome.error.code ?? outcome.error.kind,
+            errorMessage:
+              'Eshop odmieta našu IP adresu (403) — kľúč je v poriadku a zostáva uložený.',
+            httpStatus: outcome.error.httpStatus,
+            startedAt,
+            finishedAt: now(),
+          });
+          await audit.appendAudit({
+            actor,
+            eventType: 'write_failed',
+            ok: false,
+            campaignId: campaign.id,
+            campaignItemId: item.id,
+            productId: item.productId,
+            operationId,
+            requestId,
+            httpStatus: outcome.error.httpStatus,
+            message:
+              'Eshop odmieta našu IP adresu už pri pre-write GET — dávka sa zastavila, ' +
+              'kľúča sa nedotklo (D48, X1).',
+          });
+          await itemsRepo.markRemaining(
+            campaign.id,
+            item.position + 1,
+            'interrupted',
+            'Prerušené — eshop odmieta našu IP adresu; kľúč sa nedotklo.',
+          );
+          for (const rest of ordered.slice(index + 1)) {
+            if (rest.status === 'pending') rest.status = 'interrupted';
+          }
+          return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor);
+        }
+
         if (outcome.kind === 'error') {
           item.status = 'failed';
           await itemsRepo.update(item.id, {
