@@ -1,5 +1,21 @@
 # Čo všetko vieme ťahať zo shop API (stav k 13. 8. 2026)
 
+> ## ⚠ TENTO DOKUMENT HOVORÍ, ČO API UMOŽŇUJE — NIE, ČO APPKA MÁ
+>
+> Zistené 25. 8. 2026: označenia „MÁME" nižšie sa vzťahujú na to, čo API
+> dodáva, nie na to, čím appka disponuje. Zmerané 24.–25. 8. 2026:
+>
+> - **zápisový kľúč `shop_write` v appke NEEXISTUJE** (tabuľka `api_key` má
+>   jediný riadok, `orders_read`, stav `unverified`),
+> - **scope `product:read` nemáme**, takže `getFull`, `search` ani `categories`
+>   nevieme zavolať (žiadosť: `docs/61-ZIADOST-PRODUCT-READ-2026-08-25.md`),
+> - **naša IP je od 19. 8. blokovaná** (`403 ip_banned` aj na volanie bez kľúča),
+> - `clearReduction` sa v `src/` nepoužíva vôbec a `test/unit/no-clear-reduction.spec.ts`
+>   ho stále zakazuje, lebo `docs/10-KONTRAKT.md` nesie starú podobu I7.
+>
+> Údaj „Zrkadlo má 2 900 zo 41 082 produktov" je tiež zastaralý — zrkadlo je
+> od 19. 8. kompletné na 41 220.
+
 Zdroj: `docs/api/sperky-api-v5.md`. Toto nie je želanie ani plán — je to zoznam
 toho, čo API **naozaj vracia**, čo si to vyžaduje a čo z toho appka dnes používa.
 
