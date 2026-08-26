@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * Aura Zľavy — DETAIL ZĽAVY (V11; kontrakt UI 13. 8. 2026 body 4, 9–12, 22, 23;
- * kontrakt API v5 R1; architektúra §0 P1–P8, §1 TAB 3, §4).
+ * Aura Zľavy — DETAIL ZĽAVY (V11; kontrakt UI 13. 8. 2026 body 4, 9–12, 22;
+ * invariant I7; architektúra §0 P1–P8, §1 TAB 3, §4).
  *
  * Obrazovka odpovedá na tri otázky v tomto poradí: **kde je zápis · čo sa
  * nepodarilo · čo sa dá urobiť.**
@@ -83,6 +83,12 @@
  *     len geometria (číslo a bočný popisok v jednom riadku), veľkosť nesie
  *     `.lvl-1 .big`. Kto sem vráti vlastnú veľkosť mimo `.lvl-1/2/3`, urobí
  *     z jednej role zase dva mechanizmy.
+ *  6. **Zľava sa v eshope neruší** (I7, R6). Detail nesmie ponúknuť akciu,
+ *     ktorá zruší zľavu v eshope — ani vypnutú, ani „zatiaľ nezapojenú".
+ *     Katalóg to isté hovorí človeku pri každom už zlacnenom produkte
+ *     (`products/catalog-status.ts`) a dve obrazovky si nesmú protirečiť
+ *     o tom, či taká schopnosť vôbec existuje. Podrobne pri
+ *     `expiryNoteText()`.
  *
  * Vlastník: V11.
  */
@@ -94,7 +100,6 @@ import DiscountPerformance from '@/components/campaigns/DiscountPerformance';
 import DiscountState from '@/components/campaigns/DiscountState';
 import RetryFailed from '@/components/campaigns/RetryFailed';
 import styles from '@/components/campaigns/zlavy.module.css';
-import { postJson } from '@/components/campaigns/api';
 import { percentHeadline } from '@/components/campaigns/DiscountsList';
 import { sentenceOf } from '@/components/campaigns/discounts-model';
 import {
@@ -148,12 +153,12 @@ function isProblem(item: DiscountItemView): boolean {
   return item.priceMismatch;
 }
 
-/* ═══════════════════ zastavenie fronty a zrušenie zľavy ═══════════════════ */
+/* ═══════════════════ zastavenie fronty a koniec zľavy ═════════════════════ */
 
 /**
  * Zastavenie fronty — dva kroky. Týka sa VÝHRADNE toho, čo ešte nebolo
- * zapísané; už zapísané zľavy v eshope zostávajú a odstráni ich až akcia
- * „Zrušiť zľavu" nižšie, ktorá má vlastné potvrdenie.
+ * zapísané; už zapísané zľavy v eshope zostávajú a appka ich nezruší (I7) —
+ * skončia samy dňom konca zľavy. Tú vetu povie `expiryNoteText()` nižšie.
  */
 function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
   const [note, setNote] = useState<string | null>(null);
@@ -192,147 +197,68 @@ function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
 }
 
 /**
- * Je serverová cesta zrušenia zapojená?
+ * Ako sa zapísaná zľava skončí — jedna veta (I7, R6).
  *
- * `POST /api/products/clearReduction` pribudlo v API v5 a scope `product:edit`
- * appka má, takže akcia je možná — ale klient shopu, vykonávač, audit a grep
- * test, ktorý dnes rušenie zakazuje, sú mimo tejto obrazovky a zatiaľ
- * neexistujú. Kým nepribudnú, akcia je VIDIEŤ aj s potvrdením, ale posledný
- * krok je vypnutý a povie prečo — tlačidlo, ktoré ticho nič neurobí, je horšie
- * než tlačidlo, ktoré prizná, že ešte nie je zapojené.
+ * PREČO TU NIE JE TLAČIDLO. Do 26. 8. 2026 na tomto mieste stála akcia
+ * „Zrušiť zľavu": disclosure s potvrdením a s finálnym tlačidlom, ktoré bolo
+ * vypnuté, lebo serverová cesta neexistuje. Jej komentár tvrdil, že invariant
+ * I7 sa „týmto MENÍ". Nezmenil sa: `docs/10-KONTRAKT.md` ho drží v pôvodnej
+ * podobe, README ho hlási medzi tým, čo appka robí a nerobí,
+ * `test/unit/no-clear-reduction.spec.ts` ho vynucuje a
+ * `test/e2e/partial-failure-retry.spec.ts` výslovne žiada, aby v UI taká akcia
+ * NEBOLA. `KONTRAKT-API-V5-2026-08-13.md` (R1), z ktorého tlačidlo vzniklo, je
+ * NÁVRH — jeho sekcia Výsledok je prázdna.
  *
- * Zapojenie = doplniť serverovú cestu a prepnúť túto konštantu na `true`.
- * Typ je uvedený zámerne: bez neho by TypeScript odvodil `false` a celú
- * odosielaciu vetvu vyhlásil za mŕtvy kód.
+ * Katalóg tou istou vetou tvrdil opak (`catalog-status.ts` → „Appka zľavy
+ * neruší — počkajte, kým doterajšia skončí"). Priznať NEZAPOJENÚ akciu je
+ * správny vzor; priznať ZAKÁZANÚ nie je — je to prísľub schopnosti, ktorú
+ * invariant zakazuje postaviť. Namiesto tlačidla tu preto stojí odpoveď na tú
+ * istú otázku („ako sa toho zbavím?"): zapísaná zľava skončí sama dňom svojho
+ * konca. Zastaviť sa dá fronta, teda to, čo sa ešte nezapísalo.
+ *
+ * Keď sa R1 raz schváli, mení sa NAJPRV I7 a jeho test, až potom táto
+ * obrazovka — nikdy naopak.
  */
-const END_IN_SHOP_READY: boolean = false;
-
-/** Cesta, ktorou sa zrušenie odošle. Serverovú časť vlastní tím API. */
-const endInShopPath = (id: number): string => `/api/campaigns/${id}/end-in-shop`;
-
-export interface EndInShopFacts {
-  /** Koľko produktov appka do eshopu naozaj zapísala. */
-  readonly written: number;
-  /** Koľko je takých, o ktorých nevie, či sa zapísali (D45). */
-  readonly uncertain: number;
-  /** Koľko ešte čaká vo fronte. */
-  readonly pending: number;
-  /** Zostatok denného rozpočtu; `null` = nedá sa prečítať (P7). */
-  readonly budgetRemaining: number | null;
-  readonly budgetTotal: number | null;
+export function expiryNoteText(dateTo: string): string {
+  return `Appka zľavu v eshope neruší — zapísané zľavy skončia samy ${formatDateSk(dateTo)}.`;
 }
 
 /**
- * Veta potvrdenia pri rušení zľavy (kontrakt UI, bod 23).
+ * STĹPEC AKCIÍ detailu ako samostatný, vykresliteľný komponent.
  *
- * Musí obsahovať POČET PRODUKTOV, ktorých sa zrušenie dotkne, a to, že sa
- * každý z nich počíta do denného rozpočtu zápisov. Bez počtu je to potvrdenie
- * naslepo; bez rozpočtu človek nevie, že si tým zabrzdí bežiacu frontu.
+ * Oddelený z toho istého dôvodu ako `QueueTiles` nižšie: `DiscountDetail` je
+ * klientský komponent, ktorý čísla ťahá až v efekte, takže
+ * `renderToStaticMarkup` ho zastihne v stave „Načítavam…" a tvrdenie o tom, čo
+ * stĺpec akcií ponúka, nemá čo merať. A práve TU žila rozpornosť dvoch
+ * obrazoviek, takže to je jediné miesto, kde ju test môže zmerať na
+ * vykreslenom výstupe a nie v zdrojovom texte.
  */
-export function endInShopConfirmText(facts: EndInShopFacts): string {
-  const parts: string[] = [];
-
-  parts.push(
-    `Zľava sa v eshope skončí u ${formatCountSk(facts.written)} ${pluralSk(
-      facts.written,
-      'produktu',
-      'produktov',
-      'produktov',
-    )}, ktoré appka zapísala.`,
-  );
-
-  if (facts.uncertain > 0) {
-    parts.push(
-      `Pridá sa k nim ${formatCountSk(facts.uncertain)} ${pluralSk(
-        facts.uncertain,
-        'produkt',
-        'produkty',
-        'produktov',
-      )}, o ktorých appka nevie, či sa zapísali.`,
-    );
-  }
-
-  if (facts.budgetRemaining === null || facts.budgetTotal === null) {
-    parts.push(
-      'Každé zrušenie je jeden zápis z denného rozpočtu; koľko ho dnes ostáva, appka teraz nevie.',
-    );
-  } else {
-    parts.push(
-      `Každé zrušenie je jeden zápis z denného rozpočtu — dnes ostáva ${formatCountSk(
-        facts.budgetRemaining,
-      )} z ${formatCountSk(facts.budgetTotal)}.`,
-    );
-  }
-
-  if (facts.pending > 0) {
-    parts.push(
-      `Vo fronte ešte čaká ${formatCountSk(facts.pending)} ${pluralSk(
-        facts.pending,
-        'produkt',
-        'produkty',
-        'produktov',
-      )} tejto zľavy — najprv treba zastaviť frontu, inak by appka zapisovala a rušila naraz.`,
-    );
-  }
-
-  return parts.join(' ');
-}
-
-/**
- * Akcia „Zrušiť zľavu" (kontrakt UI, bod 23; kontrakt API v5, R1).
- *
- * Invariant I7 sa týmto MENÍ: appka zľavu zruší, ale výhradne na výslovný
- * pokyn človeka, s vlastným potvrdením a z denného rozpočtu. Automatické ani
- * hromadné rušenie nevzniká. Bez hesla a mimo červenej zóny — poistkou je
- * dvojkrokové potvrdenie s počtom produktov, nie ďalšia prihlasovacia obrazovka.
- */
-function EndDiscountInShop({
-  id,
-  facts,
+export function DetailActions({
+  campaign,
   onChanged,
 }: {
-  id: number;
-  facts: EndInShopFacts;
+  campaign: DiscountDetailData['campaign'];
   onChanged: () => void;
 }) {
-  const [note, setNote] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function run() {
-    setBusy(true);
-    const res = await postJson(endInShopPath(id), { reason: 'Zrušené v detaile zľavy' });
-    setBusy(false);
-    if (res.ok) {
-      setNote(null);
-      onChanged();
-      return;
-    }
-    setNote(res.error.message);
-  }
+  /*
+   * Veta o konci má zmysel len tam, kde je čo čakať: appka už niečo zapísala
+   * (alebo o tom nevie, D45) a zľava ešte neskončila. Pri skončenej zľave by
+   * to bola informácia o minulosti a na povrchu šum (P2).
+   */
+  const live = campaign.itemsOk + campaign.itemsUncertain;
+  const showExpiry = live > 0 && sentenceOf(campaign).state !== 'skončila';
 
   return (
-    <details className="stopq" data-testid="detail-end">
-      <summary className="btn">Zrušiť zľavu</summary>
-      <div className="stopq-b">
-        <span data-testid="detail-end-confirm-text">{endInShopConfirmText(facts)}</span>
-        <button
-          type="button"
-          className="btn sm"
-          disabled={busy || !END_IN_SHOP_READY}
-          onClick={() => void run()}
-          data-testid="detail-end-confirm"
-        >
-          Áno, zrušiť zľavu
-        </button>
-      </div>
-      {END_IN_SHOP_READY ? null : (
-        <div className={styles.noteQuiet} data-testid="detail-end-not-wired">
-          Táto akcia ešte nie je zapojená — appka zatiaľ nemá cestu, ktorou by zrušenie do eshopu
-          poslala.
-        </div>
+    <>
+      {campaign.itemsPending === 0 ? null : (
+        <StopQueue id={campaign.id} onChanged={onChanged} />
       )}
-      {note === null ? null : <div className={styles.note}>{note}</div>}
-    </details>
+      {showExpiry ? (
+        <div className={styles.sideNote} data-testid="detail-expiry">
+          {expiryNoteText(campaign.dateTo)}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -621,16 +547,6 @@ export function DiscountDetail({ id }: { id: number }) {
    */
   const retryWorthShowing = campaign.itemsFailed > 0 || campaign.itemsUncertain > 0;
 
-  /* Rušiť sa dá len to, čo v eshope naozaj môže svietiť. */
-  const endFacts: EndInShopFacts = {
-    written: campaign.itemsOk,
-    uncertain: campaign.itemsUncertain,
-    pending: campaign.itemsPending,
-    budgetRemaining: budget === null ? null : budget.remaining,
-    budgetTotal: budget === null ? null : budget.budget,
-  };
-  const canEnd = sentence.state !== 'skončila' && campaign.itemsOk + campaign.itemsUncertain > 0;
-
   /** Podiel jedného stavu na celej zľave — šírka jeho úseku v pruhu fronty. */
   const shareOf = (units: number): string =>
     campaign.itemsTotal <= 0 ? '0' : ((units / campaign.itemsTotal) * 100).toFixed(2);
@@ -696,12 +612,7 @@ export function DiscountDetail({ id }: { id: number }) {
           </div>
 
           <div className={styles.side}>
-            {campaign.itemsPending === 0 ? null : (
-              <StopQueue id={campaign.id} onChanged={() => void load()} />
-            )}
-            {canEnd ? (
-              <EndDiscountInShop id={campaign.id} facts={endFacts} onChanged={() => void load()} />
-            ) : null}
+            <DetailActions campaign={campaign} onChanged={() => void load()} />
             {/* Tlačidlo „Späť na zoznam" tu stálo, kým bol detail samostatná
                 stránka. Zoznam je odteraz vľavo — v stĺpci akcií zostávajú len
                 akcie, ktoré niečo menia. */}

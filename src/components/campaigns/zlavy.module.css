@@ -796,6 +796,17 @@
 }
 
 /*
+ * To isté tlmené písmo v stĺpci akcií — bez `margin-top`. `.side` je flex
+ * s `gap: 6px`, takže vlastný odstup by sa k medzere pripočítal a detail by
+ * o tých 8 px prerástol strop P4 (1 350 px pri 1440 × 900). Farbu ani veľkosť
+ * nezavádza vlastnú, sú to tie isté hodnoty ako v `.noteQuiet`.
+ */
+.sideNote {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/*
  * Kritický príznak. `globals.css` má `.flag` (jantár) a `.flag.neutral`
  * (sivá); červená sa berie z existujúceho tokenu a používa sa VÝHRADNE na
  * stratu dát a zastavený zápis (architektúra §4).

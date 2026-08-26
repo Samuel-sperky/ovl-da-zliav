@@ -1,16 +1,16 @@
 /**
  * Aura Zľavy — DIZAJNOVÉ ROZHODNUTIA TABU ZĽAVY (kontrakt UI 13. 8. 2026,
- * body 4, 11, 21, 22, 23; architektúra §0 P1, P5, P7).
+ * body 4, 11, 21, 22; invariant I7; architektúra §0 P1, P5, P7).
  *
  * Testuje sa presne to, čo sa dá na tejto dvojici obrazoviek pokaziť ticho:
  *
  *  A. **Dominanta je percento** (bod 21) — a pri pásmach je to ROZSAH, nie
  *     najvyššie percento. Najvyššie percento samo by tvrdilo, že toľko dostal
  *     celý výber; pri troch pásmach je to nepravda o tisíckach produktov.
- *  B. **Potvrdenie pri rušení zľavy** (bod 23) musí niesť POČET PRODUKTOV a
- *     to, že sa každé zrušenie počíta do denného rozpočtu. Bez počtu je to
- *     potvrdenie naslepo; bez rozpočtu človek nevie, že si brzdí frontu.
- *     Keď sa rozpočet nedá prečítať, veta to prizná — nedopočíta sa nula (P7).
+ *  B. **Zľava sa v eshope neruší** (I7, R6) — a detail hovorí to isté, čo
+ *     katalóg. Do 26. 8. 2026 tu boli tvrdenia o vete potvrdenia pri RUŠENÍ
+ *     zľavy (kontrakt UI, bod 23); merali text akcie, ktorú invariant
+ *     zakazuje postaviť. Dôvody sú pri samotnom bloku B nižšie.
  *  C. **Prázdny zoznam je tvrdenie** — kým sa dáta nenačítajú, nekreslí sa.
  *
  * Renderuje sa `renderToStaticMarkup` — žiadny prehliadač, žiadna DB, žiadna
@@ -24,7 +24,63 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import DiscountsList, { percentHeadline } from '@/components/campaigns/DiscountsList';
-import DiscountDetail, { endInShopConfirmText } from '@/components/campaigns/DiscountDetail';
+import DiscountDetail, {
+  DetailActions,
+  expiryNoteText,
+} from '@/components/campaigns/DiscountDetail';
+import type { DiscountRow } from '@/components/campaigns/zlavy-api';
+import type { CatalogRowView } from '@/components/products/catalog-api';
+import { productReasons } from '@/components/products/catalog-status';
+import { formatDateSk } from '@/lib/ui/format';
+
+/* ══════════════════════════ vymyslené dáta ════════════════════════════════ */
+
+/**
+ * Zľava, ktorá BEŽÍ. Dátumy sú zámerne mimo dosahu kalendára (do roku 2099),
+ * aby sa stav nepočítal z dnešného dňa — `sentenceOf()` pri stave `done` číta
+ * okno platnosti, takže test s dnešnými dátumami by o rok stíchol.
+ */
+const KAMPAN_BEZI: DiscountRow = {
+  id: 7,
+  name: 'Letné dočistenie skladu',
+  status: 'done',
+  statusReason: null,
+  percent: 20,
+  dateFrom: '2099-09-01',
+  dateTo: '2099-09-12',
+  mode: 'eager',
+  itemsTotal: 30,
+  itemsOk: 18,
+  itemsFailed: 0,
+  itemsUncertain: 2,
+  itemsPending: 10,
+  late: false,
+  createdAt: '2099-08-20T10:00:00.000Z',
+  tiers: [],
+  estimate: null,
+};
+
+/** Tá istá zľava po konci okna — `sentenceOf()` z nej urobí `skončila`. */
+const KAMPAN_SKONCILA: DiscountRow = {
+  ...KAMPAN_BEZI,
+  dateFrom: '2020-09-01',
+  dateTo: '2020-09-12',
+  itemsPending: 0,
+};
+
+/** Riadok katalógu, ktorý je práve v zľave — druhá strana tej istej vety. */
+const RIADOK_V_ZLAVE: CatalogRowView = {
+  productId: 4100,
+  name: 'Dámsky prstienok s matným povrchom',
+  price: '22.63',
+  hasAttributes: false,
+  shopStatus: 'ok',
+  unitsSold: 3,
+  everDiscounted: true,
+  discountedNow: true,
+  fetchedAt: '2026-08-26T10:00:00.000Z',
+  origin: 'mirror',
+};
 
 /* ═════════ A. Dominanta zoznamu je percento (kontrakt UI, bod 21) ═════════ */
 
@@ -56,61 +112,63 @@ describe('A — percento zľavy ako dominanta', () => {
   });
 });
 
-/* ═════════ B. Potvrdenie pri rušení zľavy (kontrakt UI, bod 23) ═══════════ */
+/* ═════════ B. Zľava sa neruší, skončí sama (I7, R6) ══════════════════════ */
 
-describe('B — potvrdenie zrušenia zľavy povie počet aj cenu v rozpočte', () => {
-  it('nesie počet zapísaných produktov a odrátanie z denného rozpočtu', () => {
-    const text = endInShopConfirmText({
-      written: 3408,
-      uncertain: 0,
-      pending: 0,
-      budgetRemaining: 179,
-      budgetTotal: 200,
-    });
-    expect(text).toContain('3 408');
-    expect(text).toContain('denného rozpočtu');
-    expect(text).toContain('179');
-    expect(text).toContain('200');
+/**
+ * Do 26. 8. 2026 tu stáli štyri tvrdenia o vete potvrdenia pri RUŠENÍ zľavy
+ * (kontrakt UI, bod 23). Merali text akcie, ktorá nesmie existovať: I7
+ * v `docs/10-KONTRAKT.md` zakazuje cestu, ktorá zľavu v eshope zruší,
+ * `test/unit/no-clear-reduction.spec.ts` to vynucuje grepom aj guardom a
+ * `test/e2e/partial-failure-retry.spec.ts` výslovne žiada, aby také tlačidlo
+ * v UI nebolo. Kontrakt API v5 (R1), z ktorého bod 23 vyšiel, je NÁVRH
+ * s prázdnou sekciou Výsledok — nezmenil ani invariant, ani README.
+ *
+ * Detail zľavy tú schopnosť ponúkal (vypnutým tlačidlom s potvrdením)
+ * a katalóg ju tou istou vetou popieral. Tvrdenia nižšie merajú práve tú
+ * súdržnosť: čo o rušení hovorí detail, čo katalóg, a že stĺpec akcií detailu
+ * rušenie neponúka.
+ */
+describe('B — detail a katalóg hovoria o rušení zľavy to isté', () => {
+  it('veta detailu poprie rušenie a menuje deň, ktorým zľava skončí', () => {
+    const text = expiryNoteText('2026-09-12');
+    expect(text).toMatch(/neruší/);
+    expect(text).toContain(formatDateSk('2026-09-12'));
+    // Nesmie z toho byť ponúknutý ďalší krok — zrušiť sa nedá nijako.
+    expect(text).not.toMatch(/zrušiť/i);
   });
 
-  it('neisté položky sa nezlievajú so zapísanými (D45)', () => {
-    const text = endInShopConfirmText({
-      written: 3408,
-      uncertain: 12,
-      pending: 0,
-      budgetRemaining: 179,
-      budgetTotal: 200,
-    });
-    expect(text).toContain('3 408');
-    expect(text).toContain('12');
-    expect(text).toContain('nevie, či sa zapísali');
-    // 3 420 by bol súčet oboch čísel — presne to, čo sa nesmie stať.
-    expect(text).not.toContain('3 420');
+  it('katalóg pri už zlacnenom produkte hovorí to isté', () => {
+    const reason = productReasons(RIADOK_V_ZLAVE).find((r) => r.id === 'already_discounted');
+    expect(reason).toBeDefined();
+    expect(reason?.nextStep).toMatch(/neruší/);
   });
 
-  it('bežiaca fronta sa v potvrdení pomenuje ako ďalší krok', () => {
-    const text = endInShopConfirmText({
-      written: 100,
-      uncertain: 0,
-      pending: 4480,
-      budgetRemaining: 179,
-      budgetTotal: 200,
-    });
-    expect(text).toContain('4 480');
-    expect(text).toContain('zastaviť frontu');
+  it('stĺpec akcií ponúka zastavenie fronty, nie rušenie zľavy', () => {
+    const html = renderToStaticMarkup(
+      createElement(DetailActions, { campaign: KAMPAN_BEZI, onChanged: () => {} }),
+    );
+    expect(html).toContain('Zastaviť frontu');
+    expect(html).toContain(expiryNoteText(KAMPAN_BEZI.dateTo));
+    // Toto tvrdenie padne, keď sa akcia vráti — aj keby bola vypnutá.
+    expect(html.toLowerCase()).not.toContain('zrušiť zľavu');
   });
 
-  it('neznámy rozpočet sa prizná, nedopočíta sa nula (P7)', () => {
-    const text = endInShopConfirmText({
-      written: 5,
-      uncertain: 0,
-      pending: 0,
-      budgetRemaining: null,
-      budgetTotal: null,
-    });
-    expect(text).toContain('appka teraz nevie');
-    expect(text).not.toMatch(/ostáva \d/);
-    expect(text).not.toContain(' 0 ');
+  it('pri skončenej zľave sa veta o konci už nekreslí', () => {
+    const html = renderToStaticMarkup(
+      createElement(DetailActions, { campaign: KAMPAN_SKONCILA, onChanged: () => {} }),
+    );
+    expect(html).not.toContain(expiryNoteText(KAMPAN_SKONCILA.dateTo));
+  });
+
+  it('bez jediného zapísaného produktu niet o čom písať (P2)', () => {
+    const html = renderToStaticMarkup(
+      createElement(DetailActions, {
+        campaign: { ...KAMPAN_BEZI, itemsOk: 0, itemsUncertain: 0 },
+        onChanged: () => {},
+      }),
+    );
+    expect(html).toContain('Zastaviť frontu');
+    expect(html).not.toContain(expiryNoteText(KAMPAN_BEZI.dateTo));
   });
 });
 
