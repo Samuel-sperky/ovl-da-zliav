@@ -7,9 +7,16 @@
  * Endpoint `/api/queue` dodáva V8 a v čase písania tohto modulu ešte
  * neexistuje. Preto je tu tenký typovaný fetch s BEZPEČNÝM fallbackom: čokoľvek
  * neznáme, chýbajúce alebo nesprávne otypované sa mapuje na `null` a hlavička
- * to prizná („Fronta prázdna", rozpočet ako pomlčka). NIKDY sa nedopĺňa
- * vymyslené číslo — hlavička o zápisoch do produkčného shopu nesmie tvrdiť nič,
- * čo nevie.
+ * to prizná POMLČKOU („Fronta — stav nevieme", rozpočet ako pomlčka). NIKDY sa
+ * nedopĺňa vymyslené číslo — hlavička o zápisoch do produkčného shopu nesmie
+ * tvrdiť nič, čo nevie.
+ *
+ * A „prázdna fronta" je práve také tvrdenie. Do 26. 8. 2026 hlavička na `null`
+ * napísala „Fronta prázdna" — teda že nič nečaká — hoci vo fronte mohli stáť
+ * tisíce položiek a appka o odpovedi servera nerozumela ani slovu. Rozdiel
+ * medzi „nič tam nie je" a „nevieme" drží `queueHeaderLabel()` na konci tohto
+ * súboru a je to tá istá trojica stavov, akú má dominanta Prehľadu
+ * (`dashboard/overview-model.ts`, `QueueMode`).
  *
  * Očakávaný tvar (požiadavka na V8):
  *   GET /api/queue → { ok: true, data: {
@@ -17,7 +24,8 @@
  *     queue:  { done: number, total: number, campaigns: number }
  *   }}
  * `resumeAt` je ISO čas najbližšieho obnovenia rozpočtu (reset 02:00 miestneho
- * času). `total === 0` znamená prázdnu frontu — nie chýbajúce dáta.
+ * času). `total === 0` znamená prázdnu frontu — nie chýbajúce dáta; chýbajúce
+ * dáta sú `queue === null`.
  */
 import { useState } from 'react';
 
@@ -142,4 +150,66 @@ export function formatResumeTime(resumeAt: string | null): string {
     minute: '2-digit',
     hour12: false,
   }).format(at);
+}
+
+/* ═════════════════ Menovka fronty v hlavičke (tri stavy) ══════════════════ */
+
+/** Priznaná medzera (kontrakt UI, bod 5). Nula ani slovo „prázdna" sem nepatrí. */
+const DASH = '—';
+
+/**
+ * Tri stavy menovky, tá istá trojica ako `QueueMode` v dominante Prehľadu:
+ *
+ *  - `unknown` — odpoveď `/api/queue` sa nedala prečítať, alebo appka
+ *    neodpovedala vôbec. Nevie sa NIČ, ani to, že je fronta prázdna.
+ *  - `empty`   — server povedal `total === 0`. Zmeraný fakt, nie medzera.
+ *  - `running` — vo fronte niečo je; kreslí sa zlomok.
+ */
+export type QueueHeaderKind = 'unknown' | 'empty' | 'running';
+
+export interface QueueHeaderLabel {
+  readonly kind: QueueHeaderKind;
+  /** Text menovky. Pri `running` je zlomok osobitne v `fraction`. */
+  readonly label: string;
+  /** `3 420/8 000`; `null` v každom stave okrem `running`. */
+  readonly fraction: string | null;
+  /** Celá veta do `title` a do čítačky. */
+  readonly title: string;
+}
+
+/**
+ * Čo má hlavička o fronte napísať.
+ *
+ * Jediné pravidlo, ktoré sa tu nesmie pokaziť: `null` NIE JE nula. „Fronta
+ * prázdna" je kladné tvrdenie, že na zápis nič nečaká — a hlavička stojí na
+ * každej obrazovke appky, takže by to tvrdenie bolo všade. Keď appka čísla
+ * nepozná, napíše pomlčku a povie to slovom.
+ */
+export function queueHeaderLabel(done: number | null, total: number | null): QueueHeaderLabel {
+  if (done === null || total === null) {
+    return {
+      kind: 'unknown',
+      label: `Fronta ${DASH} stav nevieme`,
+      fraction: null,
+      title:
+        'Stav fronty sa nepodarilo prečítať. Nie je to to isté ako prázdna fronta — ' +
+        'na zápis môžu čakať tisíce položiek. Klik otvorí Zľavy.',
+    };
+  }
+
+  if (total === 0) {
+    return {
+      kind: 'empty',
+      label: 'Fronta prázdna',
+      fraction: null,
+      title: 'Na zápis do shopu nečaká ani jedna položka. Klik otvorí Zľavy.',
+    };
+  }
+
+  return {
+    kind: 'running',
+    label: 'Fronta',
+    fraction: `${formatCount(done)}/${formatCount(total)}`,
+    title: 'Súhrn všetkých bežiacich front — klik otvorí Zľavy',
+  };
 }
