@@ -420,6 +420,21 @@ export interface ExpectedTokenParams {
   percent: DiscountPercent;
   from: DateOnly;
   to: DateOnly;
+  /**
+   * K3 — percentá pásiem per produkt, keď ich volajúci vie doložiť z DB.
+   *
+   * Pridané 25. 8. 2026 kvôli nálezu L1: cesta predĺženia ich nepodávala, takže
+   * `insertConfirmedCampaign` padol na hlavičkové percento a zľava s pásmami
+   * 30/20/10 sa do PRODUKČNÉHO shopu zapísala celá za 30 %. Hash to nezachytil,
+   * lebo `computePayloadHash` počíta percento položky rovnakým fallbackom —
+   * náhľad aj potvrdenie sa mýlili zhodne a I3 to pustilo.
+   *
+   * Pri zľave s JEDNÝM percentom sa tým nemení nič ani na bit: uniformná mapa dá
+   * presne ten istý hash ako chýbajúca mapa. Nepridáva to novú informáciu, len
+   * prestane mizieť existujúca — a potvrdzovací krok si rozloženie percent
+   * odvodí z DB, nie z tokenu, čím sa I3 utvrdzuje, nie oslabuje.
+   */
+  percents?: Readonly<Record<string, DiscountPercent>> | undefined;
 }
 
 /**

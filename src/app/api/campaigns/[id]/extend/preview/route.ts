@@ -38,6 +38,9 @@ import type {
 
 import { checkExtension } from '@/lib/domain/campaign-rules';
 import { discountedPrice, DISCOUNTED_PRICE_DISCLAIMER_SK } from '@/lib/domain/pricing';
+import type { CampaignItemRecordV3 } from '@/lib/repo/campaign-items.repo';
+import type { DiscountPercent } from '@/contracts';
+import type { PreviewTokenServiceV3 } from '@/lib/crypto/preview-token';
 import { startOfDayUtc } from '@/lib/domain/dates';
 import { checkAllowlist } from '@/lib/engine/guards';
 import {
@@ -129,6 +132,23 @@ export function createExtendPreviewPost(
 
           /* 2. Sada = produkty pôvodnej kampane; allowlist fail-closed (I2). */
           const campaignItems = await d.campaignItemsRepo.listByCampaign(campaign.id);
+
+          /*
+           * K3 — percentá pásiem rodiča (L1, 25. 8. 2026). Predĺženie mení
+           * výhradne `to` (D27), percento položky je to, ktoré jej dali pásma
+           * pri potvrdení pôvodnej zľavy. Kým sa mapa nepodávala, token nesol
+           * jediné hlavičkové percento — a to je podľa K3 NAJVYŠŠIE pásmo —
+           * takže zľava 30/20/10 sa celá zapísala do produkčného shopu za 30 %.
+           * Fallback na hlavičku je pre staré fakes bez percenta na položke.
+           */
+          const percents = Object.fromEntries(
+            campaignItems.map((item) => [
+              String(item.productId),
+              (item as Partial<CampaignItemRecordV3>).percent ?? campaign.percent,
+            ]),
+          );
+          const percentOf = (productId: number): DiscountPercent =>
+            percents[String(productId)] ?? campaign.percent;
           const productIds = [...new Set(campaignItems.map((i) => i.productId))].sort(
             (a, b) => a - b,
           );
@@ -228,7 +248,7 @@ export function createExtendPreviewPost(
                 name: record?.name ?? null,
                 price: record?.price ?? null,
                 discountedPrice:
-                  record?.price == null ? null : discountedPrice(record.price, campaign.percent),
+                  record?.price == null ? null : discountedPrice(record.price, percentOf(productId)),
                 hasAttributes: record?.hasAttributes ?? false,
                 lastOwnWrite,
                 reductionUnverifiable: true,
@@ -289,7 +309,7 @@ export function createExtendPreviewPost(
               productId,
               name: product.name,
               price,
-              discountedPrice: discountedPrice(price, campaign.percent),
+              discountedPrice: discountedPrice(price, percentOf(productId)),
               hasAttributes: product.has_attributes,
               lastOwnWrite,
               reductionUnverifiable: true,
@@ -319,7 +339,13 @@ export function createExtendPreviewPost(
           /* 5. Token len pre čistú sadu (I3, O2) — `from`/percento zamknuté. */
           let previewToken = '';
           if (blockers.length === 0) {
-            const issued = await d.previewTokens.issue({
+            /* `previewTokens` je v zdieľaných deps typovaný kontraktovým
+             * `PreviewTokenService`, ktorý pásma nepomenúva; V3 služba je jeho
+             * PODTYP (všetky pridané polia sú voliteľné, viď preview-token.ts:405)
+             * a produkčný default ňou je. Zúženie patrí sem, nie do `as` nad
+             * argumentom. */
+            const tokens = d.previewTokens as PreviewTokenServiceV3;
+            const issued = await tokens.issue({
               sub: ctx.claims.sub,
               kind: 'extend',
               productIds,
@@ -327,6 +353,7 @@ export function createExtendPreviewPost(
               from: campaign.dateFrom,
               to: check.to,
               pricesAtPreview,
+              percents,
             });
             previewToken = issued.token;
           }
