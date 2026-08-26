@@ -178,6 +178,8 @@ function scenarioResponse(kind: MockFailureKind, retryAfterSeconds?: number): Mo
       return transport(401, 'unauthorized');
     case 'forbidden':
       return transport(403, 'forbidden');
+    case 'ip_banned':
+      return transport(403, 'ip_banned');
     case 'invalid_input':
       return transport(400, 'invalid_input');
     case 'not_found':

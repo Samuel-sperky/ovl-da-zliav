@@ -254,6 +254,34 @@ describe('D51/D52 — 401/403 uprostred dávky', () => {
     expect(writtenIds).not.toContain('203');
   });
 
+  /**
+   * X1 (25. 8. 2026) — `ip_banned` je TIEŽ 403, ale o kľúči nehovorí nič: shop
+   * ho vracia aj na volanie bez kľúča. Do 25. 8. sa tu rozhodovalo len z
+   * `error.kind`, takže ban spadol do vetvy D51/D52 a appka funkčný kľúč
+   * ZMAZALA — a keďže ban platí od 19. 8., bol to jej reálny stav. Používateľ
+   * vložil nový kľúč, fronta narazila na to isté 403 a kľúč zmizol znovu.
+   *
+   * Rozdiel medzi týmto testom a tým nad ním JE ten nález, preto sú vedľa seba.
+   */
+  it('403 `ip_banned` kľúč NEZMAŽE a dôvod hovorí o adrese', async () => {
+    const { executor, apiKeyRepo, world } = makeWorld({ productIds: [201, 202] });
+    mock.state.ipBanned();
+
+    const result = await executor.executeCampaign(1);
+
+    // Fronta stojí rovnako ako pri odmietnutom kľúči — nemá čím pokračovať.
+    expect(result.status).toBe('needs_key');
+    // Ale kľúč JE stále uložený. Toto je jadro nálezu.
+    expect(apiKeyRepo.wipedWith).toEqual([]);
+    expect(apiKeyRepo.plaintext).not.toBeNull();
+    // A dôvod hovorí o adrese, nie o kľúči.
+    expect(world.campaignsRepo.campaigns.get(1)?.statusReason).toBe('shop_ip_banned');
+    const items = await world.campaignItemsRepo.listByCampaign(1);
+    expect(items.map((i) => i.status)).toEqual(['failed', 'interrupted']);
+    expect(items[0]?.errorMessage).toContain('adresu');
+    expect(items[0]?.errorMessage).not.toContain('scope');
+  });
+
   it('403 má rovnaký účinok s dôvodom key_forbidden (D52)', async () => {
     const { executor, apiKeyRepo, world } = makeWorld({ productIds: [201, 202] });
     mock.state.failNth(2, 'forbidden', { target: 'write', times: 1 });

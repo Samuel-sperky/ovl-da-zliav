@@ -81,6 +81,7 @@ import {
 } from '@/lib/repo/campaigns.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import { newRequestId } from '@/lib/shop/correlation';
+import { isIpBanned } from '@/lib/shop/errors';
 import { setReductionPayload } from '@/lib/shop/client';
 
 import { createBudget, type BudgetSource, type WriteAttemptCounter } from '@/lib/engine/budget';
@@ -1013,7 +1014,25 @@ export function createExecutor(deps: ExecutorDeps): {
           await audit.appendAudit({ ...commonAudit, eventType: 'write_ok', ok: true });
         } else {
           const { error } = result;
-          const keyRejected = error.kind === 'unauthorized' || error.kind === 'forbidden';
+          /*
+           * `ip_banned` NIE JE výrok o kľúči (X1, 25. 8. 2026).
+           *
+           * Shop ho vracia s 403, ale aj na volanie BEZ kľúča — je to stav
+           * NÁŠHO PRÍSTUPU. Do 25. 8. sa tu rozhodovalo len z `error.kind`,
+           * takže ban spadol do vetvy D51/D52: kľúč sa WIPNUL, kampaň dostala
+           * „chýba kľúč na zápis" a položka vetu „Kľúč nemá scope product:edit".
+           * Používateľ vložil nový kľúč, fronta narazila na to isté 403 a kľúč
+           * sa zmazal znovu — a ban nepomenoval nikto. Od 19. 8. je to stav,
+           * v ktorom appka reálne bežala.
+           *
+           * `shop/client.ts` to rozlíšenie drží (`onKeyRejected` sa pri
+           * `isIpBanned` zámerne nevolá), ale executor callback nečíta a
+           * rozhodoval sa nanovo — takže oprava v klientovi ho neochránila.
+           * Preto sa tu tá istá otázka kladie tým istým nástrojom.
+           */
+          const addressBanned = isIpBanned(error);
+          const keyRejected =
+            !addressBanned && (error.kind === 'unauthorized' || error.kind === 'forbidden');
 
           if (result.outcome === 'uncertain') {
             item.status = 'uncertain';
@@ -1036,6 +1055,37 @@ export function createExecutor(deps: ExecutorDeps): {
                 message: 'Shop vrátil nečakaný tvar odpovede — API sa možno zmenilo (D54).',
               });
             }
+          } else if (addressBanned) {
+            /*
+             * Zablokovaná adresa: kľúč sa NEDOTKNE. Zvyšok dávky sa preruší
+             * rovnako ako pri odmietnutom kľúči — fronta nemá čím pokračovať,
+             * kým ban platí — ale dôvod hovorí pravdu a kľúč zostáva, takže po
+             * odblokovaní netreba nič vkladať znova.
+             */
+            item.status = 'failed';
+            await itemsRepo.update(item.id, {
+              status: 'failed',
+              httpStatus: result.httpStatus,
+              requestId: result.requestId,
+              errorCode: error.code ?? error.kind,
+              errorMessage:
+                'Eshop odmieta našu IP adresu (403) — kľúč je v poriadku a zostáva uložený.',
+              sentPayload: redact(sentPayload),
+              rawResponse: redact(result.raw),
+              finishedAt,
+            });
+            await audit.appendAudit({ ...commonAudit, eventType: 'write_failed', ok: false });
+
+            await itemsRepo.markRemaining(
+              campaign.id,
+              item.position + 1,
+              'interrupted',
+              'Prerušené — eshop odmieta našu IP adresu; kľúč sa nedotklo.',
+            );
+            for (const rest of ordered.slice(index + 1)) {
+              if (rest.status === 'pending') rest.status = 'interrupted';
+            }
+            return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor);
           } else if (keyRejected) {
             /* D51/D52 — wipe + zvyšok `interrupted` + kampaň `needs_key`. */
             item.status = 'failed';
