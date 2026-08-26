@@ -55,6 +55,7 @@ import type {
 
 import { env } from '@/env';
 import { auditWriter as defaultAuditWriter } from '@/lib/audit/write';
+import { anonReadCost } from '@/lib/catalog/product-details';
 import { previewTokenService as defaultPreviewTokens, PreviewTokenError } from '@/lib/crypto/preview-token';
 import { isDateOnly, todayInZone } from '@/lib/domain/dates';
 import { DomainError } from '@/lib/domain/errors';
@@ -81,7 +82,10 @@ import {
   campaignsRepo as defaultCampaignsRepo,
   type CampaignsRepoExt,
 } from '@/lib/repo/campaigns.repo';
-import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
+import {
+  catalogRepo as defaultCatalogRepo,
+  type CatalogRepoExt,
+} from '@/lib/repo/catalog.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import {
   tiersRepo as defaultTiersRepo,
@@ -91,6 +95,7 @@ import {
 } from '@/lib/repo/tiers.repo';
 import { createShopClientFromSettings } from '@/lib/shop/client';
 import { newOperationId } from '@/lib/shop/correlation';
+import type { ReadBudgetStatus } from '@/lib/shop/read-budget';
 
 /* ═════════════ 0. Most na stav `queued` a príznak `late` (K2, K5) ═════════ */
 
@@ -156,17 +161,28 @@ export interface RoutesDeps {
     | 'findFutureOverlaps'
     | 'lastOwnWrite'
   > &
-    // `requeueMissed` (K2) žije až v rozšírenom repozitári, nie v kontrakte A0.
-    // VOLITEĽNÉ zámerne: staršie fakes v testoch ho nemajú a nemá zmysel nútiť
-    // ich dopisovať metódu, ktorú netestujú. Keď chýba, `resolveRoutesDeps()`
-    // doplní fail-closed náhradu, ktorá nevráti do fronty nič.
-    Partial<Pick<CampaignsRepoExt, 'requeueMissed'>>;
+    // `requeueMissed` (K2) a dávkový `lastOwnWrites` (I11) žijú až v rozšírenom
+    // repozitári, nie v kontrakte A0. VOLITEĽNÉ zámerne: staršie fakes v testoch
+    // ich nemajú a nemá zmysel nútiť ich dopisovať metódu, ktorú netestujú.
+    // Keď chýba `requeueMissed`, `resolveRoutesDeps()` doplní fail-closed
+    // náhradu, ktorá nevráti do fronty nič; keď chýba `lastOwnWrites`, volajúci
+    // sa vráti k dotazu na produkt (a v produkcii sa to nikdy nestane).
+    Partial<Pick<CampaignsRepoExt, 'requeueMissed' | 'lastOwnWrites'>>;
   campaignItemsRepo?: RoutesItemsRepo;
   allowlistRepo?: Pick<
     AllowlistRepo,
     'listActive' | 'addProduct' | 'removeProduct' | 'markShopStatus' | 'areAllActive'
   >;
   catalogRepo?: Pick<CatalogRepo, 'get' | 'getMany' | 'upsert'>;
+  /**
+   * K7 — zdieľaný denný rozpočet ANONYMNÝCH čítaní shopu.
+   *
+   * Zámerne samostatná závislosť, nie širší `catalogRepo`: trojica
+   * `get`/`getMany`/`upsert` je kontrakt, o ktorý sa opierajú existujúce testy,
+   * a rozšíriť ju by znamenalo prepísať cudzie fakes (tá istá úvaha ako
+   * `catalogLookup` v `catalog/search`). Produkčne je to ten istý repozitár.
+   */
+  readBudget?: Pick<CatalogRepoExt, 'reserveShopReads' | 'shopReadBudget'>;
   auditRepo?: Pick<AuditRepo, 'list' | 'getById' | 'countWritesInLastHour'>;
   settingsRepo?: Pick<SettingsRepo, 'get' | 'lockWrites'>;
   apiKeyRepo?: Pick<ApiKeyRepo, 'getMeta' | 'loadForUse' | 'wipe' | 'touchLastUsed'>;
@@ -218,6 +234,9 @@ export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDep
     campaignItemsRepo: overrides.campaignItemsRepo ?? defaultCampaignItemsRepo,
     allowlistRepo: overrides.allowlistRepo ?? defaultAllowlistRepo,
     catalogRepo: overrides.catalogRepo ?? defaultCatalogRepo,
+    // K7: rovnaké počítadlo, z ktorého berie synchronizácia katalógu aj
+    // `catalog/search`. Druhý zdroj by znamenal dva stropy proti jednému shopu.
+    readBudget: overrides.readBudget ?? defaultCatalogRepo,
     auditRepo: overrides.auditRepo ?? defaultAuditRepo,
     settingsRepo,
     apiKeyRepo: overrides.apiKeyRepo ?? defaultApiKeyRepo,
@@ -534,6 +553,50 @@ export function estimateWith(
 ): FinishEstimate | null {
   if (pending <= 0 || budget === null) return null;
   return estimateFinish(pending, budget.budget, { remainingToday: budget.remaining, now });
+}
+
+/* ═════════ 5b. Rozpočet ČÍTANÍ shopu (K7) — spoločná brána route-ov ═══════ */
+
+/** Výsledok pokusu zaplatiť čítanie celej sady zo zdieľaného rozpočtu (K7). */
+export interface ShopReadClearance {
+  /** `true` = celá sada je zaplatená a shop sa SMIE volať. */
+  granted: boolean;
+  /** Koľko anonymných čítaní by celá sada stála (`anonReadCost`). */
+  cost: number;
+  /** Stav počítadla po pokuse. `known: false` = počítadlo sa nedá prečítať. */
+  status: ReadBudgetStatus;
+}
+
+/**
+ * K7 — rezervácia zdieľaného denného rozpočtu anonymných čítaní PRED volaním
+ * shopu. Doteraz z tejto kvóty brali `engine/preview`, synchronizácia katalógu
+ * aj `catalog/search`, kým route-y `extend/preview` a `catalog/refresh` čítali
+ * mimo počítadla — a práve tým sa denný strop prekročil bez toho, aby o tom
+ * appka vedela.
+ *
+ * REZERVUJE SA VŠETKO NARAZ ALEBO NIČ, presne ako v `engine/preview`:
+ * `batchGetProducts()` číta celú sadu a čiastočná rezervácia by znamenala obraz
+ * postavený nad jej časťou. Stav sa najprv PREČÍTA (`reserveShopReads(0)` nič
+ * nemíňa) a rezervuje sa až vtedy, keď je na celú cenu miesto — inak by
+ * odmietnuté čítanie ešte aj minulo zvyšok kvóty.
+ *
+ * Nečitateľné počítadlo je fail-closed: `known: false` znamená „nevieme", a to
+ * nie je povolenie volať shop.
+ */
+export async function reserveShopReadsForSet(
+  d: ResolvedRoutesDeps,
+  productCount: number,
+): Promise<ShopReadClearance> {
+  const cost = anonReadCost(productCount);
+  const peek = await d.readBudget.reserveShopReads(0);
+  if (cost === 0) return { granted: false, cost, status: peek.status };
+  if (!peek.status.known || peek.status.remaining < cost) {
+    return { granted: false, cost, status: peek.status };
+  }
+  const reservation = await d.readBudget.reserveShopReads(cost);
+  // Súbeh s iným čítačom medzi náhľadom a rezerváciou. Pridelené čítania sa
+  // NEVRACAJÚ — chyba smerom k opatrnosti, rovnako ako v `product-details`.
+  return { granted: reservation.granted >= cost, cost, status: reservation.status };
 }
 
 /** Jednorazový odhad (POST) — jedno čítanie rozpočtu, jeden výsledok. */
