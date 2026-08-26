@@ -151,6 +151,15 @@ export interface KeyMetaView {
    */
   verifyNote?: string | null;
   /**
+   * Má kľúč oprávnenie `product:read`? `null` = NEVIEME (kľúč sa neoveril),
+   * chýbajúce pole = staršia odpoveď, čo znamená to isté. Server to posiela
+   * z `scopeReport()` už dnes; obrazovka to dovtedy nečítala.
+   *
+   * Kreslí to VÝHRADNE `LockedFeatures` (kontrakt UI, bod 18) — a v troch
+   * stavoch, nie v dvoch: „nevieme" sa nikdy nesmie stať „nemá".
+   */
+  productRead?: boolean | null;
+  /**
    * Vyzerá to, že v oboch slotoch je ten istý kľúč? Porovnáva sa `last4`, takže
    * `true` je domnienka, nie fakt — a preto sa to menuje `looksLike…`.
    * `null` = jeden zo slotov je prázdny, niet čo porovnávať.
