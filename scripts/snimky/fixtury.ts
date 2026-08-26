@@ -626,7 +626,13 @@ function odpoved(url: URL, method: string): Response | null {
   }
   if (cesta === '/api/campaigns') return ok({ data: ZLAVY, total: ZLAVY.length, budget: FRONTA.budget });
   if (cesta === '/api/sales') return ok(PREDAJ);
-  if (cesta === '/api/insights/sales-daily') return ok({ days: DNI_PREDAJA });
+  // Hlavička o pokrytí patrí do odpovede rovnako ako rad po dňoch: číta ju
+  // veta o pokrytí na Produktoch aj v sprievodcovi. Je to tá istá hodnota, akú
+  // vracia `/api/sales` — dva endpointy nad jedným meraním si nesmú
+  // protirečiť ani vo fixtúrach.
+  if (cesta === '/api/insights/sales-daily') {
+    return ok({ today: DNES, coverage: PREDAJ.coverage, days: DNI_PREDAJA });
+  }
   if (cesta === '/api/ai/insights') return ok(NAVRHY);
   if (cesta === '/api/audit') {
     return ok({ data: [...HISTORIA], page: 1, perPage: 40, total: 512 } satisfies AuditPage);
