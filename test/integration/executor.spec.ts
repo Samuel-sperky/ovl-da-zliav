@@ -377,7 +377,7 @@ describe('reconcile po havárii (D86)', () => {
    * jeden testovaný, druhý spustený. Test preto ide na PRODUKČNÚ cestu; mŕtvy
    * dvojník je zmazaný.
    */
-  it('write_ok z auditu potvrdí položku, ostatné sú uncertain, bez re-runu', async () => {
+  it('write_ok potvrdí položku, rozbehnutá je uncertain, nikdy neposlaná zostáva vo fronte', async () => {
     const { reconcileAfterCrash } = await import('@/lib/scheduler/reconcile');
     const { executor, world, audit } = makeWorld({ productIds: [201, 202, 203] });
     void executor;
@@ -387,7 +387,15 @@ describe('reconcile po havárii (D86)', () => {
      * položku ako `ok` a AŽ POTOM audit `write_ok` — položka `pending`
      * s auditom `ok` teda v produkcii vzniknúť nevie a testovať ju by znamenalo
      * dokazovať niečo, čo sa nikdy nestane. Reálny stav po páde uprostred
-     * dávky: 201 je dopísaná a potvrdená auditom, 202/203 zostali `pending`.
+     * dávky: 201 je dopísaná a potvrdená auditom, 202 bola práve odoslaná
+     * (má `request_id` z kroku 6c, potvrdenie chýba) a 203 sa ani nezačala.
+     *
+     * Tvrdenie o 203 sa 26. 8. 2026 zmenilo (audit 30, nález L3): kým fronta
+     * bežala jeden deň, „celá dávka je neistá" bola pravda. Pri 200 zápisoch
+     * na deň a 40-dňovej fronte (K2) by to znamenalo, že reštart kontejnera
+     * (D100) zavrie kampaň a nezapísaný zvyšok sa stratí — a to zakazuje K6.
+     * Položka bez `request_id` nemá v audite ani `write_attempt`, takže o nej
+     * VIEME, že neodišla; nazvať to „nevieme" zakazuje I11.
      */
     const campaign = world.campaignsRepo.campaigns.get(1)!;
     campaign.status = 'running';
@@ -396,6 +404,9 @@ describe('reconcile po havárii (D86)', () => {
     await world.campaignItemsRepo.update(items[0]!.id, {
       status: 'ok',
       requestId: 'REQCONFIRMED0000000000000',
+    });
+    await world.campaignItemsRepo.update(items[1]!.id, {
+      requestId: 'REQINFLIGHT00000000000000',
     });
     audit.records.push({
       actor: 'user',
@@ -419,8 +430,10 @@ describe('reconcile po havárii (D86)', () => {
 
     expect(reconciled).toBe(1);
     const settled = await world.campaignItemsRepo.listByCampaign(1);
-    expect(settled.map((i) => i.status)).toEqual(['ok', 'uncertain', 'uncertain']);
-    expect(world.campaignsRepo.campaigns.get(1)?.status).toBe('partial');
+    expect(settled.map((i) => i.status)).toEqual(['ok', 'uncertain', 'pending']);
+    // K2/K6 — kampaň má čo dopísať, takže sa vracia do fronty a NEZAVIERA sa.
+    expect(world.campaignsRepo.campaigns.get(1)?.status).toBe('queued');
+    expect(world.campaignsRepo.campaigns.get(1)?.finishedAt).toBeNull();
     expect(audit.byEvent('reconcile_uncertain')).toHaveLength(1);
     // Automatický re-run NEPREBEHOL — na shop nič neodišlo.
     expect(mock.state.requestCount).toBe(0);
