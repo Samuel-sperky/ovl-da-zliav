@@ -30,6 +30,7 @@ import { describe, expect, it } from 'vitest';
 import BudgetSection, { resetPhraseSk } from '@/components/settings/BudgetSection';
 import FeatureIndex, { APP_CAPABILITIES, isAnchor } from '@/components/settings/FeatureIndex';
 import KeysSection, { keyRowState } from '@/components/settings/KeysSection';
+import SafeguardsSection from '@/components/settings/SafeguardsSection';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
 import WritesSection, { writeConditions } from '@/components/settings/WritesSection';
 import {
@@ -478,6 +479,35 @@ describe('Kľúče', () => {
     expect(markup).toContain('nič sa nestratí');
     expect(markup).toContain('48 hodín');
     expect(markup).toContain('30 dní');
+  });
+});
+
+/* ══════════════ H. Poistky — nesľubovať, čo obrazovka neriadi ═════════════ */
+
+describe('Poistky', () => {
+  const draw = (eagerWriteDefault: boolean) =>
+    renderToStaticMarkup(
+      createElement(SafeguardsSection, {
+        settings: { ...SETTINGS, eagerWriteDefault },
+        onChanged: noop,
+      }),
+    );
+
+  it('čas zápisu je oznámený ako fakt, nie ponúknutý ako voľba', () => {
+    const markup = draw(true);
+    expect(markup).toContain('data-testid="write-time"');
+    // Prepínač, ktorý nič neriadi, je horší než mlčanie: uložil by sa,
+    // zobrazil by sa — a zápis by aj tak išiel `mode='eager'` (D33b, bod 4).
+    expect(markup).not.toContain('data-testid="eager-write-switch"');
+    expect(markup).not.toContain('data-testid="eager-write-state"');
+  });
+
+  it('predvoľba, ktorú nikto nečíta, obrazovkou ani nepohne', () => {
+    // Jadro nálezu U3: kým `eagerWriteDefault` nečíta žiadna cesta zápisu,
+    // sekcia sa pri jej prevrátení NESMIE prekresliť inak — inak používateľ
+    // vidí rozhodnutie, ktoré v skutočnosti nespravil. Keď ju formulár novej
+    // zľavy začne čítať (D22), tento test spadne a vypýta si pravdivý riadok.
+    expect(draw(false)).toBe(draw(true));
   });
 });
 
