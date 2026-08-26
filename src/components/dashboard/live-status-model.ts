@@ -116,10 +116,23 @@ export interface PillView {
  * hovorí len to, čo naozaj vie. Doména sa tu zámerne NEOPAKUJE: je nad každou
  * obrazovkou v trvalom pruhu „PRODUKCIA — doména" a druhá kópia by bola len
  * ďalšie miesto, ktoré sa môže rozísť.
+ *
+ * ODMIETNUTIE NIE JE MLČANIE a od 26. 8. 2026 to pilulka rozlišuje. Do vtedy
+ * mala na oba stavy jednu vetu — „Shop naposledy neodpovedal" — a pri bane na
+ * IP adresu (platí od 19. 8. 2026) to bolo nepravdivé v tom jedinom slove, na
+ * ktorom záleží: shop ODPOVEDAL, len nás nepustil. Rozdiel nie je slovíčkarenie,
+ * je to iný ďalší krok — mlčanie prejde samo, odmietnutie adresy nie.
  */
 export function shopPill(sync: CatalogSyncView | null): PillView {
   if (sync === null) {
     return { tone: 'idle', label: 'Spojenie so shopom nevieme', detail: null };
+  }
+  if (sync.ipBanned) {
+    return {
+      tone: 'attention',
+      label: 'Shop odmieta našu IP adresu',
+      detail: sync.lastReadAt === null ? null : formatDateTimeSk(sync.lastReadAt),
+    };
   }
   if (sync.failedLastTime || sync.waiting === 'error') {
     return {

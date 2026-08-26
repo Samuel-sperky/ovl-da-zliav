@@ -55,6 +55,8 @@ import {
   type VerdictInput,
 } from '@/components/dashboard/overview-verdict';
 import { queueProgress, type QueueProgress } from '@/components/dashboard/overview-model';
+import type { CampaignRow, QueueSnapshot } from '@/components/dashboard/api';
+import { formatCountSk } from '@/lib/ui/vocabulary';
 
 import type { CatalogWaitingReason } from '@/lib/repo/catalog.repo';
 import type { BlockerResolution, BlockerSeverity } from '@/lib/status/blockers';
@@ -88,6 +90,7 @@ function sync(patch: Partial<CatalogSyncView> = {}): CatalogSyncView {
     nextBatchAt: '2026-08-12T09:15:00.000Z',
     estimatedFinishAt: '2026-08-14T00:00:00.000Z',
     failedLastTime: false,
+    ipBanned: false,
     ...patch,
   };
 }
@@ -229,6 +232,28 @@ describe('Prehľad — čítanie živého stavu', () => {
     expect(JSON.stringify(parsed)).not.toContain('shop_5xx');
   });
 
+  /**
+   * ODMIETNUTIE ADRESY SA NESMIE STRATIŤ V „bola chyba".
+   *
+   * `lastError` je jediné miesto, kde appka o odmietnutej adrese vie, a do
+   * 26. 8. 2026 sa tu sploštil na jediný boolean. Obrazovka tým prišla o celý
+   * rozdiel medzi „shop mlčal" a „shop nás nepustil" — a mlčanie sa vyrieši
+   * čakaním, odmietnutie adresy nie.
+   *
+   * Kód sám na povrch nesmie ani teraz (I1, K10): von ide `true`/`false`.
+   */
+  it('odmietnutá adresa je vlastný príznak, nie len „bola chyba"', () => {
+    const banned = parseCatalogSync({ catalog: { loadedProducts: 10, lastError: 'ip_banned' } });
+    expect(banned?.failedLastTime).toBe(true);
+    expect(banned?.ipBanned).toBe(true);
+    // Ban je PODTRIEDA chyby, nie jej náhrada — a surový kód von neide.
+    expect(JSON.stringify(banned)).not.toContain('ip_banned');
+
+    const other = parseCatalogSync({ catalog: { loadedProducts: 10, lastError: 'shop_5xx' } });
+    expect(other?.ipBanned).toBe(false);
+    expect(parseCatalogSync({ catalog: { loadedProducts: 10 } })?.ipBanned).toBe(false);
+  });
+
   it('neznámy dôvod čakania katalógu je `null`, nie surový kód', () => {
     expect(parseCatalogSync({ catalog: { waiting: 'nieco_nove' } })?.waiting).toBeNull();
     expect(parseCatalogSync({ catalog: { waiting: 'daily_budget' } })?.waiting).toBe('daily_budget');
@@ -277,6 +302,31 @@ describe('Prehľad — kontroly pri dominante', () => {
     expect(shopCheck(sync()).tone).toBe('ok');
     expect(shopCheck(sync({ failedLastTime: true })).tone).toBe('warn');
     expect(shopCheck(sync({ waiting: 'error' })).tone).toBe('warn');
+  });
+
+  /**
+   * „NEODPOVEDAL" JE PRI BANE NEPRAVDA — shop odpovedal, len nás nepustil.
+   *
+   * Meria sa hotová veta pilulky, nie zdroj: znenie sa smie prepísať, ale
+   * odmietnutie sa nesmie znovu zliať s mlčaním. Preto sa tvrdí (a) že tie dve
+   * vety NIE SÚ tá istá, (b) že veta pri bane nehovorí o neodpovedaní, a (c) že
+   * kontrola v riadku dominanty hovorí to isté — `shopCheck()` berie slovo
+   * z pilulky, takže druhá formulácia toho istého faktu nemôže vzniknúť.
+   */
+  it('odmietnutá adresa nie je mlčanie shopu — pilulka aj kontrola to rozlíšia', () => {
+    const silent = shopPill(sync({ failedLastTime: true }));
+    const banned = shopPill(sync({ failedLastTime: true, ipBanned: true }));
+
+    expect(banned.label).not.toBe(silent.label);
+    expect(banned.label).not.toContain('neodpoved');
+    expect(banned.label).toContain('odmieta');
+    // Tón sa nemení: je to jantár v oboch prípadoch, mení sa PRAVDA vo vete.
+    expect(banned.tone).toBe('attention');
+    // Aj vtedy, keď `waiting` o chybe nevie a jediným svedkom je kód chyby.
+    expect(shopPill(sync({ ipBanned: true })).label).toBe(banned.label);
+
+    expect(shopCheck(sync({ failedLastTime: true, ipBanned: true })).text).toBe(banned.label);
+    expect(shopCheck(sync({ failedLastTime: true, ipBanned: true })).tone).toBe('warn');
   });
 
   it('katalóg hovorí, čo robí — nie koľko ho je (to je v pruhu)', () => {
@@ -424,6 +474,157 @@ describe('Prehľad — verdikt', () => {
 
   it('nečitateľná fronta je „nevieme", nikdy nula', () => {
     const verdict = overviewVerdict(input({ progress: unknownQueue() }));
+    expect(verdict.kind).toBe('unknown');
+    expect(verdict.headline).toBe('Stav fronty nevieme');
+  });
+});
+
+/* ═══════════ C2. Stojaca fronta bez kampane v behu a mŕtvy tik ════════════ */
+
+/**
+ * Nález X4 (audit 26. 8. 2026). `current` z `/api/queue` je LEN kampaň v stave
+ * `running` alebo `queued`, kým `queue.pending` počíta aj `scheduled`,
+ * `needs_key` a `missed`. Zľava v `needs_key` — dnes očakávaný stav — teda
+ * držala tisíce čakajúcich položiek bez `current`, dominanta prepadla do
+ * pokojného stavu s `pending: 0` a verdikt povedal najsilnejšie tvrdenie, aké
+ * appka má: „Všetko v poriadku · Nič nezastavuje ani nebrzdí zápis."
+ *
+ * Testuje sa CELÁ cesta zo snímky API, nie jedna funkcia: chyba bola v tom, ako
+ * si dva moduly podali `pending`, a to sa na jednom z nich nedá zmerať.
+ */
+describe('Prehľad — fronta stojí, hoci nič nezapisuje', () => {
+  /** Snímka fronty, ktorá má čo zapisovať a nemá kampaň v behu. */
+  function waitingQueue(patch: Partial<QueueSnapshot> = {}): QueueSnapshot {
+    return {
+      budget: { day: TODAY, budget: 200, spent: 0, remaining: 200, exhausted: false },
+      queue: { pending: 7800, total: 8000, done: 200, campaigns: 1 },
+      current: null,
+      estimate: null,
+      heartbeat: { lastTickAt: '2026-08-12T08:59:00.000Z', stale: false },
+      gate: { paused: false, since: null },
+      ...patch,
+    };
+  }
+
+  function row(patch: Partial<CampaignRow> = {}): CampaignRow {
+    return {
+      id: 4,
+      name: 'Ležiaky striebro — jeseň',
+      status: 'needs_key',
+      percent: 30,
+      dateFrom: '2026-08-10',
+      dateTo: '2026-09-18',
+      itemsTotal: 8000,
+      itemsOk: 200,
+      itemsFailed: 0,
+      itemsUncertain: 0,
+      itemsPending: 7800,
+      late: false,
+      tiers: [],
+      estimate: null,
+      ...patch,
+    };
+  }
+
+  function progressFor(
+    campaigns: readonly CampaignRow[] | null,
+    patch: Partial<QueueSnapshot> = {},
+  ): QueueProgress {
+    return queueProgress({ snapshot: waitingQueue(patch), campaigns, today: TODAY });
+  }
+
+  it('čakajúce položky sa už v pokojnom stave nezahodia', () => {
+    const progress = progressFor([row()]);
+    expect(progress.mode).toBe('calm');
+    expect(progress.pending).toBe(7800);
+    expect(progress.stalled).toBe(true);
+  });
+
+  it('zľava čakajúca na kľúč zhodí „Všetko v poriadku" na „Fronta stojí"', () => {
+    const verdict = overviewVerdict(input({ progress: progressFor([row()]) }));
+    expect(verdict.kind).toBe('stopped');
+    expect(verdict.headline).toBe('Fronta stojí');
+    expect(verdict.tone).toBe('warn');
+    // Číslo je merané z `campaign_items`, takže sa dá povedať nahlas.
+    expect(verdict.detail).toContain(formatCountSk(7800));
+  });
+
+  /** D8/D33b: `needs_key` a `missed` čakajú na človeka s rovnakou váhou. */
+  it('zmeškaná zľava stojí rovnako ako tá bez kľúča', () => {
+    const verdict = overviewVerdict(input({ progress: progressFor([row({ status: 'missed' })]) }));
+    expect(verdict.kind).toBe('stopped');
+    expect(verdict.headline).toBe('Fronta stojí');
+  });
+
+  /**
+   * Druhá polovica toho istého tvrdenia. Bez nej by opravu splnilo aj hlúpe
+   * „pending > 0 znamená stojí", a appka by kričala nad každou zľavou, ktorá
+   * pokojne čaká na svoj deň.
+   */
+  it('zľava naplánovaná na budúcnosť frontu nezastavuje', () => {
+    const buduca = row({ status: 'scheduled', dateFrom: '2026-09-04', dateTo: '2026-09-18' });
+    const progress = progressFor([buduca]);
+    expect(progress.stalled).toBe(false);
+
+    const verdict = overviewVerdict(input({ progress }));
+    expect(verdict.kind).toBe('ok');
+    expect(verdict.headline).toBe('Všetko v poriadku');
+  });
+
+  /** K5: okno už beží a položky sú stále nezapísané — to nikto nedobehne sám. */
+  it('meškajúca zľava stojí, aj keď ju stav ešte nepriznal', () => {
+    const progress = progressFor([row({ status: 'scheduled', late: true })]);
+    expect(progress.stalled).toBe(true);
+    expect(overviewVerdict(input({ progress })).headline).toBe('Fronta stojí');
+  });
+
+  /** P7: chýbajúci údaj nie je dobrá správa. */
+  it('nečitateľný zoznam zliav neprepustí „v poriadku" ani „stojí"', () => {
+    const progress = progressFor(null);
+    expect(progress.stalled).toBeNull();
+
+    const verdict = overviewVerdict(input({ progress }));
+    expect(verdict.kind).toBe('unknown');
+    expect(verdict.headline).toBe('Stav fronty nevieme');
+  });
+
+  /**
+   * Mŕtvy scheduler sa doteraz k verdiktu dostal len vetvou `paused`, ktorá
+   * vyžaduje kampaň v behu. Bez nej appka o mŕtvom tiku mlčala — a značka
+   * kontroly hneď pod dominantou pritom hovorila „Fronta sa nekontroluje".
+   */
+  it('mŕtvy tik zhodí verdikt aj bez kampane v behu', () => {
+    const progress = progressFor([row({ status: 'done', itemsPending: 0 })], {
+      queue: { pending: 0, total: 8000, done: 8000, campaigns: 0 },
+      heartbeat: { lastTickAt: '2026-08-09T21:04:00.000Z', stale: true },
+    });
+    expect(progress.mode).toBe('calm');
+    expect(progress.stalled).toBe(false);
+
+    const verdict = overviewVerdict({
+      ...input({ progress }),
+      heartbeat: { lastTickAt: '2026-08-09T21:04:00.000Z', stale: true },
+    });
+    expect(verdict.kind).toBe('stopped');
+    expect(verdict.headline).toBe('Fronta sa nekontroluje');
+    expect(verdict.headline).not.toContain('poriadku');
+  });
+
+  /** Fail-closed rovnako ako značka kontroly: bez údaja platí to horšie. */
+  it('chýbajúci heartbeat sa počíta ako nekontrolovaná fronta', () => {
+    const progress = progressFor([row({ status: 'done', itemsPending: 0 })], {
+      queue: { pending: 0, total: 8000, done: 8000, campaigns: 0 },
+    });
+    const verdict = overviewVerdict({ ...input({ progress }), heartbeat: null });
+    expect(verdict.headline).toBe('Fronta sa nekontroluje');
+  });
+
+  /**
+   * Výnimka: keď appka o fronte neodpovedala vôbec, chýbajúci heartbeat je časť
+   * tej istej medzery. Tvrdiť z neho mŕtvy scheduler by bolo tvrdenie navyše.
+   */
+  it('bez odpovede o fronte sa mŕtvy tik netvrdí, hovorí sa „nevieme"', () => {
+    const verdict = overviewVerdict({ ...input({ progress: unknownQueue() }), heartbeat: null });
     expect(verdict.kind).toBe('unknown');
     expect(verdict.headline).toBe('Stav fronty nevieme');
   });

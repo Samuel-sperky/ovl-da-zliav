@@ -23,10 +23,14 @@
  *
  * DVE VECI, KTORÉ SA TU NESMÚ POKAZIŤ:
  *
- * 1. **Neznáme číslo sa nedopĺňa.** Kým `/api/queue` nedodá čísla (alebo keď
- *    appka neodpovedá), hlavička píše, že je fronta prázdna, len keď to naozaj
- *    vie. Appka zapisuje do produkčného shopu — vymyslené číslo by tu bolo
- *    tvrdenie, nie medzera.
+ * 1. **Neznáme číslo sa nedopĺňa a neznámy stav sa nepomenúva.** Kým
+ *    `/api/queue` nedodá čísla (alebo keď appka neodpovedá), hlavička napíše
+ *    pomlčku a slovom prizná, že stav fronty nevie. „Fronta prázdna" je kladné
+ *    tvrdenie, že na zápis nič nečaká, a smie padnúť LEN vtedy, keď to server
+ *    povedal (`total === 0`). Appka zapisuje do produkčného shopu — vymyslené
+ *    číslo aj vymyslený stav by tu boli tvrdenie, nie medzera. Rozhoduje o tom
+ *    `queueHeaderLabel()` v `layout/queue.ts`, aby sa to dalo zmerať bez
+ *    prehliadača (`test/unit/header-status.spec.ts`).
  * 2. **Stav sa sem POSIELA, neťahá.** Hlavička aj pruh stoja na jednom čítaní
  *    `/api/status`, ktoré robí `AppShell`. Vlastné čítanie by znamenalo druhý
  *    dotaz na tú istú vec — a druhú predstavu o tom, čo je pravda.
@@ -35,30 +39,38 @@
  */
 import Link from 'next/link';
 
-import { formatCount, useQueueHeader } from '@/components/layout/queue';
+import { queueHeaderLabel, useQueueHeader } from '@/components/layout/queue';
 import ReadOnlyNotice from '@/components/layout/ReadOnlyNotice';
 import type { StatusState } from '@/components/layout/status';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 
-/** Súhrn všetkých bežiacich front. Klik vedie na tab Zľavy. */
-function QueueLink({ done, total }: { done: number | null; total: number | null }) {
-  const empty = done === null || total === null || total === 0;
+/**
+ * Súhrn všetkých bežiacich front. Klik vedie na tab Zľavy.
+ *
+ * Tri stavy, nie dva: neznámy stav sa NESMIE zliať s prázdnou frontou. Text aj
+ * vysvetlenie určuje `queueHeaderLabel()`; tento komponent už len kreslí.
+ * Tlmené `hqueue off` majú oba nekladné stavy — je to existujúci token, nie
+ * nová farba (predloha `design/v3/prazdne-stavy.html`).
+ *
+ * Exportuje sa kvôli testu, ktorý ho naozaj vykreslí (`renderToStaticMarkup`,
+ * `test/unit/header-status.spec.ts`) — inak by sa dalo zmerať len rozhodnutie
+ * v `queueHeaderLabel()`, nie to, či ho hlavička vôbec použije.
+ */
+export function QueueLink({ done, total }: { done: number | null; total: number | null }) {
+  const view = queueHeaderLabel(done, total);
   return (
     <Link
-      className={empty ? 'hqueue off' : 'hqueue'}
+      className={view.kind === 'running' ? 'hqueue' : 'hqueue off'}
       href="/zlavy"
       data-testid="header-queue"
-      data-state={empty ? 'empty' : 'running'}
-      title="Súhrn všetkých bežiacich front — klik otvorí Zľavy"
+      data-state={view.kind}
+      title={view.title}
     >
-      {empty ? (
-        'Fronta prázdna'
+      {view.fraction === null ? (
+        view.label
       ) : (
         <>
-          Fronta{' '}
-          <b>
-            {formatCount(done)}/{formatCount(total)}
-          </b>
+          {view.label} <b>{view.fraction}</b>
         </>
       )}
     </Link>

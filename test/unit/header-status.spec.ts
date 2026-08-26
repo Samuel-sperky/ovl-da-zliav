@@ -14,6 +14,11 @@
  *  3. Čísla sa obnovovali samy. Kontrakt UI (13. 8. 2026, bod 4) automatické
  *     obnovovanie ruší: čísla sa načítajú pri otvorení a potom na vyžiadanie.
  *     Časovač v chróme je odteraz chyba, ktorú chytí test — nie vec názoru.
+ *  4. Hlavička písala „Fronta prázdna" aj vtedy, keď o fronte nevedela nič —
+ *     pri nečitateľnej odpovedi `/api/queue`, pri nesúlade tvaru aj vždy, keď
+ *     appka neodpovedala. Bolo to KLADNÉ tvrdenie, že na zápis nič nečaká, na
+ *     každej obrazovke appky, hoci vo fronte mohli stáť tisíce položiek.
+ *     „Prázdna" smie padnúť len z `total === 0` od servera.
  *
  * HISTÓRIA NOSITEĽOV (aby bolo jasné, že sa tvrdenia nezoslabujú, len sťahujú)
  * --------------------------------------------------------------------------
@@ -32,9 +37,14 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import { QueueLink } from '@/components/layout/HeaderStatus';
+
 import { classifyHealthStatus } from '@/components/layout/health';
+import { parseQueueHeader, queueHeaderLabel } from '@/components/layout/queue';
 import { connectionChip, writesChip, type StatusState } from '@/components/layout/status';
 import type { StatusPayload } from '@/lib/status/snapshot';
 
@@ -194,5 +204,138 @@ describe('kontrakt UI, bod 4 — nič sa v chróme neobnovuje samo', () => {
     // Hľadá sa NOSITEĽ (trieda tlačidla), nie slovo — to je aj v doc-blokoch.
     const hits = sources.filter((f) => f.code.includes('ovl-sbar-refresh')).map((f) => f.path);
     expect(hits).toEqual(['src/components/layout/StatusBar.tsx']);
+  });
+});
+
+/* ════ Bod 4: „prázdna fronta" je tvrdenie, nie náhrada za nevedomosť ══════ */
+
+describe('menovka fronty v hlavičke — nevieme sa nezlieva s prázdne', () => {
+  /** Toľko položiek stálo vo fronte v deň, keď sa tento defekt našiel. */
+  const WAITING = 4480;
+
+  it('nečitateľné `done` NEHLÁSI prázdnu frontu', () => {
+    const view = queueHeaderLabel(null, WAITING);
+    expect(view.kind).toBe('unknown');
+    expect(view.label.toLowerCase()).not.toContain('prázdn');
+    expect(view.fraction).toBeNull();
+  });
+
+  it('nečitateľné `total` NEHLÁSI prázdnu frontu', () => {
+    const view = queueHeaderLabel(0, null);
+    expect(view.kind).toBe('unknown');
+    expect(view.label.toLowerCase()).not.toContain('prázdn');
+  });
+
+  it('nič sa nevie (appka neodpovedá, `state.kind !== "ok"`) = pomlčka a slovo', () => {
+    // Presne to, čo `HeaderRight` posiela, keď stav appky nie je `ok`.
+    const view = queueHeaderLabel(null, null);
+    expect(view.kind).toBe('unknown');
+    expect(view.label).toContain('—');
+    expect(view.label.toLowerCase()).toContain('nevieme');
+    expect(view.label.toLowerCase()).not.toContain('prázdn');
+    // Vysvetlenie musí ten rozdiel pomenovať, nielen mlčať.
+    expect(view.title.toLowerCase()).toContain('prázdna fronta');
+  });
+
+  it('„prázdna" padne LEN z nuly, ktorú povedal server', () => {
+    const view = queueHeaderLabel(0, 0);
+    expect(view.kind).toBe('empty');
+    expect(view.label).toBe('Fronta prázdna');
+  });
+
+  it('bežiaca fronta kreslí zlomok a nič nepriznáva', () => {
+    const view = queueHeaderLabel(3420, 8000);
+    expect(view.kind).toBe('running');
+    expect(view.fraction).toBe('3 420/8 000');
+    expect(view.label).toBe('Fronta');
+  });
+
+  it('tri stavy majú tri rôzne `data-state` — obrazovka ich musí odlíšiť', () => {
+    const kinds = [
+      queueHeaderLabel(null, null).kind,
+      queueHeaderLabel(0, 0).kind,
+      queueHeaderLabel(1, 2).kind,
+    ];
+    expect(new Set(kinds).size).toBe(3);
+  });
+});
+
+describe('celá cesta od odpovede /api/queue po slovo na obrazovke', () => {
+  /** Čo hlavička napíše pre dané telo odpovede. */
+  function labelFor(body: unknown) {
+    const { queue } = parseQueueHeader(body);
+    return queueHeaderLabel(queue === null ? null : queue.done, queue === null ? null : queue.total);
+  }
+
+  it('telo, ktoré nie je objekt (HTML chybovky, prázdna odpoveď)', () => {
+    for (const body of [null, undefined, '<html>502</html>', 42, []]) {
+      expect(labelFor(body).kind, JSON.stringify(body) ?? 'undefined').toBe('unknown');
+    }
+  });
+
+  it('`total` prišlo ako text — 4 480 položiek sa nesmie zmeniť na „prázdna"', () => {
+    const view = labelFor({ queue: { done: 0, total: String(4480), campaigns: 1 } });
+    expect(view.kind).toBe('unknown');
+    expect(view.label.toLowerCase()).not.toContain('prázdn');
+  });
+
+  it('sekcia `queue` v odpovedi celkom chýba', () => {
+    const view = labelFor({ writes: { spentToday: 10, budget: 200, resumeAt: null } });
+    expect(view.kind).toBe('unknown');
+  });
+
+  it('server naozaj povedal nulu → prázdna fronta, a to je v poriadku', () => {
+    expect(labelFor({ queue: { done: 0, total: 0, campaigns: 0 } }).kind).toBe('empty');
+  });
+
+  it('server povedal čísla → zlomok', () => {
+    const view = labelFor({ queue: { done: 45, total: 4480, campaigns: 1 } });
+    expect(view.kind).toBe('running');
+    expect(view.fraction).toBe('45/4 480');
+  });
+});
+
+/* ══════ A to isté nad naozaj vykresleným odkazom, nie len nad modelom ═════ */
+
+describe('vykreslená menovka fronty (renderToStaticMarkup)', () => {
+  const html = (done: number | null, total: number | null) =>
+    renderToStaticMarkup(createElement(QueueLink, { done, total }));
+
+  /**
+   * To, čo používateľ NAOZAJ prečíta. Vysvetlenie v `title` slovo „prázdna
+   * fronta" obsahovať SMIE (práve tým ten rozdiel pomenúva), na povrchu odkazu
+   * pri neznámom stave nesmie padnúť.
+   */
+  const text = (out: string) => out.replace(/<[^>]*>/g, '').trim();
+
+  it('nič sa nevie → na povrchu NIE JE „prázdna" a stav je `unknown`', () => {
+    const out = html(null, null);
+    expect(out).toContain('data-state="unknown"');
+    expect(text(out).toLowerCase()).not.toContain('prázdn');
+    expect(text(out)).toContain('nevieme');
+    expect(text(out)).toContain('—');
+  });
+
+  it('server povedal nulu → „Fronta prázdna" a stav `empty`', () => {
+    const out = html(0, 0);
+    expect(out).toContain('data-state="empty"');
+    expect(text(out)).toBe('Fronta prázdna');
+  });
+
+  it('bežiaca fronta → zlomok v `<b>` a stav `running`', () => {
+    const out = html(3420, 8000);
+    expect(out).toContain('data-state="running"');
+    expect(out).toContain('<b>3 420/8 000</b>');
+    expect(out).toContain('class="hqueue"');
+  });
+
+  it('oba nekladné stavy sú tlmené existujúcim tokenom `hqueue off`', () => {
+    expect(html(null, null)).toContain('class="hqueue off"');
+    expect(html(0, 0)).toContain('class="hqueue off"');
+  });
+
+  it('tri stavy = tri rôzne povrchy, ani dva sa nesmú zliať', () => {
+    const surfaces = [text(html(null, null)), text(html(0, 0)), text(html(1, 2))];
+    expect(new Set(surfaces).size).toBe(3);
   });
 });

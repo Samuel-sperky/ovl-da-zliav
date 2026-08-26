@@ -104,6 +104,7 @@ function sync(patch: Partial<CatalogSyncView> = {}): CatalogSyncView {
     nextBatchAt: '2026-08-12T09:15:00.000Z',
     estimatedFinishAt: '2026-08-14T00:00:00.000Z',
     failedLastTime: false,
+    ipBanned: false,
     ...patch,
   };
 }

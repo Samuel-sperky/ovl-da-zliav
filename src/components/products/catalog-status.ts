@@ -59,6 +59,7 @@ import type { StatusTone } from '@/components/ui/ToneBadge';
 import type { CatalogRowView } from '@/components/products/catalog-api';
 import type { CatalogFilterState } from '@/components/products/catalog-filter';
 import { LOGIC_TIME_ZONE } from '@/lib/domain/dates';
+import { isIpBannedCode } from '@/lib/shop/errors';
 import type { Blocker, BlockerId, BlockerResolution } from '@/lib/status/blockers';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -330,6 +331,19 @@ export interface CatalogStateView {
  * 0"); pilulka preto odpovedá na inú otázku — čo sa s načítaním práve deje.
  * Prázdny katalóg, ktorý sa dopĺňa, a prázdny katalóg, ktorý sa ani nezačal
  * čítať, sú dva rôzne stavy a doteraz vyzerali rovnako.
+ *
+ * ODMIETNUTÁ ADRESA NIE JE „DOPĹŇA SA" (26. 8. 2026)
+ * ─────────────────────────────────────────────────
+ * Ban sa v stave javí ako `waiting: null` (`pause_reason` pri zlyhaní čítania
+ * nikto nenastaví — viď hlavičku `catalogWaitingNote()`), takže pilulka na neho
+ * odpovedala „Katalóg sa dopĺňa" pri neúplnom katalógu a „Načítanie katalógu sa
+ * ešte nezačalo" pri prázdnom. Ani jedno neplatí: dopĺňanie stojí a začalo sa,
+ * len ho shop odmietol. Vlastné slovo pre ban tu NEVZNIKÁ — je to zastavené
+ * načítanie ako každé iné a veta pod pilulkou povie, čím. Dve rôzne slová o tom
+ * istom stave by boli presne to, čo bod 1 hlavičky modulu zakazuje.
+ *
+ * Pri celom (aj obnovovanom) katalógu sa vetva NEUPLATNÍ: „Načítanie katalógu sa
+ * zastavilo" by tvrdilo, že niečo chýba, a nechýba nič.
  */
 export function catalogStateView(status: CatalogStatusView | null): CatalogStateView {
   if (status === null) {
@@ -338,6 +352,9 @@ export function catalogStateView(status: CatalogStatusView | null): CatalogState
 
   const detail = status.percent === null ? null : `${formatCountSk(status.percent)} % katalógu`;
 
+  if (!status.complete && !status.refreshing && isIpBannedCode(status.lastError)) {
+    return { tone: 'attention', label: 'Načítanie katalógu sa zastavilo', detail };
+  }
   if (status.loadedProducts === 0 && status.waiting === null && status.pagesDone === 0) {
     return { tone: 'attention', label: 'Načítanie katalógu sa ešte nezačalo', detail: null };
   }
@@ -371,6 +388,34 @@ export interface CatalogWaitingNote {
 }
 
 /**
+ * Veta pre stav, v ktorom appka od 19. 8. 2026 naozaj je: shop odmieta našu
+ * ADRESU, nie našu požiadavku (kód `ip_banned`).
+ *
+ * Prečo to má vlastnú vetu a nestačí „dávku sa nepodarilo prečítať":
+ *
+ *  · **Tá veta nebola nepravdivá, ale ďalší krok pri nej bol.** „Skúste to
+ *    o chvíľu znova" je pri bane nekonečná slučka — o chvíľu to bude to isté,
+ *    a jediné, čo tým používateľ dosiahne, je ďalšie minuté čítanie. Ďalší krok,
+ *    ktorý nemôže nikdy vyjsť, je horší než žiadny.
+ *  · **Pravda o tomto stave bola do 26. 8. 2026 na obrazovke jedine ako surový
+ *    kód `ip_banned` pod „Technickým detailom"** (`CatalogStatusPanel.tsx`,
+ *    bod 5 jeho hlavičky). Tam je zámerne — práve preto, že to NIE JE veta pre
+ *    človeka. Veta preto musí byť tu.
+ *  · **Objednávková cesta ju má hotovú** (`lib/sales/stop-policy.ts`) a znie
+ *    o tom istom fakte. Vlastné znenie tu vzniká preto, že hovorí o ČÍTANÍ
+ *    KATALÓGU, nie o objednávkach — importovať tú vetu by znamenalo písať
+ *    o predaných kusoch na obrazovke Produkty.
+ *
+ * Príčinu veta NETVRDÍ (P8, bod 3 hlavičky `stop-policy.ts`): appka vie, čo
+ * shop odpovedal, nie prečo. Kód `ip_banned` sa do vety nedostane (I1, K10).
+ */
+export const CATALOG_IP_BAN_NOTE: CatalogWaitingNote = {
+  variant: 'warn',
+  what: 'Eshop odmieta čítanie z tejto IP adresy, takže katalóg zostal tam, kde bol.',
+  nextStep: 'Požiadajte eshop o odblokovanie adresy — opakovaním sa to nezmení.',
+};
+
+/**
  * Prečo sa čaká — LEN pre dva dôvody, o ktorých `blockers.ts` nevie:
  *
  *  · shop odmietol ďalšie čítanie a appka drží pauzu za celý beh,
@@ -380,12 +425,32 @@ export interface CatalogWaitingNote {
  * (`catalog_reads_day_exhausted`, `catalog_reads_minute_exhausted`) a neúplný
  * katalóg tiež (`catalog_incomplete`) — tie sa kreslia z `GET /api/status`
  * a druhá veta o tom istom by sa raz rozišla s prvou.
+ *
+ * Chyba posledného behu má DVE vetvy a rozhodujú o nich DVA RÔZNE POLIA:
+ *
+ *  · odmietnutá adresa sa pozná z `lastError` (`CATALOG_IP_BAN_NOTE`),
+ *  · všetko ostatné z `waiting === 'error'`.
+ *
+ * Nie je to nekonzistencia, je to jediná vetva, ktorá v tomto stave naozaj
+ * dostane slovo. `waiting` skladá `catalogRepo.syncStatus()` z `pause_reason`,
+ * a tú pri zlyhaní čítania nikto nenastaví — `lib/shop/catalog-sync.ts` zapíše
+ * `lastError` a beh ukončí, pauzu nie. Ban sa teda javí ako `waiting: null`
+ * a veta postavená na `waiting` by o ňom mlčala presne tak, ako mlčala doteraz.
+ * `lastError` je pritom čerstvé pole: každý úspešný beh ho prepíše na `null`,
+ * takže neprázdna hodnota znamená „POSLEDNÝ beh skončil takto".
+ *
+ * Ban je zároveň PRVÝ v poradí. Keď shop odmieta adresu, je zbytočné hlásiť
+ * pauzu, rozpočet ani ďalšiu dávku — nič z toho sa neposunie, kým adresa
+ * nie je odblokovaná.
  */
 export function catalogWaitingNote(
   status: CatalogStatusView | null,
   now: Date = new Date(),
 ): CatalogWaitingNote | null {
   if (status === null) return null;
+
+  // Ban sa pozná z KÓDU poslednej chyby, nie z `waiting` — viď hlavičku.
+  if (isIpBannedCode(status.lastError)) return CATALOG_IP_BAN_NOTE;
 
   const resume = clockPhrase(status.nextBatchAt, now);
   const resumeTail = resume === null ? 'o chvíľu' : resume;
@@ -651,8 +716,22 @@ export function catalogEmptyView(opts: {
  * Odpoveď na kliknutie musí byť VIDIEŤ — aj keď sa nič nenačítalo. Tlačidlo,
  * po ktorom sa nič nestane a nič sa nepovie, je horšie než žiadne tlačidlo:
  * používateľ ho stlačí päťkrát a myslí si, že appka zamrzla.
+ *
+ * `lastError` je KÓD poslednej chyby zo stavu katalógu (`CatalogStatusView`),
+ * nie z hlásenia o behu. Prichádza samostatným parametrom, lebo `CatalogRunView`
+ * ho nenesie — `lastRun` z route hovorí len `outcome`, počty a `resumeAt`, a tvar
+ * tej odpovede sa kvôli jednej vete nemení. Volajúci má oboje po ruke
+ * (`CatalogStatusPanel.tsx`), takže sa nič nedopočítava.
+ *
+ * Bez neho posielal `outcome: 'failed'` používateľa skúšať to o chvíľu znova aj
+ * pri odmietnutej adrese, teda do slučky, ktorá nemôže vyjsť (viď
+ * `CATALOG_IP_BAN_NOTE`).
  */
-export function runOutcomeNote(run: CatalogRunView, now: Date = new Date()): CatalogWaitingNote {
+export function runOutcomeNote(
+  run: CatalogRunView,
+  now: Date = new Date(),
+  lastError: string | null = null,
+): CatalogWaitingNote {
   const resume = clockPhrase(run.resumeAt, now);
   const resumeTail = resume === null ? 'o chvíľu' : resume;
 
@@ -703,6 +782,7 @@ export function runOutcomeNote(run: CatalogRunView, now: Date = new Date()): Cat
         nextStep: `Pokračuje sa ${resumeTail}, netreba robiť nič.`,
       };
     case 'failed':
+      if (isIpBannedCode(lastError)) return CATALOG_IP_BAN_NOTE;
       return {
         variant: 'warn',
         what: 'Dávku sa nepodarilo prečítať a katalóg zostal tam, kde bol.',

@@ -46,6 +46,7 @@ import {
   SELECTION_BLOCKERS,
   catalogEmptyView,
   catalogStateView,
+  CATALOG_IP_BAN_NOTE,
   catalogWaitingNote,
   clockPhrase,
   dropBlockers,
@@ -57,6 +58,7 @@ import {
   pickBlockers,
   productReasons,
   rowReason,
+  runOutcomeNote,
   toRunView,
 } from '@/components/products/catalog-status';
 import { collectOperationBlockers, PILOT_MAX_PRODUCTS } from '@/lib/status/blockers';
@@ -227,6 +229,88 @@ describe('V10 — karta stavu katalógu', () => {
     expect(catalogWaitingNote({ ...STATUS, waiting: 'daily_budget' }, NOW)).toBeNull();
     expect(catalogWaitingNote({ ...STATUS, waiting: 'rate_limited' }, NOW)?.variant).toBe('info');
     expect(catalogWaitingNote({ ...STATUS, waiting: 'error' }, NOW)?.variant).toBe('warn');
+  });
+
+  /**
+   * ĎALŠÍ KROK, KTORÝ NEMÔŽE NIKDY VYJSŤ, JE HORŠÍ NEŽ ŽIADNY.
+   *
+   * Shop odmieta našu adresu od 19. 8. 2026. Karta na to mala dve vety a obe
+   * posielali používateľa čakať („Appka to skúsi sama o 12:20", „Skúste to
+   * o chvíľu znova") — o chvíľu to bude to isté. Pravda o tom stave stála na
+   * obrazovke jedine ako surový kód pod Technickým detailom.
+   *
+   * Meria sa VÝSTUP a meria sa tvrdením o SLUČKE, nie o znení: veta pri bane
+   * nesmie ponúkať opakovanie ani čas ďalšieho pokusu, a musí menovať to jediné,
+   * čo stav odblokuje. Preformulovanie test prežije, návrat slučky nie.
+   */
+  it('odmietnutá adresa nedostane radu „skúste to o chvíľu znova"', () => {
+    // POZOR na tvar stavu: `waiting` je pri odmietnutom čítaní `null`, nie
+    // `'error'` — `pause_reason` pri zlyhaní nikto nenastaví, kód chyby áno.
+    // Veta postavená na `waiting` by o bane mlčala presne tak, ako mlčala do
+    // 26. 8. 2026, a test s `waiting: 'error'` by to nechal prejsť.
+    const banned = catalogWaitingNote({ ...STATUS, lastError: 'ip_banned' }, NOW);
+    const other = catalogWaitingNote({ ...STATUS, waiting: 'error', lastError: 'shop_5xx' }, NOW);
+
+    expect(banned).not.toBeNull();
+    expect(banned?.variant).toBe('warn');
+    // (a) nie je to tá istá veta ako pri hociktorej inej chybe behu,
+    expect(banned?.what).not.toBe(other?.what);
+    expect(banned?.nextStep).not.toBe(other?.nextStep);
+    // (b) neponúka opakovanie ani čas ďalšieho pokusu — to je tá slučka,
+    expect(banned?.nextStep).not.toContain('znova');
+    expect(banned?.nextStep).not.toContain('skúsi');
+    expect(banned?.nextStep).not.toContain('Skúste');
+    expect(banned?.nextStep).not.toContain('12:20');
+    // (c) menuje adresu aj to, že ju odmieta eshop — a nie surovým kódom (I1).
+    expect(banned?.what).toContain('odmieta');
+    expect(banned?.what).toContain('adres');
+    expect(banned?.nextStep).toContain('odblokovanie');
+    expect(`${banned?.what} ${banned?.nextStep}`).not.toContain('ip_banned');
+
+    // Ban prebíja aj pauzu a rozpočet: kým adresa nie je odblokovaná, žiadny
+    // z tých dôvodov nie je ten, ktorý drží katalóg na mieste.
+    expect(catalogWaitingNote({ ...STATUS, waiting: 'rate_limited', lastError: 'ip_banned' }, NOW)).toEqual(
+      CATALOG_IP_BAN_NOTE,
+    );
+    expect(catalogWaitingNote({ ...STATUS, waiting: 'error', lastError: 'ip_banned' }, NOW)).toEqual(
+      CATALOG_IP_BAN_NOTE,
+    );
+
+    // Pilulka nad vetou si s ňou nesmie protirečiť: „dopĺňa sa" pri odmietnutej
+    // adrese neplatí a pri prázdnom katalógu neplatí ani „ešte sa nezačalo".
+    expect(catalogStateView({ ...STATUS, lastError: 'ip_banned' }).label).not.toContain('dopĺňa');
+    expect(catalogStateView({ ...STATUS, lastError: 'ip_banned' }).tone).toBe('attention');
+    expect(
+      catalogStateView({ ...STATUS, loadedProducts: 0, pagesDone: 0, lastError: 'ip_banned' }).label,
+    ).not.toContain('nezačalo');
+    // Celý katalóg sa tým NEPREHLÁSI za neúplný — nechýba nič.
+    expect(catalogStateView({ ...COMPLETE, lastError: 'ip_banned' }).label).toContain('celý');
+    expect(catalogStateView({ ...REFRESHING, lastError: 'ip_banned' }).label).toContain('celý');
+
+    // Tá istá veta patrí aj odpovedi na kliknutie — inak si karta protirečí.
+    const run = runOutcomeNote({ outcome: 'failed', pages: 0, products: 0, resumeAt: null }, NOW, 'ip_banned');
+    expect(run).toEqual(CATALOG_IP_BAN_NOTE);
+    const runOther = runOutcomeNote({ outcome: 'failed', pages: 0, products: 0, resumeAt: null }, NOW, 'shop_5xx');
+    expect(runOther.nextStep).toContain('znova');
+  });
+
+  it('karta pri odmietnutej adrese nekreslí ani jednu radu na počkanie', () => {
+    const html = renderToStaticMarkup(
+      createElement(CatalogStatusPanel, {
+        status: { ...STATUS, lastError: 'ip_banned' },
+        failed: false,
+        blockers: [],
+        lastRun: { outcome: 'failed', pages: 0, products: 0, resumeAt: null },
+        running: false,
+        onLoadBatch: () => {},
+      }),
+    );
+    expect(html).toContain(CATALOG_IP_BAN_NOTE.nextStep);
+    expect(html).not.toContain('Skúste to o chvíľu znova');
+    expect(html).not.toContain('Appka to skúsi sama');
+    // Kód zostáva tam, kam patrí — pod rozklikom, nie vo vete (P6).
+    expect(html).toContain('ip_banned');
+    expect(html).toContain('Technický detail');
   });
 
   it('karta vypíše obe čísla, rozpočet čítaní aj cestu k ďalšej dávke', () => {
