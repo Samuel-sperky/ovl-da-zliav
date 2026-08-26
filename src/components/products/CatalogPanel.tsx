@@ -141,6 +141,8 @@ import {
 } from '@/components/products/catalog-status';
 import type { SavedFilter } from '@/components/products/saved-filters';
 import { readSavedFilters, removeFilter, saveFilter } from '@/components/products/saved-filters';
+import SoldCoverageNote from '@/components/products/SoldCoverageNote';
+import { useSoldCoverage } from '@/components/products/sold-coverage';
 import EmptyState from '@/components/ui/EmptyState';
 import Note from '@/components/ui/Note';
 import { LOGIC_TIME_ZONE } from '@/lib/domain/dates';
@@ -215,6 +217,17 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   /** Vynúti nové načítanie po chybe bez toho, aby sa dotkol filtra. */
   const [reloadTick, setReloadTick] = useState(0);
+
+  /**
+   * ZA KOĽKO DNÍ SÚ OBJEDNÁVKY NAOZAJ STIAHNUTÉ (KONTRAKT-PREDAJNOST P3).
+   *
+   * Stĺpec „Predané 180 d" sa menuje podľa naklikaného okna, nie podľa
+   * zmeraných dní — a chýbajúca predajnosť príde z API ako nula. Bez tejto
+   * vety by teda „0 predaných za 180 dní" vyzeralo ako meraný fakt o pol roku
+   * aj vtedy, keď má appka stiahnuté dva dni. Je to to isté čítanie, z ktorého
+   * kreslí graf predaja na Prehľade.
+   */
+  const soldCoverage = useSoldCoverage();
 
   /* Stav appky (prekážky, strop rozsahu) a stav katalógu. Oba sú lacné GETy. */
   const [status, setStatus] = useState<StatusPayload | null>(null);
@@ -812,6 +825,16 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
           <div className="fresh" data-testid="catalog-data-as-of">
             {dataAsOfSentence(view === null ? null : view.dataAsOf)}
           </div>
+
+          {/* Za koľko dní sú objednávky naozaj stiahnuté. Stojí nad
+              tabuľkou, teda tam, kde sa podľa predaných kusov vyberá — nie
+              v nápovede a nie v Nastaveniach. Keď je pokrytie plné, veta
+              zmizne úplne. Riadok „Dáta k" hovorí o KATALÓGU, toto o
+              OBJEDNÁVKACH; sú to dve rôzne merania a jedno druhé nekryje. */}
+          <SoldCoverageNote
+            coverage={soldCoverage}
+            windowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
+          />
 
           {/* Výsledok posledného dohľadania — pri mieste, kde vzniklo. Sú to
               MERANÉ čísla (koľko riadkov pribudlo, koľko sa nestihlo), takže

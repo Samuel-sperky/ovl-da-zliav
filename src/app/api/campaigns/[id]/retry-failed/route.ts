@@ -37,7 +37,22 @@
  */
 import { z } from 'zod';
 
-import type { CampaignItemRecord, CampaignRecord, CampaignStatus, DateOnly, ItemStatus } from '@/contracts';
+import type {
+  CampaignItemRecord,
+  CampaignRecord,
+  CampaignStatus,
+  DateOnly,
+  DiscountPercent,
+  ItemStatus,
+} from '@/contracts';
+/**
+ * Položka rodiča tak, ako ju POST potrebuje. `RoutesItemsRepo` je zdieľaný typ
+ * starší než K3 a `percent` nepomenúva, hoci produkčný `listByCampaign()` vracia
+ * `CampaignItemRecordV3`, ktorý ho má (`campaign-items.repo.ts:120` o sebe
+ * hovorí, že je to iba PRIDANÉ pole). Voliteľné je tu zámerne: staré fakes
+ * v testoch percento na položke nenesú a fallback na hlavičku je fail-closed.
+ */
+type RetryItem = CampaignItemRecord & { percent?: DiscountPercent };
 
 import { maxDateOnly } from '@/lib/domain/dates';
 import { conflict } from '@/lib/http/errors';
@@ -215,11 +230,11 @@ export function retrySentence(
 async function loadPlan(
   d: ResolvedRoutesDeps,
   campaignId: number,
-): Promise<{ campaign: CampaignRecord; plan: RetryPlan; today: DateOnly }> {
+): Promise<{ campaign: CampaignRecord; plan: RetryPlan; today: DateOnly; items: RetryItem[] }> {
   const campaign = await loadCampaignOr404(d, campaignId);
   const today = todayOf(d);
   const items = await d.campaignItemsRepo.listByCampaign(campaign.id);
-  return { campaign, plan: buildRetryPlan(campaign, items, today), today };
+  return { campaign, plan: buildRetryPlan(campaign, items, today), today, items };
 }
 
 /* ══════════════════════════════ 4. GET ════════════════════════════════════ */
@@ -305,7 +320,7 @@ export function createRetryFailedPost(
       params: idParamSchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
-          const { campaign: parent, plan, today } = await loadPlan(d, ctx.params.id);
+          const { campaign: parent, plan, today, items } = await loadPlan(d, ctx.params.id);
 
           /* Prekážky sa hlásia tou istou vetou, akú vráti `GET` — používateľ
            * nesmie dostať iné vysvetlenie podľa toho, ktorou cestou prišiel. */
@@ -326,6 +341,27 @@ export function createRetryFailedPost(
             );
           }
 
+          /*
+           * K3 — percentá pásiem z RIADKOV RODIČA, nie z tokenu (L2, 26. 8. 2026).
+           *
+           * Prvá oprava tohto nálezu brala `percents` z overených claims. Bola
+           * vyvrátená: `buildPreview` ich do tokenu vloží len pri neprázdnych
+           * `tiers`, a obrazovka opravy žiadne neposielala — takže sa čítalo
+           * pole, ktoré tam nikdy nebolo, a položky dostali hlavičkové percento,
+           * teda najvyššie pásmo. Teraz ich náhľad do tokenu dostane (server ich
+           * dopĺňa v `campaigns/preview`) a POST si tú istú mapu poskladá ZNOVA,
+           * nezávisle z DB — takže sa token a databáza musia zhodnúť, inak hash
+           * nesedí a nezapíše sa nič. To I3 utvrdzuje, nie oslabuje.
+           */
+          const percents = Object.fromEntries(
+            items
+              .filter((item) => plan.productIds.includes(item.productId))
+              .map((item): [string, DiscountPercent] => [
+                String(item.productId),
+                item.percent ?? parent.percent,
+              ]),
+          );
+
           /* NOVÝ token nad zúženou sadou; `from` v minulosti = dnešok (D25). */
           const claims = await verifyPreviewTokenFor(
             d,
@@ -336,12 +372,21 @@ export function createRetryFailedPost(
               percent: parent.percent,
               from: plan.effectiveFrom,
               to: plan.effectiveTo,
+              percents,
             },
             ctx.claims.sub,
           );
 
+          /* K3 — percentá pásiem nesie OVERENÝ token, nie telo požiadavky.
+           * Bez ich podania by položky dostali hlavičkové percento kampane a
+           * `assertConfirmed()` by hash prepočítaný z riadkov už nedopočítal
+           * k tomu, ktorý podpísal dry-run: opravná zľava by zostala visieť ako
+           * `draft`, jednorazový token by bol spálený a do shopu by nešlo nič
+           * (I3, K3). `POST /api/campaigns` ich podáva rovnako. */
+
           const record = await insertConfirmedCampaign(d, {
             claims,
+            percents,
             name: `${parent.name} — oprava`,
             kind: 'retry',
             mode: 'eager',

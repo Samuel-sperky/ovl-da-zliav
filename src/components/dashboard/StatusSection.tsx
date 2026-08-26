@@ -60,6 +60,12 @@
  *    zápis, kľúč, rozpočet zápisov a počty katalógu. Dlaždica „Dnes
  *    zapísaných" je jediný priesečník a je tu zámerne: bez nej sa nedá
  *    prečítať, či fronta dnes ešte prejde. Počty katalógu sem NEPATRIA.
+ * 9. **Dominanta hovorí SPRACOVANÉ, nie zapísané.** Číslo v nej je
+ *    `progress.done`, teda `total − pending` — položky, ktoré fronta vybavila,
+ *    vrátane zlyhaných a neistých. „Zapísaných" by z toho spravilo tvrdenie
+ *    o ostrom eshope, ktoré appka nezmerala (ARCHITEKTURA §3.2). Pokojný stav
+ *    to isté číslo označuje ako „Spracované položky" a tie dva popisy sa
+ *    nesmú rozísť — je to jedno číslo v jednej sekcii.
  *
  * Vlastník: V9; prestavba na čísla C4 (šprint 20, vlna 3).
  */
@@ -239,10 +245,21 @@ function RunningBody({
 
   return (
     <div data-testid="queue-running">
+      {/*
+        Popis dominanty hovorí SPRACOVANÉ, nie zapísané. `progress.done` je
+        `total − pending` (`app/api/queue/route.ts`), teda položky, ktoré fronta
+        vybavila — vrátane `failed`, `uncertain`, `skipped` a `interrupted`.
+        Do 26. 8. 2026 tu stálo „zapísaných položiek", takže najväčšie číslo
+        Prehľadu tvrdilo o dvanástich zlyhaných položkách, že sú v shope; tá
+        istá sekcia pritom to isté číslo označuje ako „Spracované položky"
+        (pokojný stav) a `ARCHITEKTURA.md §3.2` to hovorí doslova: „Pruh počíta
+        spracované, nie úspešné." Koľko z nich naozaj vyšlo, je príznak
+        „12 sa nepodarilo" a detail zľavy, nie dominanta.
+      */}
       <Dominant
         value={formatCountSk(progress.done)}
         of={formatCountSk(progress.total)}
-        caption="zapísaných položiek"
+        caption="spracovaných položiek"
       />
 
       <div className="prog-meta">

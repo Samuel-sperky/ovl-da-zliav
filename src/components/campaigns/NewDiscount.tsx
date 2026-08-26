@@ -50,6 +50,11 @@
  *     `/api/queue` (presne, z položiek) aj zoznam zliav (odhadom, z počítadiel).
  *     Zmieruje ich `resolveAhead()` a rozklik prizná, ktorý zdroj to bol.
  *     Keď sa nedá prečítať ani jeden, dátum dobehnutia sa NEDOPOČÍTA (P7).
+ *     „Jedno číslo" platí aj cez potvrdenie: odhad tu je nad `aheadPending +
+ *     itemsCount`, a `POST /api/campaigns` počíta ten istý súčet z celej fronty
+ *     (`readQueuePending()`), takže karta „Zaradené do fronty" nevypíše skorší
+ *     dátum, než aký ukázala táto obrazovka. Kto zmení jednu stranu, musí
+ *     druhú — inak sa dva dátumy tej istej fronty rozídu.
  *  7. **Nič sa neobnovuje samo** (kontrakt UI, bod 4). Čísla sa načítajú pri
  *     otvorení a potom vždy, keď o to požiada tlačidlo Obnoviť v stavovom
  *     pruhu — obrazovka je registrovaná cez `useRefreshable()` a vlastné
@@ -127,6 +132,7 @@ import {
   previewDiscount,
   scopeLimits,
   searchCatalog,
+  type ApiError,
   type BudgetView,
   type CreateResult,
   type KeyMetaView,
@@ -142,6 +148,8 @@ import {
   catalogSearchQuery,
   type CatalogFilterState,
 } from '@/components/products/catalog-filter';
+import SoldCoverageNote from '@/components/products/SoldCoverageNote';
+import { useSoldCoverage } from '@/components/products/sold-coverage';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
 import { collectOperationBlockers } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
@@ -218,6 +226,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [status, setStatus] = useState<StatusPayload | null>(null);
   /** Živý stav fronty: presný počet čakajúcich položiek a spotreba rozpočtu. */
   const [queue, setQueue] = useState<QueueSnapshotView | null>(null);
+  /**
+   * Za koľko dní má appka objednávky naozaj stiahnuté (KONTRAKT-PREDAJNOST P3).
+   * Pravidlá pásiem
+   * hovoria „0 predaných za 180 dní" bez ohľadu na to, koľko dní sa zmeralo —
+   * a podľa nich sa tu podpisuje zápis do ostrého shopu.
+   */
+  const soldCoverage = useSoldCoverage();
 
   const [name, setName] = useState('');
   const [percents, setPercents] = useState<Record<SoldBucketKey, number>>({
@@ -240,7 +255,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [typed, setTyped] = useState('');
   // Obrazovka sa otvára do načítania — nie do prázdneho výberu.
   const [busy, setBusy] = useState<Busy>('loading');
-  const [error, setError] = useState<string | null>(null);
+  // Celá obálka chyby, nie len jej správa: karta rozhodnutia prekladá vetu
+  // servera podľa KÓDU (K10) a bez kódu by ju vykreslila verbatim.
+  const [error, setError] = useState<ApiError | null>(null);
   const [created, setCreated] = useState<CreateResult | null>(null);
 
   const [sudoUntil, setSudoUntil] = useState<string | null>(null);
@@ -613,7 +630,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     if (!res.ok) {
       setPreview(null);
       setPreviewSig(null);
-      setError(res.error.message);
+      setError(res.error);
       return;
     }
     setPreview(res.data);
@@ -654,7 +671,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       // Token je jednorazový — po neúspechu sa musí skúška zopakovať (I3).
       setPreview(null);
       setPreviewSig(null);
-      setError(res.error.message);
+      setError(res.error);
       return;
     }
     setCreated(res.data);
@@ -705,11 +722,16 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
           <section className="sec" data-testid="new-discount-selection">
             <div className="sec-h">
               <h2>Výber produktov</h2>
+              {/* `.chip.on` sa od `.chip` líši len pozadím, obrysom a farbou
+                  textu. Ktorý zdroj výberu práve platí, preto bez
+                  `aria-pressed` nie je čím prečítať. */}
               <div className="act">
                 <button
                   type="button"
                   className={source === 'filter' ? 'chip on' : 'chip'}
+                  aria-pressed={source === 'filter'}
                   onClick={() => setSource('filter')}
+                  data-testid="source-filter"
                 >
                   Z filtra
                 </button>
@@ -717,7 +739,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                   <button
                     type="button"
                     className={source === 'products' ? 'chip on' : 'chip'}
+                    aria-pressed={source === 'products'}
                     onClick={() => setSource('products')}
+                    data-testid="source-products"
                   >
                     Z označených{' '}
                     <span className="c">{formatCountSk((initial.productIds ?? []).length)}</span>
@@ -740,12 +764,21 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               <span className="lvl-3" style={{ marginLeft: '8px' }}>
                 Obdobie
               </span>
-              <span className="seg">
+              {/*
+               * `.seg button.on` sa od nevybraného líši VÝHRADNE pozadím
+               * a farbou textu (`globals.css`). Bez `aria-pressed` je teda
+               * zvolené okno stav oznámený len farbou — presne to, čo P3
+               * zakazuje. Súrodenec „Obdobie" vedľa je len text, takže rolu
+               * a meno nesie skupina; bez roly by `aria-label` na `<span>`
+               * čítačka zahodila.
+               */}
+              <span className="seg" role="group" aria-label="Za koľko dní sa počítajú predané kusy">
                 {SOLD_WINDOWS.map((days) => (
                   <button
                     key={days}
                     type="button"
                     className={filter.soldWindowDays === days ? 'on' : undefined}
+                    aria-pressed={filter.soldWindowDays === days}
                     onClick={() => setFilter({ ...filter, soldWindowDays: days })}
                     data-testid={`window-${days}`}
                   >
@@ -878,6 +911,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               </div>
 
               <>
+                {/* Pravidlo pásma („0 predaných za 180 dní") znie ako meraný
+                    fakt o pol roku. Príkaz na zápis do ostrého shopu sa
+                    podpisuje TU, takže tu musí stáť aj to, za koľko dní sú
+                    objednávky naozaj stiahnuté. Pri plnom pokrytí veta
+                    zmizne. */}
+                <SoldCoverageNote coverage={soldCoverage} windowDays={filter.soldWindowDays} />
+
                 <table className={styles.tiers}>
                   <thead>
                     <tr>

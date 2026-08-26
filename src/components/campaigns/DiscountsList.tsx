@@ -178,8 +178,8 @@ export function percentHeadline(
  * Zastavenie fronty. Dva kroky, nikdy jeden klik.
  *
  * Zastavenie sa týka VÝHRADNE toho, čo ešte nebolo zapísané. Už zapísané zľavy
- * v eshope zostávajú — odstrániť ich vie iba akcia „Zrušiť zľavu" na detaile,
- * a to je iné rozhodnutie s vlastným potvrdením.
+ * v eshope zostávajú a appka ich nezruší (I7) — skončia samy dňom konca zľavy.
+ * Detail to o zľave, ktorá ešte beží, aj napíše (`expiryNoteText()`).
  */
 function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
   const [note, setNote] = useState<string | null>(null);

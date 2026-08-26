@@ -64,6 +64,7 @@ export type MockFailureKind =
   | 'server_error' // 500 {error:"request_failed"}
   | 'unauthorized' // 401 {error:"unauthorized"}
   | 'forbidden' // 403 {error:"forbidden"}
+  | 'ip_banned' // 403 {error:"ip_banned"} — odmietnutá ADRESA, nie kľúč (X1)
   | 'invalid_input' // 400 {error:"invalid_input"}
   | 'not_found' // 404 {ok:false,errors:["not found"]}
   | 'invalid_dates' // 400 {ok:false,errors:["invalid_dates"]}
@@ -177,6 +178,12 @@ export class MockShopState {
   rateLimitRetryAfter: number | null = null;
   /** Trvalý 403 `forbidden` na zápise — `forbidden()`. */
   forbiddenAll = false;
+
+  /** Trvalý 403 `ip_banned` — `ipBanned()`. */
+  ipBannedAll = false;
+
+  /** `true` = ban zasiahne aj ČÍTANIE, ako skutočný ban. */
+  ipBanReads = false;
   /** Od tejto (1-based) požiadavky vracia mock 401 — `unauthorizedAfter()`. */
   unauthorizedAfterN: number | null = null;
   /** Trvalý nesmyselný tvar s HTTP 200 — `returnGarbage()`. */
@@ -289,6 +296,21 @@ export class MockShopState {
     return this;
   }
 
+  /**
+   * Trvalý 403 `ip_banned` — shop odmieta našu ADRESU, nie kľúč.
+   *
+   * Je to iný stav než `forbidden()` a rozdiel je celý zmysel tohto prepínača:
+   * shop tento kód vracia aj na volanie BEZ kľúča, takže z neho NESMIE vzniknúť
+   * wipe kľúča. Zmerané na ostrom shope 24. 8. 2026.
+   */
+  ipBanned(enabled = true, opts: { reads?: boolean } = {}): this {
+    this.ipBannedAll = enabled;
+    // `reads: true` = ban platí na VŠETKO, ako v skutočnosti. Default je len
+    // zápis, aby sa dala zmerať zápisová vetva (viď komentár nižšie).
+    this.ipBanReads = opts.reads === true;
+    return this;
+  }
+
   /** Od (n+1)-tej požiadavky vracia mock 401 `unauthorized` (D51, TTL/revoke). */
   unauthorizedAfter(n: number): this {
     this.unauthorizedAfterN = Math.max(0, n);
@@ -335,6 +357,8 @@ export class MockShopState {
     this.delayMs = 0;
     this.rateLimitRetryAfter = null;
     this.forbiddenAll = false;
+    this.ipBannedAll = false;
+    this.ipBanReads = false;
     this.unauthorizedAfterN = null;
     this.garbageAll = false;
     this.hangWrites = false;
@@ -369,6 +393,21 @@ export class MockShopState {
     }
     if (this.unauthorizedAfterN !== null && kindOf.seq > this.unauthorizedAfterN) {
       return { kind: 'unauthorized' };
+    }
+    if (this.ipBannedAll && (this.ipBanReads || kindOf.isWrite)) {
+      /*
+       * ÚMYSELNE len na ZÁPISE, hoci skutočný ban platí na všetko.
+       *
+       * Dôvod je v tom, čo sa testuje: nebezpečná cesta je tá, kde `ip_banned`
+       * dorazí NA ZÁPISE — tam ho executor do 25. 8. 2026 zamieňal za odmietnutý
+       * kľúč a kľúč zmazal. Keď ban zasiahne už predzápisový GET (D39), beh
+       * skončí v generickej vetve zlyhania, ktorá sa kľúča NEDOTÝKA, takže
+       * o kľúč sa nepríde — len dôvod je menej konkrétny.
+       *
+       * Zapnúť ho aj na čítanie by znamenalo, že sa k zápisovej vetve nikdy
+       * nedostaneme a test by meral iný stav, než ktorý ho vyvolal.
+       */
+      return { kind: 'ip_banned' };
     }
     if (this.forbiddenAll && kindOf.isWrite) {
       return { kind: 'forbidden' };

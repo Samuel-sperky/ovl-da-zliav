@@ -151,6 +151,15 @@ export interface KeyMetaView {
    */
   verifyNote?: string | null;
   /**
+   * Má kľúč oprávnenie `product:read`? `null` = NEVIEME (kľúč sa neoveril),
+   * chýbajúce pole = staršia odpoveď, čo znamená to isté. Server to posiela
+   * z `scopeReport()` už dnes; obrazovka to dovtedy nečítala.
+   *
+   * Kreslí to VÝHRADNE `LockedFeatures` (kontrakt UI, bod 18) — a v troch
+   * stavoch, nie v dvoch: „nevieme" sa nikdy nesmie stať „nemá".
+   */
+  productRead?: boolean | null;
+  /**
    * Vyzerá to, že v oboch slotoch je ten istý kľúč? Porovnáva sa `last4`, takže
    * `true` je domnienka, nie fakt — a preto sa to menuje `looksLike…`.
    * `null` = jeden zo slotov je prázdny, niet čo porovnávať.
@@ -242,8 +251,9 @@ export const putDomain = (domain: string, password: string) =>
 
 export const testConnection = () => postJson<CanaryView>('/api/settings/test-connection');
 
-export const putEagerWriteDefault = (enabled: boolean) =>
-  sendJson<{ eagerWriteDefault: boolean }>('/api/settings/eager-write-default', 'PUT', { enabled });
+/* `PUT /api/settings/eager-write-default` tu ZÁMERNE nemá klienta: predvoľbu
+   `eagerWriteDefault` nečíta žiadna cesta zápisu, takže obrazovka ju neponúka.
+   Keď ju formulár novej zľavy začne čítať (D22), klient sa vráti sem. */
 
 /** Odhlásenie — session cookie ruší server, klient sa potom prekreslí. */
 export const logout = () => postJson<Record<string, never>>('/api/auth/logout');

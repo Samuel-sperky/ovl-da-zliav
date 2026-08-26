@@ -45,6 +45,12 @@
  * 5. **Kód chyby žije pod „Technickým detailom" (P6).** Na povrch nepatrí a
  *    obsah odpovede shopu sa doň nedostane ani z tade — route posiela KÓD (I1).
  *
+ *    Že tam kód patrí, ale VETA o tom stave nie, sa 26. 8. 2026 ukázalo ako dve
+ *    rôzne veci: `ip_banned` bolo pod Technickým detailom jediné miesto na celej
+ *    obrazovke, kde stála pravda o tom, prečo sa katalóg nedopĺňa — a nad ním
+ *    stálo „Skúste to o chvíľu znova". Kód zostal, kde bol; vetu k nemu píše
+ *    `catalog-status.ts` (`CATALOG_IP_BAN_NOTE`) a karta ju kreslí ako každú inú.
+ *
  * Vlastník: V10.
  */
 import BlockerNotes from '@/components/products/BlockerNotes';
@@ -108,7 +114,9 @@ export function CatalogStatusPanel({
   const nextBatch = nextBatchTile(status);
   const finish = finishTile(status);
   const waiting = catalogWaitingNote(status);
-  const run = lastRun === null ? null : runOutcomeNote(lastRun);
+  // Kód poslednej chyby drží STAV, nie hlásenie o behu — bez neho by veta na
+  // odmietnutú adresu ponúkla „skúste to o chvíľu znova", čo nemôže vyjsť.
+  const run = lastRun === null ? null : runOutcomeNote(lastRun, new Date(), status?.lastError ?? null);
   const panelBlockers = dropBlockers(
     pickBlockers(blockers, CATALOG_PANEL_BLOCKERS),
     SAID_BY_THE_CARD,

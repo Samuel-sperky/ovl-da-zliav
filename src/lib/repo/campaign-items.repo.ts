@@ -23,6 +23,10 @@
  *    nezrýchlia a rozbijú poradie chýb.
  *  - **K2** — `nextPending()` je vstup fronty: zoberie ďalších N položiek
  *    podľa `position`, nie celú kampaň do pamäte.
+ *  - **K2** — `listForWrite()` je sada pre ZÁPIS: tie isté riadky ako
+ *    `listByCampaign()`, ale bez `sent_payload` a `raw_response`. Executor tie
+ *    dva stĺpce nikdy nečíta a hash potvrdenia (K4) potrebuje celú sadu, takže
+ *    sa šetria STĹPCE, nie riadky.
  *
  * Vlastník: V4.
  */
@@ -55,14 +59,26 @@ export const MAX_ITEMS_PER_CAMPAIGN = 10_000;
 
 /* ─────────────────────────────────── SQL ───────────────────────────────── */
 
-const COLUMNS =
+/**
+ * Stĺpce položky BEZ dvoch najťažších — `sent_payload` a `raw_response`.
+ * Viď `listForWrite()`: kto ich nečíta, nemá si ich čím ťahať.
+ */
+const COLUMNS_FOR_WRITE =
   'id, campaign_id, product_id, percent, position, status, attempt_count, name_at_write, ' +
   'price_at_preview, price_at_write, price_mismatch, has_attributes, ' +
   'reduction_unverifiable, request_id, http_status, error_code, error_message, ' +
-  'sent_payload, raw_response, started_at, finished_at';
+  'started_at, finished_at';
+
+/** Celý riadok. Jeden zdroj pravdy so `COLUMNS_FOR_WRITE`, aby sa nerozišli. */
+const COLUMNS = `${COLUMNS_FOR_WRITE}, sent_payload, raw_response`;
 
 const SQL_LIST =
   `SELECT ${COLUMNS} FROM campaign_items WHERE campaign_id = ? ORDER BY position ASC`;
+
+/** K2: celá sada pre zápis, ale bez blobov (`listForWrite()`). */
+const SQL_LIST_FOR_WRITE =
+  `SELECT ${COLUMNS_FOR_WRITE} FROM campaign_items WHERE campaign_id = ? ` +
+  'ORDER BY position ASC';
 
 const SQL_LIST_PAGE =
   `SELECT ${COLUMNS} FROM campaign_items WHERE campaign_id = ? ` +
@@ -109,6 +125,13 @@ export interface CampaignItemRecordV3 extends CampaignItemRecord {
   /** Percento rozhodnuté pri POTVRDENÍ, nie pri zápise (K3, I9: 1–30). */
   percent: DiscountPercent;
 }
+
+/**
+ * Položka bez dvoch blobov — návrat `listForWrite()`. `sentPayload`
+ * a `rawResponse` tu nechýbajú omylom: keby tu boli s hodnotou `null`,
+ * volajúci by nevedel, či je stĺpec prázdny, alebo len nenačítaný.
+ */
+export type CampaignItemWriteRow = Omit<CampaignItemRecordV3, 'sentPayload' | 'rawResponse'>;
 
 /** Vstup `createMany()` — `percent` je povinný, DB ho nemá ako doplniť (K3). */
 export interface NewCampaignItem {
@@ -174,6 +197,9 @@ interface ItemRow {
   finished_at: Date | string | null;
 }
 
+/** Riadok bez blobov — presne to, čo vracia `SQL_LIST_FOR_WRITE`. */
+type WriteItemRow = Omit<ItemRow, 'sent_payload' | 'raw_response'>;
+
 const toDate = (value: Date | string): Date => (value instanceof Date ? value : new Date(value));
 const toDateOrNull = (value: Date | string | null): Date | null =>
   value == null ? null : toDate(value);
@@ -189,7 +215,7 @@ function parseJsonColumn(value: unknown): unknown {
   }
 }
 
-function mapRow(row: ItemRow): CampaignItemRecordV3 {
+function mapWriteRow(row: WriteItemRow): CampaignItemWriteRow {
   return {
     id: Number(row.id),
     campaignId: Number(row.campaign_id),
@@ -208,10 +234,16 @@ function mapRow(row: ItemRow): CampaignItemRecordV3 {
     httpStatus: row.http_status == null ? null : Number(row.http_status),
     errorCode: row.error_code,
     errorMessage: row.error_message,
-    sentPayload: parseJsonColumn(row.sent_payload),
-    rawResponse: parseJsonColumn(row.raw_response),
     startedAt: toDateOrNull(row.started_at),
     finishedAt: toDateOrNull(row.finished_at),
+  };
+}
+
+function mapRow(row: ItemRow): CampaignItemRecordV3 {
+  return {
+    ...mapWriteRow(row),
+    sentPayload: parseJsonColumn(row.sent_payload),
+    rawResponse: parseJsonColumn(row.raw_response),
   };
 }
 
@@ -277,7 +309,22 @@ export interface CampaignItemsRepoExt extends CampaignItemsRepo {
     offset: number,
     conn?: Queryable,
   ): Promise<CampaignItemRecordV3[]>;
-  /** K2: ďalších N `pending` položiek podľa `position` — vstup fronty. */
+  /**
+   * K2: celá sada položiek pre ZÁPIS — tie isté riadky a to isté poradie ako
+   * `listByCampaign()`, ale bez `sent_payload` a `raw_response`.
+   *
+   * Executor tie dva stĺpce nikdy nečíta (píše ich cez `update()`), zato na
+   * 30. deň 10 000-položkovej fronty je to pri KAŽDOM prechode celá história
+   * odpovedí shopu v pamäti — aby sa zapísalo 200 položiek. Riadky sa
+   * neubrali, lebo hash potvrdenia (K4, I3) sa prepočítava nad VŠETKÝMI;
+   * na frontu po častiach (`nextPending()`) by musel byť po častiach aj hash.
+   */
+  listForWrite(campaignId: number, conn?: Queryable): Promise<CampaignItemWriteRow[]>;
+  /**
+   * K2: ďalších N `pending` položiek podľa `position` — vstup fronty po
+   * častiach. Produkčného volajúceho zatiaľ NEMÁ: executor potrebuje celú
+   * sadu na hash potvrdenia (K4, I3) a berie ju cez `listForWrite()`.
+   */
   nextPending(campaignId: number, limit: number, conn?: Queryable): Promise<CampaignItemRecordV3[]>;
   /**
    * Koľko položiek zľava má. Protipól `listPage()`: bez neho by sa celkový
@@ -374,6 +421,12 @@ export function createCampaignItemsRepo(deps: CampaignItemsRepoDeps = {}): Campa
     async listByCampaign(campaignId: number, conn?: Queryable): Promise<CampaignItemRecordV3[]> {
       if (!isValidId(campaignId)) return [];
       return selectMany(conn, SQL_LIST, [campaignId]);
+    },
+
+    async listForWrite(campaignId: number, conn?: Queryable): Promise<CampaignItemWriteRow[]> {
+      if (!isValidId(campaignId)) return [];
+      const rows = await run<WriteItemRow[]>(conn, SQL_LIST_FOR_WRITE, [campaignId]);
+      return (Array.isArray(rows) ? rows : []).map(mapWriteRow);
     },
 
     async listPage(

@@ -62,9 +62,12 @@ docker compose up -d --build
 curl http://127.0.0.1:3070/api/health        # 200
 ```
 
-Prvé prihlásenie vedie onboardingom: doména → API kľúč → povolené produkty →
-skúška naprázdno (D20). Rozsah začína na `pilot`; prepnutie do `plny` je
-samostatné, auditované rozhodnutie v Nastaveniach a žiada sudo (K1).
+Onboarding ako sprievodca (D20) v architektúre V3 **neexistuje** — zrušila ho
+a nahradila prázdnymi stavmi s odkazmi (`design/v3/ARCHITEKTURA.md`, a hovorí to
+o sebe aj `src/app/onboarding/page.tsx`). Prvé prihlásenie teda vedie na Prehľad,
+ktorý prázdnymi stavmi ukáže, čo chýba: doména, API kľúč, povolené produkty.
+Rozsah začína na `pilot`; prepnutie do `plny` je samostatné, auditované
+rozhodnutie v Nastaveniach a žiada sudo (K1).
 
 ## Bezpečnostné hranice
 
@@ -85,9 +88,12 @@ npm run dev              # vývoj (zápisy vynútene vypnuté, I13)
 npm run typecheck        # tsc --noEmit
 npm run lint             # eslint .
 npm run build            # next build (standalone)
-npm run test             # vitest (unit + integračné, mock shop)
-                         # POZOR: bez bežiacej MariaDB sa 111 testov PRESKOČÍ
-                         # a beh je aj tak zelený — trvaj na „0 skipped" (1247)
+npm run test             # vitest (unit + integračné, mock shop) — 3216 testov
+                         # Bez bežiacej MariaDB `pretest` skončí s 1 a k vitestu
+                         # sa vôbec nedostane (`scripts/require-test-db.ts`).
+                         # Ticho preskočiť 15 integračných súborov sa teda už
+                         # nedá — do 25. 8. 2026 to šlo a beh bol aj tak zelený.
+npm run test:unit        # bez databázy, poctivo — nič v test/unit ju nepotrebuje
 npm run e2e              # Playwright
 npm run migrate          # migrácie (v kontajneri ich spúšťa entrypoint)
 npm run check-compose-bind   # kontrola invariantu I5 nad compose

@@ -1,9 +1,28 @@
 # Aura Zľavy — BACKLOG NA MAINTAINERA SHOPU (D38b)
 
 Formálny zoznam požiadaviek, ktoré zavrú diery v kontrakte API. Appka MUSÍ
-fungovať aj bez nich (dnešný stav), ale MUSÍ byť napísaná tak, aby ich prijatie
-znamenalo lokálnu zmenu v jednom module (api-client), nie prepis logiky.
-Tento zoznam MUSÍ byť odoslaný maintainerovi shopu.
+fungovať aj bez nich, ale MUSÍ byť napísaná tak, aby ich prijatie znamenalo
+lokálnu zmenu v jednom module (api-client), nie prepis logiky.
+
+> ## ⚠ ŠESŤ Z ÔSMICH BODOV JE UŽ DODANÝCH (13. 8. 2026)
+>
+> **Tento dokument NEODOSIELAJ správcovi shopu tak, ako je.** Zistené 25. 8.
+> 2026 pri audite: `KONTRAKT-API-V5-2026-08-13.md` eviduje, že správca dodal
+> **B1, B2, B4, B5, B6 a B8 naraz** — `getFull` s `reduction_*`,
+> `purchase_price`, `margin`, `qty` a `categories`, endpoint `clearReduction`
+> aj `GET /api/whoami`. Text nižšie ich stále žiada a je z 11. 8.
+>
+> **Otvorené zostávajú dva: B3 (dávkovateľný `setReduction`) a B7 (vyšší denný
+> strop zápisov).**
+>
+> A hlavné: **appka tie dodané polia nevie použiť nie preto, že ich shop
+> nevracia, ale preto, že náš kľúč nemá scope `product:read`.** To je iná
+> požiadavka a má vlastný dokument —
+> `docs/61-ZIADOST-PRODUCT-READ-2026-08-25.md`. Kým sa to nespraví, appka
+> obviňuje shop z niečoho, čo dodal.
+>
+> Pozor aj na to, že `docs/10-KONTRAKT.md` §I má INÝ zoznam (len B1–B4), takže
+> v repe žijú dve verzie toho istého backlogu.
 
 | Č. | Požiadavka | Prečo | Čo sa v appke zmení, keď to bude |
 | --- | --- | --- | --- |

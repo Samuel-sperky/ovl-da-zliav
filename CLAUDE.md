@@ -54,5 +54,12 @@ voľba, 6. 8. 2026). Prvý setup: `docs/21-RUNBOOKY.md` → R1, na Windows **R1w
 `npm run check-compose-bind` (invariant I5) · `scripts/backup.sh` ·
 `scripts/sync-secrets-volume.ps1` (Windows, po každej rotácii master key).
 
-Na Windows padá 9 testov v 4 súboroch z dôvodov prostredia (`chmod 400` a
-porovnávanie ciest s lomkami) — nie sú to regresie.
+Na Windows padá **nula** testov. Do 24. 8. 2026 ich padalo päť (`chmod 400` na
+NTFS vyjde ako 444) a táto veta hovorila o deviatich — commit `a16e355` to
+zavrel tým, že maska zakázaných bitov je odteraz podľa platformy. **Keď ti test
+padne, je to SKUTOČNÝ pád, nie prostredie.**
+
+Jedna výnimka a nie je to test: v git worktree padne KAŽDÝ integračný test
+route-ov už pri importe, lebo `argon2.glibc.node` je blokovaná Windows
+Application Control. V hlavnom strome to funguje. Nie je to pád tvrdenia, je to
+pád importu — v súhrne sa to ukáže ako „Failed Suites".

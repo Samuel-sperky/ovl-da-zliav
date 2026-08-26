@@ -307,6 +307,69 @@ export function previewBlockerText(code: string, message: string): string {
   return message;
 }
 
+/**
+ * ZLYHANIE POTVRDENIA NA POVRCH (K10, P3).
+ *
+ * Vety o preview tokene skladá `lib/crypto/preview-token.ts` a nesú presne to,
+ * čo sa na povrchu nesmie objaviť: „Preview token", „TTL", „dry-run" a kód
+ * invariantu v zátvorke. Obrazovka pritom `error.message` vykresľovala
+ * VERBATIM, takže najčastejšia chyba pri potvrdení — pätnásťminútová platnosť
+ * skúšky uplynula, kým človek rozhodoval o tisícoch produktov — bola napísaná
+ * jazykom, ktorý appka všade inde prekladá.
+ *
+ * Tieto tri kódy preto majú vlastnú vetu. Zvyšok padá do
+ * `previewBlockerText()`, teda do slovníka guardov, a až úplne neznámy kód si
+ * necháva správu servera. Kód sa na obrazovku nedostane nikdy.
+ *
+ * Slovník je TU a nie v `lib/ui/vocabulary.ts` zámerne: `vocabulary.ts` vlastní
+ * stavy dát a kódy brány, kým toto sú stavy POTVRDENIA (I3) — tie ani
+ * `blockers.ts`, ani `guards.ts` poznať nemôžu. Je to ten istý dôvod, prečo tu
+ * žije `QUEUE_STAND_SENTENCES`.
+ *
+ * Tvar je zámerne užší než `GuardSentence`: tón tu nikto nečíta (riadok chyby má
+ * vlastný štýl `note`) a pole, ktoré nemá volajúceho, sa v tomto repe už raz
+ * rozišlo s tým, čo tvrdilo.
+ */
+interface ConfirmErrorSentence {
+  /** Čo sa stalo, jednou vetou. */
+  readonly text: string;
+  /** Čo s tým; `null`, keď sa nedá urobiť nič. */
+  readonly hint: string | null;
+}
+
+const CONFIRM_ERROR_SENTENCES: Readonly<Record<string, ConfirmErrorSentence>> = {
+  preview_token_expired: {
+    // Pätnásť minút je normatívne `PREVIEW_TOKEN_TTL_SECONDS` (§7). Importovať
+    // ho sem nejde — je to serverový modul s tajomstvom sesie — takže číslo
+    // pripína test na tú konštantu.
+    text: 'Skúška naprázdno platí 15 minút a ten čas uplynul.',
+    hint: 'Spustite ju znova a potvrďte počet.',
+  },
+  preview_token_used: {
+    text: 'Toto potvrdenie sa už použilo — platí len na jeden zápis.',
+    hint: 'Spustite skúšku naprázdno znova.',
+  },
+  preview_token_invalid: {
+    text: 'Potvrdenie nesedí na to, čo je teraz na obrazovke.',
+    hint: 'Spustite skúšku naprázdno znova.',
+  },
+};
+
+/**
+ * Chyba zo zaradenia alebo zo skúšky naprázdno na povrch (K10). Volá sa nad
+ * `error.code` a `error.message` z obálky odpovede — nikdy nad samotnou
+ * správou, lebo tá je jazykom servera.
+ */
+export function confirmErrorText(code: string, message: string): string {
+  const own = Object.prototype.hasOwnProperty.call(CONFIRM_ERROR_SENTENCES, code)
+    ? CONFIRM_ERROR_SENTENCES[code]
+    : undefined;
+  if (own !== undefined) {
+    return own.hint === null ? own.text : `${own.text} ${own.hint}`;
+  }
+  return previewBlockerText(code, message);
+}
+
 /* ═════════════════ 3. Bezpečné čítanie odpovede `/api/queue` ══════════════ */
 
 /*

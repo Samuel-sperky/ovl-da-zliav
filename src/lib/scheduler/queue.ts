@@ -21,7 +21,10 @@
  *      `lapsed` (D25), inak `executeCampaign()`. Po každej kampani sa rozpočet
  *      prepočíta z auditu.
  *
- * Tri rozhodnutia, ktoré sa ľahko prehliadnu:
+ *      Kampaň, ktorej executor hodí výnimku, dostane odstup a najviac
+ *      `QUEUE_MAX_ATTEMPTS` pokusov; potom ju fronta vzdá (L5).
+ *
+ * Štyri rozhodnutia, ktoré sa ľahko prehliadnu:
  *
  *  - **Kampaň si claimne EXECUTOR, nie scheduler.** `executeCampaign()` má
  *    `queued` medzi claimovateľnými stavmi a claim je atomický (D84). Keby si ju
@@ -44,6 +47,13 @@
  *    signatúru vlastní V5. Do tej doby platí priorita podľa `date_from`
  *    (najskorší štart vyhráva) — je to deterministické a nikdy to neprekročí
  *    denný strop. Požiadavka na V5 je v odovzdávke.
+ *
+ *  - **Zlyhávajúca kampaň sa NESKÚŠA naveky.** Výnimka z executora je stále
+ *    lokálna (ostatné kampane bežia ďalej), ale už sa počíta: po odstupoch
+ *    5/20/60 minút a `QUEUE_MAX_ATTEMPTS` pokusoch kampaň prejde do
+ *    `partial`/`failed` s dôvodom a fronta ju opustí. Bez toho sa
+ *    deterministická chyba opakovala každých 60 sekúnd, presne ako 403 na
+ *    čítacej strane dvanásť dní (`lib/sales/stop-policy.ts`).
  *
  * Zápis do shopu tento modul NEVOLÁ NIKDY — deleguje ho výhradne
  * `engine/executor.ts` (K11 bod 2).
@@ -122,6 +132,8 @@ export interface QueueOutcome {
   markedLate: number;
   /** Koľko kampaní čaká vo fronte (po tomto ticku známy stav zo vstupu). */
   queuedCampaigns: number;
+  /** `true` = `queuedCampaigns` narazilo na `maxCampaignsPerTick`, teda je to strop, nie počet. */
+  queuedCampaignsCapped: boolean;
   /**
    * Prečo sa (ďalej) nezapisuje. `null` = fronta bežala bez prekážky.
    *
@@ -141,6 +153,7 @@ const emptyOutcome = (): QueueOutcome => ({
   lapsed: 0,
   markedLate: 0,
   queuedCampaigns: 0,
+  queuedCampaignsCapped: false,
   skipped: null,
   budget: null,
 });
@@ -196,6 +209,121 @@ async function markLateCampaigns(deps: QueueDeps, today: string): Promise<number
   }
 }
 
+/* ══════════════ kampaň, ktorá padá pri každom pokuse (L5) ═════════════════ */
+
+/**
+ * Koľko pokusov dostane kampaň, ktorej executor hodí výnimku, kým ju fronta
+ * vzdá.
+ *
+ * Do 26. 8. 2026 tu žiadne číslo nebolo: `catch` zapísal log a `continue`,
+ * takže kampaň s deterministickou chybou (nesúlad potvrdenia, `percent` NULL,
+ * neplatný token náhľadu) sa skúšala každý tik, teda každých 60 sekúnd, kým
+ * niekto appku nevypol. Je to tá istá rodina ako 403 opakované dvanásť dní na
+ * čítacej strane: `lib/sales/stop-policy.ts` na ňu má napísané pravidlo
+ * „trvalá prekážka nesmie dostať rozvrh", zápisová fronta ho nemala.
+ */
+export const QUEUE_MAX_ATTEMPTS = 4;
+
+/**
+ * Odstup po 1., 2. a 3. zlyhaní.
+ *
+ * Prečo odstup a nie len počítadlo: výnimka NEMUSÍ byť deterministická —
+ * spadnuté spojenie do DB vyzerá v `catch` presne ako nesúlad potvrdenia.
+ * Štyri pokusy nahusto po 60 sekundách by z dvojminútového výpadku DB urobili
+ * „trvalú prekážku" a vzdali by kampaň, ktorej nič nie je. Rozložené na hodinu
+ * a pol je to rozhodnutie o stave, nie o chvíľke.
+ */
+const QUEUE_RETRY_BACKOFF_MS: readonly number[] = [5 * 60_000, 20 * 60_000, 60 * 60_000];
+
+interface QueueFailure {
+  /** Koľko pokusov už skončilo výnimkou. */
+  attempts: number;
+  /** Skôr sa kampaň do executora v tomto ticku ani nepodá. */
+  retryAfter: UtcDate;
+}
+
+/**
+ * Počítadlo žije v pamäti procesu, nie v DB: stĺpec by bol zmena schémy a tá
+ * je nevratná. Dôsledok treba pomenovať — reštart appky pokusy vynuluje, takže
+ * kampaň dostane ďalšiu štvoricu. Nie je to však návrat do pôvodného stavu:
+ * ROZHODNUTIE „už to neskúšam" sa zapisuje do `campaigns.status`, teda do DB,
+ * a reštart ho neodvolá. Reštart teda pridá pokusy len kampani, ktorá sa
+ * dovtedy vzdať nestihla — nie tým, ktoré fronta už opustili.
+ */
+const queueFailures = new Map<number, QueueFailure>();
+
+/** Výhradne pre testy. */
+export function resetQueueFailures(): void {
+  queueFailures.clear();
+}
+
+/** Odstup po `attempts`-tom zlyhaní. Posledná hodnota platí aj ďalej. */
+function backoffFor(attempts: number): number {
+  const index = Math.min(Math.max(attempts, 1), QUEUE_RETRY_BACKOFF_MS.length) - 1;
+  return QUEUE_RETRY_BACKOFF_MS[index] ?? 0;
+}
+
+/**
+ * Fronta kampaň vzdáva: presunie ju do KONCOVÉHO stavu, z ktorého ju vie
+ * človek poslať znova („Zopakovať zlyhané" pracuje s `partial` aj `failed`).
+ *
+ * Žiadna položka sa nezahadzuje a nič sa neprepisuje na `blocked`: `pending`
+ * položky zostávajú presne tam, kde boli, takže zápis sa nestratí (K6) — len
+ * prestáva byť naplánovaný. Okno sa nemení (I7).
+ *
+ * Stav sa vyberá podľa počítadla, ktoré naposledy zapísal executor: `partial`,
+ * keď kampaň už niečo zapísala, `failed`, keď nie — zhodne s
+ * `resolveFinalStatus()`. „Failed" pri 5 000 zapísaných položkách by bola
+ * nepravda.
+ *
+ * Text dôvodu NEOBSAHUJE hlášku výnimky: chodila by na obrazovku a tá má
+ * hovoriť slovníkom (K10). Hláška zostáva v `queue_campaign_error` v logu.
+ *
+ * Vracia `true`, keď sa stav naozaj zapísal.
+ */
+async function giveUpOnCampaign(
+  deps: QueueDeps,
+  campaign: SchedulerCampaign,
+  operationId: Ulid,
+  attempts: number,
+  now: UtcDate,
+): Promise<boolean> {
+  const status = campaign.itemsOk > 0 ? 'partial' : 'failed';
+  const reason =
+    `Zápis skončil chybou ${attempts}× po sebe — fronta túto zľavu ďalej neskúša. ` +
+    'Nezapísané produkty zostávajú nedotknuté; po náprave spustite „Zopakovať zlyhané".';
+  try {
+    await deps.campaigns.setStatus(campaign.id, status, {
+      statusReason: reason,
+      finishedAt: now,
+      resultAckAt: null,
+    });
+    await deps.audit.appendAudit({
+      actor: 'scheduler',
+      eventType: 'campaign_finished',
+      ok: false,
+      campaignId: campaign.id,
+      operationId,
+      message: `Fronta kampaň vzdala po ${attempts} výnimkách, stav „${status}".`,
+    });
+    deps.log.error('queue_campaign_given_up', {
+      campaignId: campaign.id,
+      operationId,
+      attempts,
+      status,
+    });
+    return true;
+  } catch (error) {
+    // Zlyhanie zápisu stavu nesmie zhodiť tik. Kampaň zostane `queued`
+    // s počítadlom na strope, takže sa vzdanie zopakuje po ďalšom odstupe.
+    deps.log.error('queue_give_up_failed', {
+      campaignId: campaign.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 /* ═══════════════════════════════ fronta ═══════════════════════════════════ */
 
 function finish(outcome: QueueOutcome): QueueOutcome {
@@ -227,7 +355,22 @@ export async function processQueue(
 
   /* 2. Prázdna fronta — nič na zapisovanie. */
   const queued = await deps.campaigns.findQueued(config.maxCampaignsPerTick);
+  /*
+   * `queuedCampaigns` je OREZANÉ číslo, nie počet (nález B5, 25. 8. 2026).
+   *
+   * `findQueued()` má `LIMIT maxCampaignsPerTick` (20), takže pri 25 čakajúcich
+   * kampaniach tu vyjde 20 — a `tick.ts` to vydáva ako `queueWaiting`, čo znie
+   * ako počet. Kým sú kampane jednotky, je to jedno; pri väčšom počte je to
+   * číslo, ktoré appka NEZMERALA, a to je presne to, čo prvé pravidlo projektu
+   * zakazuje.
+   *
+   * Menší z dvoch problémov je vyriešený: pole sa menuje tak, ako sa chová, a
+   * `queuedCampaignsCapped` hovorí, či sa strop dosiahol. Kto potrebuje skutočný
+   * počet, musí sa naň spýtať zvlášť — dotaz s `COUNT(*)` tu nie je, lebo tento
+   * tik ho na svoju prácu nepotrebuje a druhý dotaz za tik nie je zadarmo.
+   */
   outcome.queuedCampaigns = queued.length;
+  outcome.queuedCampaignsCapped = queued.length >= config.maxCampaignsPerTick;
   if (queued.length === 0) {
     outcome.skipped = 'queue_empty';
     return finish(outcome);
@@ -336,9 +479,23 @@ export async function processQueue(
       continue;
     }
 
+    /* L5 — kampaň, ktorá pri poslednom pokuse hodila výnimku, má odstup.
+     * Skôr sa o ňu ani nepokúsime; ostatné kampane to nezdržuje. */
+    const failure = queueFailures.get(campaign.id);
+    if (failure !== undefined && failure.retryAfter.getTime() > now.getTime()) {
+      deps.log.info('queue_campaign_backoff', {
+        campaignId: campaign.id,
+        attempts: failure.attempts,
+        retryAfter: failure.retryAfter.toISOString(),
+      });
+      continue;
+    }
+
     try {
       // Claim robí executor (D84) — scheduler ho tu ZÁMERNE nevolá.
       const result = await executor(campaign);
+      // Pokus prešiel — predchádzajúce zlyhania už nič nebrzdia.
+      queueFailures.delete(campaign.id);
       outcome.processed += 1;
       if (result.status === 'needs_key') outcome.needsKey += 1;
       deps.log.info('queue_campaign_run', {
@@ -349,12 +506,24 @@ export async function processQueue(
         itemsFailed: result.itemsFailed,
       });
     } catch (error) {
-      // Výnimka jednej kampane nesmie zablokovať ostatné ani zhodiť tick.
+      /* Výnimka jednej kampane nesmie zablokovať ostatné ani zhodiť tick —
+       * ale ani sa nesmie opakovať naveky (L5). Pokus sa započíta, kampaň
+       * dostane odstup, a na strope ju fronta vzdá. */
+      const attempts = (queueFailures.get(campaign.id)?.attempts ?? 0) + 1;
       deps.log.error('queue_campaign_error', {
         campaignId: campaign.id,
         operationId,
+        attempts,
         error: error instanceof Error ? error.message : String(error),
       });
+      queueFailures.set(campaign.id, {
+        attempts,
+        retryAfter: new Date(now.getTime() + backoffFor(attempts)),
+      });
+      if (attempts >= QUEUE_MAX_ATTEMPTS) {
+        const gaveUp = await giveUpOnCampaign(deps, campaign, operationId, attempts, now);
+        if (gaveUp) queueFailures.delete(campaign.id);
+      }
       continue;
     }
 

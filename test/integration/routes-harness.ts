@@ -19,7 +19,6 @@ import type {
   CampaignRecord,
   CampaignStatus,
   CatalogCacheRecord,
-  CreateCampaignInput,
   MoneyString,
   Paged,
   SessionClaims,
@@ -30,6 +29,7 @@ import {
   createMemoryApiKeyRepo,
   createMemoryAudit,
   createMemorySettingsRepo,
+  createMemoryTx,
   type MemoryApiKeyRepo,
   type MemoryAudit,
 } from '@/lib/engine/testing';
@@ -38,8 +38,14 @@ import { createWriteMutex } from '@/lib/engine/mutex';
 import type { ExecutorFlags } from '@/lib/engine/executor';
 import type { RouteDeps } from '@/lib/http/define-route';
 import { createShopClient } from '@/lib/shop/client';
+import {
+  createMemoryReadBudgetStore,
+  createReadBudget,
+  type ReadBudget,
+} from '@/lib/shop/read-budget';
 
 import type { RoutesDeps } from '@/app/api/campaigns/_shared';
+import type { CreateCampaignInputV3 } from '@/lib/repo/campaigns.repo';
 import type { CampaignTierRecord } from '@/lib/repo/tiers.repo';
 
 import { fakeApiKey } from '../helpers/factories';
@@ -152,6 +158,15 @@ export interface RoutesWorld {
   audit: MemoryAudit;
   apiKeyRepo: MemoryApiKeyRepo & { getMeta(): Promise<import('@/contracts').ApiKeyMeta> };
   previewTokens: PreviewTokenServiceInstance;
+  /**
+   * K7 — zdieľaný denný rozpočet ANONYMNÝCH čítaní shopu, v pamäti. Testy si
+   * ho vedia dopredu „vyčerpať" (`reserve(n)`) a potom overiť, že route shop
+   * nezavolala. Bez neho by `resolveRoutesDeps()` spadol na produkčný
+   * repozitár nad MariaDB, ktorá v týchto testoch neexistuje.
+   */
+  readBudget: ReadBudget;
+  /** Koľko dotazov na posledné vlastné zápisy route spravila (I11, N+1). */
+  lastOwnWriteCalls: { single: number; batch: number };
   seedCampaign(
     campaign: CampaignRecord,
     items: Array<{
@@ -173,6 +188,13 @@ export interface RoutesWorldOptions {
   /** K2 — denný strop zápisov pre testy fronty. Default 200 ako v produkcii. */
   dailyBudget?: number;
 }
+
+/**
+ * Stavy kampaní, ktorých položky sa počítajú do fronty — ten istý zoznam ako
+ * `SQL_QUEUE_TOTALS` v `campaign-items.repo.ts` a `LIVE_QUEUE_STATUSES`
+ * v `app/api/queue/route.ts`.
+ */
+const LIVE_QUEUE_STATUSES: string[] = ['scheduled', 'needs_key', 'running', 'missed', 'queued'];
 
 export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
   const campaigns = new Map<number, CampaignRecord>();
@@ -288,6 +310,37 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     },
   };
 
+  /* K7 — zdieľané počítadlo anonymných čítaní shopu v pamäti. Testy ho vedia
+   * dopredu vyčerpať a overiť, že route potom shop nezavolá vôbec. */
+  const readBudget = createReadBudget({ store: createMemoryReadBudgetStore(), lane: 'anon' });
+  const readBudgetGate = {
+    reserveShopReads: (count = 1) => readBudget.reserve(count),
+    shopReadBudget: () => readBudget.status(),
+  };
+
+  /** I11 — koľkokrát sa route pýtala na posledný vlastný zápis a akým tvarom. */
+  const lastOwnWriteCalls = { single: 0, batch: 0 };
+
+  /** Posledný ÚSPEŠNÝ vlastný zápis produktu, alebo `null` (I11). */
+  const ownWriteOf = (
+    productId: number,
+  ): { percent: number; from: string; to: string; at: Date; campaignId: number } | null => {
+    const writes = [...items.values()]
+      .filter((i) => i.productId === productId && i.status === 'ok' && i.finishedAt !== null)
+      .sort((a, b) => (b.finishedAt as Date).getTime() - (a.finishedAt as Date).getTime());
+    const latest = writes[0];
+    if (!latest) return null;
+    const campaign = campaigns.get(latest.campaignId);
+    if (!campaign) return null;
+    return {
+      percent: campaign.percent,
+      from: campaign.dateFrom,
+      to: campaign.dateTo,
+      at: latest.finishedAt as Date,
+      campaignId: campaign.id,
+    };
+  };
+
   const listItems = (campaignId: number): HarnessItem[] =>
     [...items.values()]
       .filter((i) => i.campaignId === campaignId)
@@ -295,7 +348,7 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
       .map((i) => ({ ...i }));
 
   const campaignsRepo = {
-    async create(input: CreateCampaignInput) {
+    async create(input: CreateCampaignInputV3) {
       const id = nextCampaignId;
       nextCampaignId += 1;
       const record: CampaignRecord = {
@@ -317,7 +370,10 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
         claimedAt: null,
         startedAt: null,
         finishedAt: null,
-        itemsTotal: 0,
+        // K1 bod 3 — produkčný repozitár zapisuje `items_total` už pri
+        // vzniku kampane; fake, ktorý by tu držal nulu, by tento rozdiel
+        // zamaskoval.
+        itemsTotal: input.itemsTotal ?? 0,
         itemsOk: 0,
         itemsFailed: 0,
         itemsUncertain: 0,
@@ -394,20 +450,21 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
         .map((c) => ({ ...c }));
     },
     async lastOwnWrite(productId: number) {
-      const writes = [...items.values()]
-        .filter((i) => i.productId === productId && i.status === 'ok' && i.finishedAt !== null)
-        .sort((a, b) => (b.finishedAt as Date).getTime() - (a.finishedAt as Date).getTime());
-      const latest = writes[0];
-      if (!latest) return null;
-      const campaign = campaigns.get(latest.campaignId);
-      if (!campaign) return null;
-      return {
-        percent: campaign.percent,
-        from: campaign.dateFrom,
-        to: campaign.dateTo,
-        at: latest.finishedAt as Date,
-        campaignId: campaign.id,
-      };
+      lastOwnWriteCalls.single += 1;
+      return ownWriteOf(productId);
+    },
+    /**
+     * I11 — dávkový tvar, ktorý má produkčný repozitár. Fake ho MUSÍ mať:
+     * inak by testy merali postupný fallback a N+1 v route by nikto nezachytil.
+     */
+    async lastOwnWrites(productIds: number[]) {
+      lastOwnWriteCalls.batch += 1;
+      const out = new Map<number, NonNullable<ReturnType<typeof ownWriteOf>>>();
+      for (const productId of new Set(productIds)) {
+        const found = ownWriteOf(productId);
+        if (found !== null) out.set(productId, found);
+      }
+      return out;
     },
   };
 
@@ -474,6 +531,24 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     },
     async countByCampaign(campaignId: number) {
       return listItems(campaignId).length;
+    },
+    /*
+     * `queueTotals` tu MUSÍ byť z toho istého dôvodu ako `listPage` vyššie:
+     * odhad dobehnutia v `POST /api/campaigns` má dve cesty — celú frontu, keď
+     * ju repozitár vie povedať, a záložnú veľkosť samotnej kampane, keď nie.
+     * Bez tejto metódy by všetky testy zaradenia tiekli záložnou cestou a tú
+     * produkčnú by nespustil nikto.
+     */
+    async queueTotals() {
+      let pending = 0;
+      for (const item of items.values()) {
+        if (item.status !== 'pending') continue;
+        // Rovnaká hranica ako `SQL_QUEUE_TOTALS` v `campaign-items.repo.ts`:
+        // fronta sú položky ŽIVÝCH kampaní, nie všetko, čo kedy vzniklo.
+        const status = campaigns.get(item.campaignId)?.status;
+        if (status !== undefined && LIVE_QUEUE_STATUSES.includes(status)) pending += 1;
+      }
+      return { pending };
     },
     async update(id: number, patch: Partial<CampaignItemRecord>) {
       const record = items.get(id);
@@ -564,10 +639,17 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     campaignItemsRepo,
     allowlistRepo,
     catalogRepo,
+    readBudget: readBudgetGate,
     auditRepo,
     settingsRepo,
     apiKeyRepo,
     audit,
+    /* §3/D63 — `insertConfirmedCampaign()` vkladá zľavu v transakcii. Bez
+     * tohto runnera by `resolveRoutesDeps()` spadol na `withTransaction()`,
+     * ktorý si berie spojenie z poolu do MariaDB — a tá v tomto svete nie je.
+     * Rollback fake NEMÁ (viď `createMemoryTx()`): atomicitu dokazuje
+     * `vlozenie-kampane-atomicke.spec.ts` nad skutočnou DB. */
+    tx: createMemoryTx(),
     // K3 — pásma nad in-memory mapou. Bez toho by `GET /api/campaigns` aj
     // detail siahli na produkčný `tiersRepo` v DB, ktorá v teste neexistuje,
     // a čítanie by viselo až do timeoutu testu.
@@ -618,6 +700,8 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     audit,
     apiKeyRepo,
     previewTokens,
+    readBudget,
+    lastOwnWriteCalls,
     seedCampaign(campaign, seedItems) {
       const record: CampaignRecord = { ...campaign, id: nextCampaignId };
       nextCampaignId += 1;

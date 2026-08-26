@@ -17,7 +17,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { CampaignRecord } from '@/contracts';
 
 import { computePayloadHash, createPreviewTokenService } from '@/lib/crypto/preview-token';
-import { EngineError, createExecutor, resetGracefulStop, type ExecutorFlags } from '@/lib/engine/executor';
+import {
+  EngineError,
+  createExecutor,
+  resetGracefulStop,
+  type ExecutorFlags,
+  type ExecutorItemsRepo,
+} from '@/lib/engine/executor';
 import { createWriteMutex } from '@/lib/engine/mutex';
 import { buildPreview } from '@/lib/engine/preview';
 import {
@@ -248,6 +254,62 @@ describe('D51/D52 — 401/403 uprostred dávky', () => {
     expect(writtenIds).not.toContain('203');
   });
 
+  /**
+   * X1 (25. 8. 2026) — `ip_banned` je TIEŽ 403, ale o kľúči nehovorí nič: shop
+   * ho vracia aj na volanie bez kľúča. Do 25. 8. sa tu rozhodovalo len z
+   * `error.kind`, takže ban spadol do vetvy D51/D52 a appka funkčný kľúč
+   * ZMAZALA — a keďže ban platí od 19. 8., bol to jej reálny stav. Používateľ
+   * vložil nový kľúč, fronta narazila na to isté 403 a kľúč zmizol znovu.
+   *
+   * Rozdiel medzi týmto testom a tým nad ním JE ten nález, preto sú vedľa seba.
+   */
+  it('403 `ip_banned` kľúč NEZMAŽE a dôvod hovorí o adrese', async () => {
+    const { executor, apiKeyRepo, world } = makeWorld({ productIds: [201, 202] });
+    mock.state.ipBanned();
+
+    const result = await executor.executeCampaign(1);
+
+    // Fronta stojí rovnako ako pri odmietnutom kľúči — nemá čím pokračovať.
+    expect(result.status).toBe('needs_key');
+    // Ale kľúč JE stále uložený. Toto je jadro nálezu.
+    expect(apiKeyRepo.wipedWith).toEqual([]);
+    expect(apiKeyRepo.plaintext).not.toBeNull();
+    // A dôvod hovorí o adrese, nie o kľúči.
+    expect(world.campaignsRepo.campaigns.get(1)?.statusReason).toBe('shop_ip_banned');
+    const items = await world.campaignItemsRepo.listByCampaign(1);
+    expect(items.map((i) => i.status)).toEqual(['failed', 'interrupted']);
+    expect(items[0]?.errorMessage).toContain('adresu');
+    expect(items[0]?.errorMessage).not.toContain('scope');
+  });
+
+  /**
+   * X1, druhá polovica. Skutočný ban platí aj na ČÍTANIE, takže padne povinný
+   * pre-write GET (D48) — a dovtedy tá vetva robila `continue`, čiže appka by
+   * proti zabanovanej adrese poslala jeden GET na KAŽDÚ položku fronty. Pri
+   * 8 000 produktoch je to 8 000 odsúdených requestov, čo ban zhoršuje.
+   *
+   * Prvá taká odpoveď musí zastaviť celú dávku — a kľúč sa nesmie dotknúť.
+   */
+  it('ban na ČÍTANÍ zastaví dávku po prvej položke a kľúč nechá', async () => {
+    const { executor, apiKeyRepo, world } = makeWorld({ productIds: [201, 202, 203] });
+    mock.state.ipBanned(true, { reads: true });
+
+    const result = await executor.executeCampaign(1);
+
+    expect(result.status).toBe('needs_key');
+    expect(apiKeyRepo.wipedWith).toEqual([]);
+    expect(apiKeyRepo.plaintext).not.toBeNull();
+    expect(world.campaignsRepo.campaigns.get(1)?.statusReason).toBe('shop_ip_banned');
+
+    // Jadro: prvá položka `failed`, ZVYŠOK `interrupted` — nie tri zlyhané.
+    const items = await world.campaignItemsRepo.listByCampaign(1);
+    expect(items.map((i) => i.status)).toEqual(['failed', 'interrupted', 'interrupted']);
+    expect(items[0]?.errorMessage).toContain('adresu');
+
+    // A na shop odišlo práve jedno čítanie, nie tri.
+    expect(mock.state.readCount).toBe(1);
+  });
+
   it('403 má rovnaký účinok s dôvodom key_forbidden (D52)', async () => {
     const { executor, apiKeyRepo, world } = makeWorld({ productIds: [201, 202] });
     mock.state.failNth(2, 'forbidden', { target: 'write', times: 1 });
@@ -377,7 +439,7 @@ describe('reconcile po havárii (D86)', () => {
    * jeden testovaný, druhý spustený. Test preto ide na PRODUKČNÚ cestu; mŕtvy
    * dvojník je zmazaný.
    */
-  it('write_ok z auditu potvrdí položku, ostatné sú uncertain, bez re-runu', async () => {
+  it('write_ok potvrdí položku, rozbehnutá je uncertain, nikdy neposlaná zostáva vo fronte', async () => {
     const { reconcileAfterCrash } = await import('@/lib/scheduler/reconcile');
     const { executor, world, audit } = makeWorld({ productIds: [201, 202, 203] });
     void executor;
@@ -387,7 +449,15 @@ describe('reconcile po havárii (D86)', () => {
      * položku ako `ok` a AŽ POTOM audit `write_ok` — položka `pending`
      * s auditom `ok` teda v produkcii vzniknúť nevie a testovať ju by znamenalo
      * dokazovať niečo, čo sa nikdy nestane. Reálny stav po páde uprostred
-     * dávky: 201 je dopísaná a potvrdená auditom, 202/203 zostali `pending`.
+     * dávky: 201 je dopísaná a potvrdená auditom, 202 bola práve odoslaná
+     * (má `request_id` z kroku 6c, potvrdenie chýba) a 203 sa ani nezačala.
+     *
+     * Tvrdenie o 203 sa 26. 8. 2026 zmenilo (audit 30, nález L3): kým fronta
+     * bežala jeden deň, „celá dávka je neistá" bola pravda. Pri 200 zápisoch
+     * na deň a 40-dňovej fronte (K2) by to znamenalo, že reštart kontejnera
+     * (D100) zavrie kampaň a nezapísaný zvyšok sa stratí — a to zakazuje K6.
+     * Položka bez `request_id` nemá v audite ani `write_attempt`, takže o nej
+     * VIEME, že neodišla; nazvať to „nevieme" zakazuje I11.
      */
     const campaign = world.campaignsRepo.campaigns.get(1)!;
     campaign.status = 'running';
@@ -396,6 +466,9 @@ describe('reconcile po havárii (D86)', () => {
     await world.campaignItemsRepo.update(items[0]!.id, {
       status: 'ok',
       requestId: 'REQCONFIRMED0000000000000',
+    });
+    await world.campaignItemsRepo.update(items[1]!.id, {
+      requestId: 'REQINFLIGHT00000000000000',
     });
     audit.records.push({
       actor: 'user',
@@ -419,8 +492,10 @@ describe('reconcile po havárii (D86)', () => {
 
     expect(reconciled).toBe(1);
     const settled = await world.campaignItemsRepo.listByCampaign(1);
-    expect(settled.map((i) => i.status)).toEqual(['ok', 'uncertain', 'uncertain']);
-    expect(world.campaignsRepo.campaigns.get(1)?.status).toBe('partial');
+    expect(settled.map((i) => i.status)).toEqual(['ok', 'uncertain', 'pending']);
+    // K2/K6 — kampaň má čo dopísať, takže sa vracia do fronty a NEZAVIERA sa.
+    expect(world.campaignsRepo.campaigns.get(1)?.status).toBe('queued');
+    expect(world.campaignsRepo.campaigns.get(1)?.finishedAt).toBeNull();
     expect(audit.byEvent('reconcile_uncertain')).toHaveLength(1);
     // Automatický re-run NEPREBEHOL — na shop nič neodišlo.
     expect(mock.state.requestCount).toBe(0);
@@ -743,5 +818,58 @@ describe('kľúč expiruje uprostred dávky — ApiKeyError nie je sieťová chy
     // Presne 1 zápis odišiel a kľúč sa skúšal presne 2× — ŽIADNY retry.
     expect(mock.state.writeRequests().map((r) => r.body.id)).toEqual(['201']);
     expect(keyLoads).toBe(2);
+  });
+});
+
+describe('K2 — sada položiek pre zápis sa ťahá bez blobov', () => {
+  it('executor berie listForWrite() a celú sadu so sent_payload nenačíta ani raz', async () => {
+    const w = makeWorld({ productIds: [201, 202] });
+
+    /*
+     * Fake repozitár, ktorý vie oboje. `listForWrite()` zahodí presne tie dva
+     * stĺpce, ktoré produkčný `SQL_LIST_FOR_WRITE` neselektuje — a `listByCampaign()`
+     * si počíta, koľkokrát ho niekto zavolal. Na 30. deň 10 000-položkovej
+     * fronty je práve toto rozdiel medzi skalármi a celou históriou odpovedí.
+     */
+    let byCampaignCalls = 0;
+    const itemsRepo: ExecutorItemsRepo = {
+      async listByCampaign(campaignId) {
+        byCampaignCalls += 1;
+        return w.world.campaignItemsRepo.listByCampaign(campaignId);
+      },
+      async listForWrite(campaignId) {
+        const rows = await w.world.campaignItemsRepo.listByCampaign(campaignId);
+        return rows.map(({ sentPayload: _sent, rawResponse: _raw, ...rest }) => rest);
+      },
+      update: (id, patch) => w.world.campaignItemsRepo.update(id, patch),
+      markRemaining: (campaignId, fromPosition, status, reason) =>
+        w.world.campaignItemsRepo.markRemaining(campaignId, fromPosition, status, reason),
+    };
+
+    const executor = createExecutor({
+      shopClient: shopClient(),
+      campaignsRepo: w.world.campaignsRepo,
+      campaignItemsRepo: itemsRepo,
+      allowlistRepo: w.allowlistRepo,
+      settingsRepo: w.settingsRepo,
+      auditRepo: w.audit,
+      apiKeyRepo: w.apiKeyRepo,
+      audit: w.audit,
+      mutex: w.mutex,
+      budget: roomyBudget,
+      flags: FLAGS,
+    });
+
+    const result = await executor.executeCampaign(1);
+
+    // Dávka prebehla celá — sada je stále celá, ubrali sa len stĺpce.
+    expect(result.status).toBe('done');
+    expect(result.itemsOk).toBe(2);
+    expect(mock.state.writeRequests().map((r) => r.body.id)).toEqual(['201', '202']);
+    // A ťažký dotaz sa nezavolal ani raz.
+    expect(byCampaignCalls).toBe(0);
+    // Blob stĺpce vo výsledku behu nie sú načítané — a nikto ich odtiaľ nečíta.
+    expect(result.items.map((i) => i.sentPayload)).toEqual([null, null]);
+    expect(result.items.map((i) => i.rawResponse)).toEqual([null, null]);
   });
 });

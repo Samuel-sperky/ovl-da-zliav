@@ -81,6 +81,7 @@ import {
 } from '@/lib/repo/campaigns.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import { newRequestId } from '@/lib/shop/correlation';
+import { isIpBanned } from '@/lib/shop/errors';
 import { setReductionPayload } from '@/lib/shop/client';
 
 import { createBudget, type BudgetSource, type WriteAttemptCounter } from '@/lib/engine/budget';
@@ -165,6 +166,12 @@ export type ExecutorCampaign = Omit<CampaignRecord, 'status'> & {
  */
 export type ExecutorItem = CampaignItemRecord & { percent?: number };
 
+/**
+ * Položka, ako ju vracia `listForWrite()` — bez `sent_payload`
+ * a `raw_response`. Executor tie dva stĺpce nikdy nečíta (B2, K2).
+ */
+export type ExecutorItemForWrite = Omit<ExecutorItem, 'sentPayload' | 'rawResponse'>;
+
 type ExecutorCampaignPatch = Partial<
   Pick<
     CampaignRecord,
@@ -189,6 +196,12 @@ export interface ExecutorCampaignsRepo {
 
 export interface ExecutorItemsRepo {
   listByCampaign(campaignId: number): Promise<ExecutorItem[]>;
+  /**
+   * K2 — sada položiek bez `sent_payload`/`raw_response`. Voliteľná rovnako
+   * ako `listPage()` v detaile zľavy: fake repozitáre v testoch ju nemusia
+   * mať a `loadCampaign()` vtedy padá na `listByCampaign()`.
+   */
+  listForWrite?(campaignId: number): Promise<ExecutorItemForWrite[]>;
   update(
     id: number,
     patch: Partial<Omit<CampaignItemRecord, 'id' | 'campaignId' | 'productId'>>,
@@ -430,6 +443,27 @@ export function createExecutor(deps: ExecutorDeps): {
     const campaign = await campaignsRepo.getById(campaignId);
     if (campaign === null) {
       throw new EngineError('campaign_not_found', `Kampaň ${campaignId} neexistuje.`);
+    }
+    /*
+     * K2 — položky sa ťahajú BEZ `sent_payload` a `raw_response`. Executor tie
+     * dva stĺpce nikdy nečíta (píše ich cez `update()`), zato na 30. deň
+     * 10 000-položkovej fronty je to pri každom prechode 10 000 riadkov
+     * s celou históriou odpovedí shopu — aby sa zapísalo 200 položiek.
+     *
+     * Riadky sa neubrali: `assertConfirmed()` prepočítava hash nad VŠETKÝMI
+     * (K4, I3), takže sada tu musí byť celá. Šetria sa stĺpce, nie riadky.
+     *
+     * Vo výsledku behu tak `sentPayload`/`rawResponse` zostávajú `null`. Nič
+     * sa tým nestratilo: in-memory riadok sa počas zápisu neaktualizuje, takže
+     * doteraz tam boli hodnoty z PREDCHÁDZAJÚCEHO behu, nikdy z tohto — a
+     * žiadny volajúci ich z výsledku executora nečíta.
+     */
+    if (itemsRepo.listForWrite !== undefined) {
+      const rows = await itemsRepo.listForWrite(campaignId);
+      return {
+        campaign,
+        items: rows.map((row) => ({ ...row, sentPayload: null, rawResponse: null })),
+      };
     }
     const items = await itemsRepo.listByCampaign(campaignId);
     return { campaign, items };
@@ -808,6 +842,60 @@ export function createExecutor(deps: ExecutorDeps): {
           continue;
         }
 
+        if (outcome.kind === 'error' && isIpBanned(outcome.error)) {
+          /*
+           * ZABLOKOVANÁ ADRESA UŽ NA ČÍTANÍ (X1, druhá polovica, 26. 8. 2026).
+           *
+           * Prvá oprava X1 dala banu vlastnú vetvu na ZÁPISE. Verifikácia ju
+           * označila za v reálnom stave nedosiahnuteľnú a mala pravdu: skutočný
+           * ban platí aj na čítanie, takže padne povinný pre-write GET (D48) —
+           * a tá vetva robila `continue`. Dôsledok: appka by proti zabanovanej
+           * adrese vystrieľala jeden GET NA KAŽDÚ položku fronty, teda pri 8 000
+           * produktoch 8 000 odsúdených requestov, čo je presne to, čím sa ban
+           * zhoršuje. A položky by hovorili „Pre-write GET zlyhal (forbidden)",
+           * teda nič o adrese.
+           *
+           * Prvá taká odpoveď preto zastaví celú dávku, rovnako ako na zápise:
+           * zvyšok `interrupted`, kampaň `needs_key` s dôvodom `shop_ip_banned`,
+           * a KĽÚČ SA NEDOTKNE. Nič sa nestratí — po odblokovaní fronta
+           * pokračuje tam, kde stála (K6).
+           */
+          item.status = 'failed';
+          await itemsRepo.update(item.id, {
+            status: 'failed',
+            errorCode: outcome.error.code ?? outcome.error.kind,
+            errorMessage:
+              'Eshop odmieta našu IP adresu (403) — kľúč je v poriadku a zostáva uložený.',
+            httpStatus: outcome.error.httpStatus,
+            startedAt,
+            finishedAt: now(),
+          });
+          await audit.appendAudit({
+            actor,
+            eventType: 'write_failed',
+            ok: false,
+            campaignId: campaign.id,
+            campaignItemId: item.id,
+            productId: item.productId,
+            operationId,
+            requestId,
+            httpStatus: outcome.error.httpStatus,
+            message:
+              'Eshop odmieta našu IP adresu už pri pre-write GET — dávka sa zastavila, ' +
+              'kľúča sa nedotklo (D48, X1).',
+          });
+          await itemsRepo.markRemaining(
+            campaign.id,
+            item.position + 1,
+            'interrupted',
+            'Prerušené — eshop odmieta našu IP adresu; kľúč sa nedotklo.',
+          );
+          for (const rest of ordered.slice(index + 1)) {
+            if (rest.status === 'pending') rest.status = 'interrupted';
+          }
+          return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor);
+        }
+
         if (outcome.kind === 'error') {
           item.status = 'failed';
           await itemsRepo.update(item.id, {
@@ -980,7 +1068,25 @@ export function createExecutor(deps: ExecutorDeps): {
           await audit.appendAudit({ ...commonAudit, eventType: 'write_ok', ok: true });
         } else {
           const { error } = result;
-          const keyRejected = error.kind === 'unauthorized' || error.kind === 'forbidden';
+          /*
+           * `ip_banned` NIE JE výrok o kľúči (X1, 25. 8. 2026).
+           *
+           * Shop ho vracia s 403, ale aj na volanie BEZ kľúča — je to stav
+           * NÁŠHO PRÍSTUPU. Do 25. 8. sa tu rozhodovalo len z `error.kind`,
+           * takže ban spadol do vetvy D51/D52: kľúč sa WIPNUL, kampaň dostala
+           * „chýba kľúč na zápis" a položka vetu „Kľúč nemá scope product:edit".
+           * Používateľ vložil nový kľúč, fronta narazila na to isté 403 a kľúč
+           * sa zmazal znovu — a ban nepomenoval nikto. Od 19. 8. je to stav,
+           * v ktorom appka reálne bežala.
+           *
+           * `shop/client.ts` to rozlíšenie drží (`onKeyRejected` sa pri
+           * `isIpBanned` zámerne nevolá), ale executor callback nečíta a
+           * rozhodoval sa nanovo — takže oprava v klientovi ho neochránila.
+           * Preto sa tu tá istá otázka kladie tým istým nástrojom.
+           */
+          const addressBanned = isIpBanned(error);
+          const keyRejected =
+            !addressBanned && (error.kind === 'unauthorized' || error.kind === 'forbidden');
 
           if (result.outcome === 'uncertain') {
             item.status = 'uncertain';
@@ -1003,6 +1109,37 @@ export function createExecutor(deps: ExecutorDeps): {
                 message: 'Shop vrátil nečakaný tvar odpovede — API sa možno zmenilo (D54).',
               });
             }
+          } else if (addressBanned) {
+            /*
+             * Zablokovaná adresa: kľúč sa NEDOTKNE. Zvyšok dávky sa preruší
+             * rovnako ako pri odmietnutom kľúči — fronta nemá čím pokračovať,
+             * kým ban platí — ale dôvod hovorí pravdu a kľúč zostáva, takže po
+             * odblokovaní netreba nič vkladať znova.
+             */
+            item.status = 'failed';
+            await itemsRepo.update(item.id, {
+              status: 'failed',
+              httpStatus: result.httpStatus,
+              requestId: result.requestId,
+              errorCode: error.code ?? error.kind,
+              errorMessage:
+                'Eshop odmieta našu IP adresu (403) — kľúč je v poriadku a zostáva uložený.',
+              sentPayload: redact(sentPayload),
+              rawResponse: redact(result.raw),
+              finishedAt,
+            });
+            await audit.appendAudit({ ...commonAudit, eventType: 'write_failed', ok: false });
+
+            await itemsRepo.markRemaining(
+              campaign.id,
+              item.position + 1,
+              'interrupted',
+              'Prerušené — eshop odmieta našu IP adresu; kľúč sa nedotklo.',
+            );
+            for (const rest of ordered.slice(index + 1)) {
+              if (rest.status === 'pending') rest.status = 'interrupted';
+            }
+            return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor);
           } else if (keyRejected) {
             /* D51/D52 — wipe + zvyšok `interrupted` + kampaň `needs_key`. */
             item.status = 'failed';

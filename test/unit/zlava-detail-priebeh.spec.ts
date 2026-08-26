@@ -188,6 +188,8 @@ describe('B — dôvody stoja v jednom ráme (D16)', () => {
  */
 const VIEW: PerformanceView = {
   available: true,
+  started: true,
+  startsOn: null,
   unit: 'ks',
   spanDays: 14,
   recent: { from: '2026-08-06', to: '2026-08-19', units: 128 },
@@ -332,5 +334,39 @@ describe('E — dominantu nesie škála `.lvl-1/.lvl-2/.lvl-3`, nie vlastná ve�
      * detailu zľavy merala inak než dominanta ostatných obrazoviek.
      */
     if (progSize !== null) expect(progSize[1]).toBe(bigSize![1]);
+  });
+});
+
+/* ═══════════ U5 — výkon zľavy, ktorá sa ešte nezačala ════════════════════ */
+
+/**
+ * Obe okná „Výkonu výberu" končia DNESKOM a `date_from` do nich nevstupuje.
+ * Kým je zápis fronta (K2), normálny stav zľavy v detaile je „zapisuje sa" a
+ * jej okno je v BUDÚCNOSTI — takže sekcia porovnávala dva úseky, ktoré zľavu
+ * obe predchádzajú, a jeden z nich kreslila ako silnejší. To je tvrdenie
+ * o vplyve zľavy, ktorá ešte nič neovplyvnila.
+ */
+describe('Výkon výberu — zľava, ktorá sa ešte nezačala (U5)', () => {
+  it('nekreslí stĺpce a povie, že výkon ešte neexistuje', () => {
+    const html = renderToStaticMarkup(
+      createElement(PerformanceCard, {
+        view: { ...VIEW, started: false, startsOn: '2026-09-01' },
+        failed: false,
+      }),
+    );
+
+    expect(html).toContain('data-testid="performance-not-started"');
+    expect(html).toContain('ešte nezačala');
+    // Dátum štartu je v texte, aby veta povedala KEDY, nie len „ešte nie".
+    expect(html).toContain('1. 9. 2026');
+    // A hlavne: žiadne stĺpce s porovnaním.
+    expect(html).not.toContain('performance-pair');
+  });
+
+  it('rozbehnutá zľava tú vetu nemá', () => {
+    const html = renderToStaticMarkup(
+      createElement(PerformanceCard, { view: VIEW, failed: false }),
+    );
+    expect(html).not.toContain('performance-not-started');
   });
 });

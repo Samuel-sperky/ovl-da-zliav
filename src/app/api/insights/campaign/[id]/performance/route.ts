@@ -75,6 +75,22 @@ export function createInsightsCampaignPerformanceGet(
         const covers = (from: string): boolean =>
           coverage.from !== null && coverage.to !== null && from >= coverage.from;
 
+        /*
+         * ZAČALA UŽ TÁ ZĽAVA VÔBEC? (nález U5, 25. 8. 2026)
+         *
+         * Obe okná končia DNESKOM a `dateFrom` do ich výpočtu nevstupuje. Kým
+         * je zápis fronta (K2), normálny stav zľavy v detaile je „zapisuje sa"
+         * a jej okno je v BUDÚCNOSTI — takže „výkon" by porovnával dva úseky,
+         * ktoré zľavu obe predchádzajú, a kreslil pri tom dva stĺpce, z ktorých
+         * jeden je „silnejší". To je tvrdenie o vplyve zľavy, ktorá ešte nič
+         * neovplyvnila.
+         *
+         * Čísla sa nezahadzujú — predaj za posledné dni je legitímny údaj a
+         * dátumy sú v odpovedi. Zahadzuje sa TVRDENIE: `started: false` znamená
+         * „toto nie je výkon zľavy" a obrazovka to má povedať vetou.
+         */
+        const started = campaign.dateFrom <= today;
+
         const recent = covers(recentFrom)
           ? await campaignUnits(ctx.params.id, recentFrom, today)
           : null;
@@ -83,6 +99,13 @@ export function createInsightsCampaignPerformanceGet(
         return {
           campaignId: ctx.params.id,
           available: recent !== null,
+          /**
+           * `false` = zľava sa ešte nezačala (`date_from` je v budúcnosti),
+           * takže žiadne z okien ju nepokrýva a čísla NIE SÚ jej výkon.
+           */
+          started,
+          /** Odkedy zľava platí — aby obrazovka mohla povedať KEDY, nie len „ešte nie". */
+          startsOn: campaign.dateFrom,
           unit: 'ks' as const,
           spanDays: span,
           recent: { from: recentFrom, to: today, units: recent },

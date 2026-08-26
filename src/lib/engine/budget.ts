@@ -25,6 +25,10 @@
  *     vracia vždy spolu, aby ich žiadna odpoveď nezliala do jedného.
  *  2. **Čísla limitov sa neopisujú, importujú sa** z `shop/rate-limits.ts`.
  *     Jedna ručne prepísaná kópia limitu už raz zabila synchronizáciu katalógu.
+ *  3. **Nečitateľné počítadlo NIE JE nula.** `0` znamená „dnes sa nič neminulo",
+ *     teda „zapisuj" — a to je povoľujúca odpoveď na neistotu. Keď počítadlo
+ *     neodpovie číslom, hodí sa `BudgetUnavailableError`; volajúci z toho robí
+ *     `budget_unknown` a fronta pokračuje zajtra. Žiadne `?? 0`.
  *
  * Čo tu ZÁMERNE nie je:
  *  - žiadny zápis (I4 — do `audit_log` sa píše jedine cez `lib/audit/write.ts`),
@@ -197,7 +201,23 @@ const SQL_WRITE_ATTEMPTS_ON_DAY =
   'SELECT COUNT(*) AS total FROM audit_log ' +
   'WHERE event_type = ? AND ts >= ? AND ts < ?';
 
-/** Produkčné počítadlo nad `audit_log`. */
+/**
+ * Text pre nečitateľnú spotrebu. Jedna veta, dve miesta (produkčný adaptér
+ * a `createBudget()`), aby sa v logoch nedali odlíšiť dva rôzne dôvody toho
+ * istého faktu: nevieme, koľko sme dnes minuli.
+ */
+const SPENT_UNREADABLE =
+  'Spotreba rozpočtu (`write_attempt` za UTC deň) sa nepodarilo prečítať — počítadlo neodpovedalo číslom.';
+
+/**
+ * Produkčné počítadlo nad `audit_log`.
+ *
+ * Nečitateľná odpoveď HODÍ `BudgetUnavailableError`. Predtým sa vracala `0`,
+ * teda „dnes sa nič neminulo" — a to je povoľujúca odpoveď na neistotu, presne
+ * to, čo hlavička tohto modulu zakazuje. Volajúci hodenie už spracovať vie
+ * (`executor.ts` z toho robí `budget_unknown`, route-y `null`); ticho vrátenú
+ * nulu spracovať nevie nikto, lebo sa nedá odlíšiť od pravdivej nuly.
+ */
 export const auditWriteAttemptCounter: WriteAttemptCounter = {
   async countWriteAttemptsOn(day: DateOnly): Promise<number> {
     const rows = await poolQuery<Array<{ total: unknown }>>(SQL_WRITE_ATTEMPTS_ON_DAY, [
@@ -207,9 +227,10 @@ export const auditWriteAttemptCounter: WriteAttemptCounter = {
     ]);
     const row = Array.isArray(rows) ? rows[0] : undefined;
     // Turbopack tu už raz zahodil `if (!row)` ako compile-time falsy.
-    if (row === undefined) return 0;
+    if (row === undefined) throw new BudgetUnavailableError(SPENT_UNREADABLE);
     const total = typeof row.total === 'number' ? row.total : Number(row.total);
-    return Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0;
+    if (!Number.isFinite(total)) throw new BudgetUnavailableError(SPENT_UNREADABLE);
+    return Math.max(0, Math.trunc(total));
   },
 };
 
@@ -281,9 +302,12 @@ export function createBudget(deps: BudgetDeps = {}): BudgetSource {
   const counter = deps.counter ?? auditWriteAttemptCounter;
   const now = deps.now ?? ((): Date => new Date());
 
+  // Aj injektované počítadlo môže vrátiť nečíslo. „Neviem" sa ani tu neprekladá
+  // na nulu — hodí sa rovnaká chyba ako pri zaseknutom čítaní.
   const spent = async (): Promise<number> => {
     const total = await counter.countWriteAttemptsOn(budgetDay(now()));
-    return Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0;
+    if (!Number.isFinite(total)) throw new BudgetUnavailableError(SPENT_UNREADABLE);
+    return Math.max(0, Math.trunc(total));
   };
 
   return {

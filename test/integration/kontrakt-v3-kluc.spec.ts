@@ -13,7 +13,10 @@
  *   2. zľava sa napriek nemu ZARADÍ (`status: 'queued'`, položky vzniknú),
  *   3. keď kľúč prežije odhad, varovanie sa NEVYMÝŠĽA,
  *   4. keď sa metadáta kľúča nedajú prečítať, varuje sa (fail-closed smerom
- *      k varovaniu — mlčať je horšie než varovať zbytočne).
+ *      k varovaniu — mlčať je horšie než varovať zbytočne),
+ *   5. odhad, o ktorý sa varovanie opiera, počíta CELÚ frontu — aj to, čo stojí
+ *      pred novou zľavou (K5). Z veľkosti kampane by vyšiel optimistický dátum
+ *      a varovanie by sa podľa neho preskočilo.
  *
  * Zapisuje sa pri tom NIČ: fronta je práca schedulera (K2), nie odpoveď na
  * HTTP požiadavku. Test to overuje na mock shope (I6).
@@ -31,6 +34,7 @@ import { createCampaignsPost } from '@/app/api/campaigns/route';
 import type { RoutesDeps } from '@/app/api/campaigns/_shared';
 import type { BudgetStatus } from '@/lib/engine/budget';
 
+import { makeCampaign } from '../helpers/factories';
 import { useMockShop } from '../helpers/mock';
 import {
   TEST_USER_ID,
@@ -190,6 +194,53 @@ describe('K6 — kľúč kratší než fronta varuje, ale zaradenie nezablokuje'
 
     const data = res.body.data as { keyExpiresBeforeFinish: boolean };
     expect(data.keyExpiresBeforeFinish).toBe(false);
+  });
+
+  /*
+   * K5 — odhad dobehnutia je o FRONTE, nie o veľkosti kampane.
+   *
+   * Fronta má jednu spoločnú dennú kvótu (K2), takže nová zľava dobehne až po
+   * tom, čo sa vybaví všetko pred ňou. Že pred ňou niečo stojí, je normálny
+   * zdokumentovaný stav (ARCHITEKTURA §3.3, Z-2: „Zapisovať začnem, keď dobehne
+   * Ležiaky striebro"). Kým sa odhad počítal len z vlastných položiek, karta
+   * „Zaradené do fronty" vypísala SKORŠÍ dátum, než aký sekundu predtým ukázala
+   * obrazovka nastavenia zľavy — a K6 varovanie sa podľa toho optimistického
+   * dátumu preskočilo, hoci kľúč frontu preukázateľne neprežije.
+   */
+  it('odhad počíta aj frontu PRED novou zľavou a K6 sa podľa nej ozve', async () => {
+    const { world: w, deps } = world({ keyExpiresAt: new Date(NOW.getTime() + 30 * DAY_MS) });
+
+    // 300 položiek staršej pripravenej zľavy — tie sa zapíšu skôr než naše.
+    w.seedCampaign(
+      makeCampaign({ name: 'Ležiaky striebro — jeseň', status: 'scheduled', percent: 30 }),
+      Array.from({ length: 300 }, (_, i) => ({
+        productId: 5001 + i,
+        priceAtPreview: PRICE,
+      })),
+    );
+
+    const res = await createDiscount(deps, await tokenFor(w));
+    expect(res.status).toBe(200);
+    const data = res.body.data as {
+      status: string;
+      itemsTotal: number;
+      estimate: { date: string; days: number; pending: number } | null;
+      keyExpiresBeforeFinish: boolean;
+    };
+
+    // 300 pred nami + 60 našich = 360; dnes sa zmestí 10, zvyšok 350 pri 10/deň
+    // je 35 dní. Odhad z vlastných 60 položiek by tvrdil 5 dní.
+    expect(data.estimate?.pending).toBe(360);
+    expect(data.estimate?.days).toBe(35);
+    expect(data.estimate?.date).toBe(day(35));
+
+    // Kľúč vydrží 30 dní, fronta beží 35 — K6 varovanie sa MUSÍ ozvať. Pri
+    // odhade z vlastných položiek (5 dní) by kľúč vyzeral ako dostatočný.
+    expect(data.keyExpiresBeforeFinish).toBe(true);
+
+    // Ani dlhá fronta zaradenie nezablokuje a našu zľavu nezmenšila.
+    expect(data.status).toBe('queued');
+    expect(data.itemsTotal).toBe(PRODUCT_IDS.length);
   });
 
   it('nečitateľné metadáta kľúča → radšej varovať než mlčať (fail-closed)', async () => {

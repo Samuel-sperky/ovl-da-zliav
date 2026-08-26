@@ -71,7 +71,11 @@ export const PAGE_NEEDS: Readonly<Record<SettingsPageSlug, readonly ('settings' 
     'co-vie': [],
     napojenie: ['settings', 'keys'],
     'co-smie': ['settings', 'queue'],
-    historia: ['settings'],
+    // `keys` je tu kvôli `LockedFeatures`: dôvod zámku je oprávnenie kľúča
+    // (`productRead`), a bez prečítaného kľúča by sekcia vedela len „nevieme".
+    // Je to čítanie z databázy, nie volanie eshopu — `GET /api/key` na shop
+    // nesiahne ani raz.
+    historia: ['settings', 'keys'],
     'cervena-zona': ['keys'],
   };
 
@@ -217,7 +221,9 @@ function sections(page: SettingsPage, input: SectionInput) {
           {many ? groupTitle(page.groups[0].title) : null}
           <AuditPanel />
           <DiagnosticsSection />
-          <LockedFeatures />
+          {/* Kľúč sa nemusel podariť prečítať; `null` znamená „nevieme", a to
+              je zamknuté — sekcia si oprávnenie nikdy nedomyslí. */}
+          <LockedFeatures productRead={input.writeKey?.productRead ?? null} />
           {many ? groupTitle(page.groups[1].title) : null}
           <SafeguardsSection settings={settings} onChanged={input.reload} />
           <SignOut />

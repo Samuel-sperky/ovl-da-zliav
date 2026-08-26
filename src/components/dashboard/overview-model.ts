@@ -12,7 +12,7 @@
  * Vlastník: V9.
  */
 import type { CampaignRow, QueueSnapshot } from '@/components/dashboard/api';
-import type { CampaignSentence } from '@/lib/ui/vocabulary';
+import type { CampaignSentence, CampaignStatusCode } from '@/lib/ui/vocabulary';
 import { campaignSentence, toStatusCode, todayHere } from '@/lib/ui/vocabulary';
 
 /* ═════════════════════════ 0. Kód stavu zo servera ════════════════════════ */
@@ -39,9 +39,14 @@ export { toStatusCode };
  *
  *  - `unknown`  — appka neodpovedala; nič sa netvrdí (`prazdne-stavy.html`),
  *  - `empty`    — ešte nie je žiadna zľava (`prazdne-stavy.html`),
- *  - `calm`     — nič sa nezapisuje, „Všetko beží" (`prehlad-pokoj.html`),
+ *  - `calm`     — nič sa práve nezapisuje (`prehlad-pokoj.html`),
  *  - `paused`   — fronta stojí po odstávke počítača (`prehlad-pozastavene.html`),
  *  - `running`  — fronta zapisuje, číslo v 64 px (`prehlad.html`).
+ *
+ * `calm` NIE JE „všetko je v poriadku". Znamená len, že sa v tejto chvíli
+ * nezapisuje, a to má dva dôvody: fronta nemá čo zapisovať, alebo má a nikto to
+ * nezapisuje. Ten druhý je STOJACA fronta a hovorí o ňom `stalled`; verdikt
+ * (`overview-verdict.ts`) sa ho pýta skôr, než vysloví „Všetko v poriadku".
  */
 export type QueueMode = 'unknown' | 'empty' | 'calm' | 'paused' | 'running';
 
@@ -65,6 +70,14 @@ export interface QueueProgress {
   failed: number;
   /** Kedy fronta prestala zapisovať; `null`, keď to appka nevie. */
   pausedSince: string | null;
+  /**
+   * Stojí fronta na človeku? `null` je „nevieme" a je prísnejšie než `false`.
+   *
+   * Otázka má zmysel len pri `mode: 'calm'` — inak je odpoveď v samom stave
+   * (`running` zapisuje, `paused` stojí, `empty` nemá čo zapisovať). Rozhoduje
+   * o nej `queueStalled()`.
+   */
+  stalled: boolean | null;
 }
 
 /**
@@ -86,6 +99,53 @@ export function tiersLabel(row: CampaignRow): string {
 export function progressPercent(done: number, total: number): number {
   if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return 0;
   return Math.max(0, Math.min(100, (done / total) * 100));
+}
+
+/**
+ * Stavy zľavy, ktorých položky sa počítajú do fronty.
+ *
+ * Musí to byť TEN ISTÝ zoznam ako v `SQL_QUEUE_TOTALS`
+ * (`lib/repo/campaign-items.repo.ts`) — inak by obrazovka vysvetľovala inú
+ * frontu, než akú server spočítal.
+ */
+const QUEUE_STATUSES: readonly CampaignStatusCode[] = [
+  'scheduled',
+  'needs_key',
+  'running',
+  'missed',
+  'queued',
+];
+
+/**
+ * Zľavy, ktoré sa samy nerozhýbu — čakajú na ČLOVEKA, nie na krok fronty.
+ * `needs_key` a `missed` majú rovnakú váhu (D8/D33b) a rovnako ich už triedi
+ * `findNeedsIntervention()` v `lib/ai/rules.ts`.
+ */
+const NEEDS_HUMAN: readonly CampaignStatusCode[] = ['needs_key', 'missed'];
+
+/**
+ * Stojí fronta na človeku? Odpoveď má tri hodnoty a `null` znamená „nevieme".
+ *
+ * Otázka sa kladie LEN vtedy, keď fronta má čo zapisovať (`queue.pending > 0`)
+ * a server pritom nevrátil žiadnu kampaň v behu. `current` hľadá server priamo
+ * medzi `running` a `queued` (`app/api/queue/route.ts`), takže čakajúce položky
+ * v tej chvíli patria zľavám v stave `scheduled`, `needs_key` alebo `missed` —
+ * a celý rozdiel je v tom, na čo čakajú:
+ *
+ *  - `needs_key` a `missed` čakajú na ČLOVEKA (D8/D33b) → fronta stojí,
+ *  - `late` znamená, že okno už beží a položky sú stále nezapísané → stojí,
+ *  - `scheduled` s oknom v budúcnosti čaká na svoj deň → nestojí.
+ *
+ * Keď v zozname nie je ani jedna zľava, ktorá by čakajúce položky mohla
+ * vysvetliť (nečitateľný zoznam, alebo prvá strana 50 zliav, na ktorú sa
+ * nezmestila), je odpoveď `null`. „Nevieme" je prísnejšie než „v poriadku" (P7)
+ * a appka nesmie z chýbajúceho riadku vyrobiť dobrú správu.
+ */
+export function queueStalled(campaigns: readonly CampaignRow[] | null): boolean | null {
+  if (campaigns === null) return null;
+  const inQueue = campaigns.filter((row) => QUEUE_STATUSES.includes(toStatusCode(row.status)));
+  if (inQueue.length === 0) return null;
+  return inQueue.some((row) => NEEDS_HUMAN.includes(toStatusCode(row.status)) || row.late);
 }
 
 export interface QueueProgressInput {
@@ -113,6 +173,8 @@ export function queueProgress(input: QueueProgressInput): QueueProgress {
     dateTo: null,
     failed: 0,
     pausedSince: null,
+    // Bez odpovede appky sa o stojacej fronte netvrdí nič — ani to, že nestojí.
+    stalled: null,
   };
 
   if (snapshot === null) return base;
@@ -135,11 +197,35 @@ export function queueProgress(input: QueueProgressInput): QueueProgress {
   const hasCampaigns = campaigns !== null && campaigns.length > 0;
 
   if (queue.total === 0 && !campaignsKnown) return base;
-  if (queue.total === 0 && !hasCampaigns) return { ...base, mode: 'empty' };
+  // Prázdny stav nemá čo zapisovať, takže ani na čom stáť.
+  if (queue.total === 0 && !hasCampaigns) return { ...base, mode: 'empty', stalled: false };
 
   // Fronta nemá čo zapisovať — pokojný stav, nie prázdny.
-  if (queue.pending === 0 || current === null) {
-    return { ...base, mode: 'calm', done: queue.done, total: queue.total };
+  if (queue.pending === 0) {
+    return { ...base, mode: 'calm', stalled: false, done: queue.done, total: queue.total };
+  }
+
+  /*
+   * Položky čakajú, ale server nemá čo zapisovať.
+   *
+   * `current` je LEN `running` alebo `queued` kampaň (`app/api/queue/route.ts`),
+   * kým `queue.pending` počíta aj `scheduled`, `needs_key` a `missed`
+   * (`lib/repo/campaign-items.repo.ts`). Do 26. 8. 2026 sa z tejto dvojice
+   * vracal pokojný stav s `pending: 0` — appka teda zahodila jediné číslo,
+   * ktorým sa stojaca fronta dá dokázať, a verdikt potom povedal „Všetko
+   * v poriadku", kým tisíce položiek stáli (a zľava v `needs_key` je pritom
+   * očakávaný stav). Číslo tu preto zostáva a otázku „stojí to na človeku?"
+   * dostane verdikt zodpovedanú.
+   */
+  if (current === null) {
+    return {
+      ...base,
+      mode: 'calm',
+      stalled: queueStalled(campaigns),
+      done: queue.done,
+      total: queue.total,
+      pending: queue.pending,
+    };
   }
 
   // Brána je orientačná, heartbeat je fakt z databázy. Stačí jedno z dvoch:
@@ -176,6 +262,8 @@ export function queueProgress(input: QueueProgressInput): QueueProgress {
     dateTo: current.dateTo === '' ? null : current.dateTo,
     failed: current.itemsFailed,
     pausedSince: snapshot.gate.since ?? snapshot.heartbeat.lastTickAt,
+    // Kampaň v behu je: o stojacej fronte tu rozhoduje `mode`, nie `stalled`.
+    stalled: false,
   };
 }
 

@@ -583,6 +583,10 @@ export function parsePerformance(raw: unknown): PerformanceView | null {
   const locked = asRecord(record['locked']);
   return {
     available: readFlag(record, 'available'),
+    // Chýbajúce `started` = staršia odpoveď; nepredstierame priznanie, ktoré
+    // server neposlal, ale ani neblokujeme sekciu, ktorá fungovala.
+    started: record['started'] === undefined ? true : readFlag(record, 'started'),
+    startsOn: readText(record, 'startsOn'),
     unit: 'ks',
     spanDays: readCount(record, 'spanDays') ?? 0,
     recent: parsePerformanceWindow(asRecord(record['recent'])),
@@ -760,6 +764,14 @@ export interface PerformanceWindow {
 
 export interface PerformanceView {
   readonly available: boolean;
+  /**
+   * `false` = zľava sa ešte NEZAČALA, takže čísla nižšie nie sú jej výkon.
+   * Chýbajúce pole (staršia odpoveď) sa berie ako `true`, aby sa obrazovka
+   * nezmenila spätne — je to priznanie navyše, nie nová podmienka.
+   */
+  readonly started: boolean;
+  /** Odkedy zľava platí (`YYYY-MM-DD`), aby veta mohla povedať KEDY. */
+  readonly startsOn: string | null;
   readonly unit: 'ks';
   readonly spanDays: number;
   readonly recent: PerformanceWindow;

@@ -108,10 +108,16 @@ const COLUMNS =
 
 const SQL_BY_ID = `SELECT ${COLUMNS} FROM campaigns WHERE id = ? LIMIT 1`;
 
+/**
+ * `items_total` je v INSERTe zámerne (K1 bod 3): bez neho riadok vznikne s
+ * nulou a `ck_campaigns_items_total` sa nevyhodnotí, kým ho nedorovná
+ * `finishCampaign()` — až po zápise do shopu. Viď `CreateCampaignInputV3`.
+ */
 const SQL_INSERT =
   'INSERT INTO campaigns (operation_id, name, kind, parent_campaign_id, percent, ' +
   'date_from, date_to, mode, status, fire_at, scheduled_at, confirmed_at, ' +
-  'confirm_payload_hash, sudo_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+  'confirm_payload_hash, sudo_at, created_by, items_total) ' +
+  'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
 const SQL_FIND_DUE =
   `SELECT ${COLUMNS} FROM campaigns WHERE status = 'scheduled' AND fire_at IS NOT NULL ` +
@@ -414,6 +420,25 @@ const BOOLEAN_PATCH_FIELDS = new Set(['late']);
 
 /* ──────────────────────────────── factory ──────────────────────────────── */
 
+/**
+ * Vstup `create()` — nadmnožina kontraktu o `itemsTotal` (K1 bod 3).
+ *
+ * `items_total` je ODVODENINA z `campaign_items` (K2), ale zapísať sa musí už
+ * pri vzniku kampane: `ck_campaigns_items_total CHECK (items_total <= 10000)`
+ * z migrácie `0010` je posledná poistka proti sade, akú appka nemá ako
+ * zapísať, a nad natvrdo nulovým stĺpcom sa pri INSERTe nevyhodnotí vôbec.
+ * Prvý `UPDATE`, ktorý stĺpec dorovná, robí až `finishCampaign()` — teda PO
+ * tom, čo celá dávka odišla do shopu, kde už je poistka bezcenná (I7 — cesta
+ * späť nie je).
+ *
+ * Chýbajúca hodnota znamená `0` ako doteraz: volajúci, ktorý počet položiek
+ * v momente vzniku nepozná, si stĺpec dorovná `syncCountersFromItems()`.
+ */
+export interface CreateCampaignInputV3 extends CreateCampaignInput {
+  /** Koľko položiek kampaň dostane. Default `0` (dorovná sa z položiek). */
+  itemsTotal?: number;
+}
+
 /** Patch `setStatus()` — nadmnožina kontraktu o polia V3 (`percent`, `late`). */
 export type CampaignPatchV3 = Partial<
   Pick<
@@ -452,7 +477,7 @@ export type CampaignPatchV3 = Partial<
  * všetky `scheduled` kampane bez dátumovej podmienky) a fronta V3.
  */
 export interface CampaignsRepoExt {
-  create(input: CreateCampaignInput, conn?: Queryable): Promise<CampaignRecordV3>;
+  create(input: CreateCampaignInputV3, conn?: Queryable): Promise<CampaignRecordV3>;
   getById(id: number, conn?: Queryable): Promise<CampaignRecordV3 | null>;
   list(filter: CampaignListFilter, conn?: Queryable): Promise<Paged<CampaignRecordV3>>;
   claim(id: number, allowedFrom: CampaignStatusV3[], conn?: Queryable): Promise<boolean>;
@@ -500,7 +525,24 @@ export interface CampaignsRepoExt {
   findLateCandidates(today: DateOnly, conn?: Queryable): Promise<CampaignRecordV3[]>;
   /** K5: nastaví príznak meškania. `true` = práve teraz sa zmenil z 0 na 1. */
   markLate(id: number, conn?: Queryable): Promise<boolean>;
-  /** K2: prepočíta počítadlá z `campaign_items` (jediný zdroj pravdy). */
+  /**
+   * K2: prepočíta počítadlá z `campaign_items` (jediný zdroj pravdy).
+   *
+   * ⚠ **NEMÁ PRODUKČNÉHO VOLAJÚCEHO** (zistené 25. 8. 2026, nález B5) — grep ho
+   * nájde len v `test/integration/repo-fronta.spec.ts`. Kto ho zapojí, musí
+   * najprv zladiť DVE definície tých istých počítadiel, lebo dnes sa rozchádzajú
+   * s `finishCampaign()` v `lib/engine/executor.ts`:
+   *
+   *  - `items_ok` tu počíta VÝHRADNE `status = 'ok'`, takže kampaň, ktorej
+   *    všetky položky skončili ako `skipped` (opravný beh, D36), vykáže
+   *    0 úspešných a 0 zlyhaných z N — čo nie je ani jedno z toho, čo sa stalo;
+   *  - `items_failed` tu vynecháva `interrupted`, kým `finishCampaign()` ich
+   *    do zlyhaných zahrnie (`total − ok − uncertain`).
+   *
+   * Kým je nezapojený, nič nekazí. V deň zapojenia by appka začala o dobehnutej
+   * kampani tvrdiť iné čísla než pri jej dokončení — a to bez toho, aby čokoľvek
+   * spadlo. Preto to stojí tu a nie v issue.
+   */
   syncCountersFromItems(id: number, conn?: Queryable): Promise<void>;
   /**
    * K2 / odpoveď 43: prepadnutá kampaň späť do fronty po odstávke počítača.
@@ -560,7 +602,7 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
   };
 
   const repo: CampaignsRepoExt = {
-    async create(input: CreateCampaignInput, conn?: Queryable): Promise<CampaignRecordV3> {
+    async create(input: CreateCampaignInputV3, conn?: Queryable): Promise<CampaignRecordV3> {
       // Validácie hodnôt (percento, okno, dátumy) vlastní A7 — DB constrainty
       // sú posledná poistka (ck_campaigns_percent, ck_campaigns_window).
       const result = (await run<{ insertId?: number | bigint }>(conn, SQL_INSERT, [
@@ -579,6 +621,7 @@ export function createCampaignsRepo(deps: CampaignsRepoDeps = {}): CampaignsRepo
         input.confirmPayloadHash ?? null,
         input.sudoAt ?? null,
         input.createdBy,
+        Math.max(0, Math.trunc(Number(input.itemsTotal ?? 0) || 0)),
       ])) ?? {};
       const id = Number(result.insertId ?? 0);
       const rows = await run<CampaignRow[]>(conn, SQL_BY_ID, [id]);

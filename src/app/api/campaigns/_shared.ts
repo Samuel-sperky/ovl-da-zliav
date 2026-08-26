@@ -14,7 +14,9 @@
  *     (O1, D14) — derivát sa nikdy neukladá do DB.
  *  5. `insertConfirmedCampaign()` — jediná cesta, ktorou route-y vkladajú
  *     zľavu: vždy s `confirmed_at` + `confirm_payload_hash` z OVERENÉHO preview
- *     tokenu (I3), s pásmami (K3) a s položkami v deterministickom poradí (I10).
+ *     tokenu (I3), s pásmami (K3) a s položkami v deterministickom poradí (I10),
+ *     a to celé v JEDNEJ transakcii (§3, D63) — polovica vloženej zľavy je
+ *     horšia než žiadna, viď komentár nad funkciou.
  *  6. Most na stav `queued` a príznak `late` (K2, K5) — `src/contracts.ts` ich
  *     zatiaľ nevie pomenovať, tak pre ne existuje presne jedno miesto.
  *  7. Odhad dobehnutia fronty z denného rozpočtu (K5) — rozpočet sa číta RAZ
@@ -49,12 +51,15 @@ import type {
   Queryable,
   SettingsRepo,
   ShopClient,
+  TransactionRunner,
   Ulid,
   WriteMutex,
 } from '@/contracts';
 
+import { withTransaction } from '@/db/tx';
 import { env } from '@/env';
 import { auditWriter as defaultAuditWriter } from '@/lib/audit/write';
+import { anonReadCost } from '@/lib/catalog/product-details';
 import { previewTokenService as defaultPreviewTokens, PreviewTokenError } from '@/lib/crypto/preview-token';
 import { isDateOnly, todayInZone } from '@/lib/domain/dates';
 import { DomainError } from '@/lib/domain/errors';
@@ -80,8 +85,12 @@ import {
 import {
   campaignsRepo as defaultCampaignsRepo,
   type CampaignsRepoExt,
+  type CreateCampaignInputV3,
 } from '@/lib/repo/campaigns.repo';
-import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
+import {
+  catalogRepo as defaultCatalogRepo,
+  type CatalogRepoExt,
+} from '@/lib/repo/catalog.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import {
   tiersRepo as defaultTiersRepo,
@@ -91,6 +100,7 @@ import {
 } from '@/lib/repo/tiers.repo';
 import { createShopClientFromSettings } from '@/lib/shop/client';
 import { newOperationId } from '@/lib/shop/correlation';
+import type { ReadBudgetStatus } from '@/lib/shop/read-budget';
 
 /* ═════════════ 0. Most na stav `queued` a príznak `late` (K2, K5) ═════════ */
 
@@ -139,13 +149,27 @@ export interface RoutesItemsRepo {
     reason: string,
     conn?: Queryable,
   ): Promise<void>;
+  /**
+   * K2/K5 — koľko položiek drží CELÁ fronta, naprieč živými kampaňami.
+   * Voliteľné len preto, aby staršie fakes v testoch zostali platné; produkčný
+   * `campaignItemsRepo` ho má vždy. Keď chýba, `readQueuePending()` sa vráti
+   * k veľkosti samotnej kampane — a to je horšie číslo, viď jeho komentár.
+   */
+  queueTotals?(conn?: Queryable): Promise<{ pending: number }>;
 }
 
 /** Podmnožiny kontraktov, ktoré A12 skutočne používa — testy dodajú len tieto. */
 export interface RoutesDeps {
-  campaignsRepo?: Pick<
+  campaignsRepo?: {
+    /**
+     * K1 bod 3 — `itemsTotal` navyše oproti kontraktu A0, viď
+     * `CreateCampaignInputV3`. Staršie fakes s úzkym typom vstupu zostávajú
+     * platné (parametre metód sú v TS bivariantné) a `itemsTotal` jednoducho
+     * ignorujú.
+     */
+    create(input: CreateCampaignInputV3, conn?: Queryable): Promise<CampaignRecord>;
+  } & Pick<
     CampaignsRepo,
-    | 'create'
     | 'getById'
     | 'list'
     | 'claim'
@@ -156,17 +180,28 @@ export interface RoutesDeps {
     | 'findFutureOverlaps'
     | 'lastOwnWrite'
   > &
-    // `requeueMissed` (K2) žije až v rozšírenom repozitári, nie v kontrakte A0.
-    // VOLITEĽNÉ zámerne: staršie fakes v testoch ho nemajú a nemá zmysel nútiť
-    // ich dopisovať metódu, ktorú netestujú. Keď chýba, `resolveRoutesDeps()`
-    // doplní fail-closed náhradu, ktorá nevráti do fronty nič.
-    Partial<Pick<CampaignsRepoExt, 'requeueMissed'>>;
+    // `requeueMissed` (K2) a dávkový `lastOwnWrites` (I11) žijú až v rozšírenom
+    // repozitári, nie v kontrakte A0. VOLITEĽNÉ zámerne: staršie fakes v testoch
+    // ich nemajú a nemá zmysel nútiť ich dopisovať metódu, ktorú netestujú.
+    // Keď chýba `requeueMissed`, `resolveRoutesDeps()` doplní fail-closed
+    // náhradu, ktorá nevráti do fronty nič; keď chýba `lastOwnWrites`, volajúci
+    // sa vráti k dotazu na produkt (a v produkcii sa to nikdy nestane).
+    Partial<Pick<CampaignsRepoExt, 'requeueMissed' | 'lastOwnWrites'>>;
   campaignItemsRepo?: RoutesItemsRepo;
   allowlistRepo?: Pick<
     AllowlistRepo,
     'listActive' | 'addProduct' | 'removeProduct' | 'markShopStatus' | 'areAllActive'
   >;
   catalogRepo?: Pick<CatalogRepo, 'get' | 'getMany' | 'upsert'>;
+  /**
+   * K7 — zdieľaný denný rozpočet ANONYMNÝCH čítaní shopu.
+   *
+   * Zámerne samostatná závislosť, nie širší `catalogRepo`: trojica
+   * `get`/`getMany`/`upsert` je kontrakt, o ktorý sa opierajú existujúce testy,
+   * a rozšíriť ju by znamenalo prepísať cudzie fakes (tá istá úvaha ako
+   * `catalogLookup` v `catalog/search`). Produkčne je to ten istý repozitár.
+   */
+  readBudget?: Pick<CatalogRepoExt, 'reserveShopReads' | 'shopReadBudget'>;
   auditRepo?: Pick<AuditRepo, 'list' | 'getById' | 'countWritesInLastHour'>;
   settingsRepo?: Pick<SettingsRepo, 'get' | 'lockWrites'>;
   apiKeyRepo?: Pick<ApiKeyRepo, 'getMeta' | 'loadForUse' | 'wipe' | 'touchLastUsed'>;
@@ -175,6 +210,15 @@ export interface RoutesDeps {
   /** K2 — denný rozpočet z auditu; slúži len na ODHAD, nikdy nepovoľuje zápis. */
   budget?: BudgetSource;
   audit?: AuditWriter;
+  /**
+   * §3/D63 — spustenie viacerých zápisov ATOMICKY (`withTransaction`).
+   *
+   * Route-y ju potrebujú kvôli `insertConfirmedCampaign()`: kampaň, pásma,
+   * položky a auditný riadok sú jedna vec a polovica z nich je horšia než nič
+   * (viď komentár tam). Injektovateľná je preto, že in-memory svet testov
+   * nemá spojenie do MariaDB — testy si prinesú `createMemoryTx()`.
+   */
+  tx?: TransactionRunner;
   previewTokens?: PreviewTokenService;
   shopClient?: Pick<ShopClient, 'batchGetProducts' | 'getProduct' | 'setReduction'>;
   mutex?: WriteMutex;
@@ -218,6 +262,9 @@ export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDep
     campaignItemsRepo: overrides.campaignItemsRepo ?? defaultCampaignItemsRepo,
     allowlistRepo: overrides.allowlistRepo ?? defaultAllowlistRepo,
     catalogRepo: overrides.catalogRepo ?? defaultCatalogRepo,
+    // K7: rovnaké počítadlo, z ktorého berie synchronizácia katalógu aj
+    // `catalog/search`. Druhý zdroj by znamenal dva stropy proti jednému shopu.
+    readBudget: overrides.readBudget ?? defaultCatalogRepo,
     auditRepo: overrides.auditRepo ?? defaultAuditRepo,
     settingsRepo,
     apiKeyRepo: overrides.apiKeyRepo ?? defaultApiKeyRepo,
@@ -226,6 +273,8 @@ export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDep
     // spotrebu VÝHRADNE z auditu (K2) — žiadne paralelné počítadlo.
     budget: overrides.budget ?? createBudget({ settingsRepo, now: overrides.now }),
     audit: overrides.audit ?? defaultAuditWriter,
+    // §3/D63 — jediná cesta, ako spustiť viac zápisov atomicky.
+    tx: overrides.tx ?? withTransaction,
     previewTokens: overrides.previewTokens ?? defaultPreviewTokens,
     shopClient:
       overrides.shopClient ??
@@ -371,6 +420,21 @@ export interface ExpectedTokenParams {
   percent: DiscountPercent;
   from: DateOnly;
   to: DateOnly;
+  /**
+   * K3 — percentá pásiem per produkt, keď ich volajúci vie doložiť z DB.
+   *
+   * Pridané 25. 8. 2026 kvôli nálezu L1: cesta predĺženia ich nepodávala, takže
+   * `insertConfirmedCampaign` padol na hlavičkové percento a zľava s pásmami
+   * 30/20/10 sa do PRODUKČNÉHO shopu zapísala celá za 30 %. Hash to nezachytil,
+   * lebo `computePayloadHash` počíta percento položky rovnakým fallbackom —
+   * náhľad aj potvrdenie sa mýlili zhodne a I3 to pustilo.
+   *
+   * Pri zľave s JEDNÝM percentom sa tým nemení nič ani na bit: uniformná mapa dá
+   * presne ten istý hash ako chýbajúca mapa. Nepridáva to novú informáciu, len
+   * prestane mizieť existujúca — a potvrdzovací krok si rozloženie percent
+   * odvodí z DB, nie z tokenu, čím sa I3 utvrdzuje, nie oslabuje.
+   */
+  percents?: Readonly<Record<string, DiscountPercent>> | undefined;
 }
 
 /**
@@ -536,6 +600,81 @@ export function estimateWith(
   return estimateFinish(pending, budget.budget, { remainingToday: budget.remaining, now });
 }
 
+/* ═════════ 5b. Rozpočet ČÍTANÍ shopu (K7) — spoločná brána route-ov ═══════ */
+
+/** Výsledok pokusu zaplatiť čítanie celej sady zo zdieľaného rozpočtu (K7). */
+export interface ShopReadClearance {
+  /** `true` = celá sada je zaplatená a shop sa SMIE volať. */
+  granted: boolean;
+  /** Koľko anonymných čítaní by celá sada stála (`anonReadCost`). */
+  cost: number;
+  /** Stav počítadla po pokuse. `known: false` = počítadlo sa nedá prečítať. */
+  status: ReadBudgetStatus;
+}
+
+/**
+ * K7 — rezervácia zdieľaného denného rozpočtu anonymných čítaní PRED volaním
+ * shopu. Doteraz z tejto kvóty brali `engine/preview`, synchronizácia katalógu
+ * aj `catalog/search`, kým route-y `extend/preview` a `catalog/refresh` čítali
+ * mimo počítadla — a práve tým sa denný strop prekročil bez toho, aby o tom
+ * appka vedela.
+ *
+ * REZERVUJE SA VŠETKO NARAZ ALEBO NIČ, presne ako v `engine/preview`:
+ * `batchGetProducts()` číta celú sadu a čiastočná rezervácia by znamenala obraz
+ * postavený nad jej časťou. Stav sa najprv PREČÍTA (`reserveShopReads(0)` nič
+ * nemíňa) a rezervuje sa až vtedy, keď je na celú cenu miesto — inak by
+ * odmietnuté čítanie ešte aj minulo zvyšok kvóty.
+ *
+ * Nečitateľné počítadlo je fail-closed: `known: false` znamená „nevieme", a to
+ * nie je povolenie volať shop.
+ */
+export async function reserveShopReadsForSet(
+  d: ResolvedRoutesDeps,
+  productCount: number,
+): Promise<ShopReadClearance> {
+  const cost = anonReadCost(productCount);
+  const peek = await d.readBudget.reserveShopReads(0);
+  if (cost === 0) return { granted: false, cost, status: peek.status };
+  if (!peek.status.known || peek.status.remaining < cost) {
+    return { granted: false, cost, status: peek.status };
+  }
+  const reservation = await d.readBudget.reserveShopReads(cost);
+  // Súbeh s iným čítačom medzi náhľadom a rezerváciou. Pridelené čítania sa
+  // NEVRACAJÚ — chyba smerom k opatrnosti, rovnako ako v `product-details`.
+  return { granted: reservation.granted >= cost, cost, status: reservation.status };
+}
+
+/**
+ * K5 — koľko položiek fronta ešte drží, VRÁTANE práve zaradenej kampane.
+ *
+ * Odhad dobehnutia sa nesmie počítať z veľkosti jednej kampane. Fronta má
+ * JEDNU spoločnú dennú kvótu (K2), takže nová zľava dobehne až po tom, čo sa
+ * vybaví všetko, čo stojí pred ňou — a stáť pred ňou niečo môže je normálny,
+ * zdokumentovaný stav (ARCHITEKTURA §3.3, Z-2: „Zapisovať začnem, keď dobehne
+ * Ležiaky striebro"). Z veľkosti kampane by odhad vyšiel OPTIMISTICKY, teda
+ * skôr, než sa naozaj dopíše — a podľa toho dátumu sa plánuje produkcia aj
+ * varovanie K6 o kľúči.
+ *
+ * `fallback` (veľkosť kampane) je spodná hranica: keď fronta z akéhokoľvek
+ * dôvodu ohlási menej, než čo sme práve vložili, číslo je zastarané a odhad sa
+ * radšej oprie o vlastné položky, než by tvrdil menej práce, než je istá.
+ */
+export async function readQueuePending(
+  d: ResolvedRoutesDeps,
+  fallback: number,
+): Promise<number> {
+  const repo = d.campaignItemsRepo;
+  if (repo.queueTotals === undefined) return fallback;
+  try {
+    const totals = await repo.queueTotals();
+    return Math.max(totals.pending, fallback);
+  } catch {
+    // Fronta je informácia do UI, nie brzda zápisu — nečitateľné číslo
+    // nezhodí zaradenie, len sa odhad vráti k vlastným položkám.
+    return fallback;
+  }
+}
+
 /** Jednorazový odhad (POST) — jedno čítanie rozpočtu, jeden výsledok. */
 export async function estimateFinishFor(
   d: ResolvedRoutesDeps,
@@ -572,6 +711,20 @@ export interface InsertCampaignArgs {
  * Percento sa berie VÝHRADNE z overeného tokenu — nie z tela požiadavky a nie
  * z pásiem, ktoré klient poslal vedľa neho. Keby sa bralo odinakiaľ, dal by sa
  * potvrdiť jeden náhľad a zapísať iné číslo, a I3 by prestalo niečo znamenať.
+ *
+ * VŠETKY ŠTYRI ZÁPISY SÚ JEDNA TRANSAKCIA (§3, D63). Bez nej bola polovica
+ * vloženej zľavy horšia než žiadna: kampaň vzniká rovno ako `queued`
+ * s `confirm_payload_hash` nad CELOU sadou (I3), takže pád v ktorejkoľvek zo
+ * dávok `createMany()` (~500 riadkov na príkaz, pri 10 000 položkách dvadsať
+ * príkazov) nechal vo fronte ŽIVÚ kampaň s neúplnou sadou položiek. Scheduler
+ * si ju vzal, executor prepočítal hash z riadkov — a keďže do hlavičky hashu
+ * ide `count:<n>` (`preview-token.ts`), nad skrátenou sadou nesúhlasí, zápis
+ * sa odmietne a kampaň sa pokúša znova každý tick (L5). Rollback je jediná
+ * odpoveď: nedokončená zľava nesmie ostať vo fronte vôbec.
+ *
+ * `items_total` sa zapisuje UŽ TU (K1 bod 3) — inak sa `CHECK (items_total <=
+ * 10000)` z migrácie `0010` pri vzniku nevyhodnotí a DB poistka prvýkrát
+ * ožije až vo `finishCampaign()`, teda po odoslaní dávky do shopu.
  */
 export async function insertConfirmedCampaign(
   d: ResolvedRoutesDeps,
@@ -582,52 +735,67 @@ export async function insertConfirmedCampaign(
   const sortedIds = [...args.claims.productIds].sort((a, b) => a - b);
   const percents = args.percents ?? {};
 
-  const record = await d.campaignsRepo.create({
-    operationId,
-    name: args.name,
-    kind: args.kind,
-    parentCampaignId: args.parentCampaignId ?? null,
-    percent: args.claims.percent,
-    dateFrom: args.claims.from,
-    dateTo: args.claims.to,
-    mode: args.mode,
-    status: args.status,
-    fireAt: args.fireAt,
-    scheduledAt: now,
-    confirmedAt: now,
-    confirmPayloadHash: args.claims.payloadHash,
-    sudoAt: now,
-    createdBy: args.createdBy,
+  return d.tx(async (conn) => {
+    const record = await d.campaignsRepo.create(
+      {
+        operationId,
+        name: args.name,
+        kind: args.kind,
+        parentCampaignId: args.parentCampaignId ?? null,
+        percent: args.claims.percent,
+        dateFrom: args.claims.from,
+        dateTo: args.claims.to,
+        mode: args.mode,
+        status: args.status,
+        fireAt: args.fireAt,
+        scheduledAt: now,
+        confirmedAt: now,
+        confirmPayloadHash: args.claims.payloadHash,
+        sudoAt: now,
+        createdBy: args.createdBy,
+        // K1 bod 3 — počet položiek poznáme z overeného tokenu, takže DB
+        // poistka sa smie vyhodnotiť hneď a nie až po zápise do shopu.
+        itemsTotal: sortedIds.length,
+      },
+      conn,
+    );
+
+    if (args.tiers !== undefined && args.tiers.length > 0) {
+      await d.tiersRepo.createMany(record.id, args.tiers, conn);
+    }
+
+    await d.campaignItemsRepo.createMany(
+      record.id,
+      sortedIds.map((productId, index) => ({
+        productId,
+        position: index + 1,
+        percent: percents[String(productId)] ?? args.claims.percent,
+        priceAtPreview: (args.claims.pricesAtPreview[String(productId)] ?? null) as
+          | MoneyString
+          | null,
+        hasAttributes: false,
+      })),
+      conn,
+    );
+
+    // I4 — nad `audit_log` smie transakcia robiť VÝHRADNE `INSERT`, a to tu
+    // robí. Riadok ide na to isté spojenie zámerne: zľava, ktorá sa
+    // odrolovala, nesmie po sebe nechať auditný záznam, že vznikla.
+    await d.audit.appendAudit(
+      {
+        actor: 'user',
+        eventType: 'campaign_created',
+        ok: true,
+        userId: args.createdBy,
+        campaignId: record.id,
+        operationId,
+        message: `Kampaň „${args.name}" (${args.kind}, ${args.mode}) vytvorená s potvrdeným dry-runom: ${sortedIds.length} produktov, ${args.claims.percent} %, ${args.claims.from} → ${args.claims.to}${args.tiers !== undefined && args.tiers.length > 1 ? `, ${args.tiers.length} pásiem` : ''}.`,
+      },
+      conn,
+    );
+
+    return record;
   });
-
-  if (args.tiers !== undefined && args.tiers.length > 0) {
-    await d.tiersRepo.createMany(record.id, args.tiers);
-  }
-
-  await d.campaignItemsRepo.createMany(
-    record.id,
-    sortedIds.map((productId, index) => ({
-      productId,
-      position: index + 1,
-      percent: percents[String(productId)] ?? args.claims.percent,
-      priceAtPreview: (args.claims.pricesAtPreview[String(productId)] ?? null) as
-        | MoneyString
-        | null,
-      hasAttributes: false,
-    })),
-  );
-
-  await d.audit.appendAudit({
-    actor: 'user',
-    eventType: 'campaign_created',
-    ok: true,
-    userId: args.createdBy,
-    campaignId: record.id,
-    operationId,
-    message: `Kampaň „${args.name}" (${args.kind}, ${args.mode}) vytvorená s potvrdeným dry-runom: ${sortedIds.length} produktov, ${args.claims.percent} %, ${args.claims.from} → ${args.claims.to}${args.tiers !== undefined && args.tiers.length > 1 ? `, ${args.tiers.length} pásiem` : ''}.`,
-  });
-
-  return record;
 }
 
 /* ═══════════════ 7. Odpoveď dry-runu s preview tokenom (O2) ═══════════════ */
