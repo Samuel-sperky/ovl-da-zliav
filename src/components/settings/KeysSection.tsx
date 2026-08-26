@@ -159,7 +159,18 @@ function KeyRow({ label, purpose, meta, open, onToggle, testId }: KeyRowProps) {
         ) : null}
       </td>
       <td className="act">
-        <Button small onClick={onToggle} data-testid={`${testId}-toggle`}>
+        {/* Formulár sa otvorí AŽ POD tabuľkou, za dvoma odsekmi textu — medzi
+            tlačidlom a tým, čo otvorilo, nie je na obrazovke nič, čo by ich
+            spojilo. `aria-expanded` a `aria-controls` sú to spojenie; meniaci
+            sa nápis („Vložiť" → „Zavrieť") hovorí len to, čo tlačidlo urobí,
+            nie že niečo je otvorené a kde to je. */}
+        <Button
+          small
+          aria-expanded={open}
+          aria-controls={`${testId}-form`}
+          onClick={onToggle}
+          data-testid={`${testId}-toggle`}
+        >
           {open ? 'Zavrieť' : present ? 'Obnoviť' : 'Vložiť'}
         </Button>
       </td>
@@ -243,7 +254,7 @@ export function KeysSection({ writeKey, ordersKey, onStored }: KeysSectionProps)
       </Note>
 
       {open === 'write' ? (
-        <div className="set-form">
+        <div className="set-form" id="key-row-write-form">
           <ApiKeyForm
             keyMeta={writeKey}
             onStored={() => {
@@ -255,7 +266,7 @@ export function KeysSection({ writeKey, ordersKey, onStored }: KeysSectionProps)
       ) : null}
 
       {open === 'orders' ? (
-        <div className="set-form">
+        <div className="set-form" id="key-row-orders-form">
           <OrdersKeyForm
             keyMeta={ordersKey}
             onStored={() => {

@@ -99,6 +99,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import type { CatalogRowView } from '@/components/products/catalog-api';
+import { PRODUCT_DETAIL_ID } from '@/components/products/ProductDetailPanel';
 import { CodeLine } from '@/components/products/ProductFacts';
 import { codeLine, EMPTY_EXTRAS, type ExtrasStore } from '@/components/products/product-extras';
 import type { ProductReason } from '@/components/products/catalog-status';
@@ -438,10 +439,18 @@ export function CatalogTable({
                     <td className="name" data-l="Produkt">
                       {/* `title` je celý názov — orezaný chvost sa dá prečítať
                           bez otvorenia panela (D10, bod 2 v hlavičke). */}
+                      {/* Tlačidlo názvu otvára panel detailu vedľa tabuľky,
+                          teda je to ROZKLIK — a rozklik musí povedať, či je
+                          otvorený a čo otvára. Bez toho sa po stlačení názvu
+                          čítačke nezmení nič: `.open` a `aria-current` sú na
+                          RIADKU a hovoria „toto teraz čítam vpravo", nie
+                          „stlačením tohto sa vpravo niečo otvorilo". */}
                       <button
                         type="button"
                         style={NAME_BUTTON}
                         title={row.name ?? undefined}
+                        aria-expanded={open}
+                        aria-controls={PRODUCT_DETAIL_ID}
                         onClick={() => onOpenDetail(row.productId)}
                         data-testid={`open-detail-${row.productId}`}
                       >
@@ -521,7 +530,9 @@ export function CatalogTable({
           ) : null}
         </span>
         <div className="row" style={{ gap: '14px' }}>
-          <div className="seg" aria-label="Riadkov na stránku">
+          {/* `role="group"` — bez roly je `aria-label` na `<div>` neplatný
+              a čítačka ho zahodí (to isté vo filtroch a v paneli detailu). */}
+          <div className="seg" role="group" aria-label="Riadkov na stránku">
             {PER_PAGE_CHOICES.map((size) => (
               <button
                 key={size}

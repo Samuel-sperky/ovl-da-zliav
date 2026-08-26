@@ -13,7 +13,7 @@
  * Vlastník: C1. Používajú C2 (pridanie produktu, detail auditu) a C3
  * (nová kampaň — 2 kroky v tom istom draweri).
  */
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 import Icon from '@/components/ui/Icon';
 
@@ -36,6 +36,13 @@ const FOCUSABLE =
 
 export function Drawer({ open, onClose, title, subtitle, footer, children, testId }: DrawerProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * `role="dialog"` bez prístupného mena je „dialóg" a nič viac — čítačka pri
+   * vstupe neprečíta, do čoho človek vstúpil. Meno nesie ten istý nadpis, aký
+   * je vidieť, takže sa s obrazovkou nemôže rozísť (odpísaný `aria-label` by
+   * sa po prvej úprave textu rozišiel a nikto by si to nevšimol).
+   */
+  const titleId = useId();
   // `onClose` cez ref: keydown efekt tak závisí len od `open` a pri každom
   // re-renderi rodiča nekradne fokus späť do panelu.
   const onCloseRef = useRef(onClose);
@@ -106,12 +113,15 @@ export function Drawer({ open, onClose, title, subtitle, footer, children, testI
         className="ovl-drawer"
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         tabIndex={-1}
         {...(testId ? { 'data-testid': testId } : {})}
       >
         <div className="ovl-drawer-head">
           <div>
-            <h2 style={{ margin: 0 }}>{title}</h2>
+            <h2 id={titleId} style={{ margin: 0 }}>
+              {title}
+            </h2>
             {subtitle !== undefined ? (
               <p className="ovl-small ovl-muted" style={{ margin: '0.15rem 0 0' }}>
                 {subtitle}

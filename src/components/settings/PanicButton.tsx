@@ -123,7 +123,16 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
         </span>
         {!open ? (
           <span className="dz-a">
-            <Button variant="danger" small onClick={() => setOpen(true)} data-testid="panic-open">
+            {/* Rozklik nad najnebezpečnejšou akciou appky: čo sa stlačením
+                otvorí, musí byť čítačke povedané, nielen vidieť. */}
+            <Button
+              variant="danger"
+              small
+              aria-expanded={open}
+              aria-controls="panic-editor"
+              onClick={() => setOpen(true)}
+              data-testid="panic-open"
+            >
               Kľúč unikol
             </Button>
           </span>
@@ -140,7 +149,7 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
       ) : null}
 
       {open ? (
-        <div className="set-form" data-testid="panic-editor">
+        <div className="set-form" id="panic-editor" data-testid="panic-editor">
           <label className="field set-w">
             <span className="lb">Heslo</span>
             <input

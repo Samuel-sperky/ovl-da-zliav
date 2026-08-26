@@ -93,7 +93,7 @@
  * Vlastník: V10 (rozšírenie na „všetky údaje": P2 kontraktu produktov).
  */
 import Link from 'next/link';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 /*
@@ -438,6 +438,36 @@ function WriteRow({ write }: { write: ProductWriteView }) {
 
 /* ═══════════════════════════ 2. Panel ═════════════════════════════════════ */
 
+/**
+ * `id` panela. Nesie ho `<aside>` a ODKAZUJE naň `aria-controls` na tlačidle
+ * názvu v `CatalogTable` — rozklik a to, čo rozkliká, musia byť spojené jedným
+ * reťazcom, nie dvoma zhodnými literálmi v dvoch súboroch.
+ *
+ * Na obrazovke je panel najviac raz, takže `id` je pevné a nie z `productId`:
+ * pri prepnutí riadku sa väzba nesmie na okamih rozpadnúť.
+ */
+export const PRODUCT_DETAIL_ID = 'product-detail';
+
+/**
+ * ČO SA STANE S KLÁVESOU V PANELI.
+ *
+ * Escape zatvára — panel je jediné miesto obrazovky, z ktorého sa inak
+ * klávesnicou nedá vyjsť inak než pretabulovaním celého zvyšku stránky.
+ * `defaultPrevented` je tu z toho istého dôvodu ako v `ui/Drawer`: keď si
+ * Escape spracoval vnorený dialóg (sudo), panel sa ho nesmie chytiť ako druhý
+ * a zatvoriť sa pod ním.
+ *
+ * Je to čistá funkcia, nie `if` v obsluhe, aby sa dala zmerať bez prehliadača.
+ */
+export function detailPanelKeyAction(
+  key: string,
+  defaultPrevented: boolean,
+): 'close' | 'ignore' {
+  if (key !== 'Escape') return 'ignore';
+  if (defaultPrevented) return 'ignore';
+  return 'close';
+}
+
 export interface ProductDetailPanelProps {
   row: CatalogRowView;
   /** Okno, v ktorom je `row.unitsSold` — to isté, aké má tabuľka. */
@@ -477,6 +507,48 @@ export function ProductDetailPanel({
    * všetky bunky sú `pending`; nikdy nie `none`.
    */
   const [extra, setExtra] = useState<ProductExtraView | undefined>(undefined);
+
+  const panelRef = useRef<HTMLElement | null>(null);
+  /**
+   * Prvok, z ktorého sa panel otvoril — tlačidlo názvu v riadku tabuľky.
+   * Po zavretí mu fokus PATRÍ SPÄŤ: bez toho spadne na `document.body`
+   * a človek, ktorý sa dovnútra dostal klávesnicou, začína od hlavičky
+   * stránky a svoj riadok medzi päťdesiatimi hľadá odznova.
+   */
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  /*
+   * FOKUS IDE DO PANELA PRI OTVORENÍ — a to nie je ozdoba.
+   *
+   * Panel je v DOM ZA celou tabuľkou (`CatalogPanel`: `.catalog-split` má
+   * tabuľku a panel ako súrodencov v tomto poradí). Kto ho otvorí z prvého
+   * riadku, má k jeho obsahu pri päťdesiatich riadkoch na stránku vyše sto
+   * tabulátorov — zaškrtávacie políčko a názov na každom riadku. Poradie
+   * tabulátora pritom sedí s obrazovkou (panel je vpravo), takže sa to
+   * neopravuje presúvaním v DOM, ale tým, že sa fokus presunie tam, kam sa
+   * presunula pozornosť.
+   *
+   * Beží aj pri PREPNUTÍ riadku, nielen pri prvom otvorení: panel sa
+   * neodmontuje, len prekreslí, a obsah je vtedy o inom kuse.
+   */
+  useEffect(() => {
+    const active = document.activeElement;
+    const panel = panelRef.current;
+    if (active instanceof HTMLElement && (panel === null || !panel.contains(active))) {
+      openerRef.current = active;
+    }
+    panel?.focus();
+  }, [row.productId]);
+
+  /* Zavretie panela vracia fokus tam, odkiaľ sa otvoril. Prvok, ktorý medzitým
+     z obrazovky zmizol (prelistovanie, iný filter), sa preskočí. */
+  useEffect(
+    () => () => {
+      const opener = openerRef.current;
+      if (opener !== null && opener.isConnected) opener.focus();
+    },
+    [],
+  );
 
   /* Vlastné zápisy appky — jediný zdroj všetkého, čo panel povie o zľavách. */
   useEffect(() => {
@@ -700,7 +772,25 @@ export function ProductDetailPanel({
   ];
 
   return (
-    <aside className="drawer" data-testid="product-detail" aria-label="Detail produktu">
+    <aside
+      ref={panelRef}
+      id={PRODUCT_DETAIL_ID}
+      className="drawer"
+      /* `-1` = fokus sem ide programovo, do poradia tabulátora panel
+         NEPRIBUDNE. Panel nie je ovládací prvok a pridať ho medzi zastávky
+         by tabulátor len predĺžilo. */
+      tabIndex={-1}
+      /* Escape sa berie z panela, nie z `document`: panel NIE JE modálny,
+         pozadie zostáva ovládateľné, a globálny odposluch by zatváral aj
+         vtedy, keď je človek myšlienkami aj fokusom úplne inde. */
+      onKeyDown={(event) => {
+        if (detailPanelKeyAction(event.key, event.defaultPrevented) === 'ignore') return;
+        event.preventDefault();
+        onClose();
+      }}
+      data-testid="product-detail"
+      aria-label="Detail produktu"
+    >
       <div className="drawer-h">
         <div>
           <div className="t">{row.name ?? 'bez názvu'}</div>
@@ -727,7 +817,9 @@ export function ProductDetailPanel({
       </div>
 
       <SoldDominant sold={sold} windowDays={windowDays} />
-      <div className="seg" aria-label="Za koľko dní sa počítajú predané kusy">
+      {/* `role="group"` — bez roly je `aria-label` na `<div>` neplatný
+          a čítačka ho zahodí (to isté vo filtroch a v pätke tabuľky). */}
+      <div className="seg" role="group" aria-label="Za koľko dní sa počítajú predané kusy">
         {SOLD_WINDOWS.map((days: SoldWindow) => (
           <button
             key={days}

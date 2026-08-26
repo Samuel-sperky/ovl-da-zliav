@@ -251,7 +251,16 @@ export function CatalogFilters({
           <div className="chips">
             {saved.map((row) => (
               <span key={row.name} className={row.name === activeSaved ? 'chip on' : 'chip'}>
-                <button type="button" style={BARE_BUTTON} onClick={() => onApplySaved(row.query)}>
+                {/* Že filter práve platí, hovorí trieda `on` na obale — teda
+                    pozadie a farba textu, a nič iné. `aria-pressed` patrí na
+                    tlačidlo, lebo obal je `<span>` bez roly. */}
+                <button
+                  type="button"
+                  style={BARE_BUTTON}
+                  aria-pressed={row.name === activeSaved}
+                  onClick={() => onApplySaved(row.query)}
+                  data-testid={`saved-filter-${row.name}`}
+                >
                   {row.name}
                 </button>
                 <button
@@ -274,7 +283,10 @@ export function CatalogFilters({
 
       <div className="fgroup">
         <h3>Obdobie</h3>
-        <div className="seg" aria-label="Za koľko dní sa počítajú predané kusy">
+        {/* `role="group"` nie je ozdoba: na `<div>` bez roly je `aria-label`
+            podľa ARIA neplatný a čítačka ho zahodí — z prepínača potom zostane
+            „30, 60, 90, 180, 360" bez toho, čo tie čísla znamenajú. */}
+        <div className="seg" role="group" aria-label="Za koľko dní sa počítajú predané kusy">
           {SOLD_WINDOWS.map((days: SoldWindow) => (
             <button
               key={days}

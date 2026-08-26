@@ -722,11 +722,16 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
           <section className="sec" data-testid="new-discount-selection">
             <div className="sec-h">
               <h2>Výber produktov</h2>
+              {/* `.chip.on` sa od `.chip` líši len pozadím, obrysom a farbou
+                  textu. Ktorý zdroj výberu práve platí, preto bez
+                  `aria-pressed` nie je čím prečítať. */}
               <div className="act">
                 <button
                   type="button"
                   className={source === 'filter' ? 'chip on' : 'chip'}
+                  aria-pressed={source === 'filter'}
                   onClick={() => setSource('filter')}
+                  data-testid="source-filter"
                 >
                   Z filtra
                 </button>
@@ -734,7 +739,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                   <button
                     type="button"
                     className={source === 'products' ? 'chip on' : 'chip'}
+                    aria-pressed={source === 'products'}
                     onClick={() => setSource('products')}
+                    data-testid="source-products"
                   >
                     Z označených{' '}
                     <span className="c">{formatCountSk((initial.productIds ?? []).length)}</span>
@@ -757,12 +764,21 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               <span className="lvl-3" style={{ marginLeft: '8px' }}>
                 Obdobie
               </span>
-              <span className="seg">
+              {/*
+               * `.seg button.on` sa od nevybraného líši VÝHRADNE pozadím
+               * a farbou textu (`globals.css`). Bez `aria-pressed` je teda
+               * zvolené okno stav oznámený len farbou — presne to, čo P3
+               * zakazuje. Súrodenec „Obdobie" vedľa je len text, takže rolu
+               * a meno nesie skupina; bez roly by `aria-label` na `<span>`
+               * čítačka zahodila.
+               */}
+              <span className="seg" role="group" aria-label="Za koľko dní sa počítajú predané kusy">
                 {SOLD_WINDOWS.map((days) => (
                   <button
                     key={days}
                     type="button"
                     className={filter.soldWindowDays === days ? 'on' : undefined}
+                    aria-pressed={filter.soldWindowDays === days}
                     onClick={() => setFilter({ ...filter, soldWindowDays: days })}
                     data-testid={`window-${days}`}
                   >
