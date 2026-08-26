@@ -24,18 +24,35 @@
 import { StrictMode, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import DiscountDetail from '@/components/campaigns/DiscountDetail';
-import DiscountsList from '@/components/campaigns/DiscountsList';
-import Overview from '@/components/dashboard/Overview';
-import AppShell from '@/components/layout/AppShell';
-import CatalogPanel from '@/components/products/CatalogPanel';
-import { DEFAULT_CATALOG_FILTER } from '@/components/products/catalog-filter';
-import SettingsIndex from '@/components/settings/SettingsIndex';
-import SettingsSubPage from '@/components/settings/SettingsSubPage';
-
+/*
+ * PORADIE ŠTÝLOV MUSÍ BYŤ TAKÉ, AKÉ POSIELA NEXT (26. 8. 2026).
+ *
+ * Písmo a `globals.css` sa importujú PRED komponentmi, a to je jediné správne
+ * poradie: `app/layout.tsx` načíta `globals.css` v koreni, kým CSS modul si
+ * ťahá až stránka, takže v appke ide globálny list PRVÝ a modul DRUHÝ. Keď
+ * tieto tri riadky stáli pod komponentmi, balíček ich poskladal naopak — modul
+ * prvý, `globals.css` druhý — a pri rovnakej špecifickosti vyhral globálny
+ * list. Snímka tak kreslila iné šírky než appka: `.pctInput` (74 px) aj
+ * `.capInput` (92 px) prehrali s `.inp { width: 100% }`, polia v pásmach sa
+ * rozťahli na celú bunku a znak „%“ spadol pod ne. Nebola to chyba appky,
+ * bola to chyba snímkovača — a posudzovalo sa z obrázka.
+ */
 import '@fontsource-variable/inter/wght.css';
 import '@fontsource-variable/inter/wght-italic.css';
 import '@/app/globals.css';
+
+import DiscountDetail from '@/components/campaigns/DiscountDetail';
+import DiscountsList from '@/components/campaigns/DiscountsList';
+import NewDiscount, { type NewDiscountInitial } from '@/components/campaigns/NewDiscount';
+import Overview from '@/components/dashboard/Overview';
+import AppShell from '@/components/layout/AppShell';
+import CatalogPanel from '@/components/products/CatalogPanel';
+import {
+  DEFAULT_CATALOG_FILTER,
+  type CatalogFilterState,
+} from '@/components/products/catalog-filter';
+import SettingsIndex from '@/components/settings/SettingsIndex';
+import SettingsSubPage from '@/components/settings/SettingsSubPage';
 
 import { nasadFetch, poslednyDotaz } from './fixtury';
 import { zbierNalezy } from './kontroly';
@@ -48,8 +65,35 @@ interface Obrazovka {
 }
 
 /**
+ * Predvolený vstup sprievodcu bez parametrov v adrese — ležiaky za 180 dní.
+ *
+ * Je to DRUHÁ KÓPIA konštanty `LEZIAKY` z `app/zlavy/nova/page.tsx`, a to
+ * zámerne: tá stránka je serverová (`Metadata`, `searchParams`) a do balíčka
+ * snímok sa importovať nedá. Keď sa tam predvolený filter zmení, musí sa
+ * zmeniť aj tu — inak snímka ukáže iný prvý klik, než akým appka začína.
+ */
+const SPRIEVODCA_LEZIAKY: CatalogFilterState = {
+  ...DEFAULT_CATALOG_FILTER,
+  soldWindowDays: 180,
+  soldBuckets: ['none'],
+};
+
+const SPRIEVODCA_BEZ_ADRESY: NewDiscountInitial = {
+  productIds: null,
+  filter: SPRIEVODCA_LEZIAKY,
+  expectedTotal: null,
+  window: null,
+};
+
+/**
  * Zoznam obrazoviek. Kľúč je to, čo sa píše do adresy aj do mena súboru —
  * jedno meno pre snímku, adresu aj hlásenie o náleze.
+ *
+ * ÚPLNOSŤ JE TU CELÝ ZMYSEL. Rozhodnutie 11 kontraktu z 25. 8. robí zo
+ * `npm run snimky` povinný dôkaz pred aj po každej UI zmene — obrazovka, ktorá
+ * tu nie je, sa teda nedá dokázať ani vyvrátiť. Do 26. 8. tu chýbal
+ * SPRIEVODCA (`/zlavy/nova`), teda najväčšia obrazovka appky, a tri z piatich
+ * podstránok Nastavení vrátane tej s kľúčmi a tej deštruktívnej.
  */
 export const OBRAZOVKY: Readonly<Record<string, Obrazovka>> = {
   prehlad: { cesta: '/', telo: () => <Overview /> },
@@ -62,7 +106,19 @@ export const OBRAZOVKY: Readonly<Record<string, Obrazovka>> = {
     cesta: '/zlavy/42',
     telo: () => <DiscountsList selectedId={42} detail={<DiscountDetail id={42} />} />,
   },
+  'zlavy-nova': {
+    cesta: '/zlavy/nova',
+    telo: () => <NewDiscount initial={SPRIEVODCA_BEZ_ADRESY} />,
+  },
   nastavenia: { cesta: '/nastavenia', telo: () => <SettingsIndex /> },
+  'nastavenia-co-vie': {
+    cesta: '/nastavenia/co-vie',
+    telo: () => <SettingsSubPage slug="co-vie" />,
+  },
+  'nastavenia-napojenie': {
+    cesta: '/nastavenia/napojenie',
+    telo: () => <SettingsSubPage slug="napojenie" />,
+  },
   'nastavenia-zapisy': {
     cesta: '/nastavenia/co-smie',
     telo: () => <SettingsSubPage slug="co-smie" />,
@@ -70,6 +126,10 @@ export const OBRAZOVKY: Readonly<Record<string, Obrazovka>> = {
   'nastavenia-zamknute': {
     cesta: '/nastavenia/historia',
     telo: () => <SettingsSubPage slug="historia" />,
+  },
+  'nastavenia-cervena-zona': {
+    cesta: '/nastavenia/cervena-zona',
+    telo: () => <SettingsSubPage slug="cervena-zona" />,
   },
 };
 

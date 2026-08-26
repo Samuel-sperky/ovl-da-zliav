@@ -142,6 +142,8 @@ import {
   catalogSearchQuery,
   type CatalogFilterState,
 } from '@/components/products/catalog-filter';
+import SoldCoverageNote from '@/components/products/SoldCoverageNote';
+import { useSoldCoverage } from '@/components/products/sold-coverage';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
 import { collectOperationBlockers } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
@@ -218,6 +220,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [status, setStatus] = useState<StatusPayload | null>(null);
   /** Živý stav fronty: presný počet čakajúcich položiek a spotreba rozpočtu. */
   const [queue, setQueue] = useState<QueueSnapshotView | null>(null);
+  /**
+   * Za koľko dní má appka objednávky naozaj stiahnuté (KONTRAKT-PREDAJNOST P3).
+   * Pravidlá pásiem
+   * hovoria „0 predaných za 180 dní" bez ohľadu na to, koľko dní sa zmeralo —
+   * a podľa nich sa tu podpisuje zápis do ostrého shopu.
+   */
+  const soldCoverage = useSoldCoverage();
 
   const [name, setName] = useState('');
   const [percents, setPercents] = useState<Record<SoldBucketKey, number>>({
@@ -878,6 +887,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               </div>
 
               <>
+                {/* Pravidlo pásma („0 predaných za 180 dní") znie ako meraný
+                    fakt o pol roku. Príkaz na zápis do ostrého shopu sa
+                    podpisuje TU, takže tu musí stáť aj to, za koľko dní sú
+                    objednávky naozaj stiahnuté. Pri plnom pokrytí veta
+                    zmizne. */}
+                <SoldCoverageNote coverage={soldCoverage} windowDays={filter.soldWindowDays} />
+
                 <table className={styles.tiers}>
                   <thead>
                     <tr>

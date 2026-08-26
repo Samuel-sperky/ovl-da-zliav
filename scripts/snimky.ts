@@ -25,7 +25,7 @@
  *    celá stránka (nielen výrez okna),
  *  · výpis nálezov: čo na obrazovkách preteká, prekrýva sa, nesie farbu bez
  *    slova, ukazuje nulu namiesto pomlčky, obsahuje emodži alebo prerastá
- *    1,5 obrazovky (P4).
+ *    1,5 obrazovky (P4), plus každá cesta, na ktorú fixtúry odpoveď nemajú.
  *
  * Nálezy sa LEN POPISUJÚ — snímkovač do `src/` nesiaha.
  *
@@ -92,9 +92,24 @@ const ZABERY: readonly Zaber[] = [
     cakaj: '[data-testid="discounts-list"]',
   },
   {
+    obrazovka: 'zlavy-nova',
+    nazov: 'Zľavy — sprievodca novou zľavou',
+    cakaj: '[data-testid="new-discount"]',
+  },
+  {
     obrazovka: 'nastavenia',
     nazov: 'Nastavenia — rozcestník',
     cakaj: '[data-testid="settings-cards"]',
+  },
+  {
+    obrazovka: 'nastavenia-co-vie',
+    nazov: 'Nastavenia — Čo appka vie',
+    cakaj: '[data-testid="settings-sub-co-vie"]',
+  },
+  {
+    obrazovka: 'nastavenia-napojenie',
+    nazov: 'Nastavenia — Na čo je napojená',
+    cakaj: '[data-testid="settings-sub-napojenie"]',
   },
   {
     obrazovka: 'nastavenia-zapisy',
@@ -105,6 +120,20 @@ const ZABERY: readonly Zaber[] = [
     obrazovka: 'nastavenia-zamknute',
     nazov: 'Nastavenia — Zamknuté funkcie a poistky',
     cakaj: '[data-testid="settings-sub-historia"]',
+  },
+  {
+    obrazovka: 'nastavenia-cervena-zona',
+    nazov: 'Nastavenia — Červená zóna',
+    cakaj: '[data-testid="settings-sub-cervena-zona"]',
+  },
+  {
+    obrazovka: 'nastavenia-cervena-zona',
+    variant: 'otvorena',
+    nazov: 'Nastavenia — Červená zóna s otvoreným rozklikom',
+    cakaj: '[data-testid="settings-sub-cervena-zona"]',
+    // Zatvorený rozklik je celá obrazovka: nadpis a jeden červený odkaz.
+    // Bez tohto kliku je najnebezpečnejšie tlačidlo appky neodfotené.
+    klikni: '[data-testid="danger-zone-disclosure"] summary',
   },
 ];
 

@@ -31,7 +31,7 @@ import type {
   PerformanceView,
 } from '@/components/campaigns/zlavy-api';
 import type { QueueSnapshotView, RetryPlanView } from '@/components/campaigns/queue-model';
-import type { CatalogSearchView } from '@/components/products/catalog-api';
+import type { CatalogSearchView, ProductWritesView } from '@/components/products/catalog-api';
 import type { CatalogStatusView } from '@/components/products/catalog-status';
 import type { KeyMetaView, QueueView, SettingsView } from '@/components/settings/api';
 import { toStatusPayload, type StatusPayload } from '@/lib/status/snapshot';
@@ -64,22 +64,30 @@ export const NASTAVENIA: SettingsView = {
 /**
  * Kľúč na zápis. `last4` je vymyslená štvorica — nie je to časť skutočného
  * kľúča a ani ňou nesmie byť.
+ *
+ * PLATNOSŤ MUSÍ BYŤ MOŽNÁ. Do 26. 8. tu stálo `+16 dní` a `savedAt` päť dní
+ * dozadu — teda 384 hodín platnosti pri kľúči, ktorému eshop dáva 48 (R2/D69,
+ * `KeysSection.tsx:190`). Karta Kľúčov tak na jednej snímke tvrdila „Zápis
+ * platí 48 hodín" a hneď pod tým „383 h 59 min", a rovnaké nemožné číslo
+ * nieslo pätku ľavého pruhu na VŠETKÝCH obrazovkách. Snímka stavu, v ktorom
+ * appka nikdy nemôže byť, sa nedá posudzovať.
  */
 export const KLUC: KeyMetaView = {
   present: true,
   last4: '7Q2X',
-  savedAt: okamih(-60 * 24 * 5),
-  expiresAt: okamih(60 * 24 * 16),
-  secondsLeft: 16 * 24 * 60 * 60,
+  savedAt: okamih(-60 * 8),
+  expiresAt: okamih(60 * 40),
+  secondsLeft: 40 * 60 * 60,
   verifyStatus: 'valid',
 };
 
+/** Kľúč na objednávky — 30 dní, teda vlastné TTL, nie kópia zápisového. */
 export const KLUC_OBJEDNAVKY: KeyMetaView = {
   present: true,
   last4: 'B4M9',
-  savedAt: okamih(-60 * 24 * 5),
-  expiresAt: okamih(60 * 24 * 16),
-  secondsLeft: 16 * 24 * 60 * 60,
+  savedAt: okamih(-60 * 24 * 4),
+  expiresAt: okamih(60 * 24 * 26),
+  secondsLeft: 26 * 24 * 60 * 60,
   verifyStatus: 'valid',
 };
 
@@ -90,7 +98,9 @@ export const STAV: StatusPayload = toStatusPayload({
   snapshot: {
     now: new Date(),
     writes: { enabled: true },
-    apiKey: { present: true, expiresAt: chvila(60 * 24 * 16) },
+    // Rovnaká platnosť ako `KLUC` — chróm appky a karta Kľúčov nesmú hovoriť
+    // dve rôzne veci o tom istom kľúči.
+    apiKey: { present: true, expiresAt: chvila(60 * 40) },
     writeBudget: { budget: 200, spent: 128, day: DNES },
     scope: { mode: 'plny', maxProducts: 150, failClosed: false },
     catalog: {
@@ -376,6 +386,47 @@ export const ZLAVY: readonly DiscountRow[] = [
   }),
 ];
 
+/**
+ * Vlastné zápisy appky na JEDEN produkt (`/api/insights/product/:id`, I11).
+ *
+ * Fixtúra tu do 26. 8. chýbala, a keďže `NEZNAME` nikto nečítal, chýbala
+ * potichu: bočný panel na Produktoch dostal `404`, vykreslil päť pomlčiek
+ * a vetu „Zápisy sa nepodarilo načítať." — a tak to aj odfotil. Panel má pri
+ * tom v appke päť riadkov s dátumami a percentami, teda presne tú časť, ktorú
+ * sa na snímke posudzuje najviac.
+ *
+ * Dva zápisy: jeden dobehnutý z minulej zľavy a jeden čakajúci v pripravovanej
+ * zľave — aby panel ukázal aj „V pripravovanej zľave", nie iba minulosť.
+ */
+function zapisyProduktu(productId: number): ProductWritesView {
+  return {
+    productId,
+    today: DNES,
+    writes: [
+      {
+        itemId: 8_412,
+        campaignId: 38,
+        campaignName: 'Prstene — výpredaj veľkostí',
+        status: 'ok',
+        percent: 30,
+        dateFrom: den(-45),
+        dateTo: den(-31),
+        at: okamih(-60 * 24 * 45),
+      },
+      {
+        itemId: 9_910,
+        campaignId: 40,
+        campaignName: 'Prívesky a retiazky — jesenná príprava',
+        status: 'pending',
+        percent: 20,
+        dateFrom: den(9),
+        dateTo: den(23),
+        at: null,
+      },
+    ],
+  };
+}
+
 function polozky(): readonly DiscountItemView[] {
   return KATALOG.slice(0, 24).map((row, i) => {
     const zlyhala = i === 5;
@@ -515,7 +566,16 @@ function ok(data: unknown): Response {
   });
 }
 
-/** Cesty, na ktoré snímkovač odpoveď nemá. Vypíšu sa do konzoly prehliadača. */
+/**
+ * Cesty, na ktoré snímkovač odpoveď nemá.
+ *
+ * Hlavička tu sľubovala, že sa „vypíšu do konzoly prehliadača" — nevypisovali.
+ * Zoznam nikto nečítal (`NEZNAME` sa v celom repe nikde inde nevyskytuje),
+ * takže chýbajúca fixtúra bola TICHÁ: obrazovka dostala `404 no_fixture`,
+ * vykreslila prázdny stav a snímka vyzerala ako pravda o appke. Zápis preto
+ * ide aj do `console.error`, ktorý snímkovač už zbiera a vypisuje pod
+ * „ČO VYZERÁ ROZBITO".
+ */
 export const NEZNAME: string[] = [];
 
 /** Kedy naposledy odišla požiadavka na appku (ms). Snímkovač podľa toho čaká. */
@@ -566,7 +626,13 @@ function odpoved(url: URL, method: string): Response | null {
   }
   if (cesta === '/api/campaigns') return ok({ data: ZLAVY, total: ZLAVY.length, budget: FRONTA.budget });
   if (cesta === '/api/sales') return ok(PREDAJ);
-  if (cesta === '/api/insights/sales-daily') return ok({ days: DNI_PREDAJA });
+  // Hlavička o pokrytí patrí do odpovede rovnako ako rad po dňoch: číta ju
+  // veta o pokrytí na Produktoch aj v sprievodcovi. Je to tá istá hodnota, akú
+  // vracia `/api/sales` — dva endpointy nad jedným meraním si nesmú
+  // protirečiť ani vo fixtúrach.
+  if (cesta === '/api/insights/sales-daily') {
+    return ok({ today: DNES, coverage: PREDAJ.coverage, days: DNI_PREDAJA });
+  }
   if (cesta === '/api/ai/insights') return ok(NAVRHY);
   if (cesta === '/api/audit') {
     return ok({ data: [...HISTORIA], page: 1, perPage: 40, total: 512 } satisfies AuditPage);
@@ -623,6 +689,9 @@ function odpoved(url: URL, method: string): Response | null {
     } satisfies RetryPlanView);
   }
 
+  const zapisy = /^\/api\/insights\/product\/(\d+)$/.exec(cesta);
+  if (zapisy !== null) return ok(zapisyProduktu(Number(zapisy[1])));
+
   if (/^\/api\/insights\/campaign\/\d+\/performance$/.test(cesta)) return ok(VYKON);
   if (/^\/api\/insights\/campaign\/\d+\/items$/.test(cesta)) return ok({ data: [], total: 0 });
 
@@ -649,7 +718,9 @@ export function nasadFetch(): void {
     const res = odpoved(url, init?.method ?? 'GET');
     if (res !== null) return res;
 
-    NEZNAME.push(`${init?.method ?? 'GET'} ${url.pathname}`);
+    const chybajuca = `${init?.method ?? 'GET'} ${url.pathname}`;
+    NEZNAME.push(chybajuca);
+    console.error(`chýba fixtúra: ${chybajuca} — obrazovka dostala 404 a kreslí prázdny stav`);
     return new Response(JSON.stringify({ ok: false, error: { code: 'no_fixture', message: '' } }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
