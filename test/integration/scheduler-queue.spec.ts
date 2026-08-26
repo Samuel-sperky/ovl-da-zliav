@@ -12,15 +12,22 @@
  *    (nepreklápa sa do `needs_key`, viď hlavička `queue.ts`),
  *  - prepadnuté okno je `lapsed` a NIKDY sa neposúva (K5, I7),
  *  - meškajúca fronta dostane príznak `late` s nezmeneným oknom (K5),
- *  - deň pred expiráciou kľúča pri bežiacej fronte vznikne pripomienka (K6).
+ *  - deň pred expiráciou kľúča pri bežiacej fronte vznikne pripomienka (K6),
+ *  - kampaň, ktorej executor hodí výnimku, sa neskúša naveky (L5).
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { CampaignItemRecord } from '@/contracts';
 
+import type { ExecutorResultV3 } from '@/lib/engine/executor';
 import { getActiveKeyExpiryReminder, resetActiveReminders } from '@/lib/scheduler/reminders';
 import { resetQueueGate, resumeQueue, isQueuePaused } from '@/lib/scheduler/pause';
-import { lastQueueReport, resetQueueReport } from '@/lib/scheduler/queue';
+import {
+  lastQueueReport,
+  QUEUE_MAX_ATTEMPTS,
+  resetQueueFailures,
+  resetQueueReport,
+} from '@/lib/scheduler/queue';
 import type { SchedulerCampaign } from '@/lib/scheduler/types';
 
 import { makeCampaignItem, makeConfirmedCampaign, TEST_NOW, testDay } from '../helpers/factories';
@@ -53,6 +60,7 @@ function pendingItem(campaignId: number, id: number): CampaignItemRecord {
 beforeEach(() => {
   resetQueueGate();
   resetQueueReport();
+  resetQueueFailures();
   resetActiveReminders();
 });
 
@@ -309,5 +317,146 @@ describe('K7 — katalóg beží až po zápisoch', () => {
 
     expect(world.catalogCalls).toEqual([{ queueBusy: false }]);
     expect(result.queueSkipped).toBe('queue_empty');
+  });
+});
+
+describe('L5 — zlyhávajúca kampaň sa neskúša naveky', () => {
+  /** Dávka, ktorá kampaň PONECHÁ vo fronte — normálny viacdňový beh (K2). */
+  function stillQueued(campaign: SchedulerCampaign): ExecutorResultV3 {
+    return {
+      campaignId: campaign.id,
+      status: 'queued',
+      itemsTotal: campaign.itemsTotal,
+      itemsOk: 1,
+      itemsFailed: 0,
+      itemsUncertain: 0,
+      items: [],
+    };
+  }
+
+  it('po štyroch pokusoch fronta kampaň vzdá a prestane ju brať', async () => {
+    const clock = makeClock();
+    const calls: number[] = [];
+    const world = makeWorld({
+      clock,
+      queueExecutor: async (campaign) => {
+        calls.push(campaign.id);
+        // Deterministická chyba appky: nesúlad potvrdenia sa zopakuje vždy.
+        throw new Error('confirmation_mismatch');
+      },
+    });
+    world.addCampaign(queuedCampaign({ id: 1 }));
+
+    await world.ticker.runTick();
+    expect(calls).toHaveLength(1);
+    expect(world.statusOf(1)).toBe('queued');
+
+    // Tik o minútu je v odstupe — executor sa vôbec nezavolá.
+    clock.advanceMinutes(1);
+    await world.ticker.runTick();
+    expect(calls).toHaveLength(1);
+
+    clock.advanceMinutes(6);
+    await world.ticker.runTick();
+    expect(calls).toHaveLength(2);
+
+    clock.advanceMinutes(21);
+    await world.ticker.runTick();
+    expect(calls).toHaveLength(3);
+
+    clock.advanceMinutes(61);
+    await world.ticker.runTick();
+    expect(calls).toHaveLength(QUEUE_MAX_ATTEMPTS);
+
+    // Kampaň opustila frontu s koncovým stavom, dôvodom a auditom.
+    expect(world.statusOf(1)).toBe('failed');
+    expect(world.campaigns.get(1)?.finishedAt).not.toBeNull();
+    expect(world.campaigns.get(1)?.statusReason).toContain(String(QUEUE_MAX_ATTEMPTS));
+    expect(world.auditEvents()).toContain('campaign_finished');
+
+    // A toto je celý nález: ďalšie tiky ju už nespustia.
+    clock.advanceMinutes(180);
+    await world.ticker.runTick();
+    clock.advanceMinutes(180);
+    await world.ticker.runTick();
+    expect(calls).toHaveLength(QUEUE_MAX_ATTEMPTS);
+  });
+
+  it('kampaň, ktorá už niečo zapísala, skončí partial — nie failed', async () => {
+    const clock = makeClock();
+    const world = makeWorld({
+      clock,
+      queueExecutor: async () => {
+        throw new Error('percent NULL');
+      },
+    });
+    world.addCampaign({ ...queuedCampaign({ id: 1 }), itemsOk: 12 });
+
+    await world.ticker.runTick();
+    clock.advanceMinutes(6);
+    await world.ticker.runTick();
+    clock.advanceMinutes(21);
+    await world.ticker.runTick();
+    clock.advanceMinutes(61);
+    await world.ticker.runTick();
+
+    expect(world.statusOf(1)).toBe('partial');
+  });
+
+  it('úspešná dávka počítadlo vynuluje — staré zlyhania kampaň nevzdajú', async () => {
+    const clock = makeClock();
+    let succeed = false;
+    const world = makeWorld({
+      clock,
+      queueExecutor: async (campaign) => {
+        if (!succeed) throw new Error('prechodná chyba spojenia');
+        return stillQueued(campaign);
+      },
+    });
+    world.addCampaign(queuedCampaign({ id: 1 }));
+
+    // Tri zlyhania — strop sú štyri, takže kampaň je stále vo fronte.
+    await world.ticker.runTick();
+    clock.advanceMinutes(6);
+    await world.ticker.runTick();
+    clock.advanceMinutes(21);
+    await world.ticker.runTick();
+    expect(world.statusOf(1)).toBe('queued');
+
+    // Jedna úspešná dávka, ktorá kampaň vo fronte ponechá.
+    succeed = true;
+    clock.advanceMinutes(61);
+    await world.ticker.runTick();
+    expect(world.statusOf(1)).toBe('queued');
+
+    // A znova tri zlyhania. Keby úspech počítadlo nevynuloval, štvrté zlyhanie
+    // v poradí by kampaň vzdalo — takto je stále vo fronte.
+    succeed = false;
+    clock.advanceMinutes(1);
+    await world.ticker.runTick();
+    clock.advanceMinutes(6);
+    await world.ticker.runTick();
+    clock.advanceMinutes(21);
+    await world.ticker.runTick();
+    expect(world.statusOf(1)).toBe('queued');
+  });
+
+  it('výnimka jednej kampane nezastaví ostatné (D87)', async () => {
+    const done: number[] = [];
+    const world = makeWorld({
+      queueExecutor: async (campaign) => {
+        if (campaign.id === 1) throw new Error('confirmation_mismatch');
+        done.push(campaign.id);
+        return stillQueued(campaign);
+      },
+    });
+    world.addCampaign(queuedCampaign({ id: 1, dateFrom: testDay(1) }));
+    world.addCampaign(queuedCampaign({ id: 2, dateFrom: testDay(2) }));
+
+    await world.ticker.runTick();
+
+    expect(done).toEqual([2]);
+    expect(world.statusOf(1)).toBe('queued');
+    expect(world.statusOf(2)).toBe('queued');
   });
 });
