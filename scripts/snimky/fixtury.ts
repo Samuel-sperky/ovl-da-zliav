@@ -64,22 +64,30 @@ export const NASTAVENIA: SettingsView = {
 /**
  * Kľúč na zápis. `last4` je vymyslená štvorica — nie je to časť skutočného
  * kľúča a ani ňou nesmie byť.
+ *
+ * PLATNOSŤ MUSÍ BYŤ MOŽNÁ. Do 26. 8. tu stálo `+16 dní` a `savedAt` päť dní
+ * dozadu — teda 384 hodín platnosti pri kľúči, ktorému eshop dáva 48 (R2/D69,
+ * `KeysSection.tsx:190`). Karta Kľúčov tak na jednej snímke tvrdila „Zápis
+ * platí 48 hodín" a hneď pod tým „383 h 59 min", a rovnaké nemožné číslo
+ * nieslo pätku ľavého pruhu na VŠETKÝCH obrazovkách. Snímka stavu, v ktorom
+ * appka nikdy nemôže byť, sa nedá posudzovať.
  */
 export const KLUC: KeyMetaView = {
   present: true,
   last4: '7Q2X',
-  savedAt: okamih(-60 * 24 * 5),
-  expiresAt: okamih(60 * 24 * 16),
-  secondsLeft: 16 * 24 * 60 * 60,
+  savedAt: okamih(-60 * 8),
+  expiresAt: okamih(60 * 40),
+  secondsLeft: 40 * 60 * 60,
   verifyStatus: 'valid',
 };
 
+/** Kľúč na objednávky — 30 dní, teda vlastné TTL, nie kópia zápisového. */
 export const KLUC_OBJEDNAVKY: KeyMetaView = {
   present: true,
   last4: 'B4M9',
-  savedAt: okamih(-60 * 24 * 5),
-  expiresAt: okamih(60 * 24 * 16),
-  secondsLeft: 16 * 24 * 60 * 60,
+  savedAt: okamih(-60 * 24 * 4),
+  expiresAt: okamih(60 * 24 * 26),
+  secondsLeft: 26 * 24 * 60 * 60,
   verifyStatus: 'valid',
 };
 
@@ -90,7 +98,9 @@ export const STAV: StatusPayload = toStatusPayload({
   snapshot: {
     now: new Date(),
     writes: { enabled: true },
-    apiKey: { present: true, expiresAt: chvila(60 * 24 * 16) },
+    // Rovnaká platnosť ako `KLUC` — chróm appky a karta Kľúčov nesmú hovoriť
+    // dve rôzne veci o tom istom kľúči.
+    apiKey: { present: true, expiresAt: chvila(60 * 40) },
     writeBudget: { budget: 200, spent: 128, day: DNES },
     scope: { mode: 'plny', maxProducts: 150, failClosed: false },
     catalog: {
@@ -515,7 +525,16 @@ function ok(data: unknown): Response {
   });
 }
 
-/** Cesty, na ktoré snímkovač odpoveď nemá. Vypíšu sa do konzoly prehliadača. */
+/**
+ * Cesty, na ktoré snímkovač odpoveď nemá.
+ *
+ * Hlavička tu sľubovala, že sa „vypíšu do konzoly prehliadača" — nevypisovali.
+ * Zoznam nikto nečítal (`NEZNAME` sa v celom repe nikde inde nevyskytuje),
+ * takže chýbajúca fixtúra bola TICHÁ: obrazovka dostala `404 no_fixture`,
+ * vykreslila prázdny stav a snímka vyzerala ako pravda o appke. Zápis preto
+ * ide aj do `console.error`, ktorý snímkovač už zbiera a vypisuje pod
+ * „ČO VYZERÁ ROZBITO".
+ */
 export const NEZNAME: string[] = [];
 
 /** Kedy naposledy odišla požiadavka na appku (ms). Snímkovač podľa toho čaká. */
@@ -649,7 +668,9 @@ export function nasadFetch(): void {
     const res = odpoved(url, init?.method ?? 'GET');
     if (res !== null) return res;
 
-    NEZNAME.push(`${init?.method ?? 'GET'} ${url.pathname}`);
+    const chybajuca = `${init?.method ?? 'GET'} ${url.pathname}`;
+    NEZNAME.push(chybajuca);
+    console.error(`chýba fixtúra: ${chybajuca} — obrazovka dostala 404 a kreslí prázdny stav`);
     return new Response(JSON.stringify({ ok: false, error: { code: 'no_fixture', message: '' } }), {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
