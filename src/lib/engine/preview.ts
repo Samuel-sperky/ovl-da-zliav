@@ -512,8 +512,11 @@ async function lastOwnWritesFallback(
  * Hláška blokátora rozpočtu čítaní (K7). Hovorí MERANÉ čísla — koľko produktov
  * sa nedalo overiť, koľko čítaní by to stálo a koľko ich zostáva — nie „skús to
  * neskôr".
+ *
+ * Exportovaná, pretože ju potrebuje aj `campaigns/[id]/extend/preview` — tá
+ * route stavia náhľad sama a druhá kópia tejto vety by sa raz rozišla.
  */
-function shopReadBudgetMessage(
+export function shopReadBudgetMessage(
   productCount: number,
   cost: number,
   status: ReadBudgetStatus,

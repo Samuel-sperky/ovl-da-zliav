@@ -205,9 +205,28 @@ export async function getById(id: number, conn?: Queryable): Promise<AuditRecord
 }
 
 /**
+ * Runaway počítadlo neodpovedalo číslom. `SELECT COUNT(*)` vracia práve jeden
+ * riadok s jedným číslom — keď ho tam niet, nevieme, koľko zápisov za poslednú
+ * hodinu odišlo. To NIE JE nula: nula je povoľujúca odpoveď a runaway strop
+ * (D79, I12) je fail-closed poistka. Volajúci to má spracovať ako „neviem",
+ * nie ako „nezapisovalo sa".
+ */
+export class AuditCountUnreadableError extends Error {
+  constructor(message = 'Počítadlo auditu sa nepodarilo prečítať.') {
+    super(message);
+    this.name = 'AuditCountUnreadableError';
+  }
+}
+
+/**
  * Runaway počítadlo (D79, I12): `write_ok` + `write_uncertain` za poslednú
  * hodinu. Presne dotaz z BUILD-SPEC §3 — počíta sa z append-only tabuľky,
  * takže sa nedá obísť (O3).
+ *
+ * Nečitateľná odpoveď HODÍ (`AuditCountUnreadableError`). Predtým tu bola
+ * `?? 0`, čo znamenalo „tento hodinu sa nezapisovalo" — runaway strop by nad
+ * pokazeným počítadlom pustil ďalší zápis. Neistota sa v tomto smere
+ * zaokrúhľuje nadol na „nezapisuj", nie nahor na „zapisuj".
  */
 export async function countWritesInLastHour(conn?: Queryable): Promise<number> {
   const placeholders = RUNAWAY_COUNTED_EVENTS.map(() => '?').join(', ');
@@ -218,7 +237,13 @@ export async function countWritesInLastHour(conn?: Queryable): Promise<number> {
         AND ts >= UTC_TIMESTAMP(3) - INTERVAL 1 HOUR`,
     [...RUNAWAY_COUNTED_EVENTS],
   );
-  return toNumberOrNull(rows[0]?.total) ?? 0;
+  const total = toNumberOrNull(Array.isArray(rows) ? rows[0]?.total : undefined);
+  if (total === null) {
+    throw new AuditCountUnreadableError(
+      'Runaway počítadlo (`write_ok` + `write_uncertain` za hodinu) sa nepodarilo prečítať — zápis sa nespustí (D79, I12).',
+    );
+  }
+  return Math.max(0, Math.trunc(total));
 }
 
 /**

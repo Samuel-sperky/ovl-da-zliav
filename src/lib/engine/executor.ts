@@ -165,6 +165,12 @@ export type ExecutorCampaign = Omit<CampaignRecord, 'status'> & {
  */
 export type ExecutorItem = CampaignItemRecord & { percent?: number };
 
+/**
+ * Položka, ako ju vracia `listForWrite()` — bez `sent_payload`
+ * a `raw_response`. Executor tie dva stĺpce nikdy nečíta (B2, K2).
+ */
+export type ExecutorItemForWrite = Omit<ExecutorItem, 'sentPayload' | 'rawResponse'>;
+
 type ExecutorCampaignPatch = Partial<
   Pick<
     CampaignRecord,
@@ -189,6 +195,12 @@ export interface ExecutorCampaignsRepo {
 
 export interface ExecutorItemsRepo {
   listByCampaign(campaignId: number): Promise<ExecutorItem[]>;
+  /**
+   * K2 — sada položiek bez `sent_payload`/`raw_response`. Voliteľná rovnako
+   * ako `listPage()` v detaile zľavy: fake repozitáre v testoch ju nemusia
+   * mať a `loadCampaign()` vtedy padá na `listByCampaign()`.
+   */
+  listForWrite?(campaignId: number): Promise<ExecutorItemForWrite[]>;
   update(
     id: number,
     patch: Partial<Omit<CampaignItemRecord, 'id' | 'campaignId' | 'productId'>>,
@@ -430,6 +442,27 @@ export function createExecutor(deps: ExecutorDeps): {
     const campaign = await campaignsRepo.getById(campaignId);
     if (campaign === null) {
       throw new EngineError('campaign_not_found', `Kampaň ${campaignId} neexistuje.`);
+    }
+    /*
+     * K2 — položky sa ťahajú BEZ `sent_payload` a `raw_response`. Executor tie
+     * dva stĺpce nikdy nečíta (píše ich cez `update()`), zato na 30. deň
+     * 10 000-položkovej fronty je to pri každom prechode 10 000 riadkov
+     * s celou históriou odpovedí shopu — aby sa zapísalo 200 položiek.
+     *
+     * Riadky sa neubrali: `assertConfirmed()` prepočítava hash nad VŠETKÝMI
+     * (K4, I3), takže sada tu musí byť celá. Šetria sa stĺpce, nie riadky.
+     *
+     * Vo výsledku behu tak `sentPayload`/`rawResponse` zostávajú `null`. Nič
+     * sa tým nestratilo: in-memory riadok sa počas zápisu neaktualizuje, takže
+     * doteraz tam boli hodnoty z PREDCHÁDZAJÚCEHO behu, nikdy z tohto — a
+     * žiadny volajúci ich z výsledku executora nečíta.
+     */
+    if (itemsRepo.listForWrite !== undefined) {
+      const rows = await itemsRepo.listForWrite(campaignId);
+      return {
+        campaign,
+        items: rows.map((row) => ({ ...row, sentPayload: null, rawResponse: null })),
+      };
     }
     const items = await itemsRepo.listByCampaign(campaignId);
     return { campaign, items };

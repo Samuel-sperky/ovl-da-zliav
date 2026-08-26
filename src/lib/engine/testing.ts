@@ -24,6 +24,8 @@ import type {
   MoneyString,
   SecretRef,
   SettingsRecord,
+  TransactionRunner,
+  TxConnection,
   Ulid,
   UtcDate,
 } from '@/contracts';
@@ -132,6 +134,38 @@ export function createMemoryAudit(): MemoryAudit {
       return records.filter((r) => r.eventType === eventType);
     },
   };
+}
+
+/* ══════════════════════════ transakcia ════════════════════════════════════ */
+
+/**
+ * `TransactionRunner` pre in-memory svet: telo sa spustí, spojenie neexistuje.
+ *
+ * ROLLBACK TU NIE JE A NESMIE BYŤ PREDSTIERANÝ. Fakes repozitárov zapisujú do
+ * `Map`, ktorú by žiadny `rollback()` nevrátil, a fake, ktorý by atomicitu
+ * napodobnil, by z testu urobil dôkaz o sebe samom. Atomicita vloženej zľavy
+ * sa preto dokazuje nad SKUTOČNOU MariaDB
+ * (`test/integration/vlozenie-kampane-atomicke.spec.ts`); tento runner existuje
+ * len preto, aby route-y bez DB vôbec zbehli.
+ *
+ * `query()` schválne HÁDŽE: keby sa nejaká cesta o spojenie naozaj oprela,
+ * test to má povedať nahlas, nie ticho zapísať mimo fake sveta.
+ */
+export function createMemoryTx(): TransactionRunner {
+  const conn: TxConnection = {
+    async query() {
+      throw new Error(
+        'In-memory transakcia nemá spojenie do DB — fake repozitáre `conn` ignorujú.',
+      );
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {
+      return undefined;
+    },
+  };
+  return async (fn) => fn(conn);
 }
 
 /* ══════════════════════════ api key ═══════════════════════════════════════ */
