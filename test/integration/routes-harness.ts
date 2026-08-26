@@ -19,7 +19,6 @@ import type {
   CampaignRecord,
   CampaignStatus,
   CatalogCacheRecord,
-  CreateCampaignInput,
   MoneyString,
   Paged,
   SessionClaims,
@@ -30,6 +29,7 @@ import {
   createMemoryApiKeyRepo,
   createMemoryAudit,
   createMemorySettingsRepo,
+  createMemoryTx,
   type MemoryApiKeyRepo,
   type MemoryAudit,
 } from '@/lib/engine/testing';
@@ -45,6 +45,7 @@ import {
 } from '@/lib/shop/read-budget';
 
 import type { RoutesDeps } from '@/app/api/campaigns/_shared';
+import type { CreateCampaignInputV3 } from '@/lib/repo/campaigns.repo';
 import type { CampaignTierRecord } from '@/lib/repo/tiers.repo';
 
 import { fakeApiKey } from '../helpers/factories';
@@ -340,7 +341,7 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
       .map((i) => ({ ...i }));
 
   const campaignsRepo = {
-    async create(input: CreateCampaignInput) {
+    async create(input: CreateCampaignInputV3) {
       const id = nextCampaignId;
       nextCampaignId += 1;
       const record: CampaignRecord = {
@@ -362,7 +363,10 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
         claimedAt: null,
         startedAt: null,
         finishedAt: null,
-        itemsTotal: 0,
+        // K1 bod 3 — produkčný repozitár zapisuje `items_total` už pri
+        // vzniku kampane; fake, ktorý by tu držal nulu, by tento rozdiel
+        // zamaskoval.
+        itemsTotal: input.itemsTotal ?? 0,
         itemsOk: 0,
         itemsFailed: 0,
         itemsUncertain: 0,
@@ -615,6 +619,12 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     settingsRepo,
     apiKeyRepo,
     audit,
+    /* §3/D63 — `insertConfirmedCampaign()` vkladá zľavu v transakcii. Bez
+     * tohto runnera by `resolveRoutesDeps()` spadol na `withTransaction()`,
+     * ktorý si berie spojenie z poolu do MariaDB — a tá v tomto svete nie je.
+     * Rollback fake NEMÁ (viď `createMemoryTx()`): atomicitu dokazuje
+     * `vlozenie-kampane-atomicke.spec.ts` nad skutočnou DB. */
+    tx: createMemoryTx(),
     // K3 — pásma nad in-memory mapou. Bez toho by `GET /api/campaigns` aj
     // detail siahli na produkčný `tiersRepo` v DB, ktorá v teste neexistuje,
     // a čítanie by viselo až do timeoutu testu.

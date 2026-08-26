@@ -14,7 +14,9 @@
  *     (O1, D14) — derivát sa nikdy neukladá do DB.
  *  5. `insertConfirmedCampaign()` — jediná cesta, ktorou route-y vkladajú
  *     zľavu: vždy s `confirmed_at` + `confirm_payload_hash` z OVERENÉHO preview
- *     tokenu (I3), s pásmami (K3) a s položkami v deterministickom poradí (I10).
+ *     tokenu (I3), s pásmami (K3) a s položkami v deterministickom poradí (I10),
+ *     a to celé v JEDNEJ transakcii (§3, D63) — polovica vloženej zľavy je
+ *     horšia než žiadna, viď komentár nad funkciou.
  *  6. Most na stav `queued` a príznak `late` (K2, K5) — `src/contracts.ts` ich
  *     zatiaľ nevie pomenovať, tak pre ne existuje presne jedno miesto.
  *  7. Odhad dobehnutia fronty z denného rozpočtu (K5) — rozpočet sa číta RAZ
@@ -49,10 +51,12 @@ import type {
   Queryable,
   SettingsRepo,
   ShopClient,
+  TransactionRunner,
   Ulid,
   WriteMutex,
 } from '@/contracts';
 
+import { withTransaction } from '@/db/tx';
 import { env } from '@/env';
 import { auditWriter as defaultAuditWriter } from '@/lib/audit/write';
 import { anonReadCost } from '@/lib/catalog/product-details';
@@ -81,6 +85,7 @@ import {
 import {
   campaignsRepo as defaultCampaignsRepo,
   type CampaignsRepoExt,
+  type CreateCampaignInputV3,
 } from '@/lib/repo/campaigns.repo';
 import {
   catalogRepo as defaultCatalogRepo,
@@ -148,9 +153,16 @@ export interface RoutesItemsRepo {
 
 /** Podmnožiny kontraktov, ktoré A12 skutočne používa — testy dodajú len tieto. */
 export interface RoutesDeps {
-  campaignsRepo?: Pick<
+  campaignsRepo?: {
+    /**
+     * K1 bod 3 — `itemsTotal` navyše oproti kontraktu A0, viď
+     * `CreateCampaignInputV3`. Staršie fakes s úzkym typom vstupu zostávajú
+     * platné (parametre metód sú v TS bivariantné) a `itemsTotal` jednoducho
+     * ignorujú.
+     */
+    create(input: CreateCampaignInputV3, conn?: Queryable): Promise<CampaignRecord>;
+  } & Pick<
     CampaignsRepo,
-    | 'create'
     | 'getById'
     | 'list'
     | 'claim'
@@ -191,6 +203,15 @@ export interface RoutesDeps {
   /** K2 — denný rozpočet z auditu; slúži len na ODHAD, nikdy nepovoľuje zápis. */
   budget?: BudgetSource;
   audit?: AuditWriter;
+  /**
+   * §3/D63 — spustenie viacerých zápisov ATOMICKY (`withTransaction`).
+   *
+   * Route-y ju potrebujú kvôli `insertConfirmedCampaign()`: kampaň, pásma,
+   * položky a auditný riadok sú jedna vec a polovica z nich je horšia než nič
+   * (viď komentár tam). Injektovateľná je preto, že in-memory svet testov
+   * nemá spojenie do MariaDB — testy si prinesú `createMemoryTx()`.
+   */
+  tx?: TransactionRunner;
   previewTokens?: PreviewTokenService;
   shopClient?: Pick<ShopClient, 'batchGetProducts' | 'getProduct' | 'setReduction'>;
   mutex?: WriteMutex;
@@ -245,6 +266,8 @@ export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDep
     // spotrebu VÝHRADNE z auditu (K2) — žiadne paralelné počítadlo.
     budget: overrides.budget ?? createBudget({ settingsRepo, now: overrides.now }),
     audit: overrides.audit ?? defaultAuditWriter,
+    // §3/D63 — jediná cesta, ako spustiť viac zápisov atomicky.
+    tx: overrides.tx ?? withTransaction,
     previewTokens: overrides.previewTokens ?? defaultPreviewTokens,
     shopClient:
       overrides.shopClient ??
@@ -635,6 +658,20 @@ export interface InsertCampaignArgs {
  * Percento sa berie VÝHRADNE z overeného tokenu — nie z tela požiadavky a nie
  * z pásiem, ktoré klient poslal vedľa neho. Keby sa bralo odinakiaľ, dal by sa
  * potvrdiť jeden náhľad a zapísať iné číslo, a I3 by prestalo niečo znamenať.
+ *
+ * VŠETKY ŠTYRI ZÁPISY SÚ JEDNA TRANSAKCIA (§3, D63). Bez nej bola polovica
+ * vloženej zľavy horšia než žiadna: kampaň vzniká rovno ako `queued`
+ * s `confirm_payload_hash` nad CELOU sadou (I3), takže pád v ktorejkoľvek zo
+ * dávok `createMany()` (~500 riadkov na príkaz, pri 10 000 položkách dvadsať
+ * príkazov) nechal vo fronte ŽIVÚ kampaň s neúplnou sadou položiek. Scheduler
+ * si ju vzal, executor prepočítal hash z riadkov — a keďže do hlavičky hashu
+ * ide `count:<n>` (`preview-token.ts`), nad skrátenou sadou nesúhlasí, zápis
+ * sa odmietne a kampaň sa pokúša znova každý tick (L5). Rollback je jediná
+ * odpoveď: nedokončená zľava nesmie ostať vo fronte vôbec.
+ *
+ * `items_total` sa zapisuje UŽ TU (K1 bod 3) — inak sa `CHECK (items_total <=
+ * 10000)` z migrácie `0010` pri vzniku nevyhodnotí a DB poistka prvýkrát
+ * ožije až vo `finishCampaign()`, teda po odoslaní dávky do shopu.
  */
 export async function insertConfirmedCampaign(
   d: ResolvedRoutesDeps,
@@ -645,52 +682,67 @@ export async function insertConfirmedCampaign(
   const sortedIds = [...args.claims.productIds].sort((a, b) => a - b);
   const percents = args.percents ?? {};
 
-  const record = await d.campaignsRepo.create({
-    operationId,
-    name: args.name,
-    kind: args.kind,
-    parentCampaignId: args.parentCampaignId ?? null,
-    percent: args.claims.percent,
-    dateFrom: args.claims.from,
-    dateTo: args.claims.to,
-    mode: args.mode,
-    status: args.status,
-    fireAt: args.fireAt,
-    scheduledAt: now,
-    confirmedAt: now,
-    confirmPayloadHash: args.claims.payloadHash,
-    sudoAt: now,
-    createdBy: args.createdBy,
+  return d.tx(async (conn) => {
+    const record = await d.campaignsRepo.create(
+      {
+        operationId,
+        name: args.name,
+        kind: args.kind,
+        parentCampaignId: args.parentCampaignId ?? null,
+        percent: args.claims.percent,
+        dateFrom: args.claims.from,
+        dateTo: args.claims.to,
+        mode: args.mode,
+        status: args.status,
+        fireAt: args.fireAt,
+        scheduledAt: now,
+        confirmedAt: now,
+        confirmPayloadHash: args.claims.payloadHash,
+        sudoAt: now,
+        createdBy: args.createdBy,
+        // K1 bod 3 — počet položiek poznáme z overeného tokenu, takže DB
+        // poistka sa smie vyhodnotiť hneď a nie až po zápise do shopu.
+        itemsTotal: sortedIds.length,
+      },
+      conn,
+    );
+
+    if (args.tiers !== undefined && args.tiers.length > 0) {
+      await d.tiersRepo.createMany(record.id, args.tiers, conn);
+    }
+
+    await d.campaignItemsRepo.createMany(
+      record.id,
+      sortedIds.map((productId, index) => ({
+        productId,
+        position: index + 1,
+        percent: percents[String(productId)] ?? args.claims.percent,
+        priceAtPreview: (args.claims.pricesAtPreview[String(productId)] ?? null) as
+          | MoneyString
+          | null,
+        hasAttributes: false,
+      })),
+      conn,
+    );
+
+    // I4 — nad `audit_log` smie transakcia robiť VÝHRADNE `INSERT`, a to tu
+    // robí. Riadok ide na to isté spojenie zámerne: zľava, ktorá sa
+    // odrolovala, nesmie po sebe nechať auditný záznam, že vznikla.
+    await d.audit.appendAudit(
+      {
+        actor: 'user',
+        eventType: 'campaign_created',
+        ok: true,
+        userId: args.createdBy,
+        campaignId: record.id,
+        operationId,
+        message: `Kampaň „${args.name}" (${args.kind}, ${args.mode}) vytvorená s potvrdeným dry-runom: ${sortedIds.length} produktov, ${args.claims.percent} %, ${args.claims.from} → ${args.claims.to}${args.tiers !== undefined && args.tiers.length > 1 ? `, ${args.tiers.length} pásiem` : ''}.`,
+      },
+      conn,
+    );
+
+    return record;
   });
-
-  if (args.tiers !== undefined && args.tiers.length > 0) {
-    await d.tiersRepo.createMany(record.id, args.tiers);
-  }
-
-  await d.campaignItemsRepo.createMany(
-    record.id,
-    sortedIds.map((productId, index) => ({
-      productId,
-      position: index + 1,
-      percent: percents[String(productId)] ?? args.claims.percent,
-      priceAtPreview: (args.claims.pricesAtPreview[String(productId)] ?? null) as
-        | MoneyString
-        | null,
-      hasAttributes: false,
-    })),
-  );
-
-  await d.audit.appendAudit({
-    actor: 'user',
-    eventType: 'campaign_created',
-    ok: true,
-    userId: args.createdBy,
-    campaignId: record.id,
-    operationId,
-    message: `Kampaň „${args.name}" (${args.kind}, ${args.mode}) vytvorená s potvrdeným dry-runom: ${sortedIds.length} produktov, ${args.claims.percent} %, ${args.claims.from} → ${args.claims.to}${args.tiers !== undefined && args.tiers.length > 1 ? `, ${args.tiers.length} pásiem` : ''}.`,
-  });
-
-  return record;
 }
 
 /* ═══════════════ 7. Odpoveď dry-runu s preview tokenom (O2) ═══════════════ */
