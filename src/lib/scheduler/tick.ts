@@ -87,8 +87,22 @@ export interface TickConfig {
 export interface TickResultV3 extends TickResult {
   /** Koľko kampaní z fronty PREŠLO executorom (K2). */
   queueProcessed: number;
-  /** Koľko kampaní vo fronte v tomto ticku čakalo (vrátane spracovaných). */
-  queueWaiting: number;
+  /**
+   * Koľko kampaní fronta v tomto tiku VZALA — nie koľko ich čaká.
+   *
+   * Číslo pochádza z dotazu s `LIMIT maxCampaignsPerTick` (20), takže pri 25
+   * čakajúcich kampaniach je to 20. Do 26. 8. 2026 sa menovalo `queueWaiting`
+   * a doc riadok tvrdil „koľko čakalo", čo je počet, ktorý appka nezmerala.
+   * Premenované, aby meno hovorilo, čo to je; `queueWaitingCapped` povie, či sa
+   * strop naozaj dosiahol.
+   *
+   * Prečo sa nedopočítava skutočný počet: tento tik ho na svoju prácu
+   * nepotrebuje a druhý dotaz za tik nie je zadarmo. Kto ho bude potrebovať,
+   * dopýta sa naň zvlášť — a bude vedieť, že to robí.
+   */
+  queueTaken: number;
+  /** `true` = `queueTaken` narazilo na strop tiku, teda je to menšie než skutočnosť. */
+  queueWaitingCapped: boolean;
   /** Fronta čaká na potvrdenie po odstávke počítača (odpoveď 43). */
   queuePaused: boolean;
   /** Prečo sa vo fronte nezapisovalo; `null` = zapisovalo sa. */
@@ -167,7 +181,8 @@ export function createTicker(deps: TickDeps): Ticker {
         fired: 0,
         needsKey: 0,
         queueProcessed: 0,
-        queueWaiting: 0,
+        queueTaken: 0,
+        queueWaitingCapped: false,
         queuePaused: false,
         queueSkipped: null,
         catalog: null,
@@ -271,7 +286,8 @@ export function createTicker(deps: TickDeps): Ticker {
           startedAt,
         );
         result.queueProcessed = queue.processed;
-        result.queueWaiting = queue.queuedCampaigns;
+        result.queueTaken = queue.queuedCampaigns;
+        result.queueWaitingCapped = queue.queuedCampaignsCapped;
         result.queuePaused = queue.paused;
         result.queueSkipped = queue.skipped;
         result.needsKey += queue.needsKey;
