@@ -24,6 +24,23 @@
 import { StrictMode, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 
+/*
+ * PORADIE ŠTÝLOV MUSÍ BYŤ TAKÉ, AKÉ POSIELA NEXT (26. 8. 2026).
+ *
+ * Písmo a `globals.css` sa importujú PRED komponentmi, a to je jediné správne
+ * poradie: `app/layout.tsx` načíta `globals.css` v koreni, kým CSS modul si
+ * ťahá až stránka, takže v appke ide globálny list PRVÝ a modul DRUHÝ. Keď
+ * tieto tri riadky stáli pod komponentmi, balíček ich poskladal naopak — modul
+ * prvý, `globals.css` druhý — a pri rovnakej špecifickosti vyhral globálny
+ * list. Snímka tak kreslila iné šírky než appka: `.pctInput` (74 px) aj
+ * `.capInput` (92 px) prehrali s `.inp { width: 100% }`, polia v pásmach sa
+ * rozťahli na celú bunku a znak „%“ spadol pod ne. Nebola to chyba appky,
+ * bola to chyba snímkovača — a posudzovalo sa z obrázka.
+ */
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource-variable/inter/wght-italic.css';
+import '@/app/globals.css';
+
 import DiscountDetail from '@/components/campaigns/DiscountDetail';
 import DiscountsList from '@/components/campaigns/DiscountsList';
 import NewDiscount, { type NewDiscountInitial } from '@/components/campaigns/NewDiscount';
@@ -36,10 +53,6 @@ import {
 } from '@/components/products/catalog-filter';
 import SettingsIndex from '@/components/settings/SettingsIndex';
 import SettingsSubPage from '@/components/settings/SettingsSubPage';
-
-import '@fontsource-variable/inter/wght.css';
-import '@fontsource-variable/inter/wght-italic.css';
-import '@/app/globals.css';
 
 import { nasadFetch, poslednyDotaz } from './fixtury';
 import { zbierNalezy } from './kontroly';
