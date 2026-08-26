@@ -50,6 +50,11 @@
  *     `/api/queue` (presne, z položiek) aj zoznam zliav (odhadom, z počítadiel).
  *     Zmieruje ich `resolveAhead()` a rozklik prizná, ktorý zdroj to bol.
  *     Keď sa nedá prečítať ani jeden, dátum dobehnutia sa NEDOPOČÍTA (P7).
+ *     „Jedno číslo" platí aj cez potvrdenie: odhad tu je nad `aheadPending +
+ *     itemsCount`, a `POST /api/campaigns` počíta ten istý súčet z celej fronty
+ *     (`readQueuePending()`), takže karta „Zaradené do fronty" nevypíše skorší
+ *     dátum, než aký ukázala táto obrazovka. Kto zmení jednu stranu, musí
+ *     druhú — inak sa dva dátumy tej istej fronty rozídu.
  *  7. **Nič sa neobnovuje samo** (kontrakt UI, bod 4). Čísla sa načítajú pri
  *     otvorení a potom vždy, keď o to požiada tlačidlo Obnoviť v stavovom
  *     pruhu — obrazovka je registrovaná cez `useRefreshable()` a vlastné
@@ -127,6 +132,7 @@ import {
   previewDiscount,
   scopeLimits,
   searchCatalog,
+  type ApiError,
   type BudgetView,
   type CreateResult,
   type KeyMetaView,
@@ -249,7 +255,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [typed, setTyped] = useState('');
   // Obrazovka sa otvára do načítania — nie do prázdneho výberu.
   const [busy, setBusy] = useState<Busy>('loading');
-  const [error, setError] = useState<string | null>(null);
+  // Celá obálka chyby, nie len jej správa: karta rozhodnutia prekladá vetu
+  // servera podľa KÓDU (K10) a bez kódu by ju vykreslila verbatim.
+  const [error, setError] = useState<ApiError | null>(null);
   const [created, setCreated] = useState<CreateResult | null>(null);
 
   const [sudoUntil, setSudoUntil] = useState<string | null>(null);
@@ -622,7 +630,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     if (!res.ok) {
       setPreview(null);
       setPreviewSig(null);
-      setError(res.error.message);
+      setError(res.error);
       return;
     }
     setPreview(res.data);
@@ -663,7 +671,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       // Token je jednorazový — po neúspechu sa musí skúška zopakovať (I3).
       setPreview(null);
       setPreviewSig(null);
-      setError(res.error.message);
+      setError(res.error);
       return;
     }
     setCreated(res.data);

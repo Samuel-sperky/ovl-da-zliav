@@ -69,8 +69,12 @@ import styles from '@/components/campaigns/zlavy.module.css';
 import type { TierPlan } from '@/components/campaigns/discounts-model';
 // Preklad blokátora zo skúšky naprázdno žije v `queue-model.ts` — používa ho aj
 // panel opakovania a dve kópie toho istého prekladu by sa časom rozišli (K10).
-import { previewBlockerText, type BlockerCard } from '@/components/campaigns/queue-model';
-import type { CreateResult, PreviewData } from '@/components/campaigns/zlavy-api';
+import {
+  confirmErrorText,
+  previewBlockerText,
+  type BlockerCard,
+} from '@/components/campaigns/queue-model';
+import type { ApiError, CreateResult, PreviewData } from '@/components/campaigns/zlavy-api';
 import { hrefForAnchor } from '@/components/settings/sub-pages';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
@@ -117,7 +121,12 @@ export interface NewDiscountConfirmProps {
   busy: 'idle' | 'loading' | 'previewing' | 'creating';
   /** Prečo je zaradenie zamknuté; `null` = dá sa zaradiť. */
   blockedReason: string | null;
-  error: string | null;
+  /**
+   * Chyba z posledného pokusu — CELÁ obálka, nie len jej správa. Bez kódu sa
+   * veta servera dá len vykresliť, nie preložiť, a práve tie vety nesú žargón,
+   * ktorý na povrch nesmie (K10).
+   */
+  error: ApiError | null;
   created: CreateResult | null;
   onPreview: () => void;
   onQueue: () => void;
@@ -330,7 +339,7 @@ export function NewDiscountConfirm({
 
       {error === null ? null : (
         <div className={styles.note} role="alert" data-testid="confirm-error">
-          {error}
+          {confirmErrorText(error.code, error.message)}
         </div>
       )}
 

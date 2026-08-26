@@ -189,6 +189,13 @@ export interface RoutesWorldOptions {
   dailyBudget?: number;
 }
 
+/**
+ * Stavy kampaní, ktorých položky sa počítajú do fronty — ten istý zoznam ako
+ * `SQL_QUEUE_TOTALS` v `campaign-items.repo.ts` a `LIVE_QUEUE_STATUSES`
+ * v `app/api/queue/route.ts`.
+ */
+const LIVE_QUEUE_STATUSES: string[] = ['scheduled', 'needs_key', 'running', 'missed', 'queued'];
+
 export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
   const campaigns = new Map<number, CampaignRecord>();
   const items = new Map<number, HarnessItem>();
@@ -524,6 +531,24 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     },
     async countByCampaign(campaignId: number) {
       return listItems(campaignId).length;
+    },
+    /*
+     * `queueTotals` tu MUSÍ byť z toho istého dôvodu ako `listPage` vyššie:
+     * odhad dobehnutia v `POST /api/campaigns` má dve cesty — celú frontu, keď
+     * ju repozitár vie povedať, a záložnú veľkosť samotnej kampane, keď nie.
+     * Bez tejto metódy by všetky testy zaradenia tiekli záložnou cestou a tú
+     * produkčnú by nespustil nikto.
+     */
+    async queueTotals() {
+      let pending = 0;
+      for (const item of items.values()) {
+        if (item.status !== 'pending') continue;
+        // Rovnaká hranica ako `SQL_QUEUE_TOTALS` v `campaign-items.repo.ts`:
+        // fronta sú položky ŽIVÝCH kampaní, nie všetko, čo kedy vzniklo.
+        const status = campaigns.get(item.campaignId)?.status;
+        if (status !== undefined && LIVE_QUEUE_STATUSES.includes(status)) pending += 1;
+      }
+      return { pending };
     },
     async update(id: number, patch: Partial<CampaignItemRecord>) {
       const record = items.get(id);

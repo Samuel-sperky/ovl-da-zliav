@@ -242,8 +242,9 @@ export const putDomain = (domain: string, password: string) =>
 
 export const testConnection = () => postJson<CanaryView>('/api/settings/test-connection');
 
-export const putEagerWriteDefault = (enabled: boolean) =>
-  sendJson<{ eagerWriteDefault: boolean }>('/api/settings/eager-write-default', 'PUT', { enabled });
+/* `PUT /api/settings/eager-write-default` tu ZÁMERNE nemá klienta: predvoľbu
+   `eagerWriteDefault` nečíta žiadna cesta zápisu, takže obrazovka ju neponúka.
+   Keď ju formulár novej zľavy začne čítať (D22), klient sa vráti sem. */
 
 /** Odhlásenie — session cookie ruší server, klient sa potom prekreslí. */
 export const logout = () => postJson<Record<string, never>>('/api/auth/logout');

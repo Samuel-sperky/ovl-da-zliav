@@ -50,6 +50,7 @@ import {
   peekPreviewToken,
   perPageQuery,
   readBudgetStatus,
+  readQueuePending,
   resolveRoutesDeps,
   tierView,
   todayOf,
@@ -322,9 +323,20 @@ export function createCampaignsPost(
           }
 
           /* 6. K5/K6 — odhad dobehnutia a varovanie, že kľúč vyprší skôr.
-           * Ani jedno nebráni zaradeniu; obe sú informácia pre používateľa. */
+           * Ani jedno nebráni zaradeniu; obe sú informácia pre používateľa.
+           *
+           * Odhad sa počíta z CELEJ fronty, nie z veľkosti tejto kampane
+           * (`readQueuePending()`): položky sú už vložené, takže sa v tom čísle
+           * nachádzajú, a spolu s nimi aj to, čo stojí pred nimi. Inak by karta
+           * „Zaradené do fronty" vypísala skorší dátum, než aký sekundu predtým
+           * ukázala obrazovka nastavenia zľavy — a K6 varovanie o kľúči by sa
+           * podľa toho optimistického dátumu tichšie preskočilo. */
           const estimate = eager
-            ? estimateWith(await readBudgetStatus(d), itemsTotal, d.now())
+            ? estimateWith(
+                await readBudgetStatus(d),
+                await readQueuePending(d, itemsTotal),
+                d.now(),
+              )
             : null;
           let keyExpiresBeforeFinish = false;
           if (estimate !== null) {

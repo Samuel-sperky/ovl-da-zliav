@@ -11,9 +11,17 @@
  * povinné ručné potvrdenie sa vypnúť NEDÁ a obrazovka to má povedať priamo,
  * nie mlčaním.
  *
+ * Z toho istého dôvodu je bez tlačidla aj riadok „Čas zápisu". Zápis ide vždy
+ * hneď pri potvrdení, aj keď okno zľavy začína až o týždne: podľa odchýlky
+ * D33b sa zmeškané spustenie NIKDY nedobehne automaticky, takže čo je zapísané
+ * dopredu, to sa nedá zmeškať. Odložený zápis (`mode='scheduled'`) formulár
+ * novej zľavy neponúka — a kým ho neponúka, nesmie tu stáť prepínač, ktorý by
+ * predstieral, že sa dá zvoliť. (Predvoľba `eagerWriteDefault` v databáze aj
+ * `PUT /api/settings/eager-write-default` zostávajú, sú v BUILD-SPEC §5;
+ * obrazovka ich len prestala ponúkať, kým ich niekto nezačne čítať.)
+ *
  * Vlastník: V12.
  */
-import EagerWriteToggle from '@/components/settings/EagerWriteToggle';
 import UnlockWritesForm from '@/components/settings/UnlockWritesForm';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 import type { SettingsView } from '@/components/settings/api';
@@ -44,7 +52,9 @@ export function SafeguardsSection({ settings, onChanged }: SafeguardsSectionProp
         <span className="v">appka zľavu zrušiť nevie</span>
         <span className="lvl-3">zľava vyprší sama</span>
 
-        <EagerWriteToggle enabled={settings.eagerWriteDefault} onChanged={onChanged} />
+        <span className="k">Čas zápisu</span>
+        <span className="v" data-testid="write-time">zľava sa zapíše hneď pri potvrdení</span>
+        <span className="lvl-3">odložený zápis sa nedá zvoliť</span>
       </div>
 
       <div className="set-form">
