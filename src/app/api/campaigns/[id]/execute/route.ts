@@ -10,12 +10,20 @@
  * s reálnou sadou kampane (produkty, percento, okno) — pri `from` v minulosti
  * sa `from` posúva na dnešok (D25) a token musí byť vydaný už na posunuté okno.
  *
+ * Sada sa overuje DVA razy a OBA razy pred akýmkoľvek zápisom stavu: token
+ * proti hlavičke operácie (`verifyPreviewTokenFor`) a jeho `payloadHash` proti
+ * riadkom `campaign_items` tým istým predikátom, aký použije executor
+ * (`assertConfirmed`, K4). Nesúlad tak kampaň nechá v pôvodnom stave —
+ * `running` kampaň by už nedopálil nikto, lebo túto route nemá čím vyvolať
+ * ani `findQueued`, ani `findMissed`.
+ *
  * Vlastník: A12.
  */
 import { z } from 'zod';
 
 import { resolveFireWindow } from '@/lib/domain/campaign-rules';
 import { assertTransition } from '@/lib/domain/status';
+import { assertConfirmed } from '@/lib/engine/executor';
 import { conflict } from '@/lib/http/errors';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 
@@ -92,8 +100,35 @@ export function createExecutePost(
             ctx.claims.sub,
           );
 
-          /* 4. Stavový stroj: `manual_execute` s ČERSTVÝM potvrdením (D33b). */
+          /* 4. To isté potvrdenie, aké si prepočíta executor — PRED zápisom
+           *    stavu. Token sa overuje nad HLAVIČKOU (kind/productIds/percent/
+           *    from/to), executor si hash skladá z RIADKOV `campaign_items`
+           *    (`product_id:percent:price_at_preview`, K4). Tie dve veci sa
+           *    rozídu vždy, keď sa medzi vytvorením zľavy a dopálením zmenila
+           *    cena alebo pásma (K3) — a keby sa to zistilo až v kroku 7,
+           *    kampaň by už bola `running` s prepísaným `confirm_payload_hash`.
+           *    `running` kampaň nevidí ani `findQueued`, ani `findMissed`,
+           *    takže by zmeškanú zľavu nedopálil už nikto — a táto route je
+           *    jej JEDINÁ cesta (D33b). Preto sa to overuje tu a naprázdno:
+           *    pri nesúlade zostáva kampaň presne v stave, v akom bola.
+           */
           const now = d.now();
+          assertConfirmed(
+            {
+              ...campaign,
+              dateFrom: effectiveFrom,
+              dateFromOriginal:
+                resolution.action === 'shift_from'
+                  ? (campaign.dateFromOriginal ?? resolution.originalFrom)
+                  : campaign.dateFromOriginal,
+              confirmedAt: now,
+              confirmPayloadHash: claims.payloadHash,
+              sudoAt: now,
+            },
+            items,
+          );
+
+          /* 5. Stavový stroj: `manual_execute` s ČERSTVÝM potvrdením (D33b). */
           assertTransition(campaign.status, 'running', {
             trigger: 'manual_execute',
             confirmedAt: now,
@@ -101,7 +136,7 @@ export function createExecutePost(
             freshConfirmation: true,
           });
 
-          /* 5. Zapíš nové potvrdenie + prípadný posun `from` (D25). */
+          /* 6. Zapíš nové potvrdenie + prípadný posun `from` (D25). */
           await d.campaignsRepo.setStatus(campaign.id, campaign.status, {
             confirmedAt: now,
             confirmPayloadHash: claims.payloadHash,
@@ -122,7 +157,7 @@ export function createExecutePost(
             });
           }
 
-          /* 6. Atomický claim — jediná obrana proti dvojitému spusteniu (D84). */
+          /* 7. Atomický claim — jediná obrana proti dvojitému spusteniu (D84). */
           const claimed = await d.campaignsRepo.claim(campaign.id, ['needs_key', 'missed']);
           if (!claimed) {
             throw conflict(
@@ -141,7 +176,7 @@ export function createExecutePost(
             message: 'Manuálne dopálenie s novým potvrdením (D33b).',
           });
 
-          /* 7. Zápis — VÝHRADNE cez executor (§9). */
+          /* 8. Zápis — VÝHRADNE cez executor (§9). */
           const result = await makeExecutor(d).executeCampaign(campaign.id, {
             actor: 'user',
             userId: ctx.claims.sub,

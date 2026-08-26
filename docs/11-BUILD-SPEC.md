@@ -478,7 +478,8 @@ FLUSH PRIVILEGES;
 | `running` | `failed` | Žiadna položka `ok` | to isté; ak dôvod bol 401/403 → predtým wipe kľúča (D51, D52) |
 | `running` | `needs_key` | Počas dávky prišlo 401/403 → wipe kľúča a zastavenie (D51, D52) | zvyšné položky `interrupted`, audit `key_wiped` |
 | `running` | `running` | `SIGTERM` — dokončí aktuálny produkt (D85) | zvyšok `interrupted`, po štarte reconcile (D86) |
-| `running` | `partial`/`failed` | Reconcile pri štarte pre nedokončený beh (D86) | nepotvrdené položky `uncertain`, audit `reconcile_uncertain` |
+| `running` | `partial`/`failed` | Reconcile pri štarte pre nedokončený beh, keď už NIE JE čo dopísať (D86) | položky, ktorých zápis mohol odísť, sú `uncertain`, audit `reconcile_uncertain` |
+| `running` | `queued` | Reconcile pri štarte a kampaň má ešte nezapísané položky (D86 + K2, K6) | položky bez `request_id` zostávajú `pending` (do shopu neodišli), **žiadny** `finished_at`, audit `reconcile_uncertain` |
 | `done`/`partial`/`failed`/`missed`/`lapsed` | (bez zmeny) | `POST /api/campaigns/[id]/ack` | `result_ack_at` (zmizne z notifikačného panelu) |
 | `partial`/`failed` | nová kampaň `kind='retry'` | „Zopakovať zlyhané" (D15, D16) — pôvodná kampaň stav nemení | nová kampaň s `parent_campaign_id`, len zlyhané produkty |
 
@@ -724,8 +725,13 @@ Poradie krokov je normatívne:
    (§7). Beží ako prvé, aby žiadny ďalší krok nepoužil expirovaný kľúč (D63).
 3. **Reconcile pri prvom ticku po štarte** (`reconcile.ts`, D86): kampane
    v `running` bez `finished_at` → per položka porovnať s `audit_log`
-   (`write_ok` s rovnakým `request_id` = potvrdené OK), ostatné `uncertain`,
-   kampaň prejde do `partial`/`failed`, audit `reconcile_uncertain`.
+   (`write_ok` s rovnakým `request_id` = potvrdené OK). Položka, ktorej zápis
+   MOHOL odísť (má `request_id`, teda aj `write_attempt`), je `uncertain` na
+   manuálne rozhodnutie; položka, ktorá sa ani nezačala zapisovať (`pending`
+   bez `request_id`), zostáva `pending`. Kampaň s nezapísanými položkami sa
+   vracia do `queued` a dopíše sa vo fronte (K2, K6) — zavrieť ju ako
+   `partial`/`failed` s `finished_at` by pri 40-dňovej fronte stratilo zvyšok
+   zápisov. Audit `reconcile_uncertain` v oboch prípadoch.
 4. **Missed detekcia** (`missed.ts`, D33b): `status='scheduled' AND fire_at < now − 5 min`
    → `missed` + audit. **Žiadny automatický catch-up.**
 5. **Due výber a claim** (`due.ts`, D32, D84): `status='scheduled' AND fire_at ≤ now`

@@ -37,7 +37,14 @@
  */
 import { z } from 'zod';
 
-import type { CampaignItemRecord, CampaignRecord, CampaignStatus, DateOnly, ItemStatus } from '@/contracts';
+import type {
+  CampaignItemRecord,
+  CampaignRecord,
+  CampaignStatus,
+  DateOnly,
+  DiscountPercent,
+  ItemStatus,
+} from '@/contracts';
 
 import { maxDateOnly } from '@/lib/domain/dates';
 import { conflict } from '@/lib/http/errors';
@@ -340,8 +347,17 @@ export function createRetryFailedPost(
             ctx.claims.sub,
           );
 
+          /* K3 — percentá pásiem nesie OVERENÝ token, nie telo požiadavky.
+           * Bez ich podania by položky dostali hlavičkové percento kampane a
+           * `assertConfirmed()` by hash prepočítaný z riadkov už nedopočítal
+           * k tomu, ktorý podpísal dry-run: opravná zľava by zostala visieť ako
+           * `draft`, jednorazový token by bol spálený a do shopu by nešlo nič
+           * (I3, K3). `POST /api/campaigns` ich podáva rovnako. */
+          const percents = (claims as { percents?: Record<string, DiscountPercent> }).percents;
+
           const record = await insertConfirmedCampaign(d, {
             claims,
+            percents,
             name: `${parent.name} — oprava`,
             kind: 'retry',
             mode: 'eager',
