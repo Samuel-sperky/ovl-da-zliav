@@ -18,8 +18,10 @@
  *
  * 1. **„Všetko v poriadku" je najsilnejšie tvrdenie appky.** Padne LEN vtedy,
  *    keď sa stav dal prečítať CELÝ (`unreadable` je prázdne), nič nezastavuje,
- *    nič nebrzdí, zápisy nie sú zamknuté poistkou a fronta nestojí. Chýbajúci
- *    údaj sa nikdy nepočíta ako dobrý — je to `unknown`, nie `ok` (P7).
+ *    nič nebrzdí, zápisy nie sú zamknuté poistkou, fronta nestojí a appka ju
+ *    kontroluje (heartbeat). Stojaca fronta pritom NIE JE len `mode: 'paused'`:
+ *    keď čakajú položky a niet kampane v behu, stojí rovnako (`stalled`).
+ *    Chýbajúci údaj sa nikdy nepočíta ako dobrý — je to `unknown`, nie `ok` (P7).
  * 2. **Farbu volí SPÔSOB RIEŠENIA, nie závažnosť** (kontrakt, bod 7). Keď
  *    zápis zastavil vyčerpaný denný rozpočet, verdikt je pokojný a sivý —
  *    zastavuje, ale nikto s tým nič robiť nemá. Jantár patrí tomu, čo čaká na
@@ -211,6 +213,13 @@ function countSentence(count: number, verb: 'zastavuje' | 'spomaľuje'): string 
   return `${formatCountSk(count)} ${tail} zápis.`;
 }
 
+/** `7 800 položiek čaká a nič ich nezapisuje.` */
+function waitingSentence(pending: number): string {
+  if (pending <= 0) return 'Fronta sa sama nerozbehne, čaká na človeka.';
+  const tail = pluralSk(pending, 'položka čaká', 'položky čakajú', 'položiek čaká');
+  return `${formatCountSk(pending)} ${tail} a nič ich nezapisuje.`;
+}
+
 /**
  * Celá odpoveď na „je všetko v poriadku?" jedným výpočtom.
  *
@@ -219,14 +228,19 @@ function countSentence(count: number, verb: 'zastavuje' | 'spomaľuje'): string 
  *   1. stav sa nedá prečítať vôbec → nevieme,
  *   2. poistka zámku alebo prekážka, ktorá zastavuje → stojí,
  *   3. fronta stojí po odstávke → stojí (heartbeat je fakt z databázy),
- *   4. prekážka, ktorá brzdí → pomalšie,
- *   5. stav fronty sa nedá prečítať → nevieme,
- *   6. časť stavu sa nedá prečítať → nevieme,
- *   7. inak v poriadku.
+ *   4. fronta má čo zapisovať a nikto to nezapisuje → stojí,
+ *   5. appka frontu vôbec nekontroluje → stojí,
+ *   6. prekážka, ktorá brzdí → pomalšie,
+ *   7. stav fronty sa nedá prečítať → nevieme,
+ *   8. časť stavu sa nedá prečítať → nevieme,
+ *   9. inak v poriadku.
  *
- * Vetvy 5 a 6 stoja ZA prekážkami zámerne: keď appka vie povedať konkrétny
+ * Vetvy 7 a 8 stoja ZA prekážkami zámerne: keď appka vie povedať konkrétny
  * dôvod, je to užitočnejšie než priznanie medzery. Ale stoja PRED „v poriadku",
  * lebo nedočítaný stav sa nesmie vydávať za dobrú správu.
+ *
+ * Vetvy 4 a 5 stoja PRED brzdou (6) preto, že stojaca fronta nezapisuje nič —
+ * „zapisuje sa pomalšie" by bolo o nej nepravdivé tvrdenie.
  */
 export function overviewVerdict(input: VerdictInput): Verdict {
   const { status, progress } = input;
@@ -284,6 +298,51 @@ export function overviewVerdict(input: VerdictInput): Verdict {
     };
   }
 
+  /*
+   * Fronta má čo zapisovať a nikto to nezapisuje.
+   *
+   * `progress.mode === 'paused'` vyššie vyžaduje kampaň v behu, a `current` je
+   * len `running` alebo `queued` zľava. Zľava v `needs_key` alebo `missed` teda
+   * drží tisíce čakajúcich položiek MIMO oboch vetiev — a keď zoznam prekážok
+   * mlčí (prekážky o kampaniach nevedia nič), appka o takej fronte doteraz
+   * povedala „Všetko v poriadku". Rozhodnutie robí `queueStalled()`
+   * v `overview-model.ts`; tu sa už len vyslovuje.
+   */
+  if (progress.stalled === true) {
+    return {
+      kind: 'stopped',
+      tone: 'warn',
+      word: 'fronta stojí',
+      headline: 'Fronta stojí',
+      detail: waitingSentence(progress.pending),
+    };
+  }
+
+  /*
+   * Appka frontu vôbec nekontroluje.
+   *
+   * Heartbeat je fakt z databázy a JEDINÝ podklad, z ktorého sa dá poznať mŕtvy
+   * scheduler — prekážky o fronte nevedia nič. Verdikt ho doteraz nečítal vôbec
+   * a k dominante sa dostal len cez `mode: 'paused'`, teda len s kampaňou
+   * v behu; bez nej appka pri mŕtvom tiku tvrdila, že je všetko v poriadku, hoci
+   * značka kontroly hneď pod tým hovorila „Fronta sa nekontroluje". Odpoveď
+   * preto dáva `heartbeatSummary()` — tá istá funkcia ako pre značku, aby si
+   * obrazovka nemohla protirečiť sama so sebou.
+   *
+   * `mode: 'unknown'` je výnimka: tam appka neodpovedala o fronte vôbec
+   * a chýbajúci heartbeat je časť tej istej medzery, nie dôkaz o scheduleri.
+   * Tú vetu hovorí vetva 7.
+   */
+  if (progress.mode !== 'unknown' && heartbeatSummary(input.heartbeat).tone !== 'ok') {
+    return {
+      kind: 'stopped',
+      tone: 'warn',
+      word: 'fronta sa nekontroluje',
+      headline: 'Fronta sa nekontroluje',
+      detail: 'Kým sa krok fronty neozve, appka nezapíše ani jednu položku.',
+    };
+  }
+
   if (slowing.length > 0) {
     const waitingOnly = slowing.every((row) => row.resolution === 'cakanie');
     return {
@@ -295,13 +354,22 @@ export function overviewVerdict(input: VerdictInput): Verdict {
     };
   }
 
-  if (progress.mode === 'unknown') {
+  /*
+   * Stav fronty sa nedá prečítať. Dve rôzne medzery, jedna veta v dominante:
+   * appka neodpovedala o fronte vôbec (`unknown`), alebo odpovedala, ale zoznam
+   * zliav sa nedal prečítať, takže čakajúce položky nemá čím vysvetliť
+   * (`stalled === null`). Ani jedna z nich nie je dobrá správa (P7).
+   */
+  if (progress.mode === 'unknown' || progress.stalled === null) {
     return {
       kind: 'unknown',
       tone: 'idle',
       word: 'nevieme',
       headline: 'Stav fronty nevieme',
-      detail: 'Appka neodpovedala na otázku, čo sa práve zapisuje.',
+      detail:
+        progress.mode === 'unknown'
+          ? 'Appka neodpovedala na otázku, čo sa práve zapisuje.'
+          : 'Zľavy sa nedali prečítať, takže či fronta stojí, appka netvrdí nič.',
     };
   }
 

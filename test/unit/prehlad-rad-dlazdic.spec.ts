@@ -144,6 +144,7 @@ function running(patch: Partial<QueueProgress> = {}): QueueProgress {
     dateTo: '2026-09-05',
     failed: 11,
     pausedSince: null,
+    stalled: false,
     ...patch,
   };
 }
