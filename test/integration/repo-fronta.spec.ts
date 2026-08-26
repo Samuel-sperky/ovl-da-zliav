@@ -17,6 +17,8 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import type { Queryable } from '@/contracts';
+
 import { closePool } from '@/db/pool';
 import { campaignItemsRepo } from '@/lib/repo/campaign-items.repo';
 import { campaignsRepoV3 } from '@/lib/repo/campaigns.repo';
@@ -307,6 +309,59 @@ describe.skipIf(!available)('repozitáre V3 — fronta, pásma, katalóg (V4)', 
       expect((await campaignItemsRepo.nextPending(campaign.id, 10)).map((i) => i.position)).toEqual([
         4, 5,
       ]);
+    });
+
+    it('listForWrite() vráti tú istú sadu, ale DB neposiela sent_payload ani raw_response (K2)', async () => {
+      const campaign = await makeCampaign();
+      await campaignItemsRepo.createMany(
+        campaign.id,
+        [1, 2, 3].map((n) => ({
+          productId: 43_000 + n,
+          position: n,
+          percent: 25,
+          priceAtPreview: null,
+          hasAttributes: false,
+        })),
+      );
+      const seeded = await campaignItemsRepo.listByCampaign(campaign.id);
+      await campaignItemsRepo.update(seeded[0]!.id, {
+        status: 'ok',
+        sentPayload: { id: 43_001, reduction: 25 },
+        rawResponse: { success: true },
+      });
+
+      const full = await campaignItemsRepo.listByCampaign(campaign.id);
+      const lean = await campaignItemsRepo.listForWrite(campaign.id);
+
+      // Poradie aj stavy sú zhodné — ubrali sa stĺpce, nie riadky.
+      expect(lean.map((i) => i.position)).toEqual([1, 2, 3]);
+      expect(lean.map((i) => i.status)).toEqual(['ok', 'pending', 'pending']);
+
+      // Blob stĺpce v DB naozaj SÚ (inak by test dokazoval prázdnu tabuľku)
+      // a všetko ostatné je v ľahkom riadku znak po znaku rovnaké.
+      const { sentPayload, rawResponse, ...expected } = full[0]!;
+      expect(sentPayload).toEqual({ id: 43_001, reduction: 25 });
+      expect(rawResponse).toEqual({ success: true });
+      expect(lean[0]).toEqual(expected);
+      expect(Object.keys(lean[0]!)).not.toContain('sentPayload');
+      expect(Object.keys(lean[0]!)).not.toContain('rawResponse');
+
+      // A hlavne: nejde o zahodenie po ceste — DB tie dva stĺpce neposlala.
+      const rawKeys = await withMigrationConn(async (conn) => {
+        let seen: string[] = [];
+        const spy: Queryable = {
+          async query<T>(sql: string, values?: unknown): Promise<T> {
+            const rows = (await conn.query(sql, values)) as T;
+            seen = Object.keys((rows as unknown as Array<Record<string, unknown>>)[0] ?? {});
+            return rows;
+          },
+        };
+        await campaignItemsRepo.listForWrite(campaign.id, spy);
+        return seen;
+      });
+      expect(rawKeys).toContain('product_id');
+      expect(rawKeys).not.toContain('sent_payload');
+      expect(rawKeys).not.toContain('raw_response');
     });
 
     it('queueTotals() počíta len živé kampane (K2)', async () => {

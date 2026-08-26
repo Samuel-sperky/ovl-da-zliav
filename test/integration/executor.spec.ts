@@ -17,7 +17,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { CampaignRecord } from '@/contracts';
 
 import { computePayloadHash, createPreviewTokenService } from '@/lib/crypto/preview-token';
-import { EngineError, createExecutor, resetGracefulStop, type ExecutorFlags } from '@/lib/engine/executor';
+import {
+  EngineError,
+  createExecutor,
+  resetGracefulStop,
+  type ExecutorFlags,
+  type ExecutorItemsRepo,
+} from '@/lib/engine/executor';
 import { createWriteMutex } from '@/lib/engine/mutex';
 import { buildPreview } from '@/lib/engine/preview';
 import {
@@ -743,5 +749,58 @@ describe('kľúč expiruje uprostred dávky — ApiKeyError nie je sieťová chy
     // Presne 1 zápis odišiel a kľúč sa skúšal presne 2× — ŽIADNY retry.
     expect(mock.state.writeRequests().map((r) => r.body.id)).toEqual(['201']);
     expect(keyLoads).toBe(2);
+  });
+});
+
+describe('K2 — sada položiek pre zápis sa ťahá bez blobov', () => {
+  it('executor berie listForWrite() a celú sadu so sent_payload nenačíta ani raz', async () => {
+    const w = makeWorld({ productIds: [201, 202] });
+
+    /*
+     * Fake repozitár, ktorý vie oboje. `listForWrite()` zahodí presne tie dva
+     * stĺpce, ktoré produkčný `SQL_LIST_FOR_WRITE` neselektuje — a `listByCampaign()`
+     * si počíta, koľkokrát ho niekto zavolal. Na 30. deň 10 000-položkovej
+     * fronty je práve toto rozdiel medzi skalármi a celou históriou odpovedí.
+     */
+    let byCampaignCalls = 0;
+    const itemsRepo: ExecutorItemsRepo = {
+      async listByCampaign(campaignId) {
+        byCampaignCalls += 1;
+        return w.world.campaignItemsRepo.listByCampaign(campaignId);
+      },
+      async listForWrite(campaignId) {
+        const rows = await w.world.campaignItemsRepo.listByCampaign(campaignId);
+        return rows.map(({ sentPayload: _sent, rawResponse: _raw, ...rest }) => rest);
+      },
+      update: (id, patch) => w.world.campaignItemsRepo.update(id, patch),
+      markRemaining: (campaignId, fromPosition, status, reason) =>
+        w.world.campaignItemsRepo.markRemaining(campaignId, fromPosition, status, reason),
+    };
+
+    const executor = createExecutor({
+      shopClient: shopClient(),
+      campaignsRepo: w.world.campaignsRepo,
+      campaignItemsRepo: itemsRepo,
+      allowlistRepo: w.allowlistRepo,
+      settingsRepo: w.settingsRepo,
+      auditRepo: w.audit,
+      apiKeyRepo: w.apiKeyRepo,
+      audit: w.audit,
+      mutex: w.mutex,
+      budget: roomyBudget,
+      flags: FLAGS,
+    });
+
+    const result = await executor.executeCampaign(1);
+
+    // Dávka prebehla celá — sada je stále celá, ubrali sa len stĺpce.
+    expect(result.status).toBe('done');
+    expect(result.itemsOk).toBe(2);
+    expect(mock.state.writeRequests().map((r) => r.body.id)).toEqual(['201', '202']);
+    // A ťažký dotaz sa nezavolal ani raz.
+    expect(byCampaignCalls).toBe(0);
+    // Blob stĺpce vo výsledku behu nie sú načítané — a nikto ich odtiaľ nečíta.
+    expect(result.items.map((i) => i.sentPayload)).toEqual([null, null]);
+    expect(result.items.map((i) => i.rawResponse)).toEqual([null, null]);
   });
 });
