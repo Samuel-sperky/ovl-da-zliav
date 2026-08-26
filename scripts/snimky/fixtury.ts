@@ -491,6 +491,8 @@ const HISTORIA = historia(40);
 
 const VYKON: PerformanceView = {
   available: true,
+  started: true,
+  startsOn: null,
   unit: 'ks',
   spanDays: 14,
   recent: { from: den(-14), to: DNES, units: 214 },

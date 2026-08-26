@@ -103,6 +103,17 @@ export function PerformanceCard({ view, failed }: PerformanceCardProps) {
           <p className="lvl-3">Čísla sa nepodarilo načítať.</p>
         ) : view === null ? (
           <p className="lvl-3">Načítavam…</p>
+        ) : !view.started ? (
+          /*
+           * Zľava sa ešte nezačala (U5). Obe okná ju predchádzajú, takže dva
+           * stĺpce s „silnejším" by tvrdili vplyv, ktorý nemohol nastať. Číslo
+           * za posledné dni tu preto nestojí ako výkon — nestojí tu vôbec.
+           */
+          <p className="lvl-3" data-testid="performance-not-started">
+            Zľava sa ešte nezačala
+            {view.startsOn === null ? '' : `, platí od ${formatDateSk(view.startsOn)}`} — výkon
+            teda ešte neexistuje. Predaj za posledné dni sem nepatrí; bol by to predaj bez zľavy.
+          </p>
         ) : recent === null ? (
           /* Nula by tvrdila „nepredalo sa nič". Pomlčka tvrdí „nevieme". */
           <p className="lvl-3">

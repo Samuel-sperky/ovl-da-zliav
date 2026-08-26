@@ -124,7 +124,13 @@ describe('dôvodom je oprávnenie, nie rozhranie eshopu', () => {
     for (const state of STATES) {
       const doSchranky = lockedFeaturesText(state);
       expect(doSchranky).toContain('product:read');
-      expect(doSchranky).toContain('getFull');
+      /*
+       * KONCOVÝ BOD, nie meno tvaru odpovede. `getFull` je interné meno tvaru a
+       * `vocabulary.spec.ts` (P3/K10) camelCase na povrchu zakazuje — správne,
+       * lebo tá istá funkcia skladá text, ktorý vidno v appke. Správcovi shopu
+       * `products/get` povie viac než `getFull` a pravidlo neporušuje.
+       */
+      expect(doSchranky).toContain('products/get');
       // Zoznam funkcií v tej správe zostáva celý, v každom stave.
       for (const row of LOCKED_FEATURES) {
         expect(doSchranky).toContain(row.feature);

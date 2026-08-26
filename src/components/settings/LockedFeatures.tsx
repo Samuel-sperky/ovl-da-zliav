@@ -109,10 +109,10 @@ export function lockedFeaturesText(
   const lines = rows.map((r) => `- ${r.feature}: chýba ${r.missing}`);
   if (state === 'available') {
     return [
-      'Aura Zľavy — oprávnenie product:read kľúč už má, prosba je vybavená.',
+      'Aura Zľavy — oprávnenie product:read kľúč už má (koncový bod products/get), prosba je vybavená.',
       '',
-      'Zvyšok je na našej strane: údaje z getFull ešte nie sú v zrkadle katalógu,',
-      'takže tieto funkcie zostávajú v appke viditeľné, ale vypnuté:',
+      'Zvyšok je na našej strane: podrobné údaje o produktoch ešte nie sú',
+      'v zrkadle katalógu, takže tieto funkcie zostávajú viditeľné, ale vypnuté:',
       ...lines,
     ].join('\n');
   }
@@ -122,7 +122,7 @@ export function lockedFeaturesText(
     state === 'locked'
       ? 'Kľúč, ktorý appka má, toto oprávnenie nemá.'
       : 'Oprávnenia toho kľúča si appka nemohla overiť, takže nevie, či ho už nemá.',
-    'Údaje samotné eshop vracia — getFull (purchase_price, margin, qty, categories),',
+    'Údaje samotné eshop vracia — products/get (purchase_price, margin, qty, categories),',
     'search (presné filtre) a categories (strom). Chýba oprávnenie, nie rozhranie.',
     '',
     'Bez product:read zostávajú tieto funkcie v appke viditeľné, ale vypnuté:',
