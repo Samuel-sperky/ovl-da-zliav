@@ -31,7 +31,7 @@ import type {
   PerformanceView,
 } from '@/components/campaigns/zlavy-api';
 import type { QueueSnapshotView, RetryPlanView } from '@/components/campaigns/queue-model';
-import type { CatalogSearchView } from '@/components/products/catalog-api';
+import type { CatalogSearchView, ProductWritesView } from '@/components/products/catalog-api';
 import type { CatalogStatusView } from '@/components/products/catalog-status';
 import type { KeyMetaView, QueueView, SettingsView } from '@/components/settings/api';
 import { toStatusPayload, type StatusPayload } from '@/lib/status/snapshot';
@@ -386,6 +386,47 @@ export const ZLAVY: readonly DiscountRow[] = [
   }),
 ];
 
+/**
+ * Vlastné zápisy appky na JEDEN produkt (`/api/insights/product/:id`, I11).
+ *
+ * Fixtúra tu do 26. 8. chýbala, a keďže `NEZNAME` nikto nečítal, chýbala
+ * potichu: bočný panel na Produktoch dostal `404`, vykreslil päť pomlčiek
+ * a vetu „Zápisy sa nepodarilo načítať." — a tak to aj odfotil. Panel má pri
+ * tom v appke päť riadkov s dátumami a percentami, teda presne tú časť, ktorú
+ * sa na snímke posudzuje najviac.
+ *
+ * Dva zápisy: jeden dobehnutý z minulej zľavy a jeden čakajúci v pripravovanej
+ * zľave — aby panel ukázal aj „V pripravovanej zľave", nie iba minulosť.
+ */
+function zapisyProduktu(productId: number): ProductWritesView {
+  return {
+    productId,
+    today: DNES,
+    writes: [
+      {
+        itemId: 8_412,
+        campaignId: 38,
+        campaignName: 'Prstene — výpredaj veľkostí',
+        status: 'ok',
+        percent: 30,
+        dateFrom: den(-45),
+        dateTo: den(-31),
+        at: okamih(-60 * 24 * 45),
+      },
+      {
+        itemId: 9_910,
+        campaignId: 40,
+        campaignName: 'Prívesky a retiazky — jesenná príprava',
+        status: 'pending',
+        percent: 20,
+        dateFrom: den(9),
+        dateTo: den(23),
+        at: null,
+      },
+    ],
+  };
+}
+
 function polozky(): readonly DiscountItemView[] {
   return KATALOG.slice(0, 24).map((row, i) => {
     const zlyhala = i === 5;
@@ -641,6 +682,9 @@ function odpoved(url: URL, method: string): Response | null {
       requiresSudo: true,
     } satisfies RetryPlanView);
   }
+
+  const zapisy = /^\/api\/insights\/product\/(\d+)$/.exec(cesta);
+  if (zapisy !== null) return ok(zapisyProduktu(Number(zapisy[1])));
 
   if (/^\/api\/insights\/campaign\/\d+\/performance$/.test(cesta)) return ok(VYKON);
   if (/^\/api\/insights\/campaign\/\d+\/items$/.test(cesta)) return ok({ data: [], total: 0 });
