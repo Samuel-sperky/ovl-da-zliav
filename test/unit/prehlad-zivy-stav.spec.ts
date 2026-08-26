@@ -88,6 +88,7 @@ function sync(patch: Partial<CatalogSyncView> = {}): CatalogSyncView {
     nextBatchAt: '2026-08-12T09:15:00.000Z',
     estimatedFinishAt: '2026-08-14T00:00:00.000Z',
     failedLastTime: false,
+    ipBanned: false,
     ...patch,
   };
 }
@@ -229,6 +230,28 @@ describe('Prehľad — čítanie živého stavu', () => {
     expect(JSON.stringify(parsed)).not.toContain('shop_5xx');
   });
 
+  /**
+   * ODMIETNUTIE ADRESY SA NESMIE STRATIŤ V „bola chyba".
+   *
+   * `lastError` je jediné miesto, kde appka o odmietnutej adrese vie, a do
+   * 26. 8. 2026 sa tu sploštil na jediný boolean. Obrazovka tým prišla o celý
+   * rozdiel medzi „shop mlčal" a „shop nás nepustil" — a mlčanie sa vyrieši
+   * čakaním, odmietnutie adresy nie.
+   *
+   * Kód sám na povrch nesmie ani teraz (I1, K10): von ide `true`/`false`.
+   */
+  it('odmietnutá adresa je vlastný príznak, nie len „bola chyba"', () => {
+    const banned = parseCatalogSync({ catalog: { loadedProducts: 10, lastError: 'ip_banned' } });
+    expect(banned?.failedLastTime).toBe(true);
+    expect(banned?.ipBanned).toBe(true);
+    // Ban je PODTRIEDA chyby, nie jej náhrada — a surový kód von neide.
+    expect(JSON.stringify(banned)).not.toContain('ip_banned');
+
+    const other = parseCatalogSync({ catalog: { loadedProducts: 10, lastError: 'shop_5xx' } });
+    expect(other?.ipBanned).toBe(false);
+    expect(parseCatalogSync({ catalog: { loadedProducts: 10 } })?.ipBanned).toBe(false);
+  });
+
   it('neznámy dôvod čakania katalógu je `null`, nie surový kód', () => {
     expect(parseCatalogSync({ catalog: { waiting: 'nieco_nove' } })?.waiting).toBeNull();
     expect(parseCatalogSync({ catalog: { waiting: 'daily_budget' } })?.waiting).toBe('daily_budget');
@@ -277,6 +300,31 @@ describe('Prehľad — kontroly pri dominante', () => {
     expect(shopCheck(sync()).tone).toBe('ok');
     expect(shopCheck(sync({ failedLastTime: true })).tone).toBe('warn');
     expect(shopCheck(sync({ waiting: 'error' })).tone).toBe('warn');
+  });
+
+  /**
+   * „NEODPOVEDAL" JE PRI BANE NEPRAVDA — shop odpovedal, len nás nepustil.
+   *
+   * Meria sa hotová veta pilulky, nie zdroj: znenie sa smie prepísať, ale
+   * odmietnutie sa nesmie znovu zliať s mlčaním. Preto sa tvrdí (a) že tie dve
+   * vety NIE SÚ tá istá, (b) že veta pri bane nehovorí o neodpovedaní, a (c) že
+   * kontrola v riadku dominanty hovorí to isté — `shopCheck()` berie slovo
+   * z pilulky, takže druhá formulácia toho istého faktu nemôže vzniknúť.
+   */
+  it('odmietnutá adresa nie je mlčanie shopu — pilulka aj kontrola to rozlíšia', () => {
+    const silent = shopPill(sync({ failedLastTime: true }));
+    const banned = shopPill(sync({ failedLastTime: true, ipBanned: true }));
+
+    expect(banned.label).not.toBe(silent.label);
+    expect(banned.label).not.toContain('neodpoved');
+    expect(banned.label).toContain('odmieta');
+    // Tón sa nemení: je to jantár v oboch prípadoch, mení sa PRAVDA vo vete.
+    expect(banned.tone).toBe('attention');
+    // Aj vtedy, keď `waiting` o chybe nevie a jediným svedkom je kód chyby.
+    expect(shopPill(sync({ ipBanned: true })).label).toBe(banned.label);
+
+    expect(shopCheck(sync({ failedLastTime: true, ipBanned: true })).text).toBe(banned.label);
+    expect(shopCheck(sync({ failedLastTime: true, ipBanned: true })).tone).toBe('warn');
   });
 
   it('katalóg hovorí, čo robí — nie koľko ho je (to je v pruhu)', () => {

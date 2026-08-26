@@ -19,8 +19,18 @@
  *    jediný zdroj pravdy o tom, čo blokuje čo, a druhá formulácia tej istej
  *    prekážky by sa s ním rozišla presne vtedy, keď na tom bude záležať.
  * 2. **Kód chyby sa na povrch nedostane** (I1, K10). Z `lastError` katalógu si
- *    modul berie IBA to, či chyba bola — samotný kód by bol žargón a mohol by
- *    niesť kus odpovede shopu. Preto `failedLastTime: boolean`, nie reťazec.
+ *    modul berie IBA odpovede na otázky, nie samotný kód — ten by bol žargón
+ *    a mohol by niesť kus odpovede shopu. Preto booleany, nie reťazec.
+ *
+ *    Booleany sú DVA, a to je od 26. 8. 2026 podstatné: `failedLastTime`
+ *    hovorí „posledný beh skončil chybou", `ipBanned` hovorí „shop ODMIETOL
+ *    našu adresu". Do 26. 8. tu bol len prvý, takže obrazovka nedokázala
+ *    odlíšiť mlčanie shopu od jeho odmietnutia a `shopPill()` na ban napísala
+ *    „Shop naposledy neodpovedal" — shop pritom odpovedal, len nás nepustil.
+ *    Rozdiel je celý ďalší krok: mlčanie sa vyrieši čakaním, odmietnutie
+ *    adresy nie a čakať naň by bola nekonečná slučka. Kód `ip_banned` sa tým
+ *    NA POVRCH nedostáva ani teraz — rozhoduje o ňom `isIpBannedCode()`
+ *    a von ide `true`/`false`.
  * 3. **Neznámy kód je `null`, nie surová hodnota.** Závažnosť ani spôsob
  *    riešenia sa nedopĺňajú odhadom; obrazovka vie prekážku vykresliť aj vtedy,
  *    keď jej spôsob riešenia nepozná, a povie to.
@@ -39,6 +49,7 @@ import {
   readTriState,
 } from '@/components/dashboard/json';
 import { fetchJson } from '@/components/layout/health';
+import { isIpBannedCode } from '@/lib/shop/errors';
 
 /* ═══════════════════════════ 1. Prekážky ══════════════════════════════════ */
 
@@ -272,6 +283,15 @@ export interface CatalogSyncView {
   readonly estimatedFinishAt: string | null;
   /** `true` = posledný beh skončil chybou. KÓD chyby sa na povrch nedostane. */
   readonly failedLastTime: boolean;
+  /**
+   * `true` = shop odmietol našu ADRESU (`ip_banned`), nie našu požiadavku.
+   *
+   * Je to podtrieda `failedLastTime` a NIE JE to výrok o kľúči (`shop/errors.ts`):
+   * shop ten kód vracia aj na volanie bez kľúča. Pre obrazovku je to iný príbeh
+   * než „shop neodpovedal" — čakanie ho nevylieči, takže veta nesmie ponúkať
+   * „skúste to o chvíľu znova".
+   */
+  readonly ipBanned: boolean;
 }
 
 export function parseCatalogSync(raw: unknown): CatalogSyncView | null {
@@ -279,6 +299,10 @@ export function parseCatalogSync(raw: unknown): CatalogSyncView | null {
   if (root === null) return null;
   const catalog = asRecord(root['catalog']);
   if (catalog === null) return null;
+
+  // Kód sa prečíta RAZ a hneď sa premení na dva booleany — do vráteného
+  // pohľadu sa nedostane (bod 2 hlavičky), takže ho nemôže vypísať ani omylom.
+  const lastError = readText(catalog, 'lastError');
 
   return {
     loadedProducts: readCount(catalog, 'loadedProducts'),
@@ -289,7 +313,8 @@ export function parseCatalogSync(raw: unknown): CatalogSyncView | null {
     waiting: readCode(catalog, 'waiting', CATALOG_WAITING_CODES),
     nextBatchAt: readText(catalog, 'nextBatchAt'),
     estimatedFinishAt: readText(catalog, 'estimatedFinishAt'),
-    failedLastTime: readText(catalog, 'lastError') !== null,
+    failedLastTime: lastError !== null,
+    ipBanned: isIpBannedCode(lastError),
   };
 }
 
