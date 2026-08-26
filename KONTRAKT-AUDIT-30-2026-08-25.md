@@ -45,6 +45,16 @@ nepomenuje nikto.
 Mína nebola nastražená na budúcnosť. Bola odpálená a ja som sa pozeral na
 nesprávny súbor. Je to nález **X1** a je prvý na zozname.
 
+> ### ⚠ TÁTO SEKCIA BOLA 26. 8. ČIASTOČNE VYVRÁTENÁ
+>
+> Veta „keďže ban na IP platí od 19. 8., je to aktuálny stav appky" **nie je
+> pravdivá.** Skutočný ban platí aj na čítanie, takže beh zomrel na povinnom
+> pre-write GET (D48) a k wipe sa nedostal — kľúč sa teda nemazal. Diera bola
+> skutočná, ale podmienená odmietnutím LEN na zápise; napísal som meranie, ktoré
+> som neurobil. Zachytila to verifikácia. Celý stav a druhá polovica opravy
+> (ban na čítacej strane zastaví dávku po prvej položke, namiesto 8 000
+> odsúdených requestov) sú v sekcii 8.
+
 ---
 
 ## 2. Rozhodnutia (odpovede na 20 otázok)
