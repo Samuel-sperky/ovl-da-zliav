@@ -192,6 +192,95 @@ v tomto dokumente nesedí.
 
 ---
 
-## 7. Výsledok
+## 7. Výsledok (25. 8. 2026)
 
-*(Vypĺňa sa po dobehnutí.)*
+**Beh dobehol čiastočne. Z 31 agentov skončilo 20, jedenásť padlo na limite
+používania.** Balík je zelený, ale kontrakt splnený nie je — a nižšie je
+napísané presne čo.
+
+```
+npm run typecheck   čistý
+npm run lint        čistý
+npm run test        3216 prešlo / 0 padlo / 0 preskočených  (161 súborov)
+```
+
+Pred behom: 3113 v 153 súboroch. Pribudlo osem súborov a 103 testov.
+
+### Spend
+
+| | Tokeny |
+| --- | --- |
+| Tri sondy | 765 k |
+| 20 dokončených agentov | 4,0 M |
+| Koordinácia, zlúčenia, dve opravy zo zakázaných zón | zvyšok |
+| **Strop** | **~5 M — vyčerpaný** |
+
+Preto sa jedenásť padnutých agentov **nespúšťalo znovu**. Bolo by to nad strop
+a bez tvojho slova to nerobím.
+
+### Čo sa zlúčilo
+
+Päť tímových vetiev, 20 commitov. Konflikt bol jeden (`_shared.ts`, aditívny —
+backend pridal rezerváciu čítacieho rozpočtu, UI pomôcku pre odhad fronty;
+patria tam obe).
+
+| Tím | Zavreté |
+| --- | --- |
+| **logika** | L2 (percentá pásiem pri oprave zlyhaných), L3 (reconcile nechá neposlané položky `pending`), L4 (manuálny execute overí proti riadkom skôr, než siahne na stav), L5 (kampaň, ktorá padá každý tik, sa prestane opakovať) |
+| **backend** | B1 (rezervácia čítacieho rozpočtu na dvoch routách, ktoré ju obchádzali — mechanizmus IP banu), B2 (executor už neťahá dva blob stĺpce), B3 (potvrdená zľava sa vkladá v jednej transakcii), B4 (nečitateľné počítadlo auditu = „nevieme", nie nula) |
+| **ux** | X2 (ban má na čítacej strane slová), X3 (hlavička prestala tvrdiť prázdnu frontu, keď nevie), X4 (Prehľad prestal hlásiť „všetko v poriadku" nad stojacou frontou), X5 (dominantné číslo sa menuje „spracovaných", nie „zapísaných") |
+| **ui** | U1 (odhad dobehnutia z celej fronty, nie z jednej kampane), U2 (chyby potvrdenia sa prekladajú, kým dorazia na obrazovku), U3 (prepínač, ktorý nič neriadil, je odstránený), U4 (prestala sa ponúkať akcia, ktorú invariant zakazuje) |
+| **použiteľnosť** | P1 (**prvé snímky obrazoviek v histórii projektu** — a našlo sa päť, ktoré snímkovač nekreslil, plus tichá 404 vo fixtúrach a `globals.css` sa nahrával po komponentoch), P2 (pokrytie predajnosti sa priznáva tam, kde sa vyberajú produkty) |
+
+### Dve opravy zo zakázaných zón — moje, nie agentov
+
+| # | Commit | Čo |
+| --- | --- | --- |
+| **L1** | `b2b9ec4` | Predĺženie zľavy s pásmami písalo do PRODUKČNÉHO shopu všetko najvyšším percentom. Hash to nezachytil, lebo náhľad aj potvrdenie sa mýlili zhodne. Obe polovice teraz nesú mapu percent a potvrdenie si ju odvodí z DB, nie z tokenu. |
+| **X1** | `fdba422` | Appka mazala funkčný kľúč, keď shop odmietol našu ADRESU — a od 19. 8. to bol jej reálny stav. Ban má odteraz vlastnú vetvu: kľúč sa nedotkne, dôvod je `shop_ip_banned`. |
+
+Obe overené mutáciou. Agent pri L1 doložil defekt behom proti mock shopu ešte
+pred opravou — vrátane toho, čo naozaj dorazilo do shopu.
+
+### Čo kontrakt NESPLNIL
+
+1. **Verifikácia neprebehla vôbec.** Všetkých päť verifikátorov aj šiesty, ktorý
+   mal kontrolovať mňa a tento kontrakt, padli na limite. **Akceptačné
+   kritérium 7 nie je splnené** a žiadny nález nemá nezávislý verdikt. Po
+   skúsenosti z 25. 8., keď review našiel päť dier a dve moje nepravdivé
+   tvrdenia, je to najväčšia chýbajúca vec tohto behu.
+2. **Päť nálezov nezavreli agenti, ktorí na ne padli:** B5 (štvrtý komentár
+   menujúci neexistujúci test, mŕtve `syncCountersFromItems`, orezané
+   `queueWaiting`), U5 (Výkon výberu porovnáva okná pred zľavou), P3
+   (`LockedFeatures` obviňuje eshop z dát, ktoré vracia), P4 (zastaralé
+   `CLAUDE.md`, README, backlog), P5 (klávesnica a čítačka obrazovky).
+3. **P3 zostal rozrobený v DVOCH worktree** (`a30-backend` a `a30-pouzitelnost`),
+   s odlišnými diffami — jeden z nich v zóne, ktorá mu nepatrí. **Nezlúčil som
+   ani jeden.** Práca je tam a je nezacommitovaná; treba sa rozhodnúť, ktorá
+   verzia je základ.
+4. **Snímkovanie pred/po (rozhodnutie 11)** sa stihlo len ako „po" — tím
+   použiteľnosti najprv musel snímkovač opraviť, aby vôbec kreslil.
+
+### Čo sa pri behu ukázalo o prostredí
+
+- **Moja infraštruktúra bola overená nedostatočne.** Otestoval som worktree na
+  `repo.spec.ts`, ktorý `argon2` neimportuje. V skutočnosti **každý integračný
+  test route-ov vo worktree padne už pri importe** — `argon2.glibc.node` je
+  blokovaný Windows Application Control. Agenti si to museli obísť
+  `vi.mock('argon2')`. V hlavnom strome to funguje, takže plný balík (ktorý
+  púšťam ja) tým zasiahnutý nie je.
+- **Kontrakt najprv nebol vo worktree.** Commitol som ho do hlavnej vetvy, kým
+  `feat/audit-30` ukazoval pred ním — zlúčenie do worktree bolo prázdne a agenti
+  mali v zadaní čítať súbor, ktorý u nich nebol. Zachytené minútu po spustení.
+- Porty 3307–3309 boli obsadené (Hades, auraai), testovacie DB idú na
+  3310–3315.
+
+### Otvorené
+
+- Verifikačný priechod (kritérium 7).
+- Päť nezavretých nálezov a rozrobený P3.
+- Zlúčenie `feat/audit-30` do `feat/dokoncenie-prva-zlava` — nerobil som ho,
+  je to tvoje rozhodnutie.
+- Šesť worktree a šesť DB kontejnerov beží; po zlúčení sa dajú zrušiť.
+- Rozhodnutie 19 (automatické potvrdenie D2) je zapísané ako vedomé; komentár
+  priamo v `NewDiscount.tsx` som nepísal, ten súbor mal tím UI.
