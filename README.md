@@ -1,7 +1,7 @@
 # Aura Zľavy (ovl-da-zliav)
 
 Lokálna appka na ovládanie zliav v e-shope so šperkami cez jeho API.
-Beží výhradne na `http://127.0.0.1:3070` (Caddy, basic auth; HTTP bez TLS je
+Beží výhradne na `http://localhost:3070` (Caddy, basic auth; HTTP bez TLS je
 vedomá voľba — dôvod je v `Caddyfile.example`) — žiadna verejná expozícia,
 žiadny tunel (R4, I5).
 
@@ -59,7 +59,7 @@ npm ci
 npm run gen-master-key                       # secrets/master.key (D61)
 # ... session key, DB heslá, .env, secrets/Caddyfile — viď runbook R1
 docker compose up -d --build
-curl http://127.0.0.1:3070/api/health        # 200
+curl -u samuel http://localhost:3070/api/health   # 200 (bez -u je to 401)
 ```
 
 Onboarding ako sprievodca (D20) v architektúre V3 **neexistuje** — zrušila ho
@@ -68,6 +68,16 @@ o sebe aj `src/app/onboarding/page.tsx`). Prvé prihlásenie teda vedie na Preh�
 ktorý prázdnymi stavmi ukáže, čo chýba: doména, API kľúč, povolené produkty.
 Rozsah začína na `pilot`; prepnutie do `plny` je samostatné, auditované
 rozhodnutie v Nastaveniach a žiada sudo (K1).
+
+> **V prehliadači používaj `localhost`, nie `127.0.0.1`.** Caddy poslúcha na
+> oboch menách, ale na `127.0.0.1` si prehliadač mohol pripnúť HSTS od úplne inej
+> lokálnej služby — HSTS platí na CELÝ HOST bez ohľadu na port, takže Chrome
+> potom prepíše `http://127.0.0.1:3070` na `https://`, kde na tomto porte nikto
+> neposlúcha, a zostane prázdna stránka bez chybovej hlášky. Zmerané 27. 8. 2026:
+> `127.0.0.1` sa v Chrome nepotvrdilo vôbec, `localhost` áno.
+>
+> Pripnutie sa zruší v `chrome://net-internals/#hsts` → *Delete domain security
+> policies* → `127.0.0.1`. Naša Caddy konfigurácia HSTS neposiela (vedome, D95).
 
 ## Bezpečnostné hranice
 

@@ -6,6 +6,13 @@
 # is to show http://127.0.0.1:3070 does not justify that, so this does the same
 # job with no new dependency.
 #
+# The URL is localhost, not 127.0.0.1, and that matters: a browser can hold an
+# HSTS pin for the host 127.0.0.1 set by some unrelated local service, and HSTS
+# applies to the WHOLE HOST regardless of port -- so http://127.0.0.1:3070 gets
+# rewritten to https://, which nothing serves on that port, and the user gets a
+# blank page with no error. Measured 27 Aug 2026 in Chrome. Caddy answers on both
+# names, so localhost costs nothing and avoids the trap.
+#
 # INVARIANT I5 IS UNTOUCHED. This script publishes no port and starts no server
 # of its own -- the only published port stays Caddy's 127.0.0.1:3070, owned by
 # docker-compose.yml. The script is a client.
@@ -40,7 +47,7 @@ $ErrorActionPreference = 'Stop'
 
 # Repo root is the script's parent -- works from any checkout.
 $Root = Split-Path -Parent $PSScriptRoot
-$Url = 'http://127.0.0.1:3070'
+$Url = 'http://localhost:3070'
 $HealthUrl = "$Url/api/health"
 
 function Fail($Message, $WhatToDo) {
