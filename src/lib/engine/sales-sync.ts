@@ -4,10 +4,17 @@
  * Z objednávok shopu vyrobí denné súčty predaných KUSOV po produkte a uloží ich
  * do `product_sales_daily`. Priebeh dňa žije v `sales_sync_state`.
  *
+ * Od 28. 8. 2026 je v tomto module aj DRUHÝ, samostatný beh — `syncShopRevenue()`
+ * (sekcia 6, D117): denná tržba za CELÝ ESHOP z `total_paid` zo zoznamu
+ * objednávok. Prečo dva behy a nie jeden, a prečo tržba NIKDY nie je per
+ * produkt, je v doc-bloku sekcie 6.
+ *
  * Tvrdé pravidlá tohto modulu:
  *   - **I8'** — objednávkové endpointy pozná výhradne `lib/shop/orders-client.ts`;
- *     tento modul s ním hovorí cez rozhranie `OrdersClient` a žiadnu cestu shopu
- *     nezostavuje. Do DB neputuje id objednávky, krajina ani `total_paid`.
+ *     tento modul s ním hovorí cez rozhrania `OrdersClient` / `OrderTotalsClient`
+ *     a žiadnu cestu shopu nezostavuje. Do DB neputuje id objednávky ani
+ *     krajina. `total_paid` áno, ale VÝHRADNE ako denný súčet za celý eshop
+ *     (`shop_revenue_daily`) — nikdy ako číslo pripísané produktu (D117).
  *   - **I10** — requesty idú prísne sekvenčne s pauzou `ORDERS_PAUSE_MS`;
  *     `Promise.all` nad volaniami shopu tu neexistuje a existovať nesmie.
  *     (Tá pauza je dnes pod minútovým stropom shopu — modul to ohlási, ale
@@ -38,7 +45,15 @@
  *
  * Vlastník: sales-sync.
  */
-import type { DateOnly, Logger, SecretRef, ShopCtx, Ulid, UtcDate } from '@/contracts';
+import type {
+  DateOnly,
+  Logger,
+  MoneyString,
+  SecretRef,
+  ShopCtx,
+  Ulid,
+  UtcDate,
+} from '@/contracts';
 
 import { env } from '@/env';
 import { addDays } from '@/lib/domain/dates';
@@ -52,6 +67,9 @@ import { todayInTimeZone } from '@/lib/shop/client';
 import {
   ORDERS_MAX_ATTEMPTS,
   ORDERS_MAX_PER_PAGE,
+  centsToMoneyString,
+  type OrderTotalsClient,
+  type OrderTotalsPage,
   type OrderUnits,
   type OrdersClient,
   type OrdersPage,
@@ -713,6 +731,507 @@ export async function syncSales(
     // `info`, nie `warn`: minutý denný rozpočet je plánovaný stav dvojdňového
     // čítania, nie porucha (A4).
     opLog.info('sales_sync_daily_budget_reached', {
+      requestsUsed,
+      readsUsed,
+      used: budgetStop.used,
+      limit: budgetStop.limit,
+      known: budgetStop.known,
+      resumeAt: budgetStop.resetAt.toISOString(),
+    });
+  }
+
+  return {
+    outcome,
+    windowFrom,
+    windowTo: today,
+    days: reports,
+    requestsUsed,
+    readsUsed,
+    capReached,
+    dailyBudgetReached,
+    stoppedBy,
+    resumeAt: budgetStop === null ? null : budgetStop.resetAt,
+    error: runError,
+  };
+}
+
+/* ═══════════════ 6. DENNÁ TRŽBA ESHOPU (D117, 28. 8. 2026) ════════════════ */
+
+/**
+ * PREČO JE TRŽBA SAMOSTATNÝ BEH A NIE ĎALŠÍ KROK `syncSales()`
+ * ------------------------------------------------------------
+ * Sonda 28. 8. 2026 zmerala, že API **ceny položiek objednávky nevracia**
+ * (`GET /api/order/get` → `products: [{id, qty}]`). Tržba v eurách preto
+ * existuje VÝHRADNE na úrovni celého eshopu (D117): denný súčet `total_paid`
+ * zo ZOZNAMU objednávok (`GET /api/order`, 100 na stranu). Per produkt zostávajú
+ * KUSY a nič iné.
+ *
+ * **Rozdeliť `total_paid` medzi položky je ZAKÁZANÉ.** V sume je poštovné, zľavy
+ * a kupóny, takže akékoľvek rozdelenie by bolo vymyslené číslo vydávané za obrat
+ * produktu (I11). Preto tento beh nepozná `productId`, nevolá `order/get` ani
+ * raz a jeho jediný zápis ide do `shop_revenue_daily`, ktorá `product_id`
+ * zámerne nemá (migrácia 0014 §3).
+ *
+ * Dva behy, a nie jeden, z troch dôvodov:
+ *   1. **Iná cena.** Tento beh stojí ~1 request na 100 objednávok dňa, kým
+ *      `syncSales()` stojí 1 request na KAŽDÚ objednávku. Miešať ich do jedného
+ *      stropu by znamenalo, že drahšia časť vždy zožerie tú lacnú.
+ *   2. **Iné okno.** Tržba kreslí graf 30/90 dní (`SHOP_REVENUE_WINDOW_DAYS`),
+ *      kusy majú okno `SALES_WINDOW_DAYS` (default 3 dni).
+ *   3. **Iný fakt o úplnosti.** `shop_revenue_daily.day_complete` hovorí, či sa
+ *      dočítal ZOZNAM; `sales_sync_state.status` hovorí, či sa dočítali POLOŽKY.
+ *      Zoznam môže byť celý a položky nie, aj naopak — preto tento beh do
+ *      `sales_sync_state` NEZAPISUJE ani raz (migrácia 0014 §3, „dva fakty, dva
+ *      stĺpce").
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *  - **Neúplný deň MUSÍ byť označený ako neúplný.** Bez toho posledný (dnešný)
+ *    deň vždy vyzerá ako prudký pokles tržieb a graf kreslí pád, ktorý sa
+ *    nestal — to je klamanie trendom, teda I11.
+ *  - **Meny sa NESČÍTAVAJÚ.** Každá mena má vlastný riadok; súčet dvoch mien do
+ *    jedného čísla by bol nezmysel vydávaný za tržbu.
+ *  - **Deň, o ktorom beh nič nezistil, sa NEZAPISUJE.** Riadok v
+ *    `shop_revenue_daily` znamená „tento deň sme naozaj čítali", takže prázdny
+ *    zápis by z NEZNÁMA urobil nulu (I11).
+ *  - **Zápis NIKDY nezhorší, čo už v DB je.** Neúplné čítanie neprepíše deň,
+ *    ktorý bol predtým dočítaný, ani deň s vyšším počtom objednávok.
+ *
+ * ZNÁMA MEDZERA, KTORÚ TÁTO SCHÉMA UNIESŤ NEVIE (povedané nahlas)
+ * --------------------------------------------------------------
+ * Mena je časť primárneho kľúča `shop_revenue_daily`, ale deň BEZ JEDINEJ
+ * objednávky žiadnu menu neprináša — taký deň teda nemá ako dostať riadok a
+ * čítacia strana ho vidí ako „nevieme", hoci sme ho dočítali. Je to asymetria
+ * v BEZPEČNOM smere: I11 zakazuje vydávať neznámo za nulu, nie naopak. Zatvoriť
+ * sa dá len ďalšou (aditívnou) migráciou so stavom čítania tržby po dňoch;
+ * vymyslieť si menu pre prázdny deň sa NESMIE.
+ */
+
+/**
+ * Okno dennej tržby v dňoch. Nie je to `SALES_WINDOW_DAYS` (default 3): to je
+ * okno pre KUSY, ktoré stojí 1 request na objednávku, kým tu ide o zoznam po
+ * 100. Tridsať dní je predvolené okno Prehľadu (kontrakt §2) a dočítaný deň sa
+ * v ďalších behoch preskakuje, takže v ustálenom stave beh platí len za dnešok
+ * a včerajšok.
+ */
+export const SHOP_REVENUE_WINDOW_DAYS = 30;
+
+/** Súčet jednej meny za jeden deň. Nikdy sa nesčítava s inou menou (D117). */
+export interface ShopRevenueCurrencyTotal {
+  currency: string;
+  /** Súčet `total_paid` ako string pre `DECIMAL(12,2)` — nikdy float. */
+  totalPaidSum: MoneyString;
+  /** POČET objednávok v súčte, nie odkaz na objednávku (I8' bod 3). */
+  ordersCount: number;
+}
+
+export interface ShopRevenueDayReport {
+  day: DateOnly;
+  /** Prečítali sa VŠETKY strany zoznamu za tento deň? */
+  complete: boolean;
+  /** Deň sa nečítal, pretože už bol dočítaný (P7). */
+  skipped: boolean;
+  /** Súčty po menách tak, ako ich beh naozaj videl. */
+  currencies: ShopRevenueCurrencyTotal[];
+  pagesRead: number;
+  requestsUsed: number;
+  /** KÓD chyby, nikdy obsah odpovede (I1). */
+  lastError: string | null;
+  /** Zapísal sa deň do DB, alebo sa nechala predchádzajúca hodnota? */
+  written: boolean;
+}
+
+export interface ShopRevenueSyncResult {
+  outcome: 'complete' | 'partial' | 'paused' | 'disabled';
+  windowFrom: DateOnly;
+  windowTo: DateOnly;
+  days: ShopRevenueDayReport[];
+  requestsUsed: number;
+  readsUsed: number;
+  capReached: boolean;
+  dailyBudgetReached: boolean;
+  stoppedBy: SalesStopReason;
+  resumeAt: UtcDate | null;
+  /** KÓD chyby, ktorá beh ukončila; `null` keď beh dobehol. */
+  error: string | null;
+}
+
+export interface ShopRevenueSyncDeps {
+  /**
+   * ZÁMERNE `OrderTotalsClient`, nie `OrdersClient`: tento beh sa k položkám
+   * objednávky nemá ako dostať ani omylom (viď rozhranie v `orders-client.ts`).
+   */
+  ordersClient: OrderTotalsClient;
+  /** Kľúč `orders:read` ako `SecretRef` (I1) — vkladá ho wiring, nikdy modul. */
+  key: SecretRef;
+  /** Zdieľaný denný rozpočet dráhy `orders` (A4). Bez neho len pamäť behu. */
+  budget?: SalesReadBudgetGate;
+  salesRepo?: Pick<SalesRepoContract, 'upsertRevenueDay' | 'listRevenue'>;
+  logger?: Logger;
+  flags?: SalesSyncFlags | (() => SalesSyncFlags);
+  sleepFn?: (ms: number) => Promise<void>;
+  now?: () => Date;
+  timeZone?: string;
+}
+
+export interface SyncShopRevenueOptions {
+  /** Prepíše „dnes" (testy, ručné dopočítanie). Inak sa počíta v zóne D31. */
+  today?: DateOnly;
+  /** Koľko dní dozadu vrátane dneška; default `SHOP_REVENUE_WINDOW_DAYS`. */
+  windowDays?: number;
+  /** Prečíta znova aj dni, ktoré sú už dočítané (ručná korekcia). */
+  force?: boolean;
+  /** Korelácia celého behu; inak vznikne nové. */
+  operationId?: Ulid;
+}
+
+/** Výsledok jedného čítania: hodnota, chyba alebo minutý denný rozpočet. */
+type SpentRead<T> =
+  | { ok: true; value: T }
+  | { ok: false; reason: 'error'; code: string; fatal: boolean }
+  | { ok: false; reason: 'daily_budget'; status: ReadBudgetStatus };
+
+/**
+ * Denná tržba ESHOPU za okno. Rovnako ako `syncSales()` táto funkcia **NIKDY
+ * nehádže** (P6): tržba je analytika a nesmie zhodiť ani zdržať zľavy.
+ */
+export async function syncShopRevenue(
+  deps: ShopRevenueSyncDeps,
+  options: SyncShopRevenueOptions = {},
+): Promise<ShopRevenueSyncResult> {
+  const log = deps.logger ?? defaultLogger;
+  const repo = deps.salesRepo ?? defaultSalesRepo;
+  const sleepFn = deps.sleepFn ?? defaultSleep;
+  const now = deps.now ?? ((): Date => new Date());
+  const timeZone = deps.timeZone ?? env.LOGIC_TIMEZONE;
+  const flags =
+    typeof deps.flags === 'function' ? deps.flags() : (deps.flags ?? salesSyncFlagsFromEnv());
+
+  const operationId = options.operationId ?? newOperationId();
+  const opLog = log.child({ operationId, part: 'shop_revenue' });
+
+  // D31 — „dnes" sa počíta cez `Intl.DateTimeFormat` s `timeZone`, NIKDY v UTC.
+  // Medzi 22:00 a 24:00 UTC je v `Europe/Bratislava` už zajtra a beh, ktorý by
+  // deň počítal v UTC, by celý ten čas dopisoval tržbu do včerajška.
+  const today = options.today ?? todayInTimeZone(timeZone, now().getTime());
+  const windowDays = Math.max(1, Math.trunc(options.windowDays ?? SHOP_REVENUE_WINDOW_DAYS));
+  const windowFrom = addDays(today, -(windowDays - 1));
+  const yesterday = addDays(today, -1);
+  const perPage = Math.min(Math.max(1, Math.trunc(flags.perPage)), ORDERS_MAX_PER_PAGE);
+  const maxRequests = Math.max(1, Math.trunc(flags.maxRequestsPerRun));
+
+  const days: DateOnly[] = [];
+  for (let i = windowDays - 1; i >= 0; i -= 1) days.push(addDays(today, -i));
+
+  const reports: ShopRevenueDayReport[] = [];
+  let requestsUsed = 0;
+  let readsUsed = 0;
+  let capReached = false;
+  let runError: string | null = null;
+  let budgetStop: ReadBudgetStatus | null = null;
+
+  if (!flags.enabled) {
+    return {
+      outcome: 'disabled',
+      windowFrom,
+      windowTo: today,
+      days: [],
+      requestsUsed: 0,
+      readsUsed: 0,
+      capReached: false,
+      dailyBudgetReached: false,
+      stoppedBy: 'disabled',
+      resumeAt: null,
+      error: null,
+    };
+  }
+
+  if (deps.budget === undefined) {
+    opLog.warn('shop_revenue_read_budget_missing', {
+      detail: 'denný rozpočet čítaní žije len v pamäti tohto behu',
+    });
+  }
+  const budgetGate = deps.budget ?? createMemoryBudgetGate();
+
+  const budgetLeft = (): number => maxRequests - requestsUsed;
+  const ctxFor = (): ShopCtx => ({ operationId, requestId: newRequestId() });
+  const dayCounter = { requests: 0 };
+
+  async function peekBudget(): Promise<ReadBudgetStatus | null> {
+    try {
+      const peek = await budgetGate.reserveShopReads(0);
+      return peek.status;
+    } catch {
+      return null;
+    }
+  }
+
+  async function chargeRetries(): Promise<void> {
+    if (ORDERS_RETRY_READS_CHARGE <= 0) return;
+    try {
+      const extra = await budgetGate.reserveShopReads(ORDERS_RETRY_READS_CHARGE);
+      readsUsed += extra.granted;
+    } catch {
+      // Nezaúčtovaný pokus je nepresnosť, nie dôvod zhodiť beh (P6).
+    }
+  }
+
+  /**
+   * Jedno čítanie zoznamu: rozpočet PRED volaním (A4), sekvenčné tempo (I10)
+   * a chyba ako HODNOTA, nie výnimka.
+   *
+   * Plumbing je vedome rovnaký ako v `syncSales()` a NIE je z nej zdieľaný:
+   * rozhodovanie o stropoch žije v `lib/shop/read-budget.ts` a doúčtovanie
+   * tichých opakovaní v `ORDERS_RETRY_READS_CHARGE`, čiže to, na čom záleží, je
+   * na jednom mieste pre oba behy. Prepísať kvôli tomuto pridanému kroku
+   * sedemsto riadkov odskúšanej cesty na kusy by bolo väčšie riziko než
+   * tridsať riadkov rovnakého tvaru.
+   */
+  async function spend<T>(call: () => Promise<T>): Promise<SpentRead<T>> {
+    let reservation: ReadReservation;
+    try {
+      reservation = await budgetGate.reserveShopReads(1);
+    } catch (error) {
+      return { ok: false, reason: 'error', code: errorCode(error), fatal: true };
+    }
+    if (reservation.granted < 1) {
+      return { ok: false, reason: 'daily_budget', status: reservation.status };
+    }
+    readsUsed += reservation.granted;
+
+    if (requestsUsed > 0) await sleepFn(flags.pauseMs);
+    try {
+      return { ok: true, value: await call() };
+    } catch (error) {
+      if (retriedByClient(error)) await chargeRetries();
+      return { ok: false, reason: 'error', code: errorCode(error), fatal: stopsRun(error) };
+    } finally {
+      requestsUsed += 1;
+      dayCounter.requests += 1;
+    }
+  }
+
+  try {
+    for (const day of days) {
+      if (capReached || budgetStop !== null || runError !== null) break;
+
+      // Čo o dni už v DB je. Slúži na dve veci: preskočiť dočítaný deň (P7) a
+      // nikdy ho neprepísať horším výsledkom (nižšie).
+      const before = await repo.listRevenue(day, day);
+      const knownComplete = before.length > 0 && before.every((row) => row.dayComplete);
+      const alwaysRecompute = day === today || day === yesterday;
+
+      // P7 — dočítaný deň v minulosti sa znova nečíta. Dnešok a včerajšok áno:
+      // objednávky do nich stále pribúdajú.
+      if (!alwaysRecompute && knownComplete && options.force !== true) {
+        reports.push({
+          day,
+          complete: true,
+          skipped: true,
+          currencies: [],
+          pagesRead: 0,
+          requestsUsed: 0,
+          lastError: null,
+          written: false,
+        });
+        continue;
+      }
+
+      // Oplatí sa deň vôbec začať? Nahliadnutie bez rezervovania — deň, na ktorý
+      // sa nedostalo ani jedno čítanie, si nezaslúži značku „neúplný".
+      const peek = await peekBudget();
+      if (peek === null) {
+        runError = 'read_budget_unreadable';
+        opLog.error('shop_revenue_budget_unreadable', { day });
+        break;
+      }
+      if (peek.remaining < 1) {
+        budgetStop = peek;
+        break;
+      }
+
+      /** `mena → centy` a `mena → počet objednávok`. Meny sa NIKDY nesčítajú. */
+      const centsByCurrency = new Map<string, number>();
+      const countByCurrency = new Map<string, number>();
+      const seenOrderIds = new Set<number>();
+      dayCounter.requests = 0;
+      let pagesRead = 0;
+      let dayError: string | null = null;
+      let allPagesRead = true;
+
+      for (let page = 1; page <= MAX_PAGES_PER_DAY; page += 1) {
+        if (budgetLeft() <= 0) {
+          capReached = true;
+          allPagesRead = false;
+          break;
+        }
+        const listed = await spend<OrderTotalsPage>(() =>
+          deps.ordersClient.listOrderTotals(
+            { dateFrom: day, dateTo: day, page, perPage },
+            deps.key,
+            ctxFor(),
+          ),
+        );
+        if (!listed.ok) {
+          allPagesRead = false;
+          if (listed.reason === 'daily_budget') {
+            // A4 — dnes už nečítame. Nie je to chyba dňa; dopočíta sa po
+            // polnoci UTC, deň zostane označený ako NEÚPLNÝ.
+            budgetStop = listed.status;
+            break;
+          }
+          dayError = listed.code;
+          if (listed.fatal) runError = listed.code;
+          break;
+        }
+        pagesRead += 1;
+
+        for (const item of listed.value.data) {
+          // Objednávka, ktorá podľa `date_add` patrí inému dňu, do súčtu TOHTO
+          // dňa nevstúpi — zapíše ju iterácia jej vlastného dňa.
+          if (item.day !== day) continue;
+          // Dedup podľa id: keď medzi dvoma stranami pribudne objednávka,
+          // paginátor tú istú vráti dvakrát a súčet by tržbu NADHODNOTIL.
+          if (seenOrderIds.has(item.id)) continue;
+          seenOrderIds.add(item.id);
+          centsByCurrency.set(
+            item.currency,
+            (centsByCurrency.get(item.currency) ?? 0) + item.totalPaidCents,
+          );
+          countByCurrency.set(item.currency, (countByCurrency.get(item.currency) ?? 0) + 1);
+        }
+
+        if (listed.value.data.length === 0) break;
+        // Koniec stránkovania sa počíta podľa `per_page`, ktoré vrátil SHOP —
+        // keď stránku zmenší, počítanie podľa PÝTANEJ hodnoty by deň uzavrelo
+        // po prvej strane a tržba by tichom stratila zvyšok (rovnaká pasca ako
+        // v `syncSales()`).
+        const effectivePerPage =
+          Number.isInteger(listed.value.perPage) && listed.value.perPage > 0
+            ? Math.min(listed.value.perPage, perPage)
+            : perPage;
+        if (page * effectivePerPage >= listed.value.total) break;
+      }
+
+      const dayRequests = dayCounter.requests;
+      const dayComplete = allPagesRead && dayError === null && runError === null;
+      const measuredOrders = [...countByCurrency.values()].reduce((sum, n) => sum + n, 0);
+
+      const currencies: ShopRevenueCurrencyTotal[] = [...centsByCurrency.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([currency, cents]) => ({
+          currency,
+          totalPaidSum: centsToMoneyString(cents),
+          ordersCount: countByCurrency.get(currency) ?? 0,
+        }));
+
+      /*
+       * ZÁPIS — tri pravidlá, každé proti jednej konkrétnej lži:
+       *
+       *  1. Deň, z ktorého sa neprečítala ani jedna strana, sa NEZAPISUJE:
+       *     riadok v `shop_revenue_daily` znamená „tento deň sme čítali" a
+       *     prázdny zápis by z neznáma urobil nulu (I11).
+       *  2. Neúplné čítanie NEPREPÍŠE deň, ktorý bol predtým dočítaný, ani deň
+       *     s vyšším počtom objednávok — inak by prvý `rate_limited` deň nielen
+       *     zneúplnil, ale aj zmazal.
+       *  3. Mena, ktorú sme predtým poznali a v ÚPLNOM čítaní už nie je, sa
+       *     zapíše ako nula. To nie je výmysel, ale meraný fakt „prečítali sme
+       *     celý deň a v tejto mene nič nebolo" — a je to jediná cesta, ako sa
+       *     opraví riadok, ktorý tam zostal po chybnom behu.
+       */
+      let written = false;
+      if (pagesRead > 0 && (dayComplete || measuredOrders > 0)) {
+        const previous = new Map(before.map((row) => [row.currency, row]));
+        for (const total of currencies) {
+          const prior = previous.get(total.currency);
+          const wouldDowngrade =
+            !dayComplete &&
+            prior !== undefined &&
+            (prior.dayComplete || total.ordersCount < prior.ordersCount);
+          if (wouldDowngrade) continue;
+          await repo.upsertRevenueDay(day, total.currency, {
+            totalPaidSum: total.totalPaidSum,
+            ordersCount: total.ordersCount,
+            dayComplete,
+            pagesRead,
+          });
+          written = true;
+        }
+        if (dayComplete) {
+          for (const row of before) {
+            if (centsByCurrency.has(row.currency)) continue;
+            await repo.upsertRevenueDay(day, row.currency, {
+              totalPaidSum: '0.00',
+              ordersCount: 0,
+              dayComplete: true,
+              pagesRead,
+            });
+            written = true;
+          }
+        }
+      }
+
+      reports.push({
+        day,
+        complete: dayComplete,
+        skipped: false,
+        currencies,
+        pagesRead,
+        requestsUsed: dayRequests,
+        lastError: dayError,
+        written,
+      });
+
+      opLog.info('shop_revenue_day_done', {
+        day,
+        complete: dayComplete,
+        pagesRead,
+        requestsUsed: dayRequests,
+        ordersCount: measuredOrders,
+        // Mena je kód, nie údaj o zákazníkovi — do logu smie.
+        currencies: currencies.map((c) => c.currency).join(','),
+        ...(dayError !== null ? { errorCode: dayError } : {}),
+      });
+    }
+  } catch (error) {
+    // P6 — táto funkcia nesmie hodiť. Čokoľvek nečakané sa premení na kód.
+    runError = errorCode(error);
+    opLog.error('shop_revenue_aborted', { errorCode: runError, requestsUsed });
+  }
+
+  const dailyBudgetReached = budgetStop !== null;
+  const stoppedBy: SalesStopReason =
+    runError !== null
+      ? 'error'
+      : dailyBudgetReached
+        ? 'daily_budget'
+        : capReached
+          ? 'run_cap'
+          : 'done';
+
+  const outcome: ShopRevenueSyncResult['outcome'] =
+    runError === null &&
+    !capReached &&
+    !dailyBudgetReached &&
+    reports.every((report) => report.complete)
+      ? 'complete'
+      : runError === null && dailyBudgetReached && !reports.some((report) => report.written)
+        ? 'paused'
+        : 'partial';
+
+  if (capReached) {
+    opLog.warn('shop_revenue_request_cap_reached', { requestsUsed, maxRequests });
+  }
+
+  // Trvalá prekážka (401/403, zablokovaná IP) sa hlási NAHLAS a s dôvodom.
+  // Dni, ktoré sa nestihli, zostávajú BEZ riadku — appka o nich nič netvrdí.
+  const blockKind = classifySalesStop(runError);
+  if (blockKind !== null) {
+    opLog.warn('shop_revenue_blocked', { block: blockKind, errorCode: runError, requestsUsed });
+  }
+
+  if (budgetStop !== null) {
+    opLog.info('shop_revenue_daily_budget_reached', {
       requestsUsed,
       readsUsed,
       used: budgetStop.used,

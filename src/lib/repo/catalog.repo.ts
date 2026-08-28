@@ -84,6 +84,28 @@
  *     a `api/ai/insights`. Zabaliť ho do `{via, product}` by tie dve miesta
  *     ticho oslepilo.
  *
+ * OBOHATENIE Z `getFull` A JEHO FRONTA (28. 8. 2026, migrácia 0014)
+ * -----------------------------------------------------------------
+ * Sonda zmerala, že kvóta kľúča je ~200 čítaní za deň a `getFull` NIE JE
+ * batchovateľný, takže obohatiť celý katalóg (41 348 produktov) by trvalo ~207
+ * dní. Plošné obohacovanie preto NEEXISTUJE (D118): produkty sa obohacujú
+ * PRIORITIZOVANE (povolený zoznam → kampane → zvyšok) a NA DOPYT.
+ *
+ * Z toho plynú tri veci v tomto súbore:
+ *
+ *  · `saveEnrichment()` / `enrichmentFor()` — zápis a čítanie polí z `getFull`.
+ *    `margin` a `margin_percent` sa ukladajú TAK, AKO PRIŠLI; appka si ich
+ *    nepočíta, inak by po zmene definície na strane shopu ticho klamala.
+ *  · `nextToEnrich()` — fronta postavená na indexe, nie na výpočte. Priorita je
+ *    STĹPEC (`enrich_priority`), lebo dopočítavať ju pri každom tiku dávky by
+ *    znamenalo filesort nad 41 348 riadkami.
+ *  · `loadEnrichState()` / `saveEnrichState()` — kde dávka stojí a PREČO. Dôvod
+ *    `ip_banned` je pauza, nie zahodená chyba (D120): keď shop hlási ban, appka
+ *    to povie a NEMENÍ dáta.
+ *
+ * `enriched_at IS NULL` je jediná pravda o neobohatenom produkte — všetky jeho
+ * polia sú vtedy `NULL` ako „nevieme" a na obrazovke pomlčka, NIKDY nula (I11).
+ *
  * Repozitár je zároveň JEDINÉ DVERE k zdieľanému rozpočtu čítaní
  * (`shop_read_budget` cez `@/lib/repo/read-budget.repo`), aby synchronizácia
  * nemusela poznať ani SQL, ani stropy — a aby si nikto nezaložil vlastné
@@ -98,6 +120,7 @@
 import type {
   AllowlistShopStatus,
   CatalogCacheRecord,
+  CatalogEnrichmentRecord,
   CatalogRepo,
   CatalogSource,
   DateOnly,
@@ -489,6 +512,128 @@ export interface CatalogSyncStatus {
   progress: CatalogSyncProgress;
 }
 
+/* ───── Obohatenie z `getFull` a fronta obohacovania (0014, D116–D119) ───── */
+
+/**
+ * Zápis obohatenia — presne to, čo vrátil `GET /api/products/getFull`.
+ *
+ * ČASOVÉ PEČIATKY SA NEPREPOČÍTAVAJÚ. `lastTimeInOrder`, `reductionFrom` a
+ * `reductionTo` prichádzajú v HODINÁCH SHOPU (`'2026-07-28 12:29:28'`). String
+ * v tomto tvare ide do `?` parametra NEDOTKNUTÝ a MariaDB ho uloží znak za
+ * znakom — v DB potom stojí presne ten čas, ktorý povedal shop. Kto sem posiela
+ * `Date`, hovorí tým „tento okamih už poznám".
+ *
+ * Zmerané na tejto DB (28. 8. 2026), aby to nikto nemusel hádať: string
+ * `'2026-07-28 12:29:28'` sa uloží ako `2026-07-28 12:29:28` a ovládač ho pri
+ * čítaní vyhodnotí v zóne procesu, takže sa vráti ako ten istý okamih (shop aj
+ * appka bežia v `Europe/Bratislava`). `Date` s `12:29:28Z` sa naopak uloží ako
+ * `14:29:28` a prečíta späť ako `12:29:28Z` — round-trip `Date`-u je presný.
+ * Čo by pečiatku POKAZILO, je prerobiť string na okamih ručne (`text + 'Z'`,
+ * `Date.parse` ako UTC): tým by sa hodiny shopu posunuli o offset zóny.
+ *
+ * `margin` a `marginPercent` sa ukladajú TAK, AKO PRIŠLI — appka si ich
+ * NEPOČÍTA (hlavička migrácie 0014, bod 2).
+ */
+export interface CatalogEnrichWrite {
+  reference: string | null;
+  ean13: string | null;
+  purchasePrice: number | null;
+  margin: number | null;
+  marginPercent: number | null;
+  sellPriceWithVat: number | null;
+  /** Hodiny shopu ako string, alebo `Date` v UTC. `null` = shop nič nevie. */
+  lastTimeInOrder: string | UtcDate | null;
+  qty: number | null;
+  qtyInOrders: number | null;
+  supplier: string | null;
+  reductionPercent: number | null;
+  reductionFrom: string | UtcDate | null;
+  reductionTo: string | UtcDate | null;
+  active: boolean | null;
+  categories: readonly number[] | null;
+  /** Kedy sa obohatilo. Default „teraz" — je to meraný fakt, nie odhad (P7). */
+  enrichedAt?: UtcDate;
+}
+
+/**
+ * Prečo dávka obohacovania stojí (0014, D120).
+ *
+ * `ip_banned` je DÔVOD PAUZY, nie zahodená chyba: shop vracia `ip_banned` na
+ * všetko vrátane verejného čítania, appka to má POVEDAŤ a nemeniť dáta.
+ * Odblokovanie IP je akcia používateľa, preto pri ňom `pausedUntil` zostáva
+ * `null` — „stojí, kým do toho nezasiahne človek".
+ */
+export type CatalogEnrichPauseReason =
+  | 'rate_limited'
+  | 'daily_budget'
+  | 'ip_banned'
+  | 'no_key'
+  | 'error';
+
+/**
+ * Kde stojí dávka obohacovania (singleton `catalog_enrich_state`, 0014).
+ *
+ * `enrichedToday` je počet OBOHATENÝCH PRODUKTOV, nie spotrebovaných requestov
+ * — tie počíta zdieľaný `shop_read_budget` (0013, dráha `product_read`).
+ * Neúspešný `getFull` kvótu spotrebuje a produkt neobohatí, takže sú to dve
+ * rôzne čísla a zliať sa nesmú.
+ */
+export interface CatalogEnrichState {
+  /** UTC deň, ku ktorému platí `enrichedToday`. `null` = dávka dnes nebežala. */
+  batchDay: DateOnly | null;
+  enrichedToday: number;
+  /** Koľko produktov má dávka za deň obohatiť (~150, D118). */
+  dailyTarget: number;
+  /** Posledné spracované `product_id` — DIAGNOSTIKA, nie kurzor fronty. */
+  lastProductId: number | null;
+  enrichedTotal: number;
+  startedAt: UtcDate | null;
+  /** Kedy sa naposledy naozaj čítalo zo shopu (meraný fakt, P7). */
+  lastReadAt: UtcDate | null;
+  /** `null` pri vyplnenom `pauseReason` = stojí, kým nezasiahne človek. */
+  pausedUntil: UtcDate | null;
+  pauseReason: CatalogEnrichPauseReason | null;
+  /** KÓD chyby, nikdy obsah odpovede shopu (I1). */
+  lastError: string | null;
+  updatedAt: UtcDate | null;
+}
+
+/** Koľko riadkov prehodila jedna obnova priorít (D118). Diagnostika, nie odhad. */
+export interface EnrichPriorityRefresh {
+  /** Presunuté na prioritu 1 (povolený zoznam). */
+  allowlist: number;
+  /** Presunuté na prioritu 2 (aktívna/plánovaná kampaň). */
+  campaigns: number;
+  /** Vrátené na prioritu 3, lebo dôvod prednosti zanikol. */
+  demoted: number;
+}
+
+/**
+ * Riadok zrkadla pre KPI produktu (D114 v revízii D117–D119) — identita
+ * produktu A jeho obohatenie, JEDNÝM dotazom.
+ *
+ * Prečo to nie je `getMany()` + `enrichmentFor()`: KPI sa čítajú pre celú
+ * stránku (100 produktov) a dva dotazy nad TOU ISTOU tabuľkou a tými istými
+ * riadkami sú dve čítania toho istého. Mapovanie obohatenia sa tu ale
+ * NEZDVOJUJE — beží cez to isté `mapEnrichRow()` ako `enrichmentFor()`, takže
+ * druhý zdroj pravdy o tom, čo znamená `NULL`, nevzniká.
+ *
+ * `missing: true` je to, čo `enrichmentFor()` povedať NEVIE: prázdne obohatenie
+ * vracia rovnako pre produkt, ktorý zrkadlo nemá, ako pre ten, ktorý sa len
+ * neobohatil. Pre KPI sú to dve rôzne vety („eshop ho pridal po poslednom
+ * prechode" verzus „ešte sme sa naň nepýtali") a obrazovka ich má rozlíšiť.
+ */
+export interface CatalogKpiRow {
+  readonly productId: number;
+  /** `true` = riadok v zrkadle vôbec NIE JE; všetko ostatné je potom „nevieme". */
+  readonly missing: boolean;
+  readonly name: string | null;
+  /** Cenníková cena zo zoznamového prechodu — NIE z `getFull`. */
+  readonly price: MoneyString | null;
+  /** Polia z `getFull`. Pri `missing` (a pri neobohatenom produkte) samé `null`. */
+  readonly enrichment: CatalogEnrichmentRecord;
+}
+
 /* ═══════════════════════════ 2. Konštanty ═════════════════════════════════ */
 
 /** Koľko riadkov ide do jedného `INSERT … ON DUPLICATE KEY UPDATE` (K7). */
@@ -545,6 +690,32 @@ const KNOWN_PAUSE_REASONS: readonly CatalogPauseReason[] = [
   'daily_budget',
   'error',
 ];
+
+const KNOWN_ENRICH_PAUSE_REASONS: readonly CatalogEnrichPauseReason[] = [
+  'rate_limited',
+  'daily_budget',
+  'ip_banned',
+  'no_key',
+  'error',
+];
+
+/** Priorita 1 — povolený zoznam (D118). Menšie číslo ide vo fronte skôr. */
+export const ENRICH_PRIORITY_ALLOWLIST = 1;
+/** Priorita 2 — produkt v aktívnej alebo plánovanej kampani (D118). */
+export const ENRICH_PRIORITY_CAMPAIGN = 2;
+/** Priorita 3 — zvyšok katalógu. Default stĺpca `enrich_priority`. */
+export const ENRICH_PRIORITY_REST = 3;
+
+/**
+ * Koľko produktov obohatí dávka za deň (D118). Kvóta kľúča je ~200/deň a
+ * `getFull` NIE JE batchovateľný (25 položiek = 25 hitov), takže zvyšok (~50)
+ * zostáva na canary, sondy a obohatenie NA DOPYT. Je to len default pre prázdny
+ * riadok — platná hodnota žije v `catalog_enrich_state.daily_target`.
+ */
+export const DEFAULT_ENRICH_DAILY_TARGET = 150;
+
+/** Strop jednej dávky výberu z fronty — poistka proti `LIMIT` bez rozumu. */
+const MAX_ENRICH_BATCH = 500;
 
 /** Fail-closed default (K1 bod 2): `not_found` produkt sa neponúka na zápis. */
 const DEFAULT_SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'unknown'];
@@ -752,6 +923,145 @@ const SQL_FACTS_DISCOUNTS_PREFIX =
   'FROM campaign_items i JOIN campaigns cm ON cm.id = i.campaign_id ' +
   "WHERE i.status = 'ok' AND i.product_id IN ";
 const SQL_FACTS_DISCOUNTS_SUFFIX = ' GROUP BY i.product_id';
+
+/* ── Obohatenie z `getFull` a fronta obohacovania (0014, D116–D119) ──────── */
+
+const ENRICH_COLUMNS =
+  'product_id, reference, ean13, purchase_price, margin, margin_percent, ' +
+  'sell_price_with_vat, last_time_in_order, qty, qty_in_orders, supplier, ' +
+  'reduction_percent, reduction_from, reduction_to, active, categories, ' +
+  'enriched_at, enrich_attempted_at, enrich_priority';
+
+const SQL_ENRICH_GET_MANY_PREFIX = `SELECT ${ENRICH_COLUMNS} FROM catalog_cache WHERE product_id IN `;
+
+/**
+ * KPI strany: identita produktu + obohatenie jedným dotazom (`kpiRowsFor`).
+ * Stĺpce obohatenia sa berú z `ENRICH_COLUMNS`, nie z vlastného zoznamu —
+ * pribudnutý stĺpec sa tým dostane na obe cesty naraz.
+ */
+const SQL_KPI_ROWS_PREFIX =
+  `SELECT name, price, ${ENRICH_COLUMNS} FROM catalog_cache WHERE product_id IN `;
+
+/**
+ * Zápis obohatenia. `UPDATE`, nie `INSERT … ON DUPLICATE KEY UPDATE`, zámerne:
+ * obohatiť sa dá len produkt, ktorý zrkadlo UŽ MÁ. Zakladať riadok tu by
+ * znamenalo produkt bez názvu, ceny a `source`, ktorý by zoznamový prechod
+ * musel doplniť — a dovtedy by v katalógu strašil poloprázdny záznam.
+ * `affectedRows = 0` je preto platná odpoveď „taký produkt v zrkadle nie je".
+ */
+const SQL_ENRICH_SAVE =
+  'UPDATE catalog_cache SET reference = ?, ean13 = ?, purchase_price = ?, ' +
+  'margin = ?, margin_percent = ?, sell_price_with_vat = ?, last_time_in_order = ?, ' +
+  'qty = ?, qty_in_orders = ?, supplier = ?, reduction_percent = ?, ' +
+  'reduction_from = ?, reduction_to = ?, active = ?, categories = ?, ' +
+  'enriched_at = ?, enrich_attempted_at = ? WHERE product_id = ?';
+
+/** D118: neúspešný pokus. `enriched_at` sa NEDOTKNE — obohatené nie je. */
+const SQL_ENRICH_ATTEMPT =
+  'UPDATE catalog_cache SET enrich_attempted_at = ? WHERE product_id = ?';
+
+/**
+ * Ktorý produkt obohatiť ako ďalší (D118).
+ *
+ * `ORDER BY` je ZÁMERNE presne v poradí stĺpcov indexu `ix_catalog_enrich_queue
+ * (enriched_at, enrich_priority, enrich_attempted_at, product_id)`, takže výber
+ * dávky je range scan bez filesortu nad 41 348 riadkami. `enriched_at IS NULL`
+ * je pre index rovnocenné s rovnosťou, preto je v indexe PRVÉ.
+ *
+ * `enrich_attempted_at ASC` dáva NIKDY NESKÚŠANÉ dopredu, lebo MariaDB radí
+ * `NULL` v `ASC` ako prvé — a to je presne to poradie, ktoré index drží.
+ * Vďaka tomu produkt, na ktorom `getFull` padá, spadne na konec svojej priority
+ * namiesto toho, aby zjedol celú dennú kvótu.
+ *
+ * `shop_status <> 'not_found'` je fail-closed: kvóta sa nemá platiť za produkt,
+ * o ktorom shop povedal, že neexistuje (D49).
+ */
+const SQL_ENRICH_NEXT =
+  'SELECT product_id FROM catalog_cache ' +
+  "WHERE enriched_at IS NULL AND shop_status <> 'not_found' " +
+  'ORDER BY enrich_priority ASC, enrich_attempted_at ASC, product_id ASC LIMIT ?';
+
+/**
+ * Stavy kampane, ktoré znamenajú „aktívna alebo plánovaná" (D118, O1).
+ *
+ * `draft` tu NIE JE: rozpracovaná kampaň ešte nemá potvrdené okno a jej položky
+ * sa menia pod rukami. `done` a `partial` naopak ÁNO — zapísaná kampaň, ktorej
+ * okno ešte beží, je práve ten prípad, o ktorom obrazovka potrebuje čísla.
+ * Ukončené a zrušené stavy (`failed`, `missed`, `cancelled`, `lapsed`) prednosť
+ * nedávajú.
+ */
+const ENRICH_CAMPAIGN_STATUSES: readonly string[] = [
+  'scheduled',
+  'needs_key',
+  'running',
+  'done',
+  'partial',
+];
+
+const ENRICH_CAMPAIGN_PLACEHOLDERS = ENRICH_CAMPAIGN_STATUSES.map(() => '?').join(', ');
+
+/** Priorita 1 — povolený zoznam (aktívny záznam má `removed_at IS NULL`, I2). */
+const SQL_ENRICH_PRIORITY_ALLOWLIST =
+  'UPDATE catalog_cache c ' +
+  'JOIN products_allowlist a ON a.product_id = c.product_id AND a.removed_at IS NULL ' +
+  'SET c.enrich_priority = 1 WHERE c.enrich_priority <> 1';
+
+/**
+ * Priorita 2 — produkt v aktívnej/plánovanej kampani. `enrich_priority = 3`
+ * v `WHERE` je dôležité: produkt z povoleného zoznamu (1) sa NESMIE zhoršiť na
+ * 2 len preto, že je aj v kampani. Preto sa allowlist prepisuje PRVÝ.
+ */
+const SQL_ENRICH_PRIORITY_CAMPAIGNS =
+  'UPDATE catalog_cache c ' +
+  'JOIN campaign_items i ON i.product_id = c.product_id ' +
+  'JOIN campaigns m ON m.id = i.campaign_id ' +
+  'SET c.enrich_priority = 2 ' +
+  `WHERE c.enrich_priority = 3 AND m.status IN (${ENRICH_CAMPAIGN_PLACEHOLDERS}) ` +
+  'AND m.date_to >= ?';
+
+/**
+ * Vrátenie na prioritu 3, keď dôvod prednosti zanikol (produkt odobraný z
+ * allowlistu, kampaň dobehla). Bez tohto by fronta navždy vozila dopredu
+ * produkty, ktoré už nikoho nezaujímajú.
+ *
+ * `enrich_priority < 3` nie je krytý indexom, takže tento príkaz prejde zrkadlo
+ * raz. Je to vedomý obchod: beží LEN pri zmene allowlistu alebo kampaní (teda
+ * ručne, zopár krát za deň), kým dotaz fronty beží pri každom tiku dávky — a
+ * ten indexovaný je. Vlastný index na `enrich_priority` by za to platil pri
+ * každom zápise a slúžil by jednému príkazu.
+ */
+const SQL_ENRICH_PRIORITY_DEMOTE =
+  'UPDATE catalog_cache c SET c.enrich_priority = 3 WHERE c.enrich_priority < 3 ' +
+  'AND NOT EXISTS (SELECT 1 FROM products_allowlist a ' +
+  'WHERE a.product_id = c.product_id AND a.removed_at IS NULL) ' +
+  'AND NOT EXISTS (SELECT 1 FROM campaign_items i JOIN campaigns m ON m.id = i.campaign_id ' +
+  `WHERE i.product_id = c.product_id AND m.status IN (${ENRICH_CAMPAIGN_PLACEHOLDERS}) ` +
+  'AND m.date_to >= ?)';
+
+const ENRICH_STATE_COLUMNS =
+  'batch_day, enriched_today, daily_target, last_product_id, enriched_total, ' +
+  'started_at, last_read_at, paused_until, pause_reason, last_error, updated_at';
+
+const SQL_ENRICH_STATE_GET =
+  `SELECT ${ENRICH_STATE_COLUMNS} FROM catalog_enrich_state WHERE id = 1 LIMIT 1`;
+
+/**
+ * Zápis stavu dávky. `INSERT … ON DUPLICATE KEY UPDATE` z rovnakého dôvodu ako
+ * `SQL_PROGRESS_SAVE`: riadok síce zakladá migrácia, ale dávka, ktorá by kvôli
+ * chýbajúcemu riadku potichu nezapisovala stav, by po prerušení stratila dôvod
+ * pauzy — a pri `ip_banned` by sa o kvótu pokúsila znova.
+ */
+const SQL_ENRICH_STATE_SAVE =
+  'INSERT INTO catalog_enrich_state ' +
+  '(id, batch_day, enriched_today, daily_target, last_product_id, enriched_total, ' +
+  'started_at, last_read_at, paused_until, pause_reason, last_error) ' +
+  'VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+  'ON DUPLICATE KEY UPDATE batch_day = VALUES(batch_day), ' +
+  'enriched_today = VALUES(enriched_today), daily_target = VALUES(daily_target), ' +
+  'last_product_id = VALUES(last_product_id), enriched_total = VALUES(enriched_total), ' +
+  'started_at = VALUES(started_at), last_read_at = VALUES(last_read_at), ' +
+  'paused_until = VALUES(paused_until), pause_reason = VALUES(pause_reason), ' +
+  'last_error = VALUES(last_error)';
 
 /* ═══════════════════════════ 4. Pomocníci ═════════════════════════════════ */
 
@@ -1088,6 +1398,179 @@ function mapProgressRow(row: ProgressRow): CatalogSyncProgress {
   };
 }
 
+/* ── obohatenie: riadok ⇄ objekt (0014, D116–D119) ──────────────────────── */
+
+/** Tvar, v akom shop posiela dátum/čas (`'2026-07-28'` aj s časom). */
+const SHOP_STAMP_RE = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?$/;
+
+/**
+ * Časová pečiatka zo shopu do `?` parametra.
+ *
+ * String v tvare shopu ide DO DB NEDOTKNUTÝ, takže v stĺpci stojí presne ten
+ * čas, ktorý shop povedal (zmerané — viď docblok `CatalogEnrichWrite`). Prerobiť
+ * ho na okamih ručne by hodiny posunulo o offset zóny; `Date` prijmeme tak, ako
+ * je, lebo ovládač si s ním poradí sám.
+ *
+ * Nerozpoznaný tvar je `null`: uložiť ho nevieme a MariaDB by ním zhodila celú
+ * dávku. Surová odpoveď zostáva v `raw`, takže sa nič nestráca — a `NULL` tu
+ * znamená presne to, čo znamenať má: „nevieme" (I11).
+ */
+function shopStampParam(value: string | UtcDate | null | undefined): Date | string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const text = value.trim();
+  if (!SHOP_STAMP_RE.test(text)) return null;
+  return text.replace('T', ' ');
+}
+
+interface EnrichRow {
+  product_id: number | string;
+  reference: string | null;
+  ean13: string | null;
+  purchase_price: string | number | null;
+  margin: string | number | null;
+  margin_percent: string | number | null;
+  sell_price_with_vat: string | number | null;
+  last_time_in_order: Date | string | null;
+  qty: number | string | null;
+  qty_in_orders: number | string | null;
+  supplier: string | null;
+  reduction_percent: string | number | null;
+  reduction_from: Date | string | null;
+  reduction_to: Date | string | null;
+  active: number | boolean | null;
+  categories: unknown;
+  enriched_at: Date | string | null;
+  enrich_attempted_at: Date | string | null;
+  enrich_priority: number | string | null;
+}
+
+/**
+ * Riadok obohatenia → objekt. Každé pole prechádza `…OrNull`, takže `0` prežije
+ * ako nula a nezmysel skončí ako `null` — nikdy naopak (I11).
+ */
+function mapEnrichRow(row: EnrichRow): CatalogEnrichmentRecord {
+  const categories = parseJsonColumn(row.categories);
+  return {
+    productId: Number(row.product_id),
+    reference: textOrNull(row.reference),
+    ean13: textOrNull(row.ean13),
+    purchasePrice: numOrNull(row.purchase_price),
+    margin: numOrNull(row.margin),
+    marginPercent: numOrNull(row.margin_percent),
+    sellPriceWithVat: numOrNull(row.sell_price_with_vat),
+    lastTimeInOrder: toDateOrNull(row.last_time_in_order),
+    qty: intOrNull(row.qty),
+    qtyInOrders: intOrNull(row.qty_in_orders),
+    supplier: textOrNull(row.supplier),
+    reductionPercent: numOrNull(row.reduction_percent),
+    reductionFrom: toDateOrNull(row.reduction_from),
+    reductionTo: toDateOrNull(row.reduction_to),
+    active: boolOrNull(row.active),
+    categories: Array.isArray(categories)
+      ? categories.map(intOrNull).filter((id): id is number => id !== null)
+      : null,
+    enrichedAt: toDateOrNull(row.enriched_at),
+    enrichAttemptedAt: toDateOrNull(row.enrich_attempted_at),
+    enrichPriority: toCount(
+      typeof row.enrich_priority === 'string' ? row.enrich_priority : (row.enrich_priority ?? null),
+      ENRICH_PRIORITY_REST,
+    ),
+  };
+}
+
+/** Obohatenie, ktoré platí o produkte, čo zrkadlo vôbec nemá — všetko „nevieme". */
+export function emptyCatalogEnrichment(productId: number): CatalogEnrichmentRecord {
+  return {
+    productId,
+    reference: null,
+    ean13: null,
+    purchasePrice: null,
+    margin: null,
+    marginPercent: null,
+    sellPriceWithVat: null,
+    lastTimeInOrder: null,
+    qty: null,
+    qtyInOrders: null,
+    supplier: null,
+    reductionPercent: null,
+    reductionFrom: null,
+    reductionTo: null,
+    active: null,
+    categories: null,
+    enrichedAt: null,
+    enrichAttemptedAt: null,
+    enrichPriority: ENRICH_PRIORITY_REST,
+  };
+}
+
+/* ── stav dávky obohacovania: riadok ⇄ objekt (0014) ─────────────────────── */
+
+interface EnrichStateRow {
+  batch_day: Date | string | null;
+  enriched_today: number | string | null;
+  daily_target: number | string | null;
+  last_product_id: number | string | null;
+  enriched_total: number | string | null;
+  started_at: Date | string | null;
+  last_read_at: Date | string | null;
+  paused_until: Date | string | null;
+  pause_reason: string | null;
+  last_error: string | null;
+  updated_at: Date | string | null;
+}
+
+const isEnrichPauseReason = (value: unknown): value is CatalogEnrichPauseReason =>
+  KNOWN_ENRICH_PAUSE_REASONS.includes(value as CatalogEnrichPauseReason);
+
+/** `DATE` stĺpec chodí ako `Date` aj ako string — chceme `YYYY-MM-DD`. */
+function dayOrNull(value: Date | string | null): DateOnly | null {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    // `DATE` je kalendárny deň bez zóny; pool ho dáva ako lokálnu polnoc, preto
+    // sa čítajú LOKÁLNE zložky — `toISOString()` by deň posunul (rovnako ako
+    // `toDateOnly()` v `sales.repo.ts`).
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  const text = String(value);
+  return DATE_ONLY_RE.test(text) ? text : (text.slice(0, 10) as DateOnly);
+}
+
+/** Stav dávky, ktorý platí, kým sa nič neobohatilo — „ešte sa nezačalo". */
+export function emptyCatalogEnrichState(): CatalogEnrichState {
+  return {
+    batchDay: null,
+    enrichedToday: 0,
+    dailyTarget: DEFAULT_ENRICH_DAILY_TARGET,
+    lastProductId: null,
+    enrichedTotal: 0,
+    startedAt: null,
+    lastReadAt: null,
+    pausedUntil: null,
+    pauseReason: null,
+    lastError: null,
+    updatedAt: null,
+  };
+}
+
+function mapEnrichStateRow(row: EnrichStateRow): CatalogEnrichState {
+  const lastProductId = intOrNull(row.last_product_id);
+  return {
+    batchDay: dayOrNull(row.batch_day),
+    enrichedToday: toCount(Number(row.enriched_today ?? 0), 0),
+    dailyTarget: Math.max(0, toCount(Number(row.daily_target ?? 0), DEFAULT_ENRICH_DAILY_TARGET)),
+    lastProductId: lastProductId !== null && lastProductId > 0 ? lastProductId : null,
+    enrichedTotal: toCount(Number(row.enriched_total ?? 0), 0),
+    startedAt: toDateOrNull(row.started_at),
+    lastReadAt: toDateOrNull(row.last_read_at),
+    pausedUntil: toDateOrNull(row.paused_until),
+    pauseReason: isEnrichPauseReason(row.pause_reason) ? row.pause_reason : null,
+    lastError: row.last_error,
+    updatedAt: toDateOrNull(row.updated_at),
+  };
+}
+
 const DECIMAL_RE = /^-?\d{1,8}(\.\d{1,2})?$/;
 
 /** Cena do `?` parametra ako string; nezmysel sa ticho IGNORUJE (filter odpadne). */
@@ -1309,6 +1792,60 @@ export interface CatalogRepoExt extends CatalogRepo {
   shopReadBudget(): Promise<ReadBudgetStatus>;
   /** A5 — stav katalógu pre UI a pre agregátor stavu. */
   syncStatus(opts?: { now?: UtcDate; conn?: Queryable }): Promise<CatalogSyncStatus>;
+
+  /* ── D116–D119: obohatenie z `getFull` a fronta obohacovania ─────────── */
+
+  /**
+   * Zapíše obohatenie jedného produktu a označí ho ako obohatené.
+   *
+   * Vracia `true`, len keď riadok naozaj existoval. `false` = produkt v zrkadle
+   * NIE JE, takže sa nič nezapísalo — a je to platná odpoveď, nie chyba: zrkadlo
+   * je úplné k času posledného prechodu a eshop medzitým pridáva aj maže.
+   */
+  saveEnrichment(
+    productId: number,
+    data: CatalogEnrichWrite,
+    conn?: Queryable,
+  ): Promise<boolean>;
+  /**
+   * Obohatenie pre konkrétne ID. Vracia riadok pre KAŽDÉ platné ID — aj pre to,
+   * ktoré zrkadlo nemá (vtedy je všetko `null`, teda „nevieme"). Chýbajúci kľúč
+   * v mape by volajúceho nútil dopĺňať si prázdno sám a prázdno sa ľahko
+   * nakreslí ako nula (I11).
+   */
+  enrichmentFor(
+    productIds: readonly number[],
+    conn?: Queryable,
+  ): Promise<Map<number, CatalogEnrichmentRecord>>;
+  /**
+   * D114 — podklad KPI pre celú stránku produktov: názov, cenníková cena a
+   * obohatenie, JEDNÝM dotazom na 500 ID (bez N+1).
+   *
+   * Vracia riadok pre KAŽDÉ platné ID, aj pre to, ktoré zrkadlo nemá — vtedy je
+   * `missing: true` a obohatenie samé `null`. Čisto čítacie, žiadny shop (K8).
+   */
+  kpiRowsFor(productIds: readonly number[], conn?: Queryable): Promise<Map<number, CatalogKpiRow>>;
+  /**
+   * D118 — neúspešný pokus o obohatenie. `enriched_at` zostáva `NULL` (obohatené
+   * naozaj nie je), ale produkt spadne na konec svojej priority, takže jeden
+   * padajúci `getFull` nezje celú dennú kvótu.
+   */
+  markEnrichAttempt(productId: number, at?: UtcDate, conn?: Queryable): Promise<void>;
+  /** D118 — ktoré produkty obohatiť ako ďalšie, v poradí priority. */
+  nextToEnrich(limit: number, conn?: Queryable): Promise<number[]>;
+  /**
+   * D118 — prepočíta prioritu podľa povoleného zoznamu a kampaní. Volá sa pri
+   * ZMENE týchto dvoch vecí, nie pri každom dotaze (viď komentáre pri
+   * `SQL_ENRICH_PRIORITY_*`).
+   */
+  refreshEnrichPriority(opts?: {
+    today?: DateOnly;
+    conn?: Queryable;
+  }): Promise<EnrichPriorityRefresh>;
+  /** Kde stojí dávka obohacovania. Prázdny stav = „ešte sa nezačalo". */
+  loadEnrichState(conn?: Queryable): Promise<CatalogEnrichState>;
+  /** Uloží stav dávky (celý riadok naraz — jeden zápis na dávku). */
+  saveEnrichState(state: CatalogEnrichState, conn?: Queryable): Promise<void>;
 }
 
 export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
@@ -1845,6 +2382,208 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         lastError: progress.lastError,
         progress,
       };
+    },
+
+    /* ── D116–D119: obohatenie z `getFull` a fronta obohacovania ───────── */
+
+    async saveEnrichment(
+      productId: number,
+      data: CatalogEnrichWrite,
+      conn?: Queryable,
+    ): Promise<boolean> {
+      if (!isValidProductId(productId)) return false;
+      const enrichedAt = data.enrichedAt ?? new Date();
+      /*
+       * `enrich_attempted_at` sa nastavuje NA TEN ISTÝ čas ako `enriched_at`:
+       * úspešné obohatenie je tiež pokus a bez toho by riadok tvrdil, že sa
+       * o produkt nikdy nikto nepokúsil.
+       *
+       * `categories` ide do JSON stĺpca ako `JSON.stringify`; `null` zostáva
+       * `null`, ale PRÁZDNE POLE prežije ako `[]`. Sú to dve rôzne vety:
+       * „nevieme, do akých kategórií patrí" a „shop hovorí, že do žiadnej".
+       */
+      const result = await run<{ affectedRows?: number | bigint }>(conn, SQL_ENRICH_SAVE, [
+        data.reference === null ? null : data.reference.slice(0, 64),
+        data.ean13 === null ? null : data.ean13.slice(0, 20),
+        data.purchasePrice,
+        data.margin,
+        data.marginPercent,
+        data.sellPriceWithVat,
+        shopStampParam(data.lastTimeInOrder),
+        data.qty,
+        data.qtyInOrders,
+        data.supplier === null ? null : data.supplier.slice(0, 191),
+        data.reductionPercent,
+        shopStampParam(data.reductionFrom),
+        shopStampParam(data.reductionTo),
+        data.active === null ? null : data.active ? 1 : 0,
+        data.categories === null ? null : JSON.stringify([...data.categories]),
+        enrichedAt,
+        enrichedAt,
+        productId,
+      ]);
+      return Number(result?.affectedRows ?? 0) > 0;
+    },
+
+    async enrichmentFor(
+      productIds: readonly number[],
+      conn?: Queryable,
+    ): Promise<Map<number, CatalogEnrichmentRecord>> {
+      const out = new Map<number, CatalogEnrichmentRecord>();
+      const unique = [...new Set(productIds.filter(isValidProductId))];
+      if (unique.length === 0) return out;
+
+      // Dávkovanie z rovnakého dôvodu ako v `getMany()`: `IN (…)` s tisíckami
+      // `?` narazí na limit parametrov skôr než na limit trpezlivosti.
+      for (let start = 0; start < unique.length; start += UPSERT_CHUNK_ROWS) {
+        const chunk = unique.slice(start, start + UPSERT_CHUNK_ROWS);
+        const placeholders = `(${chunk.map(() => '?').join(', ')})`;
+        const rows = await run<EnrichRow[]>(conn, SQL_ENRICH_GET_MANY_PREFIX + placeholders, chunk);
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const record = mapEnrichRow(row);
+          out.set(record.productId, record);
+        }
+      }
+
+      // Produkt, ktorý zrkadlo nemá, je v mape s prázdnym obohatením — nie
+      // chýbajúci kľúč (viď docblok v rozhraní).
+      for (const productId of unique) {
+        if (!out.has(productId)) out.set(productId, emptyCatalogEnrichment(productId));
+      }
+      return out;
+    },
+
+    /**
+     * KPI podklad pre stránku produktov. Jeden dotaz na dávku ID — nie dotaz
+     * na produkt: sto riadkov v tabuľke znamená sto KPI, nie sto čítaní z DB.
+     *
+     * Neplatné ID (nula, zápor, necelé číslo) sa ZAHODÍ a v mape nebude; platné
+     * ID, ktoré zrkadlo nemá, naopak V MAPE JE, len s `missing: true`. Rovnaká
+     * dohoda ako v `detailsFor()` — prázdno nesmie byť chýbajúci kľúč.
+     */
+    async kpiRowsFor(
+      productIds: readonly number[],
+      conn?: Queryable,
+    ): Promise<Map<number, CatalogKpiRow>> {
+      const out = new Map<number, CatalogKpiRow>();
+      const unique = [...new Set(productIds.filter(isValidProductId))];
+      if (unique.length === 0) return out;
+
+      for (let start = 0; start < unique.length; start += UPSERT_CHUNK_ROWS) {
+        const chunk = unique.slice(start, start + UPSERT_CHUNK_ROWS);
+        const placeholders = `(${chunk.map(() => '?').join(', ')})`;
+        const rows = await run<Array<EnrichRow & { name: string | null; price: string | null }>>(
+          conn,
+          SQL_KPI_ROWS_PREFIX + placeholders,
+          chunk,
+        );
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const enrichment = mapEnrichRow(row);
+          out.set(enrichment.productId, {
+            productId: enrichment.productId,
+            missing: false,
+            name: textOrNull(row.name),
+            price: toMoney(row.price),
+            enrichment,
+          });
+        }
+      }
+
+      for (const productId of unique) {
+        if (!out.has(productId)) {
+          out.set(productId, {
+            productId,
+            missing: true,
+            name: null,
+            price: null,
+            enrichment: emptyCatalogEnrichment(productId),
+          });
+        }
+      }
+      return out;
+    },
+
+    async markEnrichAttempt(productId: number, at?: UtcDate, conn?: Queryable): Promise<void> {
+      if (!isValidProductId(productId)) return;
+      await run(conn, SQL_ENRICH_ATTEMPT, [at ?? new Date(), productId]);
+    },
+
+    async nextToEnrich(limit: number, conn?: Queryable): Promise<number[]> {
+      const take = Math.min(MAX_ENRICH_BATCH, Math.max(0, Math.trunc(Number(limit) || 0)));
+      if (take === 0) return [];
+      const rows = await run<Array<{ product_id: number | string }>>(conn, SQL_ENRICH_NEXT, [take]);
+      return (Array.isArray(rows) ? rows : []).map((row) => Number(row.product_id));
+    },
+
+    /**
+     * Tri `UPDATE`-y v tomto poradí a nie v inom: allowlist si berie prioritu 1
+     * PRVÝ, aby ho kampaňový krok nemohol zhoršiť na 2, a demote ide POSLEDNÝ,
+     * aby nezhodil to, čo práve pribudlo.
+     *
+     * Ide to po sebe, nie v `Promise.all` — tri súbežné `UPDATE`-y nad tou istou
+     * tabuľkou si nič nezrýchlia a vyrobili by deadlock na tých istých riadkoch.
+     */
+    async refreshEnrichPriority(
+      opts: { today?: DateOnly; conn?: Queryable } = {},
+    ): Promise<EnrichPriorityRefresh> {
+      // Deň v zóne logiky (D31) — nikdy v UTC, inak by sa medzi 22:00 a 24:00
+      // UTC porovnávalo voči zajtrajšku a kampaň končiaca dnes by prednosť
+      // stratila o dve hodiny skôr.
+      const today =
+        typeof opts.today === 'string' && DATE_ONLY_RE.test(opts.today)
+          ? opts.today
+          : todayInZone(new Date());
+      const affected = (result: { affectedRows?: number | bigint } | undefined): number =>
+        Number(result?.affectedRows ?? 0);
+
+      const allowlist = affected(
+        await run<{ affectedRows?: number | bigint }>(
+          opts.conn,
+          SQL_ENRICH_PRIORITY_ALLOWLIST,
+          [],
+        ),
+      );
+      const campaigns = affected(
+        await run<{ affectedRows?: number | bigint }>(opts.conn, SQL_ENRICH_PRIORITY_CAMPAIGNS, [
+          ...ENRICH_CAMPAIGN_STATUSES,
+          today,
+        ]),
+      );
+      const demoted = affected(
+        await run<{ affectedRows?: number | bigint }>(opts.conn, SQL_ENRICH_PRIORITY_DEMOTE, [
+          ...ENRICH_CAMPAIGN_STATUSES,
+          today,
+        ]),
+      );
+
+      return { allowlist, campaigns, demoted };
+    },
+
+    async loadEnrichState(conn?: Queryable): Promise<CatalogEnrichState> {
+      const rows = await run<EnrichStateRow[]>(conn, SQL_ENRICH_STATE_GET, []);
+      const row = Array.isArray(rows) ? rows[0] : undefined;
+      // Chýbajúci riadok nie je chyba: migrácia ho síce zakladá, ale „ešte sa
+      // nezačalo" je platný stav a dávka z neho vie vyjsť.
+      return row === undefined ? emptyCatalogEnrichState() : mapEnrichStateRow(row);
+    },
+
+    async saveEnrichState(state: CatalogEnrichState, conn?: Queryable): Promise<void> {
+      await run(conn, SQL_ENRICH_STATE_SAVE, [
+        state.batchDay !== null && DATE_ONLY_RE.test(state.batchDay) ? state.batchDay : null,
+        Math.max(0, Math.trunc(state.enrichedToday)),
+        Math.max(0, Math.trunc(state.dailyTarget)),
+        state.lastProductId === null || !isValidProductId(state.lastProductId)
+          ? null
+          : state.lastProductId,
+        Math.max(0, Math.trunc(state.enrichedTotal)),
+        state.startedAt,
+        state.lastReadAt,
+        state.pausedUntil,
+        state.pauseReason,
+        // I1 — do `last_error` ide KÓD, nikdy obsah odpovede shopu; orez je
+        // poistka proti stĺpcu `VARCHAR(200)`, nie filter obsahu.
+        state.lastError === null ? null : state.lastError.slice(0, 200),
+      ]);
     },
   };
 

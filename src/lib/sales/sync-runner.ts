@@ -11,6 +11,20 @@
  *
  * Modul NIKDY nehádže — predaje sú analytika a nesmú zhodiť ani zdržať zľavy.
  *
+ * DVA BEHY V JEDNOM TICKU (od 28. 8. 2026, D117)
+ * ----------------------------------------------
+ * Runner spúšťa najprv DENNÚ TRŽBU ESHOPU (`syncShopRevenue()`) a až potom
+ * dopočítanie predaných KUSOV (`syncSales()`). Poradie je vedomé: zoznam
+ * objednávok stojí ~1 request na 100 objednávok dňa, kým kusy stoja 1 request na
+ * KAŽDÚ objednávku, a oba behy platia z toho istého denného rozpočtu (A4). Keby
+ * išla tržba druhá, drahší beh by rozpočet minul a tržba by nebola nikdy.
+ * Podrobné zdôvodnenie je pri tom bloku v tele funkcie.
+ *
+ * Per-beh strop `ORDERS_MAX_REQUESTS_PER_RUN` má odteraz KAŽDÝ z tých dvoch
+ * behov vlastný, takže jeden tick môže teoreticky minúť dvojnásobok. Prakticky
+ * to nič nemení: strop je 1500, kým zdieľaný denný rozpočet dráhy `orders` je
+ * 160 na kľúč a UTC deň — brzdí teda rozpočet, nie per-beh strop.
+ *
  * DENNÝ ROZPOČET ČÍTANÍ (A4) SA ZAPÁJA TU
  * ---------------------------------------
  * `syncSales()` si zdieľané počítadlo nikdy nezaobstaráva samo (rovnako ako si
@@ -48,8 +62,10 @@ import { env } from '@/env';
 import {
   salesSyncFlagsFromEnv,
   syncSales,
+  syncShopRevenue,
   type SalesSyncFlags,
   type SalesSyncResult,
+  type ShopRevenueSyncResult,
 } from '@/lib/engine/sales-sync';
 import { logger } from '@/lib/log/logger';
 import { ordersKeyRepo } from '@/lib/repo/api-key.repo';
@@ -122,6 +138,16 @@ export type SalesRunOutcome =
 export interface SalesRunReport {
   outcome: SalesRunOutcome;
   sync: SalesSyncResult | null;
+  /**
+   * Ako dopadla DENNÁ TRŽBA ESHOPU (D117). `null` = v tomto ticku sa nekonala
+   * (vypnuté, overovacia požiadavka po bane, alebo chyba pred jej spustením).
+   *
+   * Je to samostatné pole, a nie súčasť `sync`: tržba a kusy sú dva rôzne behy
+   * s rôznou cenou aj rôznym oknom (viď sekcia 6 v `lib/engine/sales-sync.ts`),
+   * takže „tržba je dopočítaná" a „kusy sú dopočítané" musí appka vedieť
+   * povedať oddelene.
+   */
+  revenue?: ShopRevenueSyncResult | null;
   /** Kedy sa oplatí skúsiť znova. `null` = nevieme / pri ďalšom vhodnom ticku. */
   resumeAt?: UtcDate | null;
   /**
@@ -197,6 +223,27 @@ async function readBlock(): Promise<SalesBlock | null> {
 }
 
 /**
+ * Prekážka z PRÁVE SKONČENÉHO BEHU, keď o nej DB nemusí vedieť.
+ *
+ * Beh dennej tržby (D117) do `sales_sync_state` zámerne NEZAPISUJE — je to iný
+ * fakt (dočítaný ZOZNAM verzus dočítané POLOŽKY, migrácia 0014 §3). Keď teda
+ * shop odmietne práve tržbu, `readBlock()` môže vrátiť `null`, hoci prekážka je
+ * čerstvo zmeraná. Pravidlá odstupu ale musia byť pre oba behy tie isté, preto
+ * sa použije tá istá čistá politika (`stop-policy.ts`) nad zmeraným faktom.
+ *
+ * Dôsledok, ktorý treba vedieť: takto zistená prekážka NEPREŽIJE reštart appky.
+ * Nie je to diera, len slabší stupeň — cesta na kusy beží v tom istom ticku a tá
+ * prekážku do DB zapíše, takže po reštarte ju runner nájde tam.
+ */
+async function blockFromRun(code: string | null, atMs: number): Promise<SalesBlock | null> {
+  const fromDb = await readBlock();
+  if (fromDb !== null) return fromDb;
+  const at = new Date(atMs);
+  const meta = await ordersKeyRepo.getMeta();
+  return decideSalesBlock({ code, at, since: at }, { keySavedAt: meta.savedAt });
+}
+
+/**
  * Spustí synchronizáciu, ak je na čase. Vracia dôvod rozhodnutia, aby sa dalo
  * testovať a logovať, čo sa naozaj stalo — nie len „prebehlo/neprebehlo".
  */
@@ -208,6 +255,12 @@ export async function runSalesSyncIfDue(
   if (nowMs < nextAllowedMs) return { outcome: 'too_soon', sync: null };
 
   running = true;
+  /**
+   * Výsledok dennej tržby (D117). Žije MIMO `try`, aby ho nesla aj poistná
+   * vetva `catch` — inak by sa dopočítaná tržba stratila len preto, že o krok
+   * neskôr spadlo niečo iné.
+   */
+  let revenue: ShopRevenueSyncResult | null = null;
   try {
     // Bez kľúča sa nesynchronizuje — a nie je to chyba, len stav „kľúč ešte
     // nie je vložený" (alebo mu vypršala platnosť a repozitár ho zmazal).
@@ -216,7 +269,7 @@ export async function runSalesSyncIfDue(
       // Krátky odstup, nie celý interval — kľúč môže pribudnúť za pár minút.
       nextAllowedMs = nowMs + SALES_NO_KEY_RETRY_MS;
       log.info('sales_sync_skipped', { reason: 'no_orders_key' });
-      lastReport = { outcome: 'no_orders_key', sync: null, resumeAt: null };
+      lastReport = { outcome: 'no_orders_key', sync: null, revenue: null, resumeAt: null };
       return { ...lastReport };
     }
 
@@ -240,6 +293,7 @@ export async function runSalesSyncIfDue(
         lastReport = {
           outcome: 'blocked',
           sync: null,
+          revenue: null,
           resumeAt: standing.probeAt,
           block: standing,
         };
@@ -249,6 +303,66 @@ export async function runSalesSyncIfDue(
       // jeden request (viď `probeFlags()`).
       probing = true;
       log.info('sales_sync_probe', { block: standing.kind, since: standing.since.toISOString() });
+    }
+
+    /*
+     * ── DENNÁ TRŽBA ESHOPU (D117) IDE PRVÁ ─────────────────────────────────
+     *
+     * Vedomé rozhodnutie z 28. 8. 2026, nie poradie z náhody. Zoznam objednávok
+     * stojí ~1 request na 100 objednávok dňa; dopočítanie KUSOV stojí 1 request
+     * na KAŽDÚ objednávku. Oba behy platia z toho istého denného rozpočtu (A4,
+     * dráha `orders`), takže keby išla tržba druhá, drahší beh by rozpočet minul
+     * a tržba by sa nedopočítala nikdy. D119 to hovorí aj priamo: plošné
+     * sťahovanie objednávok sa nespúšťa, obrátkovosť ide z `getFull`.
+     * Rozhodnutie je reverzibilné — stačí prehodiť tieto dva bloky.
+     *
+     * Pri OVEROVACEJ požiadavke po bane (`probing`) sa tržba vynecháva: appka sa
+     * vtedy pýta jedinú otázku jediným requestom a druhý beh by ten zámer
+     * poprel.
+     */
+    if (!probing) {
+      try {
+        revenue = await syncShopRevenue({
+          ordersClient: createOrdersClientFromSettings(settingsRepo),
+          key,
+          // A4 — to isté zdieľané počítadlo dráhy `orders` ako pri kusoch.
+          // Vlastné by znamenalo dva stropy pre jeden kľúč a shop by ich sčítal.
+          budget: { reserveShopReads: (count = 1) => ordersReadBudget.reserve(count) },
+          salesRepo,
+          logger: log,
+        });
+        log.info('shop_revenue_done', {
+          outcome: revenue.outcome,
+          windowFrom: revenue.windowFrom,
+          windowTo: revenue.windowTo,
+          requestsUsed: revenue.requestsUsed,
+          readsUsed: revenue.readsUsed,
+          stoppedBy: revenue.stoppedBy,
+          resumeAt: revenue.resumeAt?.toISOString(),
+          error: revenue.error ?? undefined,
+        });
+      } catch (error) {
+        // `syncShopRevenue()` výnimky neprepúšťa (P6), takže sem sa nemá dať
+        // dostať. Keď áno, je to chyba appky a NESMIE zhodiť dopočítanie kusov
+        // ani scheduler — tržba je analytika (hlavička modulu).
+        log.error('shop_revenue_fatal_caught', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Shop nás k objednávkam nepustí (401/403, zablokovaná IP). Kusy sa už
+      // neskúšajú: tá istá odpoveď by prišla znova a minula by rozpočet.
+      if (revenue !== null && classifySalesStop(revenue.error) !== null) {
+        nextAllowedMs = nowMs + SALES_BLOCK_RECHECK_MS;
+        lastReport = {
+          outcome: 'blocked',
+          sync: null,
+          revenue,
+          resumeAt: null,
+          block: await blockFromRun(revenue.error, nowMs),
+        };
+        return { ...lastReport };
+      }
     }
 
     const sync = await syncSales({
@@ -284,6 +398,7 @@ export async function runSalesSyncIfDue(
       lastReport = {
         outcome: 'blocked',
         sync,
+        revenue,
         resumeAt: null,
         block: await readBlock(),
       };
@@ -295,6 +410,7 @@ export async function runSalesSyncIfDue(
     lastReport = {
       outcome: sync.outcome === 'paused' ? 'budget_exhausted' : 'ran',
       sync,
+      revenue,
       resumeAt: sync.resumeAt,
     };
     return { ...lastReport };
@@ -305,7 +421,7 @@ export async function runSalesSyncIfDue(
     log.error('sales_sync_fatal_caught', {
       error: error instanceof Error ? error.message : String(error),
     });
-    lastReport = { outcome: 'failed', sync: null, resumeAt: null };
+    lastReport = { outcome: 'failed', sync: null, revenue, resumeAt: null };
     return { ...lastReport };
   } finally {
     running = false;

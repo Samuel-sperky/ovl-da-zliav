@@ -33,6 +33,29 @@
  * ktoré v shope neexistujú. NIE celý katalóg. Volajúci to musí v UI pomenovať;
  * rad kusov bez uvedeného rozsahu vyzerá ako obrat celého eshopu.
  *
+ * OKNO 7/30/90 A PRIZNANÁ MEDZERA (28. 8. 2026, D113/D119)
+ * -------------------------------------------------------
+ * `?window=7|30|90` (default 30) je prepínač Prehľadu. Dve veci, ktoré sa na
+ * ňom nesmú pokaziť:
+ *
+ *  1. **`days` je odteraz OREZANÉ na okno.** Bez toho by si okno filtrovala
+ *     obrazovka sama a `gaps` (spočítané tu) by hovorili o inom úseku než
+ *     nakreslený rad — dve odpovede na jednu otázku. Semantika riadku je
+ *     nezmenená: v `days` je LEN deň, ktorý sa naozaj sťahoval.
+ *  2. **`gaps` je prvotriedny údaj, nie poznámka.** `gaps.unknownDays` je
+ *     presne to „koľko dní okna nemáme", `gaps.missing` menuje ktoré, a
+ *     `gaps.days` má riadok pre KAŽDÝ deň okna — takže graf vie nakresliť
+ *     dieru na správnom mieste, nie len vypísať počet.
+ *
+ * `unitsState` hovorí, čím je `windowUnits`: `measured` (celé okno dočítané),
+ * `lower_bound` (časť dní chýba, súčet je dolná hranica) alebo `unknown`
+ * (nedočítal sa ani jeden deň → `windowUnits` je `null`, NIE nula).
+ *
+ * TRŽBA TU NIE JE. Denná tržba eshopu má vlastnú route
+ * (`/api/insights/revenue-daily`, D117) a je to zámerné: tržba je EŠOPOVÁ, kusy
+ * sú za VÝBER produktov. Jedna odpoveď s oboma číslami by ich postavila vedľa
+ * seba ako dve strany tej istej veci a niekto by z nich vydelil cenu za kus.
+ *
  * ČISTO ČÍTACIE. Žiadne volanie shopu (sťahovanie objednávok má na starosti
  * jediný povolený modul a beží nočne), žiadny zápis, teda ani cesta, ktorá by
  * obišla potvrdenie. Nesiaha na `/api/order*` ani na zákaznícke dáta.
@@ -53,12 +76,25 @@ import {
   syncDays as defaultSyncDays,
 } from '@/lib/sales/insights';
 
+import {
+  DEFAULT_WINDOW_DAYS,
+  measurementState,
+  windowCoverage,
+  windowQuery,
+  windowRange,
+  type MeasurementState,
+  type WindowCoverage,
+  type WindowRange,
+} from '../_shared';
+
 /** Voliteľné kotvenie „dneška" — testy nemajú prepisovať systémový čas. */
 const querySchema = z.object({
   anchor: z
     .string()
     .refine((v) => isDateOnly(v), 'Očakáva sa existujúci kalendárny deň v tvare RRRR-MM-DD.')
     .optional(),
+  /** Prepínač okna Prehľadu (D113). Nepovolená hodnota je 400, nie fallback. */
+  window: windowQuery,
 });
 
 /**
@@ -70,6 +106,24 @@ export interface SalesDailyRow {
   day: DateOnly;
   units: number;
   status: 'complete' | 'partial';
+}
+
+/**
+ * Celá odpoveď route. Je tu ako typ zámerne: obrazovka si má vedieť overiť, že
+ * `gaps` a `unitsState` NEIGNORUJE — bez nich je `windowUnits` číslo bez vety.
+ */
+export interface SalesDailyResponse {
+  today: DateOnly;
+  /** Okno prepínača (7/30/90) tak, ako sa naozaj použilo. */
+  window: WindowRange;
+  /** Pokrytie podľa `lib/sales/insights` — celé sťahované obdobie, nie okno. */
+  coverage: ReturnType<typeof summarizeCoverage>;
+  /** Medzera OKNA po dňoch (D119) — koľko dní nemáme a ktoré to sú. */
+  gaps: WindowCoverage;
+  /** Súčet kusov za dočítané dni okna. `null` = ani jeden deň nie je dočítaný. */
+  windowUnits: number | null;
+  unitsState: MeasurementState;
+  days: SalesDailyRow[];
 }
 
 export interface SalesDailyDeps {
@@ -106,27 +160,54 @@ export function createInsightsSalesDailyGet(
         const windowDays = overrides.windowDays ?? env.SALES_WINDOW_DAYS;
         const today = ctx.query.anchor ?? todayInZone(now(), timeZone);
 
+        const range = windowRange(today, ctx.query.window ?? DEFAULT_WINDOW_DAYS);
+
         const syncState = await sales.syncDays();
         const coverage = summarizeCoverage(syncState, { syncEnabled, windowDays });
+        /* Medzera okna sa počíta VŽDY — aj keď nie je ani jeden stiahnutý deň. */
+        const gaps = windowCoverage(syncState, range);
 
-        /* Dni, o ktorých appka NIEČO vie. `pending` medzi nimi nie je. */
+        /* Dni, o ktorých appka NIEČO vie, ORÉZANÉ na okno prepínača. */
         const covered = syncState
           .flatMap((row) =>
-            row.status === 'complete' || row.status === 'partial'
+            (row.status === 'complete' || row.status === 'partial') &&
+            row.saleDay >= range.from &&
+            row.saleDay <= range.to
               ? [{ saleDay: row.saleDay, status: row.status }]
               : [],
           )
           .sort((a, b) => (a.saleDay < b.saleDay ? -1 : a.saleDay > b.saleDay ? 1 : 0));
 
-        if (!coverage.hasData || coverage.from == null || coverage.to == null) {
-          return { today, coverage, days: [] as SalesDailyRow[] };
+        if (
+          !coverage.hasData ||
+          coverage.from == null ||
+          coverage.to == null ||
+          covered.length === 0
+        ) {
+          return {
+            today,
+            window: range,
+            coverage,
+            gaps,
+            windowUnits: null,
+            unitsState: 'unknown' as MeasurementState,
+            days: [] as SalesDailyRow[],
+          };
         }
 
         const products = (await insights.discountDepth())
           .filter((row) => row.shopStatus !== 'not_found')
           .map((row) => row.productId);
 
-        const rows = await sales.dailyUnits(products, coverage.from, coverage.to);
+        /*
+         * Dotaz sa pýta na PRIESEČNÍK okna a pokrytia. Pýtať sa na celé okno by
+         * bolo čítanie dní, o ktorých vieme, že riadky nemajú; pýtať sa na celé
+         * pokrytie by prinieslo dni mimo okna, ktoré by sa do `days` aj tak
+         * nedostali.
+         */
+        const from = coverage.from > range.from ? coverage.from : range.from;
+        const to = coverage.to < range.to ? coverage.to : range.to;
+        const rows = await sales.dailyUnits(products, from, to);
 
         /*
          * Kľúčom je STIAHNUTÝ deň, nie deň s riadkom predaja. Preto sa mapa
@@ -141,12 +222,37 @@ export function createInsightsSalesDailyGet(
           byDay.set(row.saleDay, current + row.unitsSold);
         }
 
-        const statusByDay = new Map(covered.map((row) => [row.saleDay, row.status]));
-        const days: SalesDailyRow[] = [...byDay.entries()]
-          .map(([day, units]) => ({ day, units, status: statusByDay.get(day) ?? 'complete' }))
+        /*
+         * Riadky sa skladajú PRIAMO zo `covered`, ktoré nesie deň AJ jeho
+         * skutočný `status` — nie spojením dvoch paralelných máp s náhradnou
+         * hodnotou. Dovtedy tu bolo `statusByDay.get(day) ?? 'complete'`:
+         * nedosiahnuteľné (obe mapy vznikali z toho istého poľa), ale náhradná
+         * hodnota mierila NESPRÁVNYM smerom. Deň, o ktorého stiahnutí by sa
+         * status nenašiel, by sa vydával za DOČÍTANÝ a `windowUnits` nižšie by
+         * ho zrátalo ako MERANIE — presne to zliatie „nevieme" do nuly, ktoré
+         * zakazuje I11 a ktoré sa v tomto repe raz už do produkcie dostalo.
+         * Takto sa `status` nedá vymyslieť, lebo tu nie je čo dopĺňať.
+         *
+         * `?? 0` pri kusoch zostáva a je to iná vec: `byDay` je nasadená zo
+         * `covered` s nulou, takže nula znamená „deň sa sťahoval a predaj v ňom
+         * nebol" — MERANÝ fakt, nie dosadená hodnota.
+         */
+        const days: SalesDailyRow[] = covered
+          .map(({ saleDay, status }) => ({ day: saleDay, units: byDay.get(saleDay) ?? 0, status }))
           .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 
-        return { today, coverage, days };
+        /*
+         * Súčet okna sa počíta VÝHRADNE z dní `complete`. `partial` deň je
+         * dolná hranica; keby sa pripočítal, `windowUnits` by miešalo meranie
+         * s odhadom a `unitsState` by o tej zmesi nič nepovedalo.
+         */
+        const state = measurementState(gaps);
+        const windowUnits =
+          state === 'unknown'
+            ? null
+            : days.reduce((sum, row) => (row.status === 'complete' ? sum + row.units : sum), 0);
+
+        return { today, window: range, coverage, gaps, windowUnits, unitsState: state, days };
       },
     },
     routeDeps,

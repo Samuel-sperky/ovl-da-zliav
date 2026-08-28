@@ -612,6 +612,91 @@ export interface CatalogCacheRecord {
   raw: unknown;
 }
 
+/**
+ * Obohatenie riadku katalógu z `GET /api/products/getFull` (migrácia 0014,
+ * D116–D119, 28. 8. 2026).
+ *
+ * KAŽDÉ pole je `| null` a `null` znamená VÝHRADNE „nevieme" (I11) — nikdy nula
+ * a nikdy odhad. Rozlíšiť sa to dá jediným spôsobom: `enrichedAt === null`
+ * znamená, že sa produkt nikdy neobohatil, takže sú NULL všetky polia; pri
+ * vyplnenom `enrichedAt` je `null` odpoveď SHOPU („o tomto poli nič nevedie").
+ *
+ * `margin` a `marginPercent` posiela shop už vypočítané a ukladajú sa tak, ako
+ * prišli — appka si ich NEPOČÍTA (viď hlavička migrácie 0014, bod 2).
+ */
+export interface CatalogEnrichmentRecord {
+  productId: number;
+  /** Kód produktu („ref · názov" v UI, D116). */
+  reference: string | null;
+  ean13: string | null;
+  purchasePrice: number | null;
+  /** Marža v EUR TAK, AKO JU POSLAL SHOP (`sell_price - purchase_price`). */
+  margin: number | null;
+  /** Marža v % TAK, AKO JU POSLAL SHOP (2 desatiny). */
+  marginPercent: number | null;
+  sellPriceWithVat: number | null;
+  /** Deň poslednej objednávky s produktom. `null` = shop o žiadnej nevie. */
+  lastTimeInOrder: UtcDate | null;
+  /** Sklad. `0` je platná nula (vypredané), `null` je „nevieme". */
+  qty: number | null;
+  /** Koľko kusov bolo kedy objednané — podklad obrátkovosti (D119). */
+  qtyInOrders: number | null;
+  supplier: string | null;
+  /**
+   * Stav zľavy PODĽA SHOPU v čase `enrichedAt`. NIE JE to „posledný vlastný
+   * zápis" z `campaign_items` (I11) — sú to dve rôzne vety a nesmú sa zliať.
+   * Všetky tri sú `null` naraz, keď na produkte žiadna zľava nebeží.
+   */
+  reductionPercent: number | null;
+  reductionFrom: UtcDate | null;
+  reductionTo: UtcDate | null;
+  active: boolean | null;
+  /** Id kategórií tak, ako prišli. `null` = nevieme, `[]` = shop poslal prázdno. */
+  categories: readonly number[] | null;
+  /** Kedy sa riadok naposledy ÚSPEŠNE obohatil. `null` = NIKDY (I11). */
+  enrichedAt: UtcDate | null;
+  /** Kedy sa o obohatenie naposledy POKÚSILO (aj neúspešne) — D118. */
+  enrichAttemptedAt: UtcDate | null;
+  /** Poradie vo fronte: 1 = allowlist, 2 = kampane, 3 = ostatné (D118). */
+  enrichPriority: number;
+}
+
+/**
+ * Denná tržba CELÉHO ESHOPU (migrácia 0014, tabuľka `shop_revenue_daily`, D117).
+ *
+ * POZOR: nikdy nie tržba na produkt. `GET /api/order/get` vracia položky ako
+ * `{id, qty}` bez ceny, takže rozdeliť `totalPaidSum` medzi položky je zakázané
+ * — bolo by to vymyslené číslo (poštovné, zľavy, kupóny) a porušilo by I11.
+ * Per produkt existujú výhradne KUSY.
+ */
+export interface ShopRevenueDayRecord {
+  /** Deň podľa hodín SHOPU (`date_add`), nie prepočítaný do UTC. */
+  day: DateOnly;
+  /** Mena tak, ako prišla. Riadok je na (deň, mena) — meny sa NESČÍTAVAJÚ. */
+  currency: string;
+  /** Súčet `total_paid` objednávok dňa. Riadok existuje len pre čítaný deň. */
+  totalPaidSum: MoneyString;
+  /** Počet objednávok v súčte. POČET, nie odkaz na objednávku (I8' bod 3). */
+  ordersCount: number;
+  /**
+   * `true` = stiahli sme VŠETKY strany objednávok za tento deň, súčet je celý
+   * deň. `false` = súčet je zatiaľ len DOLNÁ HRANICA a obrazovka to musí
+   * priznať, inak posledný deň vždy vyzerá ako pokles.
+   */
+  dayComplete: boolean;
+  pagesRead: number;
+  updatedAt: UtcDate | null;
+}
+
+/**
+ * Pokrytie jedného dňa v predajnosti (`sales_sync_state`, 0009 + 0014 §4, I11).
+ *
+ * Toto je odpoveď na otázku „je `0 predaných` nula, alebo sme ten deň
+ * nesťahovali": `complete` = platná nula, `missing`/`pending`/`partial` =
+ * NEVIEME, a `partial` je navyše len dolná hranica, nikdy súčet.
+ */
+export type SalesDayCoverage = 'missing' | 'pending' | 'partial' | 'complete';
+
 /** „Posledný VLASTNÝ zápis" — nikdy nie pravda o shope (D7, D38, I11). */
 export interface LastOwnWrite {
   percent: DiscountPercent;
@@ -1127,6 +1212,224 @@ export interface SalesInsightsReport {
   today: DateOnly;
   coverage: SalesCoverage;
   products: ProductSalesMetrics[];
+}
+
+/* ══════ 13b. KPI produktu (KONTRAKT-V4-2026-08-28: D114, D117–D119) ══════ */
+
+/**
+ * PREČO KAŽDÉ KPI NESIE DÔVOD, KEĎ HODNOTU NEMÁ (I11)
+ * ---------------------------------------------------
+ * KPI produktu má TRI stavy, nie dva, a rozdiel medzi druhým a tretím je celý
+ * zmysel tohto typu:
+ *
+ *  1. **hodnota** — číslo, ktoré appka naozaj zmerala (`0` je platná nula),
+ *  2. **„nevieme, produkt nie je obohatený"** — `getFull` sa naň nikdy nepýtalo
+ *     (kvóta ~200 čítaní/deň, celý katalóg = ~207 dní, preto D118), takže
+ *     o cene, marži, sklade ani dodávateľovi nie je známe NIČ,
+ *  3. **„nevieme, dni chýbajú"** — okno 30/90 dní nie je celé stiahnuté, takže
+ *     súčet kusov je nanajvýš DOLNÁ HRANICA (D119).
+ *
+ * Zliať stav 2 alebo 3 do nuly je chyba, ktorá sa v tomto repe UŽ RAZ dostala
+ * do produkcie: `sales_sync_state` malo štrnásť dní `partial / orders_seen = 0`,
+ * tie sa počítali ako pokryté a KAŽDÉ číslo o predajnosti bolo zhruba osemkrát
+ * nižšie než to, čo sa naozaj zmeralo. Preto `KpiValue` nesie `gap` a nie holé
+ * `T | null`: z holého `null` sa na obrazovke `?? 0` spraví nula v jednom
+ * riadku kódu, kým z `{ value: null, gap }` sa nula spraviť NEDÁ bez toho, aby
+ * autor ten dôvod výslovne zahodil.
+ */
+export type KpiGap =
+  /** Produkt sa NIKDY neobohatil (`enriched_at IS NULL`) — nevieme o ňom nič. */
+  | 'not_enriched'
+  /** Obohatený je, ale shop toto pole o ňom nevedie (alebo nič nebeží). */
+  | 'shop_has_none'
+  /** Časť okna — alebo celé okno — nie je stiahnutá; číslo by klamalo (D119). */
+  | 'days_missing'
+  /** Obe ingrediencie poznáme, ale pomer hodnotu nemá (delenie nulou). */
+  | 'not_computable';
+
+/**
+ * Jedno KPI. `gap === null` ⇔ hodnotu POZNÁME; `value: 0` je platná nula
+ * a `gap` je pri nej `null`.
+ */
+export interface KpiValue<T> {
+  readonly value: T | null;
+  readonly gap: KpiGap | null;
+}
+
+/**
+ * Beží na produkte zľava PODĽA SHOPU? Stav sa počíta z `reduction_percent`,
+ * `reduction_from` a `reduction_to` z `getFull`, teda z odpovede SHOPU — a nie
+ * z `campaign_items`, kde je „posledný VLASTNÝ zápis" (I11). Sú to dve rôzne
+ * vety a v UI sa NESMÚ zliať; preto `KpiActiveDiscount.measuredAt`.
+ */
+export type KpiDiscountState =
+  /** Podľa shopu zľava v posudzovaný deň BEŽÍ. */
+  | 'running'
+  /** Shop má okno zľavy, ale začína až po tom dni. */
+  | 'scheduled'
+  /** Shop mal okno zľavy a to už uplynulo. */
+  | 'ended'
+  /** Shop k `measuredAt` povedal, že žiadna zľava nebeží — MERANÝ fakt, nie nula. */
+  | 'none'
+  /** Produkt nie je obohatený, alebo shop poslal nekonzistentnú trojicu. */
+  | 'unknown';
+
+/** Aktívna zľava produktu podľa shopu (D114 „aktívna zľava %"). */
+export interface KpiActiveDiscount {
+  readonly state: KpiDiscountState;
+  /**
+   * % zľavy, ktorá v posudzovaný deň NAOZAJ beží. Mimo stavu `running` je to
+   * vždy `null` — aj keď shop nejaké percento nahlásil (viď `reportedPercent`).
+   * Toto je pole, ktoré UI píše do stĺpca „aktívna zľava".
+   */
+  readonly activePercent: KpiValue<number>;
+  /**
+   * % okna tak, ako ho shop nahlásil — aj pre okno v budúcnosti či minulosti.
+   * Pre stĺpec „aktívna zľava" sa NESMIE použiť; je to podklad pre detail.
+   */
+  readonly reportedPercent: KpiValue<number>;
+  readonly from: UtcDate | null;
+  readonly to: UtcDate | null;
+  /**
+   * Kedy sa tento stav zmeral (`enriched_at`). `null` = produkt nie je
+   * obohatený. Bez tohto poľa by obrazovka tvrdila, že pozná stav zľavy
+   * v shope TERAZ — a to je presne to, čo I11 zakazuje.
+   */
+  readonly measuredAt: UtcDate | null;
+}
+
+/** Okno predajov a to, koľko z neho appka NEMÁ (D119). */
+export interface KpiWindowCoverage {
+  readonly windowDays: number;
+  readonly from: DateOnly;
+  readonly to: DateOnly;
+  /** Koľko dní okna je naozaj DOČÍTANÝCH (`sales_sync_state.status='complete'`). */
+  readonly completeDays: number;
+  /**
+   * Koľko dní okna je „nevieme": `missing` + `pending` + `partial`. `0` je
+   * jediný stav, pri ktorom je súčet kusov celé okno; inak je to dolná hranica.
+   */
+  readonly unknownDays: number;
+}
+
+/**
+ * Predané kusy za okno VÝHRADNE za dni, ktoré sú naozaj stiahnuté (D119).
+ *
+ * `partial` deň sa do súčtu NEPOČÍTA: je to len časť dňa a pripočítať ho by
+ * znamenalo vydávať dolnú hranicu za deň. Počíta sa medzi `unknownDays`.
+ */
+export interface KpiWindowUnits extends KpiWindowCoverage {
+  /**
+   * Kusy za DOČÍTANÉ dni okna. `null` s `gap: 'days_missing'` ⇔ z okna nie je
+   * dočítaný ANI JEDEN deň — nula by tam bola tvrdenie o nepredaní.
+   * `0` s `gap: null` naopak znamená „celé okno je dočítané a nepredalo sa nič".
+   */
+  readonly units: KpiValue<number>;
+  /** `true` ⇔ `units.value` je len DOLNÁ HRANICA (`unknownDays > 0`). */
+  readonly lowerBound: boolean;
+}
+
+/** Čím je značka „bez predaja" DOKÁZANÁ. Bez dôkazu značka nevzniká (D119). */
+export type KpiNoSaleProof =
+  /**
+   * `getFull`: shop o produkte nemá ani jednu objednávku — `last_time_in_order`
+   * je `NULL` a `qty_in_orders` je `0`. Jeden request na produkt namiesto
+   * tisícov objednávok (D119).
+   */
+  | 'shop_never_ordered'
+  /** Celé dlhé okno je dočítané (`unknownDays === 0`) a v ňom nula kusov. */
+  | 'no_sale_in_covered_days';
+
+/**
+ * Značka „bez predaja" (ležiak). NEOBOHATENÝ PRODUKT NIE JE MŔTVY PRODUKT —
+ * je to neznámy produkt, a preto `mark` vzniká len s dôkazom.
+ */
+export interface KpiNoSale {
+  readonly mark: boolean;
+  /** `null` ⇔ `mark === false`. */
+  readonly proof: KpiNoSaleProof | null;
+}
+
+/**
+ * KPI jedného riadku produktu (D114 v revízii D117–D119).
+ *
+ * ODKIAĽ ČO POCHÁDZA — a nie je to kozmetika, lebo z toho plynú dôvody chýbania:
+ *  · `getFull` (obohatenie): `reference`, `supplier`, `priceWithVat`,
+ *    `purchasePrice`, `margin`, `marginPercent`, `discount`, `stock`,
+ *    `soldTotal`, `lastSaleAt`, `daysSinceLastSale`, `soldPerStock`,
+ *  · lokálne denné predaje: `units30`, `units90`,
+ *  · zoznamový prechod katalógu: `name`, `listPrice`.
+ *
+ * Marža sa NEPOČÍTA — shop ju dáva hotovú (`margin`, `margin_percent`) a appka
+ * ukladá aj čítá presne to, čo prišlo. Keby si ju počítala a shop zmenil
+ * definíciu (DPH, nákupná cena s dopravou), appka by ticho klamala.
+ */
+export interface ProductKpiRow {
+  readonly productId: number;
+  /**
+   * `true` = zrkadlo katalógu tento produkt vôbec nemá (eshop ho pridal po
+   * poslednom prechode, alebo je to cudzie id). Všetky KPI z obohatenia sú
+   * potom `not_enriched` — `missing` je to, čím sa tie dva prípady odlíšia.
+   */
+  readonly missing: boolean;
+  readonly name: string | null;
+  /** Kód produktu („ref · názov", D116). Len z `getFull`. */
+  readonly reference: KpiValue<string>;
+  readonly supplier: KpiValue<string>;
+  /**
+   * Cenníková cena zo zoznamového prechodu (`catalog_cache.price`), teda BEZ
+   * obohatenia. Podľa dokumentácie shopu je to tá istá hodnota ako `sell_price`.
+   */
+  readonly listPrice: MoneyString | null;
+  /** Predajná cena s DPH z `getFull` (`sell_price_with_vat`). */
+  readonly priceWithVat: KpiValue<number>;
+  readonly purchasePrice: KpiValue<number>;
+  /** Marža v EUR TAK, AKO JU POSLAL SHOP. Nikdy dopočítaná. */
+  readonly margin: KpiValue<number>;
+  /** Marža v % TAK, AKO JU POSLAL SHOP. Nikdy dopočítaná. */
+  readonly marginPercent: KpiValue<number>;
+  readonly discount: KpiActiveDiscount;
+  /** Sklad (`qty`). `0` je platná nula (vypredané), nie „nevieme". */
+  readonly stock: KpiValue<number>;
+  /** Celkovo predané kusy za celú históriu (`qty_in_orders`, D119). */
+  readonly soldTotal: KpiValue<number>;
+  /** Posledný predaj podľa shopu (`last_time_in_order`). */
+  readonly lastSaleAt: KpiValue<UtcDate>;
+  /**
+   * Dni od posledného predaja. Je to HORNÁ hranica: hodnota je meraná k času
+   * `discount.measuredAt`, takže od obohatenia mohol pribudnúť predaj, o ktorom
+   * appka nevie.
+   */
+  readonly daysSinceLastSale: KpiValue<number>;
+  /**
+   * Koľkokrát sa AKTUÁLNA zásoba už predala (`qty_in_orders / qty`).
+   *
+   * POZOR NA POMENOVANIE: **toto NIE JE účtovná obrátkovosť.**
+   * `(Ø zásoba × počet dní) / COGS` sa stále vypočítať NEDÁ — `getFull` dáva
+   * zásobu ako JEDINÚ momentku, nie priemer za obdobie, a bez toho je každá
+   * „obrátkovosť za obdobie" vymyslené číslo (I11). D119 pod obrátkovosťou
+   * myslí práve tieto tri merané fakty: `soldTotal`, `stock` a tento pomer.
+   * `gap: 'not_computable'` znamená „sklad je 0, pomer hodnotu nemá".
+   */
+  readonly soldPerStock: KpiValue<number>;
+  readonly units30: KpiWindowUnits;
+  readonly units90: KpiWindowUnits;
+  readonly noSale: KpiNoSale;
+  /** Kedy sa obohatenie zmeralo. `null` = produkt NIE JE obohatený (I11). */
+  readonly enrichedAt: UtcDate | null;
+}
+
+/**
+ * Celá strana KPI. Pokrytie oboch okien je pre všetky riadky ROVNAKÉ (je to
+ * vlastnosť sťahovania, nie produktu), takže hlavička tabuľky ho vezme odtiaľ
+ * a nemusí ho čítať z prvého riadku.
+ */
+export interface ProductKpiPage {
+  /** Deň, voči ktorému sa počítajú okná aj „beží zľava" (D31, nikdy UTC). */
+  readonly today: DateOnly;
+  readonly window30: KpiWindowCoverage;
+  readonly window90: KpiWindowCoverage;
+  readonly rows: ProductKpiRow[];
 }
 
 /* ═══════════════════════ 14. Health (§5, D87, D91) ═══════════════════════ */

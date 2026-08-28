@@ -11,10 +11,22 @@
  *     Modul si ho NIKDY nečíta z DB ani z disku, dešifruje ho tesne pred
  *     odoslaním, `release()` beží vo `finally`, hlavička sa okamžite maže
  *     a kľúč sa neobjaví v logu, v hláške ani v návratovej hodnote.
- *   - **I8' bod 3** — z odpovede sa ďalej NEVRACIA `total_paid`, `currency`,
- *     `country` ani `country_iso`. Zo zoznamu ide von len `id` (aby sa dal
- *     dotiahnuť detail) a deň z `date_add`; z detailu len `products[].id/qty`.
- *     Id objednávky teda žije výhradne v pamäti počas jedného behu.
+ *   - **I8' bod 3** — z odpovede sa ďalej NEVRACIA `country` ani `country_iso`.
+ *     Zo zoznamu ide von len `id` (aby sa dal dotiahnuť detail) a deň
+ *     z `date_add`; z detailu len `products[].id/qty`. Id objednávky teda žije
+ *     výhradne v pamäti počas jedného behu.
+ *
+ *     **DOPLNENÉ D117 (28. 8. 2026):** `total_paid` a `currency` smú modul
+ *     opustiť, ale VÝHRADNE cestou `listOrderTotals()` a výhradne preto, aby sa
+ *     z nich urobil DENNÝ SÚČET ZA CELÝ ESHOP (`shop_revenue_daily`). Dôvod je
+ *     meranie, nie zmena chuti: sonda 28. 8. 2026 potvrdila, že API ceny
+ *     položiek objednávky NEVRACIA (`order/get` → `products: [{id, qty}]`), takže
+ *     tržba per produkt sa poctivo povedať nedá a per produkt zostávajú KUSY.
+ *     **Rozdeliť `total_paid` medzi položky je ZAKÁZANÉ** — v sume je poštovné,
+ *     zľavy a kupóny, takže akékoľvek rozdelenie by bolo vymyslené číslo
+ *     vydávané za obrat produktu (I11). Preto tu `OrderTotal` NEMÁ a nikdy
+ *     nesmie mať pole s položkami a `OrderUnits` naopak NEMÁ a nikdy nesmie mať
+ *     pole s peniazmi: tie dva tvary sa v tomto module zámerne nestretnú.
  *   - **I8' bod 4** — modul nepozná zápis zľavy. Názov zapisovacej akcie shopu
  *     sa v ňom nevyskytuje a vyskytovať nesmie (test to kontroluje);
  *     objednávkový kľúč sa tak k zápisu nemá ako dostať.
@@ -36,6 +48,7 @@ import type {
   DateOnly,
   KeyProbeResult,
   Logger,
+  MoneyString,
   SecretHandle,
   SecretRef,
   ShopCtx,
@@ -108,15 +121,50 @@ const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * Položka zoznamu — ZÁMERNE len `id` a deň.
  *
- * `total_paid` a `currency` sa nečítajú: suma je za celú objednávku, nie za
+ * `total_paid` a `currency` sa TU nečítajú: suma je za celú objednávku, nie za
  * položku, takže obrat na produkt sa priradiť NEDÁ (kontrakt §3 NIE) a appka
- * si nepredstiera dáta, ktoré nemá (I11).
+ * si nepredstiera dáta, ktoré nemá (I11). Kto potrebuje sumu, berie ju
+ * z `OrderTotal` nižšie — a je to suma ESHOPU, nie produktu (D117).
  */
 export interface OrderRef {
   /** Id objednávky. Slúži VÝHRADNE na dotiahnutie detailu v tom istom behu. */
   id: number;
   /** Kalendárny deň z `date_add` (`YYYY-MM-DD`) — kľúč denného súčtu. */
   day: DateOnly;
+}
+
+/**
+ * Objednávka zredukovaná na SUMU ZA CELÚ OBJEDNÁVKU (D117).
+ *
+ * Zámerne samostatný tvar, nie rozšírený `OrderRef`: `OrderRef` slúži ceste,
+ * ktorá počíta KUSY po produkte, a peniaze v nej nemajú čo robiť. Kto sem
+ * niekedy pridá `lines`, `productId` alebo čokoľvek per položku, porušuje D117
+ * a I11 — rozdelenie tejto sumy medzi položky je vymyslené číslo.
+ */
+export interface OrderTotal {
+  /** Id objednávky. Slúži VÝHRADNE na deduplikáciu strán v jednom behu. */
+  id: number;
+  /** Kalendárny deň z `date_add` (`YYYY-MM-DD`) — kľúč denného súčtu. */
+  day: DateOnly;
+  /**
+   * `total_paid` CELEJ objednávky v CENTOCH.
+   *
+   * Centy, nie float: denný súčet je sčítanie stoviek hodnôt a v `number`
+   * s desatinami by sa po ceste nazbieral halier, ktorý by nikto neuvidel a
+   * ktorý by sa nedal vysvetliť. Celé čísla sčítajú presne a `DECIMAL(12,2)`
+   * v DB je presne to isté rozlíšenie.
+   */
+  totalPaidCents: number;
+  /** Mena tak, ako prišla (ISO kód, veľkými). Meny sa NIKDY nesčítavajú. */
+  currency: string;
+}
+
+/** Stránka zoznamu objednávok v tvare „suma za objednávku" (D117). */
+export interface OrderTotalsPage {
+  data: OrderTotal[];
+  page: number;
+  perPage: number;
+  total: number;
 }
 
 /** Jedna položka objednávky zredukovaná na to, čo sa dá sčítať. */
@@ -160,6 +208,29 @@ export interface OrdersClient {
   getOrderUnits(id: number, key: SecretRef, ctx: ShopCtx): Promise<OrderUnits>;
 }
 
+/**
+ * Čítanie objednávok na SUMY ZA ESHOP (D117) — ZÁMERNE samostatné rozhranie,
+ * nie ďalšia metóda v `OrdersClient`.
+ *
+ * Dôvod nie je štýl, ale to, čo si volajúci môže vypýtať: cesta, ktorá počíta
+ * KUSY po produkte (`lib/engine/sales-sync.ts` → `syncSales`), dostane
+ * `OrdersClient` a k peniazom sa tým typom NEDOSTANE ani omylom. Cesta, ktorá
+ * počíta dennú tržbu eshopu, dostane `OrderTotalsClient` a k položkám
+ * objednávky sa nedostane. Jedno rozhranie s oboma metódami by tú hranicu
+ * zmazalo a rozdelenie `total_paid` medzi položky by bolo na jeden riadok od
+ * pravdy (I11).
+ */
+export interface OrderTotalsClient {
+  /**
+   * Tá istá strana zoznamu ako `listOrders()`, ale prečítaná na SUMU za
+   * objednávku (D117).
+   */
+  listOrderTotals(params: ListOrdersParams, key: SecretRef, ctx: ShopCtx): Promise<OrderTotalsPage>;
+}
+
+/** Čo `createOrdersClient()` naozaj vracia — obe čítania nad jedným transportom. */
+export type OrdersReadClient = OrdersClient & OrderTotalsClient;
+
 /* ═════════════════════════════ 3. Schémy ══════════════════════════════════ */
 
 const numberLike = z
@@ -181,6 +252,27 @@ const orderListItemSchema = z.looseObject({
 
 const orderListResponseSchema = z.looseObject({
   data: z.array(orderListItemSchema),
+  page: intLike,
+  per_page: intLike,
+  total: intLike,
+});
+
+/**
+ * Položka zoznamu v tvare „suma za objednávku" (D117).
+ *
+ * `total_paid` sa TU zámerne nekonvertuje na `number`: konverziu robí
+ * `moneyToCents()`, ktorá nečitateľnú hodnotu odmietne, a odmietnutie musí byť
+ * vidieť ako `schema_drift`, nie ako ticho nulová objednávka.
+ */
+const orderTotalItemSchema = z.looseObject({
+  id: intLike,
+  date_add: z.string(),
+  total_paid: z.union([z.number(), z.string()]),
+  currency: z.string(),
+});
+
+const orderTotalsResponseSchema = z.looseObject({
+  data: z.array(orderTotalItemSchema),
   page: intLike,
   per_page: intLike,
   total: intLike,
@@ -213,10 +305,59 @@ export function unwrapEnvelope(body: unknown): unknown {
   return typeof inner === 'object' && inner !== null ? inner : body;
 }
 
-/** `"2026-08-01 10:22:00"` → `"2026-08-01"`; nečitateľný vstup → `null`. */
+/**
+ * `"2026-08-01 10:22:00"` → `"2026-08-01"`; nečitateľný vstup → `null`.
+ *
+ * ZÓNA: `date_add` je HODINA SHOPU a appka ju NEPREPOČÍTAVA — z reťazca sa
+ * odreže dátumová časť, takže deň objednávky je vždy ten, ktorý by na tej
+ * objednávke prečítal človek v administrácii eshopu. Dokumentácia shopu
+ * (`docs/api/sperky-api-v5.md`) zónu `date_add` NIKDE nemenuje, takže akýkoľvek
+ * prevod na UTC alebo do `LOGIC_TIMEZONE` by bol domnienka, ktorá by pri
+ * objednávkach okolo polnoci ticho presúvala tržbu o deň. Vedomé rozhodnutie:
+ * radšej ponechať zónu zdroja a povedať to nahlas, než hádať.
+ */
 export function dayFromDateAdd(dateAdd: string): DateOnly | null {
   const head = dateAdd.trim().slice(0, 10);
   return DATE_ONLY_RE.test(head) ? head : null;
+}
+
+/** Suma s najviac 12 celými a 6 desatinnými miestami; `,` aj `.` (D117). */
+const MONEY_RE = /^-?\d{1,12}(?:[.,]\d{1,6})?$/;
+
+/** Mena je ISO kód — nič iné sa do primárneho kľúča tržby nedostane (D117). */
+const CURRENCY_RE = /^[A-Za-z]{3}$/;
+
+/**
+ * `total_paid` → CENTY. `null` = hodnota sa nedá prečítať.
+ *
+ * `null` NIE JE nula a volajúci ho tak nesmie brať: pre denný súčet je jediná
+ * poctivá odpoveď na nečitateľnú sumu `schema_drift` (stav neistý, D54). Keby sa
+ * taká objednávka len preskočila, deň by sa uzavrel ako úplný so sumou, ktorá je
+ * TICHO nižšia — presne tá lož, ktorú I11 zakazuje.
+ *
+ * Zaokrúhľuje sa na centy, pretože `DECIMAL(12,2)` v `shop_revenue_daily` má to
+ * isté rozlíšenie; shop podľa dokumentácie posiela dve desatiny.
+ */
+export function moneyToCents(value: unknown): number | null {
+  const text =
+    typeof value === 'number'
+      ? String(value)
+      : typeof value === 'string'
+        ? value.trim()
+        : '';
+  // `String(1e21)` je `"1e+21"` — exponent regex neprejde a hodnota skončí ako
+  // „nečitateľná" (fail-closed), nie ako pretečené číslo.
+  if (!MONEY_RE.test(text)) return null;
+  const parsed = Number(text.replace(',', '.'));
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100);
+}
+
+/** CENTY → `"12345.67"` pre `DECIMAL(12,2)`. Nikdy float, nikdy locale. */
+export function centsToMoneyString(cents: number): MoneyString {
+  const whole = Math.trunc(Math.abs(Math.trunc(cents)) / 100);
+  const rest = Math.abs(Math.trunc(cents)) % 100;
+  return `${cents < 0 ? '-' : ''}${whole}.${String(rest).padStart(2, '0')}`;
 }
 
 /* ══════════════════════════ 4. Závislosti klienta ═════════════════════════ */
@@ -263,7 +404,7 @@ interface SuccessEnvelope {
 
 /* ══════════════════════════════ 5. Klient ═════════════════════════════════ */
 
-export function createOrdersClient(deps: OrdersClientDeps): OrdersClient {
+export function createOrdersClient(deps: OrdersClientDeps): OrdersReadClient {
   const log = deps.logger ?? defaultLogger;
   const fetchImpl: FetchLike =
     deps.fetchImpl ?? ((input, init) => fetch(input, init) as Promise<Response>);
@@ -494,11 +635,12 @@ export function createOrdersClient(deps: OrdersClientDeps): OrdersClient {
 
   /* ─────────────────────────── 5.3 zoznam objednávok ────────────────────── */
 
-  async function listOrders(
+  /** Jedna strana zoznamu — spoločná pre cestu na kusy aj pre cestu na sumy. */
+  async function fetchOrderListPage(
     params: ListOrdersParams,
     key: SecretRef,
     ctx: ShopCtx,
-  ): Promise<OrdersPage> {
+  ): Promise<SuccessEnvelope> {
     if (!DATE_ONLY_RE.test(params.dateFrom) || !DATE_ONLY_RE.test(params.dateTo)) {
       fail(makeShopError({ kind: 'bad_request', code: 'local_invalid_dates' }));
     }
@@ -523,14 +665,23 @@ export function createOrdersClient(deps: OrdersClientDeps): OrdersClient {
       reportIfKeyRejected(ctx, result.error);
       fail(result.error);
     }
+    return result.value;
+  }
 
-    const parsed = parseShopPayload(orderListResponseSchema, result.value.body);
+  async function listOrders(
+    params: ListOrdersParams,
+    key: SecretRef,
+    ctx: ShopCtx,
+  ): Promise<OrdersPage> {
+    const envelope = await fetchOrderListPage(params, key, ctx);
+
+    const parsed = parseShopPayload(orderListResponseSchema, envelope.body);
     if (!parsed.ok) {
       const error = schemaDriftError({
-        requestId: result.value.requestId,
-        httpStatus: result.value.httpStatus,
+        requestId: envelope.requestId,
+        httpStatus: envelope.httpStatus,
         issues: parsed.issues,
-        raw: result.value.body,
+        raw: envelope.body,
       });
       reportDrift(ORDERS_PATHS.orderList, ctx, error);
       fail(error);
@@ -543,6 +694,66 @@ export function createOrdersClient(deps: OrdersClientDeps): OrdersClient {
       const day = dayFromDateAdd(item.date_add);
       if (day === null) continue; // nečitateľný `date_add` — objednávku preskočíme
       data.push({ id: item.id, day });
+    }
+
+    return {
+      data,
+      page: parsed.value.page,
+      perPage: parsed.value.per_page,
+      total: parsed.value.total,
+    };
+  }
+
+  /* ───────── 5.3b zoznam objednávok ako SUMY ZA ESHOP (D117) ─────────────── */
+
+  /**
+   * Tá istá strana zoznamu, prečítaná na `(deň, mena, suma)`.
+   *
+   * Prečo je nečitateľná položka `schema_drift`, a nie preskočená objednávka
+   * (na rozdiel od `listOrders()` vyššie): tam sa počítajú kusy a vynechaná
+   * objednávka deň ZNEÚPLNÍ, čo volajúci vidí. Tu sa počítajú peniaze a
+   * vynechaná objednávka by deň nechala vyzerať úplný so sumou TICHO nižšou.
+   * Stav neistý sa preto priznáva (D54), nikdy sa neodhaduje (I11).
+   */
+  async function listOrderTotals(
+    params: ListOrdersParams,
+    key: SecretRef,
+    ctx: ShopCtx,
+  ): Promise<OrderTotalsPage> {
+    const envelope = await fetchOrderListPage(params, key, ctx);
+
+    const parsed = parseShopPayload(orderTotalsResponseSchema, envelope.body);
+    if (!parsed.ok) {
+      const error = schemaDriftError({
+        requestId: envelope.requestId,
+        httpStatus: envelope.httpStatus,
+        issues: parsed.issues,
+        raw: envelope.body,
+      });
+      reportDrift(ORDERS_PATHS.orderList, ctx, error);
+      fail(error);
+    }
+
+    const data: OrderTotal[] = [];
+    const issues: string[] = [];
+    for (const item of parsed.value.data) {
+      const day = dayFromDateAdd(item.date_add);
+      const cents = moneyToCents(item.total_paid);
+      const currency = item.currency.trim().toUpperCase();
+      if (day === null) issues.push(`date_add: invalid_format`);
+      else if (cents === null) issues.push(`total_paid: unreadable`);
+      else if (!CURRENCY_RE.test(currency)) issues.push(`currency: invalid_format`);
+      else data.push({ id: item.id, day, totalPaidCents: cents, currency });
+    }
+    if (issues.length > 0) {
+      const error = schemaDriftError({
+        requestId: envelope.requestId,
+        httpStatus: envelope.httpStatus,
+        // Do chyby ide len ZARADENIE problému, nikdy hodnota z odpovede (I1).
+        issues: [...new Set(issues)],
+      });
+      reportDrift(ORDERS_PATHS.orderList, ctx, error);
+      fail(error);
     }
 
     return {
@@ -603,7 +814,7 @@ export function createOrdersClient(deps: OrdersClientDeps): OrdersClient {
     return { id: parsed.value.id, day, lines };
   }
 
-  return { listOrders, getOrderUnits };
+  return { listOrders, getOrderUnits, listOrderTotals };
 }
 
 /* ═══════════════════ 6. Konštrukcia z nastavení (D80) ═════════════════════ */
@@ -623,7 +834,7 @@ export interface OrdersSettingsSource {
 export function createOrdersClientFromSettings(
   settings: OrdersSettingsSource,
   deps: Omit<OrdersClientDeps, 'baseUrl'> = {},
-): OrdersClient {
+): OrdersReadClient {
   return createOrdersClient({
     ...deps,
     baseUrl: async () => shopBaseUrlFromSettings(await settings.get()),

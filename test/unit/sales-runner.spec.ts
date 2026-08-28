@@ -11,7 +11,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const loadForUse = vi.fn<() => Promise<(() => Promise<never>) | null>>();
 const getMeta = vi.fn<() => Promise<{ savedAt: Date | null }>>();
 const syncSales = vi.fn();
+const syncShopRevenue = vi.fn();
 const reserve = vi.fn();
+/**
+ * Poradie, v akom runner oslovil dva behy shopu. Runner ich volá v jednom ticku
+ * a D117 hovorí, že tržba ide PRVÁ — poradie je teda tvrdenie, nie kozmetika,
+ * a bez záznamu sa nedá zmerať (oba mocky vracajú hodnotu okamžite).
+ */
+const callOrder: string[] = [];
 const latestSyncStop =
   vi.fn<() => Promise<{ code: string | null; at: Date | null; since: Date | null }>>();
 
@@ -20,7 +27,27 @@ vi.mock('@/lib/repo/api-key.repo', () => ({
 }));
 
 vi.mock('@/lib/engine/sales-sync', () => ({
-  syncSales: (...args: unknown[]) => syncSales(...args),
+  syncSales: (...args: unknown[]) => {
+    callOrder.push('units');
+    return syncSales(...args);
+  },
+  /**
+   * DENNÁ TRŽBA ESHOPU (D117) — mock musí tento export MAŤ.
+   *
+   * Doplnené 28. 8. 2026 pri zelenej bráne. Dovtedy tu chýbal a test bol
+   * zelený NAPRIEK tomu: runner volá `syncShopRevenue()` vo vlastnom
+   * `try/catch` (tržba je analytika a nesmie zhodiť kusy), takže KAŽDÝ test
+   * tohto súboru tichо padal do poistnej vetvy a do logu písal
+   * `shop_revenue_fatal_caught`. Celá tržbová vetva runnera — poradie behov,
+   * preskočenie kusov pri prekážke, vynechanie tržby pri overovacej
+   * požiadavke — tým nebola krytá NIČÍM. Presne tá trieda diery, ktorú tento
+   * repozitár už raz zaplatil (CLAUDE.md: „čo test vyňal z kontroly, nestráži
+   * NIKTO").
+   */
+  syncShopRevenue: (...args: unknown[]) => {
+    callOrder.push('revenue');
+    return syncShopRevenue(...args);
+  },
   // Runner si pre overovaciu požiadavku skladá vlastné nastavenia — mock musí
   // dodať aj tento kus, inak by test testoval iný kód než produkcia.
   salesSyncFlagsFromEnv: () => ({
@@ -97,6 +124,26 @@ function blockedSync(code: string) {
   return { ...OK_SYNC, outcome: 'partial', stoppedBy: 'error', error: code };
 }
 
+/** Dopočítaná denná tržba eshopu (D117) — tvar `ShopRevenueSyncResult`. */
+const OK_REVENUE = {
+  outcome: 'complete',
+  windowFrom: '2026-07-08',
+  windowTo: '2026-08-06',
+  days: [],
+  requestsUsed: 2,
+  readsUsed: 2,
+  capReached: false,
+  dailyBudgetReached: false,
+  stoppedBy: 'done',
+  resumeAt: null,
+  error: null,
+};
+
+/** Tržba, ktorú shop odmietol trvalou chybou (ban, 401/403). */
+function blockedRevenue(code: string) {
+  return { ...OK_REVENUE, outcome: 'partial', stoppedBy: 'error', error: code };
+}
+
 beforeEach(() => {
   resetSalesRunnerState();
   loadForUse.mockReset();
@@ -104,6 +151,9 @@ beforeEach(() => {
   getMeta.mockResolvedValue({ savedAt: null });
   syncSales.mockReset();
   syncSales.mockResolvedValue(OK_SYNC);
+  syncShopRevenue.mockReset();
+  syncShopRevenue.mockResolvedValue(OK_REVENUE);
+  callOrder.length = 0;
   reserve.mockReset();
   reserve.mockResolvedValue({ requested: 1, granted: 1, status: { remaining: 159 } });
   latestSyncStop.mockReset();
@@ -361,5 +411,125 @@ describe('sync-runner — trvalá prekážka sa neopakuje na rozvrhu', () => {
 
     expect(report.outcome).toBe('ran');
     expect((await runSalesSyncIfDue(T0 + SALES_MIN_INTERVAL_MS - 1)).outcome).toBe('too_soon');
+  });
+});
+
+/**
+ * DENNÁ TRŽBA ESHOPU V RUNNERI (D117) — doplnené 28. 8. 2026 pri zelenej bráne.
+ *
+ * Dovtedy túto vetvu nekryl ANI JEDEN test: mock `@/lib/engine/sales-sync`
+ * nemal export `syncShopRevenue`, runner ho volá vo vlastnom `try/catch`, a tak
+ * každý beh tichо skončil v poistnej vetve. Testy boli zelené a nemerali nič.
+ */
+describe('sync-runner — denná tržba eshopu (D117) je súčasťou behu, nie prílepok', () => {
+  it('tržba ide PRVÁ a kusy druhé — drahší beh nesmie vyhladovať lacnejší', async () => {
+    withKey();
+
+    const report = await runSalesSyncIfDue(T0);
+
+    expect(report.outcome).toBe('ran');
+    // Poradie je celé zdôvodnenie D117: zoznam objednávok stojí ~1 request na
+    // 100 objednávok, dopočítanie kusov 1 request na KAŽDÚ objednávku, a oba
+    // platia z toho istého denného rozpočtu dráhy `orders`.
+    expect(callOrder).toEqual(['revenue', 'units']);
+    expect(syncShopRevenue).toHaveBeenCalledTimes(1);
+    expect(syncSales).toHaveBeenCalledTimes(1);
+  });
+
+  it('výsledok tržby sa nesie v reporte — inak by o nej scheduler nevedel', async () => {
+    withKey();
+
+    const report = await runSalesSyncIfDue(T0);
+
+    expect(report.revenue).toEqual(expect.objectContaining({ outcome: 'complete', readsUsed: 2 }));
+    // A to isté musí vidieť aj neskoršie čítanie stavu (stavový pás appky).
+    expect(lastSalesRun()?.revenue).toEqual(expect.objectContaining({ outcome: 'complete' }));
+  });
+
+  it('oba behy dostanú TO ISTÉ zdieľané počítadlo čítaní (A4), nie každý vlastné', async () => {
+    withKey();
+
+    await runSalesSyncIfDue(T0);
+
+    const revenueDeps = syncShopRevenue.mock.calls[0]?.[0] as {
+      budget?: { reserveShopReads: (count?: number) => unknown };
+      key?: unknown;
+    };
+    const unitsDeps = syncSales.mock.calls[0]?.[0] as {
+      budget?: { reserveShopReads: (count?: number) => unknown };
+    };
+    // Kľúč dostane tržba tak isto ako kusy — bez neho by sa objednávok nedopýtala.
+    expect(revenueDeps.key).toBeDefined();
+
+    reserve.mockClear();
+    await revenueDeps.budget?.reserveShopReads(1);
+    await unitsDeps.budget?.reserveShopReads(1);
+    // Dve rezervácie na JEDNOM počítadle. Vlastné počítadlo pre každý beh by
+    // znamenalo dva stropy pre jeden kľúč — a shop ich sčíta.
+    expect(reserve).toHaveBeenCalledTimes(2);
+  });
+
+  it('prekážka zistená TRŽBOU zastaví beh a kusy sa už neskúšajú', async () => {
+    withKey();
+    syncShopRevenue.mockResolvedValue(blockedRevenue('ip_banned'));
+
+    const report = await runSalesSyncIfDue(T0);
+
+    expect(report.outcome).toBe('blocked');
+    // Tá istá odpoveď by prišla znova a minula by rozpočet.
+    expect(callOrder).toEqual(['revenue']);
+    expect(syncSales).not.toHaveBeenCalled();
+    // Prekážka sa vyhodnotí TOU ISTOU politikou ako pri kusoch (stop-policy.ts),
+    // hoci ju `sales_sync_state` ešte nepozná (tržba tam zámerne nezapisuje).
+    expect(report.block?.kind).toBe('ip_ban');
+    // Zmeraná tržba sa NEZAHODÍ len preto, že beh skončil na prekážke.
+    expect(report.revenue).toEqual(expect.objectContaining({ error: 'ip_banned' }));
+  });
+
+  it('overovacia požiadavka po bane tržbu VYNECHÁ — je to jedna otázka jedným requestom', async () => {
+    withKey();
+    latestSyncStop.mockResolvedValue({
+      code: 'ip_banned',
+      at: new Date(T0),
+      since: new Date(T0),
+    });
+
+    // Prvý tick prekážku len prečíta a určí termín overenia.
+    expect((await runSalesSyncIfDue(T0)).outcome).toBe('blocked');
+    callOrder.length = 0;
+
+    const probe = await runSalesSyncIfDue(T0 + IP_BAN_MIN_WAIT_MS);
+
+    expect(probe.outcome).toBe('ran');
+    // Druhý beh by zámer overovacej požiadavky poprel.
+    expect(callOrder).toEqual(['units']);
+    expect(syncShopRevenue).not.toHaveBeenCalled();
+    expect(probe.revenue).toBeNull();
+  });
+
+  it('výnimka z tržby NESMIE zhodiť dopočítanie kusov — tržba je analytika', async () => {
+    withKey();
+    syncShopRevenue.mockRejectedValue(new Error('tržba explodovala'));
+
+    const report = await runSalesSyncIfDue(T0);
+
+    // Toto je vetva, v ktorej ticho žil CELÝ tento súbor, kým mock nemal
+    // `syncShopRevenue`. Teraz je to tvrdenie o poistke, nie náhoda.
+    expect(report.outcome).toBe('ran');
+    expect(callOrder).toEqual(['revenue', 'units']);
+    expect(syncSales).toHaveBeenCalledTimes(1);
+    // Tržba sa nedopočítala a appka to prizná — NIE nulou (I11).
+    expect(report.revenue).toBeNull();
+  });
+
+  it('bez objednávkového kľúča sa tržba nepýta shopu vôbec', async () => {
+    loadForUse.mockResolvedValue(null);
+
+    const report = await runSalesSyncIfDue(T0);
+
+    expect(report.outcome).toBe('no_orders_key');
+    expect(callOrder).toEqual([]);
+    expect(syncShopRevenue).not.toHaveBeenCalled();
+    expect(report.revenue).toBeNull();
   });
 });

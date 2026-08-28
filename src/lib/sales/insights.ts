@@ -25,19 +25,62 @@
  *
  * Delenie SQL a výpočtu je zámerné: metriky sú čisté funkcie a testujú sa
  * bez DB, presne ako `src/lib/ai/rules.ts`.
+ *
+ * KPI PRODUKTU (sekcia 6, 28. 8. 2026 — D114 v revízii D117–D119)
+ * ---------------------------------------------------------------
+ * Pribudla druhá čítacia strana: KPI riadku produktu. Miešajú sa v nej DVA
+ * zdroje a ten rozdiel je celý dôvod, prečo je to napísané tu a nie v repozitári:
+ *
+ *   · obohatenie z `GET /api/products/getFull` (cena, marža €/%, aktívna zľava,
+ *     sklad, celkovo predané, posledný predaj, referencia, dodávateľ) — číta ho
+ *     `catalogRepo.kpiRowsFor()`,
+ *   · vlastné denné predaje (kusy za okno 30 a 90 dní) — číta ich SQL nižšie,
+ *     a to VÝHRADNE za dni so `status = 'complete'`.
+ *
+ * Tri veci z hlavičky vyššie sa tým NEMENIA a treba ich čítať doslova:
+ *
+ *  1. **Účtovná obrátkovosť sa stále vypočítať NEDÁ.** `getFull` dodal nákupnú
+ *     cenu (teda COGS na kus) aj sklad na úrovni produktu, ale sklad je JEDINÁ
+ *     MOMENTKA, nie priemer za obdobie — a bez priemernej zásoby je
+ *     `(Ø zásoba × dní) / COGS` vymyslené číslo. Preto sa pomer
+ *     `qty_in_orders / qty` menuje `soldPerStock` a NIE menom účtovnej metriky
+ *     — ani v kóde, ani na povrchu (stráži to `test/unit/sales-insights.spec.ts`,
+ *     ktorý anglický názov tej metriky v tomto súbore zakazuje). D119 pod
+ *     „obrátkovosťou" myslí práve tie merané fakty, nie účtovnú metriku.
+ *  2. **Peniaze na produkt neexistujú.** Sonda 28. 8. 2026 potvrdila, že
+ *     `order/get` vracia položky ako `{id, qty}` bez ceny (D117), takže KPI
+ *     nesie marže a ceny z `getFull`, ale obrat na produkt NIE. Za okno sa
+ *     počítajú výhradne KUSY.
+ *  3. **Sieť tu nie je.** KPI čítajú len lokálnu DB (K8) — obrazovka nesmie pri
+ *     renderi volať shop.
  */
 import type {
+  CatalogEnrichmentRecord,
   DateOnly,
   DbRow,
+  KpiActiveDiscount,
+  KpiGap,
+  KpiNoSale,
+  KpiValue,
+  KpiWindowCoverage,
+  KpiWindowUnits,
+  ProductKpiPage,
+  ProductKpiRow,
   ProductSalesDay,
   ProductSalesMetrics,
   Queryable,
   SalesCoverage,
+  SalesDayCoverage,
   SalesSyncDay,
+  UtcDate,
 } from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
-import { addDays, diffDays, isDateOnly } from '@/lib/domain/dates';
+import { addDays, diffDays, isDateOnly, todayInZone } from '@/lib/domain/dates';
+import type { CatalogKpiRow, CatalogRepoExt } from '@/lib/repo/catalog.repo';
+import { catalogRepo } from '@/lib/repo/catalog.repo';
+import type { SalesRepoContract } from '@/lib/repo/sales.repo';
+import { salesRepo } from '@/lib/repo/sales.repo';
 import type { SalesStopRecord } from '@/lib/sales/stop-policy';
 
 /* ═══════════════════════════ 1. Konštanty ═════════════════════════════════ */
@@ -159,6 +202,34 @@ const SQL_CAMPAIGN_UNITS =
 const SQL_DAILY_UNITS_PREFIX =
   'SELECT product_id, sale_day, units_sold FROM product_sales_daily ' +
   'WHERE sale_day >= ? AND sale_day <= ? AND product_id IN ';
+
+/**
+ * KPI: predané kusy za KRÁTKE aj DLHÉ okno, jedným dotazom na celú stránku
+ * produktov (D114, D119).
+ *
+ * `JOIN sales_sync_state … status = 'complete'` je celý zmysel tohto dotazu a
+ * NIE JE to optimalizácia. Bez neho `SUM(units_sold)` ticho sčíta stiahnuté aj
+ * nestiahnuté dni do jedného čísla, ktoré vyzerá ako súčet okna — a to je presne
+ * tá lož, ktorú I11 zakazuje. `INNER JOIN` znamená, že deň, ktorý nie je
+ * dočítaný, do sumy neprispeje ani nulou: v okne o ňom nevieme nič a povie to
+ * `unknownDays` (viď `windowCoverage()`).
+ *
+ * `partial` deň je z rovnakého dôvodu VONKU. Jeho kusy sú len časť dňa a
+ * pripočítať ich by znamenalo vydávať dolnú hranicu dňa za deň.
+ *
+ * Krátke okno je poddotazom TOHO ISTÉHO prechodu (`CASE WHEN sale_day >= ?`),
+ * nie druhým dotazom: 30 dní je podmnožina 90 dní, takže druhé čítanie tých
+ * istých riadkov by bola len druhá príležitosť, ako sa rozísť s prvým.
+ */
+const SQL_KPI_UNITS_PREFIX =
+  'SELECT s.product_id, ' +
+  'SUM(CASE WHEN s.sale_day >= ? THEN s.units_sold ELSE 0 END) AS units_short, ' +
+  'SUM(s.units_sold) AS units_long ' +
+  'FROM product_sales_daily s ' +
+  "JOIN sales_sync_state t ON t.sale_day = s.sale_day AND t.status = 'complete' " +
+  'WHERE s.sale_day >= ? AND s.sale_day <= ? AND s.product_id IN ';
+
+const SQL_KPI_UNITS_SUFFIX = ' GROUP BY s.product_id';
 
 /* ══════════════════════════ 4. Čítacie dotazy ═════════════════════════════ */
 
@@ -407,8 +478,413 @@ export function describeCoverageSk(coverage: SalesCoverage): string {
   return `${coverage.from} – ${coverage.to} (${coverage.daysCovered} dní)`;
 }
 
+/* ══════════ 6. KPI produktu (D114 v revízii D117–D119, I11) ══════════════ */
+
+/** Krátke okno KPI — D114 „predané ks 30 d". */
+export const KPI_WINDOW_SHORT_DAYS = 30;
+/** Dlhé okno KPI — D114 „ks 90 d"; z neho vzniká aj značka „bez predaja". */
+export const KPI_WINDOW_LONG_DAYS = 90;
+/** Strop okna. 400 dní je viac než najdlhšie okno, ktoré UI ponúka. */
+const MAX_KPI_WINDOW_DAYS = 400;
+/** Strop jednej strany KPI. UI stránkuje po 100; 500 je poistka, nie plán. */
+const MAX_KPI_PRODUCTS = 500;
+
+const kpiKnown = <T>(value: T): KpiValue<T> => ({ value, gap: null });
+const kpiMissing = <T>(gap: KpiGap): KpiValue<T> => ({ value: null, gap });
+
+/**
+ * Hodnota z obohatenia — a keď chýba, DÔVOD prečo (I11).
+ *
+ * Dva dôvody, ktoré sa nesmú zliať: `not_enriched` znamená, že `getFull` sa na
+ * produkt nikdy nepýtalo (kvóta ~200/deň, D118), `shop_has_none` znamená, že
+ * pýtalo a shop o tom poli nič nevie. Prvý sa rieši otvorením produktu, druhý
+ * sa nerieši vôbec — a nula nie je odpoveď ani na jeden.
+ *
+ * Porovnania sú EXPLICITNE proti `null`: `!value` by z vypredaného produktu
+ * (`qty === 0`) urobilo neznámy sklad a Turbopack taký guard v tomto repe už
+ * raz zahodil ako compile-time falsy.
+ */
+function fromEnrichment<T>(enrichedAt: UtcDate | null, value: T | null): KpiValue<T> {
+  if (enrichedAt === null) return kpiMissing('not_enriched');
+  return value === null ? kpiMissing('shop_has_none') : kpiKnown(value);
+}
+
+/**
+ * Beží na produkte zľava PODĽA SHOPU v deň `today`?
+ *
+ * Porovnáva sa po DŇOCH, nie po okamihoch, a to zámerne: shop posiela
+ * `reduction_from`/`reduction_to` ako dátum s hodinami a keby sa `to` bralo ako
+ * presný okamih (typicky polnoc koncového dňa), zľava, ktorá celý ten deň beží,
+ * by od druhej sekundy po polnoci vyzerala ako `ended`. Deň sa počíta v zóne
+ * logiky cez `todayInZone()` (D31), NIKDY v UTC — inak by sa medzi 22:00 a
+ * 24:00 UTC posudzovalo voči zajtrajšku. Je to tá istá dohoda, akú má
+ * `campaigns.date_from/date_to` (okno je vrátane oboch krajných dní).
+ *
+ * `state === 'none'` je MERANÝ FAKT („shop povedal, že nič nebeží"), kým
+ * `unknown` je nevedomosť. `measuredAt` hovorí, kedy to bolo zmerané — bez neho
+ * by obrazovka tvrdila, že pozná stav zľavy v shope TERAZ (I11).
+ */
+export function kpiActiveDiscount(
+  enrichment: CatalogEnrichmentRecord,
+  today: DateOnly,
+): KpiActiveDiscount {
+  const { enrichedAt, reductionPercent, reductionFrom, reductionTo } = enrichment;
+
+  if (enrichedAt === null) {
+    return {
+      state: 'unknown',
+      activePercent: kpiMissing('not_enriched'),
+      reportedPercent: kpiMissing('not_enriched'),
+      from: null,
+      to: null,
+      measuredAt: null,
+    };
+  }
+
+  // Všetky tri naraz `null` je jediná veta, ktorú shop o „žiadnej zľave" hovorí
+  // (kontrakt `CatalogEnrichmentRecord`). Preto `none`, nie `unknown`.
+  if (reductionPercent === null && reductionFrom === null && reductionTo === null) {
+    return {
+      state: 'none',
+      activePercent: kpiMissing('shop_has_none'),
+      reportedPercent: kpiMissing('shop_has_none'),
+      from: null,
+      to: null,
+      measuredAt: enrichedAt,
+    };
+  }
+
+  // Nekonzistentná trojica: zápisová strana ju neukládá (`isReductionStorable`),
+  // takže sem sa dostať nemá. Keď sa dostane, je to NEVEDOMOSŤ — dopočítať si
+  // chýbajúcu hranicu okna by znamenalo vymyslieť si stav zľavy v produkcii.
+  if (reductionPercent === null || reductionFrom === null || reductionTo === null) {
+    return {
+      state: 'unknown',
+      activePercent: kpiMissing('shop_has_none'),
+      reportedPercent: kpiMissing('shop_has_none'),
+      from: reductionFrom,
+      to: reductionTo,
+      measuredAt: enrichedAt,
+    };
+  }
+
+  const fromDay = todayInZone(reductionFrom);
+  const toDay = todayInZone(reductionTo);
+  const state = toDay < today ? 'ended' : fromDay > today ? 'scheduled' : 'running';
+
+  return {
+    state,
+    // Mimo `running` je „aktívna zľava" nula prípadov — a percento budúceho či
+    // uplynulého okna do toho stĺpca NESMIE, inak obrazovka ukáže zľavu, ktorá
+    // nebeží. Kto potrebuje to číslo, má `reportedPercent`.
+    activePercent: state === 'running' ? kpiKnown(reductionPercent) : kpiMissing('shop_has_none'),
+    reportedPercent: kpiKnown(reductionPercent),
+    from: reductionFrom,
+    to: reductionTo,
+    measuredAt: enrichedAt,
+  };
+}
+
+/**
+ * Koľko dní okna je DOČÍTANÝCH a koľko z neho appka NEMÁ (D119).
+ *
+ * `unknownDays` sa počíta ako „okno mínus dočítané dni", NIE ako počet riadkov,
+ * ktoré nemajú `complete`. Rozdiel je celý zmysel funkcie: deň, o ktorom
+ * `sales_sync_state` nemá ANI RIADOK, sa nesťahoval — a keby sa počítali len
+ * existujúce riadky, prázdna tabuľka by vyšla ako plne pokryté okno.
+ */
+export function windowCoverage(
+  days: readonly { day: DateOnly; coverage: SalesDayCoverage }[],
+  from: DateOnly,
+  to: DateOnly,
+): KpiWindowCoverage {
+  const windowDays = isDateOnly(from) && isDateOnly(to) ? Math.max(0, diffDays(from, to) + 1) : 0;
+  let completeDays = 0;
+  for (const row of days) {
+    if (!isDateOnly(row.day) || row.day < from || row.day > to) continue;
+    if (row.coverage === 'complete') completeDays += 1;
+  }
+  const capped = Math.min(completeDays, windowDays);
+  return { windowDays, from, to, completeDays: capped, unknownDays: windowDays - capped };
+}
+
+/**
+ * Kusy za okno pre jeden produkt — s priznaním, čo z okna chýba.
+ *
+ * TRI STAVY, ktoré sa tu rozhodujú:
+ *  · `completeDays === 0` → `units.value = null`, `gap: 'days_missing'`. Z okna
+ *    nie je dočítaný ani jeden deň, takže nula by bola tvrdenie o nepredaní.
+ *  · `unknownDays > 0` → hodnota JE, ale je to DOLNÁ HRANICA (`lowerBound`).
+ *  · `unknownDays === 0` → hodnota je celé okno; `0` znamená „nepredalo sa nič".
+ *
+ * `units ?? 0` NIE JE dosadená nula: `product_sales_daily` má riadok len pre
+ * (produkt, deň) s predajom, a `status = 'complete'` znamená, že ten deň sa
+ * prečítal CELÝ (0009 + hlavička 0014 §4). Chýbajúci riadok v dočítanom dni je
+ * teda ZMERANÁ nula. Keď nie je dočítaný ani jeden deň, sem sa to nedostane.
+ */
+function kpiWindowUnits(coverage: KpiWindowCoverage, units: number | undefined): KpiWindowUnits {
+  if (coverage.completeDays === 0) {
+    return { ...coverage, units: kpiMissing('days_missing'), lowerBound: coverage.windowDays > 0 };
+  }
+  const value = Math.max(0, Math.trunc(units ?? 0));
+  const lowerBound = coverage.unknownDays > 0;
+  return {
+    ...coverage,
+    units: lowerBound ? { value, gap: 'days_missing' } : kpiKnown(value),
+    lowerBound,
+  };
+}
+
+/**
+ * Značka „bez predaja" (ležiak). Vzniká LEN s dôkazom (D119).
+ *
+ * NEOBOHATENÝ PRODUKT NIE JE MŔTVY PRODUKT — je to neznámy produkt, a preto
+ * neobohatený riadok s nestiahnutým oknom dostane `mark: false` bez dôkazu.
+ * Dva dôkazy, ktoré značku unesú:
+ *
+ *  1. `shop_never_ordered` — `getFull` povedal `last_time_in_order = NULL` A
+ *     `qty_in_orders = 0`. Vyžadujú sa OBE: `qty_in_orders > 0` bez dátumu je
+ *     protirečivá odpoveď a z protirečenia sa značka odvodiť nesmie. Toto je
+ *     dôkaz, ktorý D119 myslí — jeden request na produkt namiesto tisícov
+ *     objednávok.
+ *  2. `no_sale_in_covered_days` — DLHÉ okno je celé dočítané (`unknownDays === 0`)
+ *     a v ňom nula kusov. Čiastočne pokryté okno s nulou nedokazuje nič.
+ *
+ * Krátke okno značku nedáva zámerne: tridsať dní bez predaja nie je pri šperkoch
+ * ležiak, a keby sa značka viazala na kratšie okno, sypala by sa na polovicu
+ * katalógu.
+ *
+ * ZVAŽOVANÝ A ZAMIETNUTÝ tretí dôkaz: „`last_time_in_order` je starší než
+ * začiatok okna". Vyzerá lákavo, ale hodnota platí k času `enriched_at`, takže
+ * o období medzi obohatením a dneškom nehovorí nič — pri týždeň starom obohatení
+ * by značka tvrdila viac, než sa zmeralo. UI má na to `lastSaleAt` spolu
+ * s `measuredAt` a môže povedať „posledný predaj pred N dňami (stav k …)".
+ */
+export function kpiNoSale(
+  enrichment: CatalogEnrichmentRecord,
+  longWindow: KpiWindowUnits,
+): KpiNoSale {
+  const { enrichedAt, lastTimeInOrder, qtyInOrders } = enrichment;
+  if (enrichedAt !== null && lastTimeInOrder === null && qtyInOrders === 0) {
+    return { mark: true, proof: 'shop_never_ordered' };
+  }
+  if (longWindow.unknownDays === 0 && longWindow.units.value === 0) {
+    return { mark: true, proof: 'no_sale_in_covered_days' };
+  }
+  return { mark: false, proof: null };
+}
+
+/**
+ * Koľkokrát sa aktuálna zásoba už predala (`qty_in_orders / qty`).
+ *
+ * NIE JE to účtovná obrátkovosť (viď hlavička modulu). Keď je sklad `0`, pomer
+ * hodnotu nemá — a to je `not_computable`, teda TRETÍ dôvod, iný než „nevieme".
+ * Vypredaný produkt totiž poznáme presne; len ten pomer sa o ňom povedať nedá.
+ */
+function kpiSoldPerStock(
+  soldTotal: KpiValue<number>,
+  stock: KpiValue<number>,
+): KpiValue<number> {
+  if (soldTotal.value === null) return kpiMissing(soldTotal.gap ?? 'shop_has_none');
+  if (stock.value === null) return kpiMissing(stock.gap ?? 'shop_has_none');
+  if (stock.value === 0) return kpiMissing('not_computable');
+  return kpiKnown(round2(soldTotal.value / stock.value));
+}
+
+/**
+ * Dni od posledného predaja podľa shopu. Je to HORNÁ hranica: hodnota je meraná
+ * k času `enriched_at`, takže od obohatenia mohol pribudnúť predaj, o ktorom
+ * appka nevie. Deň sa berie v zóne logiky (D31), nikdy v UTC.
+ */
+function kpiDaysSinceLastSale(lastSaleAt: KpiValue<UtcDate>, today: DateOnly): KpiValue<number> {
+  if (lastSaleAt.value === null) return kpiMissing(lastSaleAt.gap ?? 'shop_has_none');
+  const saleDay = todayInZone(lastSaleAt.value);
+  if (!isDateOnly(saleDay) || !isDateOnly(today)) return kpiMissing('not_computable');
+  return kpiKnown(Math.max(0, diffDays(saleDay, today)));
+}
+
+/** Kusy oboch okien pre jeden produkt tak, ako ich vrátil jeden dotaz. */
+export interface KpiUnitsRow {
+  shortUnits: number;
+  longUnits: number;
+}
+
+export interface ProductKpiInput {
+  /** Riadky zrkadla s obohatením — v poradí, v akom ich má tabuľka nakresliť. */
+  products: readonly CatalogKpiRow[];
+  /**
+   * Kusy za obe okná. CHÝBAJÚCI KĽÚČ znamená „v dočítaných dňoch bez predaja",
+   * nie „nevieme" — či sa vôbec niečo dočítalo, hovorí `window30`/`window90`.
+   */
+  units: ReadonlyMap<number, KpiUnitsRow>;
+  window30: KpiWindowCoverage;
+  window90: KpiWindowCoverage;
+  /** Deň, voči ktorému sa posudzuje zľava a dni od predaja (D31). */
+  today: DateOnly;
+}
+
+/**
+ * Čisté zloženie KPI riadku z dvoch zdrojov. Bez DB a bez siete — presne preto
+ * sa dajú všetky tri stavy každého KPI otestovať bez MariaDB.
+ */
+export function buildProductKpis(input: ProductKpiInput): ProductKpiRow[] {
+  const { today, window30, window90 } = input;
+  return input.products.map((product) => {
+    const e = product.enrichment;
+    const at = e.enrichedAt;
+    const units = input.units.get(product.productId);
+    const units30 = kpiWindowUnits(window30, units?.shortUnits);
+    const units90 = kpiWindowUnits(window90, units?.longUnits);
+    const stock = fromEnrichment(at, e.qty);
+    const soldTotal = fromEnrichment(at, e.qtyInOrders);
+    const lastSaleAt = fromEnrichment<UtcDate>(at, e.lastTimeInOrder);
+
+    return {
+      productId: product.productId,
+      missing: product.missing,
+      name: product.name,
+      reference: fromEnrichment(at, e.reference),
+      supplier: fromEnrichment(at, e.supplier),
+      listPrice: product.price,
+      priceWithVat: fromEnrichment(at, e.sellPriceWithVat),
+      purchasePrice: fromEnrichment(at, e.purchasePrice),
+      // Marža sa NEPOČÍTA — shop ju dáva hotovú a appka číta uloženú hodnotu.
+      margin: fromEnrichment(at, e.margin),
+      marginPercent: fromEnrichment(at, e.marginPercent),
+      discount: kpiActiveDiscount(e, today),
+      stock,
+      soldTotal,
+      lastSaleAt,
+      daysSinceLastSale: kpiDaysSinceLastSale(lastSaleAt, today),
+      soldPerStock: kpiSoldPerStock(soldTotal, stock),
+      units30,
+      units90,
+      noSale: kpiNoSale(e, units90),
+      enrichedAt: at,
+    };
+  });
+}
+
+/**
+ * Kusy za krátke aj dlhé okno pre celú stránku produktov — JEDEN dotaz, žiadne
+ * N+1 (viď `SQL_KPI_UNITS_PREFIX`, kde je aj dôvod `JOIN`-u na `complete`).
+ *
+ * Produkt, ktorý v mape nie je, sa v dočítaných dňoch nepredal. Že to nie je
+ * „nevieme", vie volajúci z pokrytia okna, nie z tejto mapy.
+ */
+export async function kpiUnitsInCompleteDays(
+  productIds: readonly number[],
+  range: { shortFrom: DateOnly; longFrom: DateOnly; to: DateOnly },
+  conn?: Queryable,
+): Promise<Map<number, KpiUnitsRow>> {
+  const out = new Map<number, KpiUnitsRow>();
+  const ids = [...new Set(productIds)].filter(isValidId).slice(0, MAX_KPI_PRODUCTS);
+  if (ids.length === 0) return out;
+  if (!isDateOnly(range.shortFrom) || !isDateOnly(range.longFrom) || !isDateOnly(range.to)) {
+    return out;
+  }
+  if (range.longFrom > range.to || range.shortFrom > range.to) return out;
+
+  const placeholders = `(${ids.map(() => '?').join(', ')})`;
+  const rows = await run<DbRow[]>(
+    conn,
+    SQL_KPI_UNITS_PREFIX + placeholders + SQL_KPI_UNITS_SUFFIX,
+    [range.shortFrom, range.longFrom, range.to, ...ids],
+  );
+  for (const row of Array.isArray(rows) ? rows : []) {
+    out.set(num(row.product_id), {
+      shortUnits: Math.max(0, Math.trunc(num(row.units_short))),
+      longUnits: Math.max(0, Math.trunc(num(row.units_long))),
+    });
+  }
+  return out;
+}
+
+export interface ProductKpiOptions {
+  /** Deň, voči ktorému sa počítajú okná. Default: dnes v zóne logiky (D31). */
+  today?: DateOnly;
+  /** Náhrada „teraz" pre testy — z nej sa `today` odvodí, nikdy v UTC. */
+  now?: UtcDate;
+  shortWindowDays?: number;
+  longWindowDays?: number;
+  /** Zrkadlo katalógu (obohatenie). Default: produkčný repozitár. */
+  catalog?: Pick<CatalogRepoExt, 'kpiRowsFor'>;
+  /** Pokrytie dní po dňoch. Default: produkčný repozitár predajnosti. */
+  sales?: Pick<SalesRepoContract, 'coverageFor'>;
+  conn?: Queryable;
+}
+
+/** Okno v dňoch: nezmysel spadne na predvoľbu, nie na nulu. */
+function clampWindowDays(value: number | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const days = Math.trunc(Number(value));
+  if (!Number.isFinite(days) || days < 1) return fallback;
+  return Math.min(days, MAX_KPI_WINDOW_DAYS);
+}
+
+/**
+ * KPI celej stránky produktov (D114) — TRI dotazy bez ohľadu na počet riadkov:
+ *
+ *  1. `catalogRepo.kpiRowsFor()` — názov, cenníková cena a obohatenie,
+ *  2. `salesRepo.coverageFor()`  — pokrytie dní dlhého okna (z neho sa spočíta
+ *     aj krátke, lebo 30 dní je jeho podmnožina),
+ *  3. `kpiUnitsInCompleteDays()` — kusy za obe okná.
+ *
+ * Dotazy idú SEKVENČNE, nie v `Promise.all`: volajúci môže poslať `conn`, a to
+ * je JEDNO spojenie MariaDB — dva súbežné dotazy na ňom sa pobijú. Zrýchlenie
+ * by aj tak žiadne nebolo, dotazy sú tri.
+ *
+ * Prázdny (alebo celý neplatný) zoznam ID nečíta DB vôbec a vráti okná ako
+ * NEPOKRYTÉ. Je to bezpečný smer: „nevieme" sa dá nakresliť, vymyslené pokrytie
+ * nie (I11).
+ */
+export async function productKpis(
+  productIds: readonly number[],
+  opts: ProductKpiOptions = {},
+): Promise<ProductKpiPage> {
+  const today =
+    opts.today !== undefined && isDateOnly(opts.today)
+      ? opts.today
+      : todayInZone(opts.now ?? new Date());
+  const longDays = clampWindowDays(opts.longWindowDays, KPI_WINDOW_LONG_DAYS);
+  const shortDays = Math.min(clampWindowDays(opts.shortWindowDays, KPI_WINDOW_SHORT_DAYS), longDays);
+  const longFrom = addDays(today, -(longDays - 1));
+  const shortFrom = addDays(today, -(shortDays - 1));
+
+  const ids = [...new Set(productIds)].filter(isValidId).slice(0, MAX_KPI_PRODUCTS);
+  if (ids.length === 0) {
+    return {
+      today,
+      window30: windowCoverage([], shortFrom, today),
+      window90: windowCoverage([], longFrom, today),
+      rows: [],
+    };
+  }
+
+  const catalog = opts.catalog ?? catalogRepo;
+  const sales = opts.sales ?? salesRepo;
+
+  const rowsById = await catalog.kpiRowsFor(ids, opts.conn);
+  const coverage = await sales.coverageFor(longFrom, today, opts.conn);
+  const units = await kpiUnitsInCompleteDays(ids, { shortFrom, longFrom, to: today }, opts.conn);
+
+  const window30 = windowCoverage(coverage.days, shortFrom, today);
+  const window90 = windowCoverage(coverage.days, longFrom, today);
+
+  // Poradie riadkov je poradie, v akom ID prišli — tabuľka si triedenie
+  // rozhodla dotazom v katalógu a KPI ho nesmú prehodiť.
+  const products: CatalogKpiRow[] = [];
+  for (const productId of ids) {
+    const row = rowsById.get(productId);
+    if (row !== undefined) products.push(row);
+  }
+
+  return { today, window30, window90, rows: buildProductKpis({ products, units, window30, window90, today }) };
+}
+
 export const salesInsights = {
   syncDays,
   dailyUnits,
   latestSyncStop,
+  productKpis,
 };

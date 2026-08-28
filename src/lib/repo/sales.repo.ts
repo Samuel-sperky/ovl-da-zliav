@@ -15,14 +15,44 @@
  * prepočte dňa už nefigurujú, sa pre daný deň zmažú — inak by po korekcii
  * ostal v tabuľke duch starého súčtu.
  *
+ * DENNÁ TRŽBA ESHOPU A POKRYTIE OKNA (28. 8. 2026, migrácia 0014, D117)
+ * ---------------------------------------------------------------------
+ * Sonda 28. 8. 2026 potvrdila, že API NEVRACIA ceny položiek objednávky
+ * (`order/get` → `products: [{id, qty}]`). Tržba v eurách preto pribudla
+ * VÝHRADNE na úrovni celého eshopu — `shop_revenue_daily`, súčet `total_paid`
+ * za deň a menu. **Rozdeľovať ju medzi položky je zakázané** (D117): v sume je
+ * poštovné, zľavy a kupóny, takže akékoľvek rozdelenie by bolo vymyslené číslo
+ * vydávané za obrat produktu (I11). Per produkt zostávajú výhradne KUSY.
+ *
+ * `coverageFor()` je čítacia strana rozlíšenia, ktoré do schémy zaviedla 0009 a
+ * ktoré je pre I11 kľúčové: `product_sales_daily` má riadok len pre (produkt,
+ * deň) s predajom, takže „žiadny riadok" znamená DVE úplne rôzne veci a rozhodne
+ * o nich až `sales_sync_state`:
+ *
+ *   · deň so `status = 'complete'`  ⇒ produkt sa v ten deň NEPREDAL (platná nula),
+ *   · deň bez riadku, `pending` alebo `partial` ⇒ NEVIEME (pomlčka); `partial`
+ *     je navyše len DOLNÁ HRANICA, nikdy súčet.
+ *
+ * Samotný `SUM(units_sold)` nad oknom ticho sčíta stiahnuté aj nestiahnuté dni
+ * do jedného čísla, preto obrazovka musí pokrytie priznať — a `coverageFor()` je
+ * to, čím ho zistí bez druhého zdroja pravdy.
+ *
  * Raw parametrizované SQL, žiadne ORM (rovnaký vzor ako ostatné repozitáre).
  * I4: žiadny prístup k `audit_log`.
  *
  * Vlastník: sales-sync.
  */
-import type { DateOnly, DbRow, Queryable } from '@/contracts';
+import type {
+  DateOnly,
+  DbRow,
+  MoneyString,
+  Queryable,
+  SalesDayCoverage,
+  ShopRevenueDayRecord,
+} from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
+import { addDays } from '@/lib/domain/dates';
 
 /* ═══════════════════════════════ 1. Typy ══════════════════════════════════ */
 
@@ -54,11 +84,80 @@ export interface SalesSyncStateRecord {
  */
 export type SalesSyncStateWrite = Omit<SalesSyncStateRecord, 'day'>;
 
+/**
+ * Zápis jedného dňa tržby ESHOPU (D117). Bez `day` a `currency` — tie sú kľúč.
+ *
+ * `dayComplete` MUSÍ hovoriť pravdu: `false` znamená, že súčet je zatiaľ len
+ * dolná hranica. Bez toho posledný (rozbehnutý) deň vždy vyzerá ako prudký
+ * pokles tržieb a graf kreslí pád, ktorý sa nestal.
+ */
+export interface ShopRevenueDayWrite {
+  /** Súčet `total_paid` ako string (DECIMAL) alebo číslo. */
+  totalPaidSum: MoneyString | number;
+  ordersCount: number;
+  dayComplete: boolean;
+  pagesRead?: number;
+}
+
+/**
+ * Pokrytie jedného dňa okna (I11). `units` je súčet kusov produktu za ten deň
+ * — má význam LEN pri `coverage === 'complete'`.
+ */
+export interface SalesDayCoverageRow {
+  day: DateOnly;
+  coverage: SalesDayCoverage;
+  /** Koľko dní z okna appka naozaj má, sa nedá odvodiť z jedného riadku. */
+  ordersSeen: number;
+}
+
+/** Pokrytie celého okna naraz — podklad pre priznanú medzeru v grafe (D119). */
+export interface SalesCoverageResult {
+  from: DateOnly;
+  to: DateOnly;
+  /** Riadok pre KAŽDÝ deň okna; nesťahovaný deň má `coverage: 'missing'`. */
+  days: SalesDayCoverageRow[];
+  /** Koľko dní okna je naozaj dočítaných (`complete`). */
+  completeDays: number;
+  /**
+   * Koľko dní okna je „nevieme" (`missing` + `pending` + `partial`). `0` je
+   * jediný stav, pri ktorom smie obrazovka súčet okna ukázať bez medzery.
+   */
+  unknownDays: number;
+}
+
 export interface SalesRepoContract {
   replaceDayUnits(day: DateOnly, rows: DailyUnitsRow[], conn?: Queryable): Promise<number>;
   getSyncState(day: DateOnly, conn?: Queryable): Promise<SalesSyncStateRecord | null>;
   listSyncStates(from: DateOnly, to: DateOnly, conn?: Queryable): Promise<SalesSyncStateRecord[]>;
   saveSyncState(day: DateOnly, state: SalesSyncStateWrite, conn?: Queryable): Promise<void>;
+
+  /* ── D117: denná tržba ESHOPU (nikdy per produkt) ────────────────────── */
+
+  /**
+   * Upsert dennej tržby eshopu pre (deň, menu). Idempotentný ABSOLÚTNY zápis
+   * ako `replaceDayUnits()` — opakovaný beh nad tým istým dňom nemôže sumu
+   * zdvojnásobiť.
+   */
+  upsertRevenueDay(
+    day: DateOnly,
+    currency: string,
+    write: ShopRevenueDayWrite,
+    conn?: Queryable,
+  ): Promise<void>;
+  /**
+   * Denná tržba za okno, zoradená podľa dňa. Vracia LEN dni, ktoré sa naozaj
+   * čítali — chýbajúci deň sa NEDOPLŇUJE nulou (I11), to je práca čítacej
+   * strany, ktorá vie, koľko dní graf kreslí.
+   */
+  listRevenue(from: DateOnly, to: DateOnly, conn?: Queryable): Promise<ShopRevenueDayRecord[]>;
+
+  /* ── I11: „0 predaných" verzus „tento deň sa nesťahoval" ─────────────── */
+
+  /**
+   * Pokrytie okna po dňoch. Riadok dostane KAŽDÝ deň okna, aj ten, o ktorom
+   * `sales_sync_state` nič nemá — vtedy je `coverage: 'missing'`.
+   */
+  coverageFor(from: DateOnly, to: DateOnly, conn?: Queryable): Promise<SalesCoverageResult>;
 }
 
 /* ═══════════════════════════ 2. Konštanty a SQL ═══════════════════════════ */
@@ -94,6 +193,44 @@ const SQL_STATE_UPSERT =
   'finished_at = VALUES(finished_at)';
 
 const SQL_UNITS_DELETE_DAY = 'DELETE FROM product_sales_daily WHERE sale_day = ?';
+
+/* ── D117: denná tržba ESHOPU (`shop_revenue_daily`, migrácia 0014) ─────── */
+
+const REVENUE_COLUMNS =
+  'revenue_day, currency, total_paid_sum, orders_count, day_complete, pages_read, updated_at';
+
+/**
+ * Absolútny upsert dňa, nie inkrement — presne z toho istého dôvodu ako
+ * `replaceDayUnits()`: opakovaný beh nad tým istým dňom musí vrátiť to isté
+ * číslo. `total_paid_sum = VALUES(...)`, NIKDY `total_paid_sum + ?`.
+ *
+ * `day_complete` sa PREPÍŠE na to, čo hovorí posledný beh. Zámerne aj z `1` na
+ * `0`: keď sa deň prepočítava znova a beh sa preruší, deň už dočítaný NIE JE a
+ * tvrdiť opak by bola presne tá lož, ktorú tento stĺpec má zabrániť.
+ */
+const SQL_REVENUE_UPSERT =
+  'INSERT INTO shop_revenue_daily ' +
+  '(revenue_day, currency, total_paid_sum, orders_count, day_complete, pages_read) ' +
+  'VALUES (?, ?, ?, ?, ?, ?) ' +
+  'ON DUPLICATE KEY UPDATE ' +
+  'total_paid_sum = VALUES(total_paid_sum), ' +
+  'orders_count = VALUES(orders_count), ' +
+  'day_complete = VALUES(day_complete), ' +
+  'pages_read = VALUES(pages_read)';
+
+const SQL_REVENUE_RANGE =
+  `SELECT ${REVENUE_COLUMNS} FROM shop_revenue_daily ` +
+  'WHERE revenue_day >= ? AND revenue_day <= ? ' +
+  'ORDER BY revenue_day ASC, currency ASC LIMIT ?';
+
+/** Strop riadkov jedného čítania tržieb — dva roky a dve meny sa zmestia. */
+const MAX_REVENUE_ROWS = 1500;
+
+/** Strop dní jedného okna pokrytia. 400 dní je viac než najdlhšie okno UI. */
+const MAX_COVERAGE_DAYS = 400;
+
+/** Kód meny podľa API shopu (ISO, `'EUR'`). Nič iné sa do kľúča nedostane. */
+const CURRENCY_RE = /^[A-Za-z]{3}$/;
 
 /* ═══════════════════════════ 3. Pomocníci ═════════════════════════════════ */
 
@@ -243,7 +380,110 @@ export function createSalesRepo(deps: SalesRepoDeps = {}): SalesRepoContract {
     ]);
   }
 
-  return { replaceDayUnits, getSyncState, listSyncStates, saveSyncState };
+  /* ── D117: denná tržba ESHOPU ─────────────────────────────────────────── */
+
+  async function upsertRevenueDay(
+    day: DateOnly,
+    currency: string,
+    write: ShopRevenueDayWrite,
+    conn?: Queryable,
+  ): Promise<void> {
+    if (!isDay(day)) return;
+    const code = String(currency ?? '').trim().toUpperCase();
+    // Mena je časť primárneho kľúča a súčasne to, čo obrazovka NESMIE sčítať
+    // cez meny. Nezmyselný kód by vyrobil štvrtý riadok dňa, o ktorom nikto nič
+    // nevie — fail-closed teda nezapíšeme nič.
+    if (!CURRENCY_RE.test(code)) return;
+
+    // `DECIMAL` ide do DB ako string (pool má `decimalAsNumber: false`), aby sa
+    // suma po ceste nestala floatom. `Number` sa preto formátuje na 2 desatiny.
+    const sum =
+      typeof write.totalPaidSum === 'number'
+        ? write.totalPaidSum.toFixed(2)
+        : String(write.totalPaidSum);
+
+    await run(conn, SQL_REVENUE_UPSERT, [
+      day,
+      code,
+      sum,
+      Math.max(0, Math.trunc(num(write.ordersCount))),
+      write.dayComplete ? 1 : 0,
+      Math.max(0, Math.trunc(num(write.pagesRead ?? 0))),
+    ]);
+  }
+
+  async function listRevenue(
+    from: DateOnly,
+    to: DateOnly,
+    conn?: Queryable,
+  ): Promise<ShopRevenueDayRecord[]> {
+    if (!isDay(from) || !isDay(to) || from > to) return [];
+    const rows = await run<DbRow[]>(conn, SQL_REVENUE_RANGE, [from, to, MAX_REVENUE_ROWS]);
+    return (Array.isArray(rows) ? rows : []).map((row) => ({
+      day: toDateOnly(row.revenue_day),
+      currency: String(row.currency ?? ''),
+      // Suma zostáva STRINGOM až na obrazovku — `Number` by z 12 desatinných
+      // miest DECIMAL(12,2) urobil float a z tržby zaokrúhlenú približnosť.
+      totalPaidSum: String(row.total_paid_sum ?? '0.00'),
+      ordersCount: num(row.orders_count),
+      dayComplete: num(row.day_complete) === 1,
+      pagesRead: num(row.pages_read),
+      updatedAt: toDateOrNull(row.updated_at),
+    }));
+  }
+
+  /* ── I11: „0 predaných" verzus „tento deň sa nesťahoval" ──────────────── */
+
+  async function coverageFor(
+    from: DateOnly,
+    to: DateOnly,
+    conn?: Queryable,
+  ): Promise<SalesCoverageResult> {
+    const empty: SalesCoverageResult = {
+      from,
+      to,
+      days: [],
+      completeDays: 0,
+      unknownDays: 0,
+    };
+    if (!isDay(from) || !isDay(to) || from > to) return empty;
+
+    const states = await listSyncStates(from, to, conn);
+    const byDay = new Map<DateOnly, SalesSyncStateRecord>();
+    for (const state of states) byDay.set(state.day, state);
+
+    const days: SalesDayCoverageRow[] = [];
+    let completeDays = 0;
+    let unknownDays = 0;
+
+    /*
+     * Dni sa prechádzajú KALENDÁRNE cez `addDays()` (`@/lib/domain/dates`), nie
+     * pripočítavaním 86 400 000 ms k `Date`: v deň prechodu na letný čas by
+     * milisekundová aritmetika deň preskočila alebo zdvojila.
+     */
+    let cursor: DateOnly = from;
+    for (let i = 0; i < MAX_COVERAGE_DAYS && cursor <= to; i += 1) {
+      const state = byDay.get(cursor);
+      // Turbopack tu už raz zahodil null-guard cez `!state` — porovnávaj presne.
+      const coverage: SalesDayCoverage = state === undefined ? 'missing' : state.status;
+      if (coverage === 'complete') completeDays += 1;
+      else unknownDays += 1;
+      days.push({ day: cursor, coverage, ordersSeen: state === undefined ? 0 : state.ordersSeen });
+      cursor = addDays(cursor, 1);
+    }
+
+    return { from, to, days, completeDays, unknownDays };
+  }
+
+  return {
+    replaceDayUnits,
+    getSyncState,
+    listSyncStates,
+    saveSyncState,
+    upsertRevenueDay,
+    listRevenue,
+    coverageFor,
+  };
 }
 
 /** Default repozitár nad produkčným poolom. */

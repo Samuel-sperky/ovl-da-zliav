@@ -134,8 +134,36 @@ const ORDERS_CLIENT = 'src/lib/shop/orders-client.ts';
  *
  *  · `orders_seen` — POČET spracovaných objednávok za deň (P4/P6). Nie je to
  *    id objednávky ani nič, z čoho by sa objednávka dala zrekonštruovať.
+ *
+ * Nasledujúce päť pribudlo 28. 8. 2026 s migráciou 0014 na základe **D117 a
+ * D119** (`KONTRAKT-V4-2026-08-28.md` §2b — revízia po sonde API). Zákaz slova
+ * `total_paid` v tomto teste pochádza z času, keď platilo „žiadne eurá"; D117 to
+ * pre ÚROVEŇ ESHOPU zmenilo a tento zoznam je presne ten mechanizmus, ktorým sa
+ * také rozhodnutie kontraktu prenesie do testu. Ani jeden z nich nenesie
+ * zákaznícky údaj a ani jeden nie je odkaz na konkrétnu objednávku:
+ *
+ *  · `total_paid_sum`, `orders_count` — denný SÚČET a POČET za CELÝ ESHOP
+ *    (`shop_revenue_daily`, D117). Agregát nad všetkými objednávkami dňa, bez
+ *    id, bez produktu, bez čohokoľvek o kupujúcom. Rovnaká trieda ako
+ *    `orders_seen` vyššie, len o riadok vyššie v agregácii.
+ *  · `last_time_in_order`, `qty_in_orders` — POLIA PRODUKTU z `getFull`
+ *    (`catalog_cache`, D119): dátum poslednej objednávky s tým produktom a
+ *    koľko kusov bolo kedy objednané. Sú to údaje o produkte, ktoré appka
+ *    dostane jedným čítaním katalógu — nie riadok objednávky.
+ *  · `ix_catalog_last_order` — názov indexu nad `last_time_in_order`.
+ *
+ * POZOR, čo sa tým NEUVOĽNILO: zoznam sa uplatňuje ako presný reťazec a len
+ * v druhom (rozlomenom) skene, takže HOLÉ `total_paid`, `order_id`, `email`,
+ * `country` ani `address` v DDL naďalej test zhodia.
  */
-const ALLOWED_DDL_IDENTIFIERS: readonly string[] = ['orders_seen'];
+const ALLOWED_DDL_IDENTIFIERS: readonly string[] = [
+  'orders_seen',
+  'total_paid_sum',
+  'orders_count',
+  'last_time_in_order',
+  'qty_in_orders',
+  'ix_catalog_last_order',
+];
 
 /**
  * Scopes, ktoré appka smie poznať. Nič iné (zákazníci, košíky, faktúry).
