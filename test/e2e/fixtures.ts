@@ -447,11 +447,13 @@ export interface Control {
   setProducts(products: readonly MockCatalogProduct[]): Promise<void>;
 }
 
-/** Produkt v katalógu mocku (podmnožina `MockProduct` — `has_attributes` je 0). */
+/** Produkt v katalógu mocku (podmnožina `MockProduct`). */
 export interface MockCatalogProduct {
   id: number;
   name?: string;
   price: number;
+  /** Kus s variantmi. Predvolene `false` — mock ich potom nevedie. */
+  hasAttributes?: boolean;
 }
 
 function makeControl(): Control {

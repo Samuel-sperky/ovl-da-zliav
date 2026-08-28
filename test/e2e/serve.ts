@@ -284,12 +284,20 @@ function startControlServer(mock: MockShopServer): Promise<{ close(): Promise<vo
         const body = await readJson(req);
         const raw = Array.isArray(body.products) ? body.products : [];
         const products = raw.map((item) => {
-          const entry = item as { id: unknown; name?: unknown; price: unknown };
+          const entry = item as {
+            id: unknown;
+            name?: unknown;
+            price: unknown;
+            hasAttributes?: unknown;
+          };
           return {
             id: Number(entry.id),
             name: typeof entry.name === 'string' ? entry.name : `Šperk ${String(entry.id)}`,
             price: Number(entry.price),
-            has_attributes: false,
+            // Voliteľné: scenár, ktorý overuje riadok „Varianty", potrebuje kus
+            // s variantmi. Predvolené `false` zostáva — kto o varianty nestojí,
+            // nemusí o nich vedieť.
+            has_attributes: entry.hasAttributes === true,
           };
         });
         // NAHRADIŤ, nie primiešať: `setProducts()` v mocku merguje, takže bez

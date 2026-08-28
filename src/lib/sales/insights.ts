@@ -37,7 +37,7 @@ import type {
 } from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
-import { addDays, diffDays, isDateOnly } from '@/lib/domain/dates';
+import { addDays, dbDateOnly, diffDays, isDateOnly } from '@/lib/domain/dates';
 import type { SalesStopRecord } from '@/lib/sales/stop-policy';
 
 /* ═══════════════════════════ 1. Konštanty ═════════════════════════════════ */
@@ -91,9 +91,15 @@ const num = (value: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-/** `DATE` chodí z drivera ako `Date` aj ako string — chceme vždy `YYYY-MM-DD`. */
+/**
+ * `DATE` chodí z drivera ako `Date` aj ako string — chceme vždy `YYYY-MM-DD`.
+ *
+ * Prevod z `Date` robí `dbDateOnly()`: driver skladá `DATE` ako LOKÁLNU polnoc,
+ * takže pôvodné `toISOString().slice(0, 10)` posúvalo deň predaja o jeden
+ * dozadu všade, kde appka nebeží v UTC.
+ */
 function toDay(value: unknown): DateOnly {
-  if (value instanceof Date) return value.toISOString().slice(0, 10) as DateOnly;
+  if (value instanceof Date) return dbDateOnly(value);
   return String(value ?? '').slice(0, 10) as DateOnly;
 }
 

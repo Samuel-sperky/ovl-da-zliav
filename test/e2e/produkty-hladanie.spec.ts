@@ -21,13 +21,21 @@
  *     vysvetlenia sa číta ako „taký produkt neexistuje", hoci zrkadlo pozná
  *     z produktu len názov a číslo.
  *
+ * ZRKADLO MUSÍ SEDIEŤ S MOCKOM (24. 8. 2026). Tabuľka si pre viditeľnú stránku
+ * sama vypýta `POST /api/catalog/details` a kus, ktorý shop nepozná, sa podľa
+ * D49 označí `shop_status = 'not_found'` — predvolený filter „Ktoré eshop pozná"
+ * ho potom skryje a hľadanie nad ním vráti nulu. Riadky nasadené do
+ * `catalog_cache` preto MUSIA byť aj v katalógu mocku (`control.setProducts`),
+ * s tým istým názvom a cenou: doťahovanie detailu ich do zrkadla prepíše.
+ * Bez toho tento súbor netestuje hľadanie, ale mlčky prázdnu tabuľku.
+ *
  * Test NEKLIKÁ na „Dohľadať v eshope" — to je platené volanie do eshopu
  * a scenár o jeho výsledku patrí k mocku hľadania (`hladanie-produktov.spec.ts`).
  * Tu sa overuje, že ponuka existuje a je dosiahnuteľná.
  *
  * Vlastník: V15 (hľadanie a tabuľka).
  */
-import { expect, test, type DbHelper } from './fixtures';
+import { expect, test, type Control, type DbHelper } from './fixtures';
 
 /** Zrkadlo je zámerne NEÚPLNÉ — presne to spúšťa značku `≈`. */
 const MIRROR = [
@@ -51,11 +59,16 @@ const SLOVA = [
   { id: 914, name: 'Zirkónové náušnice Aria', price: 18.5 },
 ] as const;
 
-/** Vloží riadky do zrkadla katalógu. */
+/**
+ * Vloží riadky do zrkadla katalógu — a do katalógu mocku, aby ich shop poznal.
+ * Poradie je jedno; dôvod, prečo obe, je v hlavičke súboru.
+ */
 async function seedMirror(
   db: DbHelper,
+  control: Control,
   rows: readonly { id: number; name: string; price: number }[],
 ): Promise<void> {
+  await control.setProducts(rows.map((row) => ({ id: row.id, name: row.name, price: row.price })));
   for (const product of rows) {
     await db.query(
       'INSERT INTO catalog_cache (product_id, name, price, has_attributes, source, fetched_at) ' +
@@ -78,16 +91,12 @@ async function resetSyncState(db: DbHelper): Promise<void> {
 }
 
 test.describe('produkty — hľadanie, počet zhôd a výber', () => {
-  test('výber prežije prechod na iný tab, ponuka dohľadania nezmizne', async ({ page, db }) => {
-    for (const product of MIRROR) {
-      await db.query(
-        'INSERT INTO catalog_cache (product_id, name, price, has_attributes, source, fetched_at) ' +
-          'VALUES (?, ?, ?, 0, ?, UTC_TIMESTAMP(3)) ' +
-          'ON DUPLICATE KEY UPDATE name = VALUES(name), price = VALUES(price), ' +
-          'fetched_at = UTC_TIMESTAMP(3)',
-        [product.id, product.name, product.price, 'list'],
-      );
-    }
+  test('výber prežije prechod na iný tab, ponuka dohľadania nezmizne', async ({
+    page,
+    db,
+    control,
+  }) => {
+    await seedMirror(db, control, MIRROR);
 
     /* Katalóg, ktorý appka MÁ len z časti: `shop_total` je celý eshop,
        `rows_written` tri riadky. Bez toho by bol počet zhôd meraný fakt. */
@@ -162,8 +171,12 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
    * nad dočítaným katalógom sú to „produkty", nie „načítané riadky", a `≈`
    * pri počte zhôd nemá čo robiť.
    */
-  test('hľadanie dvoch slov nájde obe bez ohľadu na poradie a diakritiku', async ({ page, db }) => {
-    await seedMirror(db, SLOVA);
+  test('hľadanie dvoch slov nájde obe bez ohľadu na poradie a diakritiku', async ({
+    page,
+    db,
+    control,
+  }) => {
+    await seedMirror(db, control, SLOVA);
     await db.query(
       'UPDATE catalog_sync_state SET per_page = 100, last_page = 1, shop_total = ?, ' +
         'rows_written = ?, completed = 1, started_at = UTC_TIMESTAMP(3), ' +
@@ -176,12 +189,13 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
       await page.goto('/produkty');
       await expect(page.getByTestId('catalog-table')).toBeVisible();
 
-      /* 1. Dočítané zrkadlo: presné číslo bez `≈` a slovo „produktov"
-            namiesto „načítaných" (kontrakt bod 8 z druhej strany). */
+      /* 1. Dočítané zrkadlo: presné číslo bez `≈` (kontrakt bod 8 z druhej
+            strany). Slovo „produktov" sa overuje až v kroku 3a — pri rovnosti
+            oboch čísel appka druhé číslo zámerne NEPÍŠE (bod 17, W2,
+            20. 8. 2026: „4 z 4 produktov" hovorí to isté dvakrát). */
       const matching = page.getByTestId('catalog-matching');
       await expect(matching).not.toContainText('≈', { timeout: 15_000 });
-      await expect(matching).toContainText('produktov');
-      await expect(matching).not.toContainText('načítaných');
+      await expect(matching).toContainText(String(SLOVA.length));
 
       /* 2. Pole priznáva, kde hľadá — a kde nie. */
       await expect(page.getByTestId('catalog-search-hint')).toContainText(
@@ -199,6 +213,13 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
       // `AND`, nie `OR`: náramok bez zirkónu ani zirkón bez náramku sa neráta.
       await expect(page.locator('table.tbl tbody')).not.toContainText('Lumen');
       await expect(page.locator('table.tbl tbody')).not.toContainText('náušnice');
+
+      /* 3a. Teraz sú čísla rôzne (2 z 4), takže druhé číslo je na obrazovke —
+             a nad DOČÍTANÝM zrkadlom sú to „produkty", nie „načítané riadky".
+             To je celý zmysel bodu 8: slovo „načítaných" priznáva výsek
+             katalógu a nad úplným katalógom by klamalo opačným smerom. */
+      await expect(matching).toContainText(`z ${String(SLOVA.length)} produktov`);
+      await expect(matching).not.toContainText('načítaných');
 
       /* 4. Poradie slov je jedno. */
       await page.getByTestId('catalog-search').fill('zirkón náramok');
@@ -227,8 +248,9 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
   test('prázdny výsledok hľadania priznáva, kde sa hľadalo, a ponúka eshop', async ({
     page,
     db,
+    control,
   }) => {
-    await seedMirror(db, SLOVA);
+    await seedMirror(db, control, SLOVA);
     await db.query(
       'UPDATE catalog_sync_state SET per_page = 100, last_page = 1, shop_total = ?, ' +
         'rows_written = ?, completed = 1, started_at = UTC_TIMESTAMP(3), ' +

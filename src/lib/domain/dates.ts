@@ -86,6 +86,26 @@ export function toDateOnly(day: CalendarDay): DateOnly {
   return `${pad(day.year, 4)}-${pad(day.month)}-${pad(day.day)}`;
 }
 
+/**
+ * Hodnota stĺpca `DATE` z drivera → `YYYY-MM-DD`.
+ *
+ * POZOR — TU BOLA CHYBA O CELÝ DEŇ. `DATE` je kalendárny deň bez zóny a
+ * `mariadb` ho skladá ako LOKÁLNU polnoc, takže `toISOString().slice(0, 10)`
+ * vráti správny deň len na stroji v UTC. V `Europe/Bratislava` — teda tam, kde
+ * appka naozaj beží — sa `2026-08-01` prečíta ako `2026-07-31` a okno zľavy sa
+ * na povrchu posunie o deň dozadu. Čítajú sa preto LOKÁLNE zložky, presne tie,
+ * z ktorých driver ten `Date` zložil.
+ *
+ * Toto je jediná kópia prevodu: `repo/campaigns.repo.ts`, `repo/insights.repo.ts`
+ * aj `sales/insights.ts` ju mali každý vlastnú a dve z troch boli v UTC.
+ */
+export function dbDateOnly(value: unknown): DateOnly {
+  if (value instanceof Date) {
+    return `${pad(value.getFullYear(), 4)}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  }
+  return String(value ?? '').slice(0, 10) as DateOnly;
+}
+
 /** Zobrazovací formát `DD.MM.YYYY` (D13). */
 export function formatDateOnlySk(value: DateOnly): string {
   const d = parseDateOnly(value);

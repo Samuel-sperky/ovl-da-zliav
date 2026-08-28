@@ -53,7 +53,19 @@ test.describe('čiastočné zlyhanie', () => {
 
     const detail = page.getByTestId('discount-detail');
     await expect(detail).toBeVisible();
-    await expect(page.getByTestId('detail-progress')).toContainText('sa nepodarilo');
+    /*
+     * Koľko prešlo a koľko nie, hovoria DVE dlaždice v „Priebehu" — nie jedna
+     * veta. Tvrdenie preto stojí na nich a je prísnejšie než pôvodné hľadanie
+     * podreťazca „sa nepodarilo" v celej sekcii: kontroluje aj ČÍSLA (2 a 1),
+     * teda to, kvôli čomu sa na detail ide. Znenie dlaždice je „Nepodarilo sa"
+     * (K10 — vnútorné „1 zlyhané" je preč); podreťazec s malým začiatočným
+     * písmenom sa v sekcii od prekreslenia dlaždíc nevyskytuje.
+     */
+    const progress = page.getByTestId('detail-progress');
+    await expect(progress.getByTestId('tile-ok')).toContainText('Zapísané');
+    await expect(progress.getByTestId('tile-ok')).toContainText('2');
+    await expect(progress.getByTestId('tile-failed')).toContainText('Nepodarilo sa');
+    await expect(progress.getByTestId('tile-failed')).toContainText('1');
     // K10 — na povrchu nie je ani jeden vnútorný kód stavu položky.
     await expect(detail).not.toContainText('item failed');
     await expect(detail).not.toContainText('needs_key');

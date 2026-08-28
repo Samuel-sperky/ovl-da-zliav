@@ -1008,7 +1008,9 @@ export function ProductDetailPanel({
         </div>
       </DetailGroup>
 
-      <details className="tech">
+      {/* Identifikátor: `details.tech` je v paneli päťkrát (každá zavretá
+          skupina má ten istý tvar), takže sa naň nedá ukázať triedou. */}
+      <details className="tech" data-testid="detail-tech-fold">
         <summary>{SURFACE_TERMS.technicalDetail}</summary>
         <div className="body">
           <table>

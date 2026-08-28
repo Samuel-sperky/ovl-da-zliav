@@ -11,10 +11,18 @@
  * preto presúva tam; výzva na nový kľúč (`readonly-notice`) zostáva na každej
  * obrazovke a nemení sa. Tabuľka allowlistu zanikla — čítanie sa overuje na
  * tabuľke katalógu (`/produkty`) a na zozname zliav (`/zlavy`).
+ *
+ * KDE KĽÚČE BÝVAJÚ: `/nastavenia/napojenie`, nie `/nastavenia`. Nastavenia sú
+ * od 19. 8. 2026 rozcestník s podstránkami (`components/settings/sub-pages.ts`,
+ * slug `napojenie` = „Na čo je napojená"); riadok kľúča ani formulár preň na
+ * rozcestníku nie sú.
  */
 import { addAllowlist, api, expect, storeApiKey, test } from './fixtures';
 
 const PRODUCTS = [201, 202] as const;
+
+/** Podstránka Nastavení s adresou eshopu a oboma kľúčmi (slug `napojenie`). */
+const NAPOJENIE = '/nastavenia/napojenie';
 
 test.describe('read-only po expirácii kľúča', () => {
   test('expirovaný kľúč: čítanie funguje, zápis nie, výzva na nový kľúč visí', async ({
@@ -27,7 +35,7 @@ test.describe('read-only po expirácii kľúča', () => {
     // Kľúč platí — výzva nie je a Nastavenia hlásia uložený kľúč.
     await page.goto('/');
     await expect(page.getByTestId('readonly-notice')).toBeHidden();
-    await page.goto('/nastavenia');
+    await page.goto(NAPOJENIE);
     // Platnosť kľúča je v riadku tabuľky „Kľúče" — nie v hlavičke (K9).
     await expect(page.getByTestId('key-row-write')).toContainText('vložený');
 
@@ -37,7 +45,7 @@ test.describe('read-only po expirácii kľúča', () => {
     await page.goto('/');
     await expect(page.getByTestId('readonly-notice')).toBeVisible();
     await expect(page.getByTestId('readonly-notice')).toContainText('len na čítanie');
-    await page.goto('/nastavenia');
+    await page.goto(NAPOJENIE);
     await expect(page.getByTestId('key-row-write')).toContainText('chýba');
 
     // D63 — expirovaný kľúč sa wipne, v DB po ňom nezostane riadok.
@@ -68,7 +76,7 @@ test.describe('read-only po expirácii kľúča', () => {
     await storeApiKey(page);
     await db.expireApiKey();
 
-    await page.goto('/nastavenia');
+    await page.goto(NAPOJENIE);
     // Keď kľúč na zápis chýba, formulár je otvorený hneď — je to najčastejší
     // dôvod, prečo sem človek prišiel.
     await expect(page.getByTestId('api-key-missing')).toBeVisible();

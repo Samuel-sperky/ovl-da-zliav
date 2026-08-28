@@ -42,6 +42,7 @@ import type {
 } from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
+import { dbDateOnly } from '@/lib/domain/dates';
 
 /* ───────────────── stav `queued` mimo `src/contracts.ts` (K2) ──────────── */
 
@@ -319,14 +320,13 @@ const toDateOrNull = (value: Date | string | null): Date | null =>
  * `2026-09-01` sa prečíta ako `2026-08-31`. Posunulo by to `date_from`,
  * `date_to` aj „posledný vlastný zápis" o deň dozadu — teda okno zľavy.
  *
- * Preto sa čítajú lokálne zložky, rovnako ako v `sales.repo.ts`.
+ * Preto sa čítajú lokálne zložky, rovnako ako v `sales.repo.ts`. Prevod je od
+ * 28. 8. 2026 jeden pre celý repozitár (`dbDateOnly()` v `domain/dates.ts`) —
+ * kópie v `insights.repo.ts` a `sales/insights.ts` boli v UTC a posúvali okno
+ * vlastného zápisu v detaile produktu o deň dozadu.
  * Regresiu drží test, ktorý beží s `TZ=Europe/Bratislava`.
  */
-const toDateOnly = (value: Date | string): DateOnly => {
-  if (!(value instanceof Date)) return String(value).slice(0, 10);
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-};
+const toDateOnly = (value: Date | string): DateOnly => dbDateOnly(value);
 
 function mapRow(row: CampaignRow): CampaignRecordV3 {
   return {

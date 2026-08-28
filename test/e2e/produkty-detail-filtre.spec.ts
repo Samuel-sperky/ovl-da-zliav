@@ -19,6 +19,13 @@
  * Čo tento test NEROBÍ: nespúšťa dohľadanie v eshope (platené volanie) a nič
  * nezapisuje do shopu. Zľava v zázname je nasadená priamo do databázy.
  *
+ * ZRKADLO MUSÍ SEDIEŤ S MOCKOM (24. 8. 2026). Tabuľka si pre viditeľnú stránku
+ * sama vypýta `POST /api/catalog/details`; kus, ktorý shop nepozná, sa podľa
+ * D49 označí `not_found` a predvolený filter „Ktoré eshop pozná" ho skryje.
+ * `KNOWN` preto musí byť aj v katalógu mocku — a s tým istým názvom a cenou,
+ * lebo doťahovanie detailu ich do zrkadla prepíše. `MISSING` v mocku ZÁMERNE
+ * nie je: to je presne ten kus, ktorý eshop už nevracia.
+ *
  * Vlastník: P2/P3 kontraktu produktov.
  */
 import { expect, test } from './fixtures';
@@ -31,11 +38,24 @@ const MISSING = { id: 912, name: 'Zlatá brošňa Aria, starý model', price: 21
 
 const SHOP_TOTAL = 41_082;
 
+/** Okno vlastného zápisu. Tvrdenia o dátumoch stoja NA ŇOM, nie na dnešku. */
+const WINDOW = { from: '2026-08-01', to: '2026-08-31' } as const;
+
+/** `2026-08-01` → `1. 8. 2026` — tvar, ktorý appka píše (kontrakt UI, bod 10). */
+function dateSk(value: string): string {
+  const [year, month, day] = value.split('-').map(Number);
+  return `${String(day)}. ${String(month)}. ${String(year)}`;
+}
+
 test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
   test('panel vypíše všetko, čo o kuse vieme, a zľavu priznáva ako vlastný zápis', async ({
     page,
     db,
+    control,
   }) => {
+    await control.setProducts([
+      { id: KNOWN.id, name: KNOWN.name, price: KNOWN.price, hasAttributes: true },
+    ]);
     await db.query(
       'INSERT INTO catalog_cache (product_id, name, price, has_attributes, shop_status, source, ' +
         'fetched_at) VALUES (?, ?, ?, 1, ?, ?, UTC_TIMESTAMP(3)) ' +
@@ -50,8 +70,8 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
     const campaignId = await db.seedCampaign({
       name: 'Letné zľavy',
       percent: 15,
-      from: '2026-08-01',
-      to: '2026-08-31',
+      from: WINDOW.from,
+      to: WINDOW.to,
       status: 'done',
       items: [{ productId: KNOWN.id, status: 'ok' }],
     });
@@ -79,7 +99,12 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
       await expect(panel.getByTestId('detail-discount-now')).toContainText('15 %', {
         timeout: 15_000,
       });
-      await expect(panel).toContainText('1. 8. 2026');
+      /* Okno je celé a presne to, čo je v zázname — nie deň vedľa. Tvrdenie
+         stojí na nasedenej hodnote, nie na dnešku: `date_from` je `DATE`
+         a driver ho skladá ako lokálnu polnoc, takže prevod cez UTC z neho
+         urobí predchádzajúci deň (`31. 7.`) všade mimo UTC. Samotné
+         `1. 8. 2026` by pritom prešlo aj ako kus reťazca `31. 8. 2026`. */
+      await expect(panel).toContainText(`${dateSk(WINDOW.from)} – ${dateSk(WINDOW.to)}`);
       await expect(panel).toContainText('Appka vidí len to, čo sama zapísala');
 
       /* 3. Zamknuté údaje sú VIDIEŤ, prázdne, so zámkom — nie vynechané. */
@@ -100,8 +125,11 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
       await panel.getByTestId('detail-window-360').click();
       await expect(panel).toContainText('predaných za posledných 360 dní');
 
-      /* 5. Číslo produktu zostáva pod rozklikom (P6), nie na povrchu. */
-      await expect(panel.locator('details.tech')).toContainText(String(KNOWN.id));
+      /* 5. Číslo produktu zostáva pod rozklikom (P6), nie na povrchu.
+            `details.tech` je v paneli päťkrát (každá zavretá skupina má ten
+            istý tvar), takže tvrdenie ide na „Technický detail" po jeho
+            vlastnom identifikátore — inak je to strict-mode violation. */
+      await expect(panel.getByTestId('detail-tech-fold')).toContainText(String(KNOWN.id));
     } finally {
       await db.query('DELETE FROM catalog_cache WHERE product_id = ?', [KNOWN.id]);
     }
@@ -110,7 +138,10 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
   test('kus, ktorý eshop už nevracia, sa dá vyfiltrovať a inak ho nevidno', async ({
     page,
     db,
+    control,
   }) => {
+    /* Shop pozná JEDEN z dvoch kusov — v tom je celý scenár. */
+    await control.setProducts([{ id: KNOWN.id, name: KNOWN.name, price: KNOWN.price }]);
     for (const [product, status] of [
       [KNOWN, 'ok'],
       [MISSING, 'not_found'],

@@ -36,7 +36,13 @@ import type {
 
 import { query as poolQuery } from '@/db/pool';
 import { WRITE_OUTCOME_EVENTS } from '@/lib/audit/events';
-import { LOGIC_TIME_ZONE, endOfDayExclusiveUtc, startOfDayUtc, todayInZone } from '@/lib/domain/dates';
+import {
+  LOGIC_TIME_ZONE,
+  dbDateOnly,
+  endOfDayExclusiveUtc,
+  startOfDayUtc,
+  todayInZone,
+} from '@/lib/domain/dates';
 import { isItemStatus } from '@/lib/domain/status';
 
 /* ═════════════════════════════ 1. Typy ════════════════════════════════════ */
@@ -170,9 +176,16 @@ const strOrNull = (value: unknown): string | null => (value == null ? null : Str
 
 const boolOf = (value: unknown): boolean => value != null && Number(value) !== 0;
 
-/** `DATE` stĺpec chodí ako `Date` (timezone `Z`) aj ako string — chceme `YYYY-MM-DD`. */
+/**
+ * `DATE` stĺpec chodí ako `Date` aj ako string — chceme `YYYY-MM-DD`.
+ *
+ * Prevod z `Date` robí `dbDateOnly()` z `domain/dates.ts`: driver skladá `DATE`
+ * ako LOKÁLNU polnoc, takže tunajšie pôvodné `toISOString().slice(0, 10)`
+ * vracalo v `Europe/Bratislava` deň dozadu — okno vlastného zápisu sa
+ * v detaile produktu kreslilo ako `31. 7. – 30. 8.` namiesto `1. 8. – 31. 8.`.
+ */
 function toDateOnly(value: unknown): DateOnly {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) return dbDateOnly(value);
   const text = String(value ?? '');
   return (DATE_ONLY_RE.test(text) ? text : text.slice(0, 10)) as DateOnly;
 }

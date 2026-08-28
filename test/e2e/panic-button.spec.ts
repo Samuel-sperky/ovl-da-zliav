@@ -6,11 +6,38 @@
  * nedotknuté — je to ono „potvrdenie" z I3. Po vykonaní je kľúč
  * z appky wipnutý, čakajúce kampane zrušené, appka je len na čítanie a UI
  * zobrazí runbook — appka kľúč revokovať NEVIE a nesmie to tvrdiť.
+ *
+ * KDE PANIC BÝVA: `/nastavenia/cervena-zona`, nie `/nastavenia`. Nastavenia sú
+ * od 19. 8. 2026 rozcestník s podstránkami (`components/settings/sub-pages.ts`,
+ * slug `cervena-zona`) a červená zóna sa naň zámerne nedostane ani ako
+ * dlaždica (kontrakt UI, bod 14). Scenár preto ide rovno na podstránku — na
+ * rozcestníku by `panic-open` nebol a čakalo by sa na neho do timeoutu.
  */
+import type { Page } from '@playwright/test';
+
 import { expect, storeApiKey, test } from './fixtures';
 
 const PRODUCT = 201;
 const PANIC_LITERAL = 'KLUC UNIKOL';
+
+/** Podstránka Nastavení, na ktorej červená zóna žije (slug `cervena-zona`). */
+const CERVENA_ZONA = '/nastavenia/cervena-zona';
+
+/**
+ * Otvorí červenú zónu tak, ako sa k nej dostane človek.
+ *
+ * Aj na vlastnej podstránke je celá sekcia ešte za rozklikom (kontrakt UI,
+ * bod 14) — `panic-open` v DOM je, ale nie je vidieť. Scenár ho preto
+ * neklikne „cez" zavretý rozklik: otvorí ho, a tým zároveň tvrdí, že tá brzda
+ * pred najnebezpečnejšou akciou appky stále existuje.
+ */
+async function openCervenaZona(page: Page): Promise<void> {
+  await page.goto(CERVENA_ZONA);
+  const disclosure = page.getByTestId('danger-zone-disclosure');
+  await expect(page.getByTestId('panic-open')).toBeHidden();
+  await disclosure.locator('summary').click();
+  await expect(page.getByTestId('panic-open')).toBeVisible();
+}
 
 function dateOnly(offsetDays: number): string {
   const d = new Date();
@@ -22,7 +49,7 @@ test.describe('panic button', () => {
   test('bez presného literálu sa nedá odoslať', async ({ page }) => {
     await storeApiKey(page);
 
-    await page.goto('/nastavenia');
+    await openCervenaZona(page);
     await page.getByTestId('panic-open').click();
     await page.getByTestId('panic-confirm').fill('kluc unikol'); // malé písmená
     await expect(page.getByTestId('panic-submit')).toBeDisabled();
@@ -45,7 +72,7 @@ test.describe('panic button', () => {
       items: [{ productId: PRODUCT, status: 'pending' }],
     });
 
-    await page.goto('/nastavenia');
+    await openCervenaZona(page);
     await page.getByTestId('panic-open').click();
     await page.getByTestId('panic-confirm').fill(PANIC_LITERAL);
     await page.getByTestId('panic-submit').click();
@@ -83,7 +110,7 @@ test.describe('panic button', () => {
   });
 
   test('panic je použiteľný aj bez uloženého kľúča', async ({ page, db }) => {
-    await page.goto('/nastavenia');
+    await openCervenaZona(page);
     await expect(page.getByTestId('panic-button')).toContainText(
       'Teraz nie je uložený ani jeden kľúč',
     );
