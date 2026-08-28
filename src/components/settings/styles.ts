@@ -111,7 +111,7 @@ export const SETTINGS_CSS = `
 /* Filtre histórie: popiska vedľa poľa, nie nad ním. Štyri polia s popiskou
    nad sebou merali 89 px — na obrazovke, ktorá má päť sekcií a strop 1,5
    obrazovky, je to celý jeden záznam histórie navyše. Platí len tu; formuláre
-   inde v Nastaveniach (heslo, doména, kľúč) si popisky nad poľom nechávajú,
+   inde v Nastaveniach (doména, kľúč) si popisky nad poľom nechávajú,
    lebo tam sa vypĺňa, kým tu sa len prepína. */
 .set-page #historia form.row .field{display:flex;flex-direction:row;
   align-items:center;gap:8px;margin-bottom:0}

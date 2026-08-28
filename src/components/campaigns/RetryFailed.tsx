@@ -18,7 +18,9 @@
  *     zľavy. Nič sa nezapisuje, žiadne potvrdenie sa nevydáva.
  *  2. **Skúška naprázdno** nad zúženou sadou — jediné miesto, odkiaľ pochádza
  *     jednorazové potvrdenie zápisu (I3).
- *  3. **Zaradenie** s tým potvrdením a s heslom (D70).
+ *  3. **Zaradenie** s tým potvrdením. Do 27. 8. 2026 k nemu patrilo aj heslo
+ *     (sudo, D70); sudo zrušilo D100 a I3 znie odteraz „žiadny zápis bez
+ *     dry-runu + potvrdenia" — čerstvá skúška naprázdno teda zostáva povinná.
  *
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
@@ -40,7 +42,6 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
 import styles from '@/components/campaigns/zlavy.module.css';
-import { fetchSession, sudoValid } from '@/components/campaigns/api';
 import {
   RETRY_WHY_FRESH,
   previewBlockerText,
@@ -54,7 +55,6 @@ import {
   type PreviewData,
 } from '@/components/campaigns/zlavy-api';
 import Note from '@/components/ui/Note';
-import SudoPrompt from '@/components/ui/SudoPrompt';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk } from '@/lib/ui/format';
 import { formatCountSk } from '@/lib/ui/vocabulary';
@@ -87,8 +87,6 @@ export function RetryFailed({ campaignId, onCreated, testId }: RetryFailedProps)
   const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<number | null>(null);
 
-  const [sudoUntil, setSudoUntil] = useState<string | null>(null);
-  const [showSudo, setShowSudo] = useState(false);
 
   const load = useCallback(async () => {
     setBusy('loading');
@@ -108,7 +106,6 @@ export function RetryFailed({ campaignId, onCreated, testId }: RetryFailedProps)
 
   useEffect(() => {
     void load();
-    void fetchSession().then((session) => setSudoUntil(session?.sudoUntil ?? null));
   }, [load]);
 
   if (planError !== null) {
@@ -184,11 +181,8 @@ export function RetryFailed({ campaignId, onCreated, testId }: RetryFailedProps)
 
   function onConfirm(): void {
     if (preview === null || preview.previewToken === '') return;
-    // D70 — od poslednej autentifikácie viac než 15 min → heslo znova.
-    if (plan !== null && plan.requiresSudo && !sudoValid(sudoUntil)) {
-      setShowSudo(true);
-      return;
-    }
+    // Do 27. 8. 2026 tu stálo overenie sudo okna (D70). Čerstvý náhľad
+    // a potvrdenie zostávajú — tie držia I3, nie heslo.
     void doRetry(preview.previewToken);
   }
 
@@ -363,19 +357,6 @@ export function RetryFailed({ campaignId, onCreated, testId }: RetryFailedProps)
         </>
       ) : null}
 
-      {showSudo ? (
-        <SudoPrompt
-          actionLabel="Zaradenie opravnej zľavy do fronty zápisov"
-          onSuccess={(until) => {
-            setSudoUntil(until);
-            setShowSudo(false);
-            if (preview !== null && preview.previewToken !== '') {
-              void doRetry(preview.previewToken);
-            }
-          }}
-          onCancel={() => setShowSudo(false)}
-        />
-      ) : null}
     </section>
   );
 }

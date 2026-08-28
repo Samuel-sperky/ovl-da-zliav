@@ -251,7 +251,6 @@ export function createRetryFailedGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       params: idParamSchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -292,11 +291,16 @@ export function createRetryFailedGet(
               originalFrom: campaign.dateFrom,
               today,
             },
-            /** Čo si `POST` vyžiada. Nie je to voliteľné (I3, D16, D70). */
+            /**
+             * Čo si `POST` vyžiada. Nie je to voliteľné (I3, D16).
+             *
+             * `sudo: true` tu stálo do 27. 8. 2026. D100 sudo zrušilo, takže
+             * pole zmizlo — nechať ho by bol sľub, ktorý route nedodrží.
+             * Čerstvý náhľad a potvrdenie sú NEDOTKNUTÉ.
+             */
             requires: {
               freshPreview: true as const,
               confirmation: true as const,
-              sudo: true as const,
             },
           };
         }),
@@ -315,7 +319,6 @@ export function createRetryFailedPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'sudo',
       body: bodySchema,
       params: idParamSchema,
       handler: (ctx) =>
@@ -374,7 +377,7 @@ export function createRetryFailedPost(
               to: plan.effectiveTo,
               percents,
             },
-            ctx.claims.sub,
+            ctx.actor.id,
           );
 
           /* K3 — percentá pásiem nesie OVERENÝ token, nie telo požiadavky.
@@ -393,12 +396,12 @@ export function createRetryFailedPost(
             status: 'draft',
             fireAt: null,
             parentCampaignId: parent.id,
-            createdBy: ctx.claims.sub,
+            createdBy: ctx.actor.id,
           });
 
           await makeExecutor(d).executeCampaign(record.id, {
             actor: 'user',
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
           });
           return {
             campaignId: record.id,

@@ -294,7 +294,12 @@ describe('vety hovoria jazykom povrchu, nie jazykom kódu', () => {
     const kody: ReadonlyArray<readonly [string, RegExp]> = [
       ['pilot', /\bpilot\b/],
       ['plny', /\bplny\b/],
-      ['sudo', /\bsudo\b/],
+      // `potvrdenie` je od 27. 8. 2026 (D105) kód spôsobu riešenia a zároveň
+      // normálne slovenské slovo — jediný taký kód v tomto zozname. Zostáva
+      // zakázaný napriek tomu: čo povie zámok, veta druhýkrát nehovorí (bod 5
+      // hlavičky `blockers.ts`), takže na povrchu prekážky nemá čo robiť ani
+      // ako slovo. Sekcia 4 to isté meria adresne na vetách so zámkom.
+      ['potvrdenie', /\bpotvrdenie\b/],
       ['cakanie', /\bcakanie\b/],
       ['mimo_appky', /mimo_appky/],
       ['scope_', /scope_/],
@@ -333,19 +338,21 @@ describe('vety hovoria jazykom povrchu, nie jazykom kódu', () => {
 /* ═════════════ 4. Čo povedal zámok, veta druhýkrát nehovorí ═══════════════ */
 
 describe('zámok a veta si neskáču do reči', () => {
-  it('pilotný strop sa rieši zámkom — `sudo`, nie vetou o hesle', () => {
+  it('pilotný strop sa rieši zámkom — `potvrdenie`, nie vetou o potvrdení', () => {
     const nad = jedina('scope_pilot_cap', (b) => b.severity === 'blokuje');
-    expect(nad.resolution).toBe('sudo');
+    expect(nad.resolution).toBe('potvrdenie');
     // `ui/blocker-look.ts` kreslí vedľa tejto vety ikonu zámku a slovo
-    // „rieši sa v appke, vypýta si heslo". Druhýkrát to veta nehovorí.
-    expect(nad.nextStep).not.toContain('heslo');
+    // „rieši sa v appke, vyžaduje výslovné potvrdenie". Druhýkrát to veta
+    // nehovorí. Do 27. 8. 2026 tu stálo heslo — D100 ho zrušilo, D105 prepísalo
+    // slovo, ale zákaz zdvojenia platí nezmenene.
+    expect(nad.nextStep).not.toMatch(/heslo|potvrd/i);
     expect(nad.nextStep).toBe('Zúžte výber na 10 produktov, alebo prepnite rozsah v Nastaveniach.');
   });
 
-  it('žiadna veta so zámkom heslo neopakuje', () => {
-    const hriesnici = VETY.filter((b) => b.resolution === 'sudo' && /heslo/i.test(povrch(b))).map(
-      (b) => b.id,
-    );
+  it('žiadna veta so zámkom potvrdenie neopakuje', () => {
+    const hriesnici = VETY.filter(
+      (b) => b.resolution === 'potvrdenie' && /heslo|potvrd/i.test(povrch(b)),
+    ).map((b) => b.id);
     expect(hriesnici).toEqual([]);
   });
 

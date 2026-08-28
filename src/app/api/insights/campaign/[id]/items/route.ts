@@ -28,7 +28,6 @@ export function createInsightsCampaignItemsGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       params: campaignIdParamSchema,
       handler: async (ctx) => {
         const { tally, unrecognized } = await d.insightsRepo.campaignItemTally(ctx.params.id);

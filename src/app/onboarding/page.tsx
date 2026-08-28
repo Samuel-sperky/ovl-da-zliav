@@ -88,7 +88,18 @@ export default function OnboardingPage() {
           </div>
           <div className="empty">
             <div className="t">Kam má appka písať</div>
-            <div>Jedna adresa pre celú appku. Zmena vyžaduje heslo.</div>
+            {/*
+              28. 8. 2026 (D106): PUT /api/settings/domain si vypýta výslovné
+              `confirmed: true` zo zaškrtávacieho poľa — heslo (D80) zmazalo
+              D99 a bez akejkoľvek brány by adresu, na ktorú appka posiela
+              produkčný API kľúč, prepísal jeden tichý POST. Druhou brzdou
+              zostáva canary čítanie proti novej adrese (D55): keď zlyhá,
+              adresa sa NEULOŽÍ.
+            */}
+            <div>
+              Jedna adresa pre celú appku. Zmena si vyžiada potvrdenie a uloží sa až
+              po úspešnom testovacom čítaní.
+            </div>
             <div className="a">
               <Link className="btn primary" href="/nastavenia#pripojenie">
                 Nastaviť adresu

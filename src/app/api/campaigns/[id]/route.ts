@@ -55,7 +55,6 @@ export function createCampaignGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       params: idParamSchema,
       query: detailQuerySchema,
       handler: (ctx) =>

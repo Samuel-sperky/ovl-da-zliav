@@ -41,7 +41,6 @@ export function createCancelPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: bodySchema,
       params: idParamSchema,
       handler: (ctx) =>
@@ -63,7 +62,7 @@ export function createCancelPost(
             actor: 'user',
             eventType: 'campaign_cancelled',
             ok: true,
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
             campaignId: campaign.id,
             operationId: campaign.operationId,
             message: reason,

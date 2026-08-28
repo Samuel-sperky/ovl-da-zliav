@@ -2,16 +2,21 @@
  * Aura Zľavy — chybový model HTTP vrstvy (A5, BUILD-SPEC §5, §2).
  *
  * Jediný typ chyby, ktorý smie určiť HTTP status a kód odpovede, je `AppError`.
- * Všetko ostatné (`ZodError`, `SessionError`, `SudoRequiredError`,
- * `LockoutError`, `ShopRequestError`, ľubovoľná neodchytená výnimka) sa na
- * `AppError` mapuje funkciou `toAppError()`.
+ * Všetko ostatné (`ZodError`, `ShopRequestError`, ľubovoľná neodchytená
+ * výnimka) sa na `AppError` mapuje funkciou `toAppError()`.
+ *
+ * Do 27. 8. 2026 sa tu mapovali aj `SessionError`, `SudoRequiredError`
+ * a `LockoutError`. Prihlásenie a lockout zmazala D99 (ruší D68, D69, D71),
+ * sudo D100 (ruší D70) — a mapovanie chyby, ktorú nič neprodukuje, tvrdí
+ * o appke niečo nepravdivé. (D101 je iná vec: „tabuľka `users` zostáva".)
  *
  * Invarianty držané tu:
  *  - **I1** — z chyby sa do odpovede NIKDY nedostane `stack`, `cause` ani raw
  *    hodnota výnimky. `detail` prechádza `redact()` a pri neznámej výnimke sa
  *    `detail` nevytvára vôbec (fail-closed). Message neznámej výnimky sa
  *    zahodí a nahradí generickou slovenskou vetou.
- *  - **I3** — chýbajúce sudo okno je 401 `sudo_required`, nikdy nie „prejde".
+ *  - **I3** — po zrušení sudo (D100) znie „žiadny zápis bez dry-runu
+ *    a potvrdenia"; potvrdenie drží `assertConfirmed()` v engine, nie tento súbor.
  *  - **I11** — hlášky o stave zľavy tu nevznikajú; slovenské vety pre chyby
  *    shopu vlastní A3 (`lib/shop/messages.sk.ts`) a my ich len preberáme.
  *
@@ -35,8 +40,8 @@ export const HTTP_ERROR_CODES = {
   validationFailed: 'validation_failed',
   /** Chýbajúca/neplatná/expirovaná session (D69). */
   unauthorized: 'unauthorized',
-  /** Session je platná, ale sudo okno nie (D70, I3). */
-  sudoRequired: 'sudo_required',
+  /* 27. 8. 2026: `sudoRequired: 'sudo_required'` zmazané — sudo zrušila D100
+     (I3 znie „dry-run + potvrdenie") a ten kód už nič nevyrobí. */
   /** Mutácia bez hlavičky `Origin` (D72). */
   originMissing: 'origin_missing',
   /** `Origin` nesúhlasí s hostom požiadavky (D72). */
@@ -125,9 +130,6 @@ export const unauthorized = (
   code: string = HTTP_ERROR_CODES.unauthorized,
   options: AppErrorOptions = {},
 ): AppError => new AppError(401, code, message, options);
-
-export const sudoRequired = (message: string, options: AppErrorOptions = {}): AppError =>
-  new AppError(401, HTTP_ERROR_CODES.sudoRequired, message, options);
 
 export const forbidden = (
   message: string,
@@ -265,16 +267,12 @@ const hasNumericRetryAfter = (value: unknown): value is { retryAfterSeconds: num
   value !== null &&
   typeof (value as { retryAfterSeconds?: unknown }).retryAfterSeconds === 'number';
 
-const errorName = (value: unknown): string =>
-  value instanceof Error ? value.name : typeof value;
-
 /**
  * Kódy doménových chýb (A7–A10, repozitáre) mapované na HTTP status. Neznámy
  * doménový kód skončí ako 400 — nikdy nie 500 s detailmi a nikdy nie 200.
  */
 const DOMAIN_CODE_STATUS: Record<string, number> = {
-  // A4
-  sudo_required: 401,
+  // A4 — `sudo_required` odtiaľ zmizlo 27. 8. 2026 (D100), nič ho už nevyrobí.
   too_many_attempts: 429,
   invalid_credentials: 401,
   // I2 / allowlist
@@ -318,28 +316,6 @@ export function toAppError(error: unknown): AppError {
       409,
       HTTP_ERROR_CODES.shopNotConfigured,
       error.shopError.message,
-      { cause: error, logAsError: false },
-    );
-  }
-
-  // A4 chyby sú rozpoznané podľa `name`, aby A5 nezáviselo na ich konštruktoroch
-  // (a aby fungovali aj cez hranicu modulov v testoch).
-  const name = errorName(error);
-  if (name === 'SudoRequiredError') {
-    return sudoRequired((error as Error).message, { cause: error, logAsError: false });
-  }
-  if (name === 'SessionError') {
-    return unauthorized((error as Error).message, HTTP_ERROR_CODES.unauthorized, {
-      detail: hasStringCode(error) ? { reason: error.code } : undefined,
-      cause: error,
-      logAsError: false,
-    });
-  }
-  if (name === 'LockoutError' && hasNumericRetryAfter(error)) {
-    return tooManyRequests(
-      error instanceof Error ? error.message : String(error),
-      error.retryAfterSeconds,
-      HTTP_ERROR_CODES.tooManyRequests,
       { cause: error, logAsError: false },
     );
   }

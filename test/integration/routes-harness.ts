@@ -2,9 +2,13 @@
  * Aura Zľavy — HARNESS PRE INTEGRAČNÉ TESTY ROUTE-OV A12.
  *
  * In-memory svet repozitárov (nad fakes z `src/lib/engine/testing.ts`),
- * stubovaná session/sudo vrstva pre `defineRoute()` a helper na stavbu
- * `Request`-ov so správnym Origin (D72). Shop je VŽDY reálny mock (I6) —
- * testy si ho prinesú cez `useMockShop()` a harness dostane jeho URL.
+ * stubovaný lokálny actor pre `defineRoute()` a helper na stavbu `Request`-ov
+ * so správnym Origin (D72). Shop je VŽDY reálny mock (I6) — testy si ho
+ * prinesú cez `useMockShop()` a harness dostane jeho URL.
+ *
+ * Do 27. 8. 2026 tu bol stub SESSION a SUDO vrstvy. Prihlásenie zmizlo
+ * (D99, D100); zostal actor, ktorého `defineRoute()` potrebuje pre FK
+ * `campaigns.created_by` a `audit_log.user_id` (D102).
  *
  * Vlastník: A12. Zdieľajú ho `routes-campaigns.spec.ts`,
  * `no-write-without-confirm.spec.ts` a `kontrakt-v3-kluc.spec.ts` (K6).
@@ -21,7 +25,7 @@ import type {
   CatalogCacheRecord,
   MoneyString,
   Paged,
-  SessionClaims,
+  LocalActor,
 } from '@/contracts';
 
 import { createPreviewTokenService, type PreviewTokenServiceInstance } from '@/lib/crypto/preview-token';
@@ -50,44 +54,26 @@ import type { CampaignTierRecord } from '@/lib/repo/tiers.repo';
 
 import { fakeApiKey } from '../helpers/factories';
 
-/* ══════════════════════════ 1. Session / sudo stub ════════════════════════ */
+/* ═══════════════════════════ 1. Lokálny actor ═════════════════════════════ */
 
 export const TEST_USER_ID = 1;
 
-export function testClaims(now = new Date()): SessionClaims {
-  return {
-    sub: TEST_USER_ID,
-    username: 'samuel',
-    absoluteExpiresAt: new Date(now.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(now.getTime() + 30 * 60_000),
-    sudoUntil: new Date(now.getTime() + 10 * 60_000),
-  };
+export function testActor(): LocalActor {
+  return { id: TEST_USER_ID, username: 'samuel' };
 }
 
-/** Stub session vrstvy — testy route-ov netestujú A4, len pipeline za ňou. */
-export function sessionRouteDeps(opts: { sudo?: boolean } = {}): RouteDeps {
-  const claims = testClaims();
+/**
+ * Actor pre `defineRoute()` bez siahnutia do DB.
+ *
+ * Nahradilo `sessionRouteDeps()`, ktoré stubovalo session aj sudo okno.
+ * Zápisové garancie sa tým NEOSLABILI — po zrušení sudo ich drží dry-run
+ * a potvrdenie (`assertConfirmed()` v engine), nie táto vrstva. Strážia to
+ * `no-write-without-confirm.spec.ts` a `origin-check-po-loginu.spec.ts`.
+ */
+export function actorRouteDeps(opts: { now?: () => Date } = {}): RouteDeps {
   return {
-    verifySession: async () => ({
-      claims,
-      refreshed: {
-        token: 'test-token',
-        claims,
-        cookie: {
-          name: 'ovl_zliav_session',
-          value: 'test-token',
-          options: { httpOnly: true, secure: true, sameSite: 'strict', path: '/', maxAge: 1800 },
-        },
-      },
-    }),
-    requireSudo:
-      opts.sudo === false
-        ? () => {
-            const err = new Error('Vyžaduje sa opätovné potvrdenie heslom (D70).');
-            err.name = 'SudoRequiredError';
-            throw err;
-          }
-        : () => new Date(Date.now() + 10 * 60_000),
+    localActor: async () => testActor(),
+    ...(opts.now ? { now: opts.now } : {}),
   };
 }
 

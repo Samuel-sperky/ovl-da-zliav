@@ -43,11 +43,9 @@ import LockedFeatures, {
   lockedFeaturesText,
 } from '@/components/settings/LockedFeatures';
 import SafeguardsSection from '@/components/settings/SafeguardsSection';
-import SignOut from '@/components/settings/SignOut';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
 import { SETTINGS_ANCHORS } from '@/components/settings/sub-pages';
 import { SETTINGS_CSS } from '@/components/settings/styles';
-import { LOGIN_CSS } from '@/app/login/styles';
 import type { KeyMetaView, QueueView, SettingsView } from '@/components/settings/api';
 
 /* ═══════════════════════════ vzorka ═══════════════════════════════════════ */
@@ -117,7 +115,7 @@ describe('Nastavenia — kotvy a sekcie', () => {
     //   čo smie robiť     → rozsah, zapisy
     //   koľko toho smie   → rozpocet
     //   čo už spravila    → historia, diagnostika, zamknute
-    //   núdzové brzdy     → poistky, odhlasenie, cervena
+    //   núdzové brzdy     → poistky, cervena
     //
     // `covie` je navrchu zámerne: používateľ mesiace netušil, že strop
     // desiatich produktov je iba prepínač, takže rozcestník „čo appka vie"
@@ -133,7 +131,6 @@ describe('Nastavenia — kotvy a sekcie', () => {
       'diagnostika',
       'zamknute',
       'poistky',
-      'odhlasenie',
       'cervena',
     ]);
   });
@@ -156,10 +153,14 @@ describe('Nastavenia — kotvy a sekcie', () => {
       renderToStaticMarkup(createElement(DiagnosticsSection)),
     ].join('\n');
 
-    // Podmnožina kotiev — tie ostatné (`pripojenie`, `historia`, `odhlasenie`,
-    // `cervena`) patria komponentám, ktoré si bez fetchu a props nezrenderujú,
-    // a kryje ich e2e. Kto pridá kotvu do `SETTINGS_ANCHORS`, nech ju pridá aj
-    // sem — inak kotva ukazuje na sekciu, ktorá nemusí existovať.
+    // Podmnožina kotiev — tie ostatné (`pripojenie`, `historia`, `cervena`)
+    // patria komponentám, ktoré si bez fetchu a props nezrenderujú.
+    //
+    // POZOR NA TÚTO VÝNIMKU (28. 8. 2026): do dnes tu bola vyňatá aj kotva
+    // `odhlasenie` s tým, že „kryje ju e2e". Nekryla — a keď D99 zmazalo
+    // `SignOut.tsx`, rozcestník ponúkal odkaz na sekciu, ktorá neexistuje,
+    // a našel to až preklik v prehliadači. Čo je vyňaté tu, nestráži NIKTO;
+    // kto pridá kotvu do `SETTINGS_ANCHORS`, nech ju pridá aj sem.
     for (const id of ['kluce', 'rozpocet', 'rozsah', 'poistky', 'zamknute', 'diagnostika']) {
       expect(markup, `chýba sekcia s kotvou ${id}`).toContain(`id="${id}"`);
     }
@@ -238,16 +239,17 @@ describe('Rozpočet zápisov', () => {
 /* ═══════════════════════ E. Rozsah zliav ══════════════════════════════════ */
 
 describe('Rozsah zliav', () => {
-  it('pilotný rozsah povie, že prechod na plný stojí heslo', () => {
+  it('pilotný rozsah povie, že prechod na plný stojí potvrdenie', () => {
     const markup = renderToStaticMarkup(
       createElement(ScopeModeForm, { settings: SETTINGS, onChanged: noop }),
     );
     expect(markup).toContain('pilotný rozsah');
-    expect(markup).toContain('vyžaduje heslo');
+    // D105 (27. 8. 2026): „heslo" → „potvrdenie", brána zostala.
+    expect(markup).toContain('vyžaduje potvrdenie');
     expect(markup).toContain('data-testid="scope-open-full"');
   });
 
-  it('plný rozsah sa dá vrátiť späť bez hesla', () => {
+  it('plný rozsah sa dá vrátiť späť bez potvrdenia', () => {
     const markup = renderToStaticMarkup(
       createElement(ScopeModeForm, {
         settings: { ...SETTINGS, scopeMode: 'plny', maxProducts: 10000 },
@@ -255,7 +257,7 @@ describe('Rozsah zliav', () => {
       }),
     );
     expect(markup).toContain('data-testid="scope-confirm-pilot"');
-    expect(markup).toContain('heslo nevyžaduje');
+    expect(markup).toContain('potvrdenie nevyžaduje');
   });
 
   it('nečitateľná hodnota sa prizná a znamená pilotný rozsah', () => {
@@ -399,27 +401,13 @@ describe('Zamknuté funkcie', () => {
   });
 });
 
-/* ═══════════════ H. Odhlásenie sa dá vôbec urobiť ═════════════════════════ */
-
-describe('Odhlásenie', () => {
-  /*
-   * Regresia: prestavba na štyri taby vzala odhlásenie so sebou. Cesta
-   * `POST /api/auth/logout` ostala, ale v UI ju už nič nevolalo — používateľ
-   * sa nemal ako odhlásiť a musel čakať, kým session vyprší. Tento test drží
-   * tlačidlo na mieste.
-   */
-  it('sekcia existuje, má tlačidlo a nesie kotvu, na ktorú navigácia ukazuje', () => {
-    const markup = renderToStaticMarkup(createElement(SignOut));
-    expect(markup).toContain('id="odhlasenie"');
-    expect(markup).toContain('data-testid="sign-out-button"');
-    expect(markup).toContain('Odhlásiť sa');
-  });
-
-  it('hovorí, čo odhlásenie NEZASTAVÍ — fronta beží na serveri, nie v prehliadači', () => {
-    const markup = renderToStaticMarkup(createElement(SignOut));
-    expect(markup).toContain('Fronta beží ďalej');
-  });
-});
+/*
+ * ODDIEL H (Odhlásenie sa dá vôbec urobiť) TU BOL DO 27. 8. 2026.
+ *
+ * Vznikol z regresie: prestavba na štyri taby vzala odhlásenie so sebou a
+ * používateľ musel čakať, kým session vyprší. Prihlásenie zmizlo celé (D99),
+ * takže sa nie je z čoho odhlasovať a sekcia `SignOut` je zmazaná.
+ */
 
 /* ═════════════════════════════ G. Mobil ═══════════════════════════════════ */
 
@@ -433,14 +421,6 @@ describe('Mobil — nič neskroluje doboku', () => {
 
   it('dlhé technické reťazce sa lámu, nerozťahujú stránku', () => {
     expect(SETTINGS_CSS).toContain('overflow-wrap:anywhere');
-    expect(LOGIN_CSS).toContain('overflow-wrap:anywhere');
   });
 
-  it('prihlasovacia karta má strop šírky, nie pevnú šírku', () => {
-    // `width:100%` + `max-width` = karta sa na telefóne zmestí; samotné
-    // `max-width` bez `width:100%` by na širokej obrazovke stále fungovalo,
-    // ale bez neho by pevná šírka vytlačila stránku doboku.
-    expect(LOGIN_CSS).toContain('.login .sec{width:100%;max-width:360px;');
-    expect(LOGIN_CSS).toMatch(/\.login\{[^}]*padding:24px 4px\}/);
-  });
 });

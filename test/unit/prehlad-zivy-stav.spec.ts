@@ -651,10 +651,11 @@ describe('Prehľad — prečo sa nič nedeje', () => {
     expect(look.tone).toBe('idle');
     expect(look.tone).not.toBe('critical');
     expect(RESOLUTION_LOOK.sam.tone).toBe('attention');
-    // Zámok už NIE JE tón: `sudo` je jantárové ako `sam`, lebo používateľ s tým
-    // vie pohnúť. Že si to vypýta heslo, nesie glyf, slovo a príznak `locked`.
-    expect(RESOLUTION_LOOK.sudo.tone).toBe('attention');
-    expect(RESOLUTION_LOOK.sudo.locked).toBe(true);
+    // Zámok už NIE JE tón: `potvrdenie` je jantárové ako `sam`, lebo používateľ
+    // s tým vie pohnúť. Že si to vyžiada výslovné potvrdenie (do 27. 8. 2026
+    // heslo — D105), nesie glyf, slovo a príznak `locked`.
+    expect(RESOLUTION_LOOK.potvrdenie.tone).toBe('attention');
+    expect(RESOLUTION_LOOK.potvrdenie.locked).toBe(true);
     // Zastavený zápis, s ktorým sa z obrazovky nedá urobiť nič, je červený.
     expect(RESOLUTION_LOOK.mimo_appky.tone).toBe('critical');
   });
@@ -712,7 +713,7 @@ describe('Prehľad — kódy sedia s originálmi (kontroluje typ, nie viera)', (
     };
     const resolution: Record<BlockerResolution, keyof typeof RESOLUTION_LOOK> = {
       sam: 'sam',
-      sudo: 'sudo',
+      potvrdenie: 'potvrdenie',
       cakanie: 'cakanie',
       mimo_appky: 'mimo_appky',
     };
@@ -863,7 +864,7 @@ describe('Prehľad — dominanta a prekážky sa vykreslia', () => {
           blocker({
             id: 'scope_pilot_cap',
             severity: 'informuje',
-            resolution: 'sudo',
+            resolution: 'potvrdenie',
             what: 'V pilotnom režime prejde 10 produktov.',
             nextStep: 'Prepnite rozsah v Nastaveniach.',
           }),
@@ -877,8 +878,8 @@ describe('Prehľad — dominanta a prekážky sa vykreslia', () => {
     expect(html).toContain('Netreba robiť nič');
     // Domnienka sa prizná, nezamlčí.
     expect(html).toContain('nevie overiť');
-    // Zámok pri kroku, ktorý si vypýta heslo.
-    expect(html).toContain('Vyžiada si heslo');
+    // Zámok pri kroku, ktorý si vyžiada výslovné potvrdenie.
+    expect(html).toContain('Vyžiada si potvrdenie');
     // Závažnosť nesie SLOVO, nie farba — inak sa tri úrovne nedajú rozlíšiť.
     expect(html).toContain('zastavuje zápis');
     expect(html).toContain('nezastavuje nič');

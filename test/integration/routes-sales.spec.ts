@@ -20,46 +20,16 @@ import { resetRateLimiter, type RouteDeps } from '@/lib/http/define-route';
 const APP_ORIGIN = 'https://zlavy.local';
 const NOW = new Date('2026-08-06T09:00:00.000Z');
 
-function claims() {
-  return {
-    sub: 7,
-    username: 'samuel',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
-function routeDeps(authenticated = true): RouteDeps {
+/**
+ * Deps pre `defineRoute()`. Do 27. 8. 2026 tu bol stub SESSION vrstvy
+ * (`verifySession`) a testy si ním vedeli vyrobiť aj stav „bez session" alebo
+ * „bez sudo okna". Prihlásenie zmizlo (D99, D100), takže tie stavy neexistujú
+ * a stub sa zúžil na lokálneho actora, ktorého route potrebuje pre FK a audit.
+ */
+function routeDeps(): RouteDeps {
   return {
     now: () => NOW,
-    verifySession: async () => {
-      if (!authenticated) {
-        const error = new Error('Session chýba alebo je neplatná.');
-        error.name = 'SessionError';
-        (error as Error & { code: string }).code = 'missing';
-        throw error;
-      }
-      const session = claims();
-      return {
-        claims: session,
-        refreshed: {
-          token: 'refreshed',
-          claims: session,
-          cookie: {
-            name: 'ovl_zliav_session' as const,
-            value: 'refreshed',
-            options: {
-              httpOnly: true as const,
-              secure: true as const,
-              sameSite: 'strict' as const,
-              path: '/',
-              maxAge: 1800,
-            },
-          },
-        },
-      };
-    },
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -130,11 +100,10 @@ function makeDeps(opts: WorldOptions = {}): { deps: SalesRouteDeps; unitsQueries
 
 async function call(
   opts: WorldOptions = {},
-  authenticated = true,
 ): Promise<{ status: number; body: { ok: boolean; data?: SalesInsightsReport; error?: { code: string } } }> {
   resetRateLimiter();
   const world = makeDeps(opts);
-  const handler = createSalesGet(world.deps, routeDeps(authenticated));
+  const handler = createSalesGet(world.deps, routeDeps());
   const response = await handler(new Request(`${APP_ORIGIN}/api/sales`, { method: 'GET' }));
   return {
     status: response.status,
@@ -144,13 +113,13 @@ async function call(
 
 /* ══════════════════════════════ 1. Auth ═══════════════════════════════════ */
 
+/*
+ * Test „bez session vráti 401" tu stál do 27. 8. 2026. Prihlásenie appka nemá
+ * (D99), takže stav „bez session" neexistuje a test by meral vetvu, ktorá už
+ * nie je v kóde. Čo z tejto oblasti PRETRVÁVA a je strážené inde: origin check
+ * na mutáciách (`origin-check-po-loginu.spec.ts`) — čítanie ho nepotrebuje.
+ */
 describe('GET /api/sales — auth ako ostatné čítacie routy', () => {
-  it('bez session vráti 401 a žiadne dáta', async () => {
-    const res = await call({}, false);
-    expect(res.status).toBe(401);
-    expect(res.body.ok).toBe(false);
-    expect(res.body.data).toBeUndefined();
-  });
 
   it('so session vráti 200', async () => {
     const res = await call();

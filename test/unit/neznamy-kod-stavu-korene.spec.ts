@@ -33,7 +33,6 @@ import type {
   CampaignItemRecord,
   CampaignRecord,
   CampaignStatus,
-  SessionClaims,
 } from '@/contracts';
 
 import { createAckPost } from '@/app/api/campaigns/[id]/ack/route';
@@ -41,7 +40,6 @@ import type { RoutesDeps } from '@/app/api/campaigns/_shared';
 import { sentenceOf, UNKNOWN_STATUS_FLAG } from '@/components/campaigns/discounts-model';
 import { toStatusCode as toStatusCodeFromOverview } from '@/components/dashboard/overview-model';
 import type { RouteDeps } from '@/lib/http/define-route';
-import { SudoRequiredError } from '@/lib/auth/sudo';
 import {
   CAMPAIGN_STATUS_CODES,
   SURFACE_STATES,
@@ -142,42 +140,11 @@ describe('zoznam zliav po presune prevodu', () => {
 const NOW = new Date('2026-08-24T09:00:00.000Z');
 const APP_ORIGIN = 'https://zlavy.local';
 
-function claims(): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
 function sessionDeps(): RouteDeps {
   return {
     now: () => NOW,
     newRequestId: () => '01J00000000000000000ACK001',
-    requireSudo: (c: SessionClaims | null | undefined) => {
-      if (c === null || c === undefined || c.sudoUntil === null) throw new SudoRequiredError();
-      return c.sudoUntil;
-    },
-    verifySession: async () => ({
-      claims: claims(),
-      refreshed: {
-        token: 'refreshed',
-        claims: claims(),
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 

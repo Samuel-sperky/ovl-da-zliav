@@ -162,7 +162,7 @@ export function writeConditions(
               ? 'Appka sa sama zastavila, lebo zapisovala rýchlejšie, než je bezpečné.'
               : `Appka sa sama zastavila. Dôvod: ${lockedReason}.`,
           nextStep:
-            'Otvoriť sa to dá jedine ručne heslom v Poistkách — appka sa nikdy neodomkne sama.',
+            'Otvoriť sa to dá jedine ručne potvrdením v Poistkách — appka sa nikdy neodomkne sama.',
           anchor: '#poistky',
           assumed: false,
         }

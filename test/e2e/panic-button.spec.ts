@@ -1,12 +1,13 @@
 /**
  * Aura Zľavy — e2e: panic button „kľúč unikol" (A18, D67, R5).
  *
- * Panic vyžaduje heslo A doslovný literál `KLUC UNIKOL`. Po vykonaní je kľúč
+ * Panic vyžaduje doslovný literál `KLUC UNIKOL` vypísaný rukou. Do 27. 8. 2026
+ * k nemu chcel aj heslo; heslá zmizli (D99), potvrdenie literálom zostáva
+ * nedotknuté — je to ono „potvrdenie" z I3. Po vykonaní je kľúč
  * z appky wipnutý, čakajúce kampane zrušené, appka je len na čítanie a UI
  * zobrazí runbook — appka kľúč revokovať NEVIE a nesmie to tvrdiť.
  */
-import { expect, login, storeApiKey, test } from './fixtures';
-import { E2E_CONFIG } from './config';
+import { expect, storeApiKey, test } from './fixtures';
 
 const PRODUCT = 201;
 const PANIC_LITERAL = 'KLUC UNIKOL';
@@ -19,12 +20,10 @@ function dateOnly(offsetDays: number): string {
 
 test.describe('panic button', () => {
   test('bez presného literálu sa nedá odoslať', async ({ page }) => {
-    await login(page);
     await storeApiKey(page);
 
     await page.goto('/nastavenia');
     await page.getByTestId('panic-open').click();
-    await page.getByTestId('panic-password').fill(E2E_CONFIG.adminPassword);
     await page.getByTestId('panic-confirm').fill('kluc unikol'); // malé písmená
     await expect(page.getByTestId('panic-submit')).toBeDisabled();
 
@@ -33,7 +32,6 @@ test.describe('panic button', () => {
   });
 
   test('panic wipne kľúč, zruší čakajúce kampane a ukáže runbook', async ({ page, db }) => {
-    await login(page);
     await storeApiKey(page);
     await db.seedAllowlist([PRODUCT]);
 
@@ -49,7 +47,6 @@ test.describe('panic button', () => {
 
     await page.goto('/nastavenia');
     await page.getByTestId('panic-open').click();
-    await page.getByTestId('panic-password').fill(E2E_CONFIG.adminPassword);
     await page.getByTestId('panic-confirm').fill(PANIC_LITERAL);
     await page.getByTestId('panic-submit').click();
 
@@ -86,14 +83,12 @@ test.describe('panic button', () => {
   });
 
   test('panic je použiteľný aj bez uloženého kľúča', async ({ page, db }) => {
-    await login(page);
     await page.goto('/nastavenia');
     await expect(page.getByTestId('panic-button')).toContainText(
       'Teraz nie je uložený ani jeden kľúč',
     );
 
     await page.getByTestId('panic-open').click();
-    await page.getByTestId('panic-password').fill(E2E_CONFIG.adminPassword);
     await page.getByTestId('panic-confirm').fill(PANIC_LITERAL);
     await page.getByTestId('panic-submit').click();
     await expect(page.getByTestId('panic-result')).toBeVisible();

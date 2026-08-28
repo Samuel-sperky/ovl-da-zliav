@@ -15,7 +15,8 @@
  * Nastavenia boli treťou obrazovkou s prekážkami a prevod mal tri riadky, tak
  * sa napísal na mieste — presne ako predtým na Prehľade a v tabe Zľavy. Tri
  * tabuľky sa potom rozišli: `mimo_appky` bolo tu a v tabe Zľavy červené, na
- * Prehľade jantárové; `sudo` bolo tu jantárové, na Prehľade tlmené; a slovo
+ * Prehľade jantárové; `potvrdenie` (do D105 `sudo`) bolo tu jantárové, na
+ * Prehľade tlmené; a slovo
  * o riešení znelo na každej obrazovke inak. Prevod NIE JE lokálna vec — je to
  * tvrdenie appky o jednej a tej istej prekážke.
  *
@@ -29,7 +30,8 @@
  *
  * Preto:
  *  - `cakanie`    → pokojný tón. Netreba robiť nič, čas to vyrieši.
- *  - `sam`, `sudo` → tón pozornosti. Dá sa to spraviť hneď, v appke.
+ *  - `sam`, `potvrdenie` → tón pozornosti. Dá sa to spraviť hneď, v appke.
+ *    (Kód `sudo` sa 27. 8. 2026 premenoval na `potvrdenie` — D105.)
  *  - `mimo_appky` → tón poruchy. Appka s tým nespraví nič a nikto to nespraví
  *    za používateľa; červená je tu vyhradená pre stratu dát a zastavený zápis
  *    a toto je presne ten druhý prípad.
@@ -85,8 +87,9 @@ export function blockerTone(blocker: Pick<BlockerWire, 'resolution'>): StatusTon
 }
 
 /**
- * Ikona prekážky. Berie sa zo SLOVNÍKA PREKÁŽOK, nie z ikony tónu: `sudo` má
- * zámok, hoci má rovnaký tón ako `sam`, lebo zámok je spôsob riešenia.
+ * Ikona prekážky. Berie sa zo SLOVNÍKA PREKÁŽOK, nie z ikony tónu:
+ * `potvrdenie` (do 27. 8. 2026 `sudo`, D105) má zámok, hoci má rovnaký tón ako
+ * `sam`, lebo zámok je spôsob riešenia.
  *
  * Do 19. 8. 2026 to bol ZNAK a vracalo sa 🔒 — jediné emoji v appke a jediná
  * farebná vec v inak zmeranej monochromatickej palete. Teraz je to názov

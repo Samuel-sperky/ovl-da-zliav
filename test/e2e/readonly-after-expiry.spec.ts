@@ -12,7 +12,7 @@
  * obrazovke a nemení sa. Tabuľka allowlistu zanikla — čítanie sa overuje na
  * tabuľke katalógu (`/produkty`) a na zozname zliav (`/zlavy`).
  */
-import { addAllowlist, api, expect, login, storeApiKey, test } from './fixtures';
+import { addAllowlist, api, expect, storeApiKey, test } from './fixtures';
 
 const PRODUCTS = [201, 202] as const;
 
@@ -21,7 +21,6 @@ test.describe('read-only po expirácii kľúča', () => {
     page,
     db,
   }) => {
-    await login(page);
     await storeApiKey(page);
     await addAllowlist(page, PRODUCTS);
 
@@ -66,7 +65,6 @@ test.describe('read-only po expirácii kľúča', () => {
   });
 
   test('nový kľúč zruší read-only režim', async ({ page, db }) => {
-    await login(page);
     await storeApiKey(page);
     await db.expireApiKey();
 
@@ -81,7 +79,6 @@ test.describe('read-only po expirácii kľúča', () => {
   });
 
   test('D21: naplánovaná kampaň bez kľúča neskončí ako `failed`', async ({ page, db }) => {
-    await login(page);
     await storeApiKey(page);
     await addAllowlist(page, [PRODUCTS[0]]);
 

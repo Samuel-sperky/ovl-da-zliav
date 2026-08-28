@@ -246,7 +246,8 @@ export function clockPhrase(
  *
  *  · `cakanie`    — nedá sa nič urobiť, appka počká sama → pokojná vysvetlivka.
  *    Vyčerpaný denný rozpočet je `blokuje`, a predsa nie je chyba (K2).
- *  · `sam`/`sudo` — používateľ s tým niečo urobiť MÔŽE → `warn`, aby to našiel.
+ *  · `sam`/`potvrdenie` — používateľ s tým niečo urobiť MÔŽE → `warn`, aby to
+ *    našiel. Kód `sudo` premenovala 27. 8. 2026 D105 na `potvrdenie`.
  *  · `mimo_appky` — z obrazovky sa to vyriešiť nedá → `err`; je to jediná cesta
  *    k červenej na tejto obrazovke a vedie k nej výhradne zastavený zápis (§4).
  */

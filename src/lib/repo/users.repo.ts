@@ -1,18 +1,26 @@
 /**
- * Aura Zľavy — repozitár tabuľky `users` (BUILD-SPEC §3, R9, D68, I1).
+ * Aura Zľavy — repozitár tabuľky `users` (BUILD-SPEC §3, R9, D101, I1).
  *
- * Jediný user je admin (Samuel) — roly sa neimplementujú (R9). Repozitár drží
- * výhradne prácu s riadkom; politiku hesla, hashovanie a overovanie vlastní
- * `src/lib/auth/password.ts`, aby sa argon2 nikdy nevolal z dvoch miest.
+ * 27. 8. 2026 (D99, D100) appka prišla o prihlásenie aj o sudo, a s nimi
+ * o `src/lib/auth/password.ts`. Tabuľka `users` a jediný riadok v nej
+ * (`samuel`, id 1) ZOSTALI (D101): `campaigns.created_by` a `audit_log.user_id`
+ * na ňu majú FK `ON DELETE RESTRICT`, takže bez nej sa nezapíše ani kampaň, ani
+ * auditný riadok. Odteraz je jedinou úlohou tohto repozitára ČÍTANIE riadku —
+ * heslo tu už nikto nemení.
+ *
+ * POZOR PRI ČÍTANÍ: k 27. 8. 2026 tento modul NEIMPORTUJE nikto. Dohľadanie
+ * lokálneho actora (D102) si `src/lib/auth/local-actor.ts` robí vlastným SQL,
+ * lebo potrebuje aj INSERT na čerstvej inštalácii. Súbor zostáva podľa §5
+ * kontraktu `KONTRAKT-BEZ-LOGINU-2026-08-27.md` ako jediná čítacia cesta
+ * k `users` — nie preto, že ho niečo volá. Keď sa sem actor raz presunie,
+ * začne sa volať `getById()`/`getByUsername()`.
  *
  * Invarianty držané tu:
  *  - **I1** — `password_hash` sa nikdy neloguje ani nevracia do UI; do
- *    `UserRecord` patrí, pretože ho potrebuje `verifyPassword()`, ale meno poľa
- *    `passwordHash` je v denylistě redaktora (A2), takže aj náhodné logovanie
- *    celého recordu je maskované.
- *  - **I4** — tento súbor NEOBSAHUJE žiadny prístup k `audit_log`; auditné
- *    eventy `login_ok`/`login_fail`/`sudo_*` zapisuje `lib/auth/*` cez
- *    `appendAudit()`.
+ *    `UserRecord` patrí, pretože ho nesie stĺpec, ale meno poľa `passwordHash`
+ *    je v denylistě redaktora (A2), takže aj náhodné logovanie celého recordu
+ *    je maskované.
+ *  - **I4** — tento súbor NEOBSAHUJE žiadny prístup k `audit_log`.
  *  - **§2** — časy sú v DB v UTC (`DATETIME(3)`), driver ich vracia ako `Date`.
  *
  * Vlastník: A4.
@@ -27,17 +35,15 @@ const COLUMNS = 'id, username, password_hash, created_at, updated_at, last_login
 
 const SQL_BY_USERNAME = `SELECT ${COLUMNS} FROM users WHERE username = ? LIMIT 1`;
 const SQL_BY_ID = `SELECT ${COLUMNS} FROM users WHERE id = ? LIMIT 1`;
-const SQL_UPSERT =
-  'INSERT INTO users (username, password_hash) VALUES (?, ?) ' +
-  'ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)';
-const SQL_TOUCH_LOGIN = 'UPDATE users SET last_login_at = UTC_TIMESTAMP(3) WHERE id = ?';
-const SQL_SET_HASH = 'UPDATE users SET password_hash = ? WHERE id = ?';
-const SQL_COUNT = 'SELECT COUNT(*) AS total FROM users';
+
+/* 27. 8. 2026 (D99): `SQL_UPSERT` a `SQL_TOUCH_LOGIN` zmazané spolu s
+   `upsertAdmin()`/`touchLastLogin()` — tento repozitár už do `users` NEZAPISUJE
+   vôbec. Riadok (`samuel`, id 1) zakladá `src/lib/auth/local-actor.ts` (D102). */
 
 /** `users.username` je `VARCHAR(64)` (§3). */
 export const USERNAME_MAX_LENGTH = 64;
-/** Minimum kopíruje `scripts/seed-admin.ts` (A0). */
-export const USERNAME_MIN_LENGTH = 3;
+/* `USERNAME_MIN_LENGTH` zmazaná 27. 8. 2026 (D99): dolnú hranicu kontroloval
+   len `upsertAdmin()`, a ten je zmazaný. Čítanie hranicu nepotrebuje. */
 
 /* ──────────────────────────────── mapovanie ────────────────────────────── */
 
@@ -75,12 +81,12 @@ export interface UsersRepoDeps {
   defaultConn?: Queryable;
 }
 
-export interface UsersRepository extends UsersRepo {
-  /** Existuje vôbec admin? Podklad pre onboarding (D20) a boot kontroly. */
-  countUsers(conn?: Queryable): Promise<number>;
-  /** Zmena hesla existujúceho usera (hash počíta `lib/auth/password.ts`). */
-  setPasswordHash(id: number, passwordHash: string, conn?: Queryable): Promise<boolean>;
-}
+/**
+ * Zhoda s kontraktom `UsersRepo`. `countUsers()` (onboarding D20),
+ * `setPasswordHash()` (zmena hesla), `upsertAdmin()` a `touchLastLogin()` tu
+ * stáli do 27. 8. 2026 — po D99 ich nemalo čo volať, tak sú zmazané.
+ */
+export type UsersRepository = UsersRepo;
 
 export function createUsersRepo(deps: UsersRepoDeps = {}): UsersRepository {
   const run = async <T>(conn: Queryable | undefined, sql: string, values: unknown[]): Promise<T> => {
@@ -104,51 +110,16 @@ export function createUsersRepo(deps: UsersRepoDeps = {}): UsersRepository {
       return row ? mapRow(row) : null;
     },
 
-    /**
-     * Vytvorí alebo prepíše admina. Volá to `scripts/seed-admin.ts` (A0 má
-     * vlastnú kópiu SQL, aby skript nemusel importovať `src/`) a onboarding.
-     * `passwordHash` MUSÍ byť už hotový argon2id hash — plaintext sem nikdy
-     * nechodí (I1).
-     */
-    async upsertAdmin(username: string, passwordHash: string, conn?: Queryable): Promise<UserRecord> {
-      const name = typeof username === 'string' ? username.trim() : '';
-      if (name.length < USERNAME_MIN_LENGTH || name.length > USERNAME_MAX_LENGTH) {
-        throw new Error(
-          `Prihlasovacie meno musí mať ${USERNAME_MIN_LENGTH}–${USERNAME_MAX_LENGTH} znakov.`,
-        );
-      }
-      if (typeof passwordHash !== 'string' || !passwordHash.startsWith('$argon2id$')) {
-        throw new Error('Do users.password_hash sa smie zapísať výhradne argon2id hash (D68).');
-      }
-      await run(conn, SQL_UPSERT, [name, passwordHash]);
-      const row = firstRow(await run(conn, SQL_BY_USERNAME, [name]));
-      if (!row) throw new Error(`User "${name}" sa po zápise nedá načítať.`);
-      return mapRow(row);
-    },
-
-    async touchLastLogin(id: number, conn?: Queryable): Promise<void> {
-      if (!Number.isInteger(id) || id <= 0) return;
-      await run(conn, SQL_TOUCH_LOGIN, [id]);
-    },
-
-    async countUsers(conn?: Queryable): Promise<number> {
-      const result = await run<Array<{ total: number | bigint }>>(conn, SQL_COUNT, []);
-      const total = Array.isArray(result) ? result[0]?.total : 0;
-      return Number(total ?? 0);
-    },
-
-    async setPasswordHash(id: number, passwordHash: string, conn?: Queryable): Promise<boolean> {
-      if (!Number.isInteger(id) || id <= 0) return false;
-      if (typeof passwordHash !== 'string' || !passwordHash.startsWith('$argon2id$')) {
-        throw new Error('Do users.password_hash sa smie zapísať výhradne argon2id hash (D68).');
-      }
-      const result = (await run<{ affectedRows?: number }>(conn, SQL_SET_HASH, [passwordHash, id])) ?? {};
-      return typeof result.affectedRows === 'number' ? result.affectedRows > 0 : false;
-    },
+    /* 27. 8. 2026 (D99): `upsertAdmin()` a `touchLastLogin()` zmazané spolu so
+       svojimi deklaráciami v `UsersRepo` (`src/contracts.ts`). Nevolalo ich nič
+       — `seed-admin`, onboarding aj prihlásenie zmizli — a `upsertAdmin()`
+       navyše držal jediný živý výskyt argon2-hash prefixu v `src/`, čo je
+       proti K6 kontraktu `KONTRAKT-BEZ-LOGINU-2026-08-27.md`. Stĺpce
+       `password_hash` a `last_login_at` v DB zostali nedotknuté (D101). */
   };
 
   return repo;
 }
 
-/** Singleton pre route-y a auth vrstvu. */
+/** Singleton pre route-y a dohľadanie lokálneho actora (D102). */
 export const usersRepo: UsersRepository = createUsersRepo();

@@ -24,7 +24,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { AuditRecord, SessionClaims } from '@/contracts';
+import type { AuditRecord } from '@/contracts';
 
 import { closePool } from '@/db/pool';
 import { createScopeModeRoute } from '@/app/api/settings/scope-mode/route';
@@ -45,35 +45,16 @@ const available = await dbAvailable();
 const APP_ORIGIN = 'https://zlavy.local';
 const NOW = new Date('2026-08-12T10:00:00.000Z');
 
-const claims: SessionClaims = {
-  sub: 1,
-  username: 'samuel',
-  absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-  idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-  sudoUntil: new Date(NOW.getTime() + 10 * 60_000),
-};
+/**
+ * `audit_log.user_id` a `campaigns.created_by` majú FK na `users(id)`, takže
+ * actor musí v DB existovať a jeho `id` musí sedieť s tým, čo posiela route.
+ */
+const TEST_USER_ID = 1;
 
-function sessionRouteDeps(): RouteDeps {
+function actorRouteDeps(opts: { now?: () => Date } = {}): RouteDeps {
   return {
-    now: () => NOW,
-    verifySession: async () => ({
-      claims,
-      refreshed: {
-        token: 'test-token',
-        claims,
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'test-token',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    now: opts.now ?? (() => NOW),
+    localActor: async () => ({ id: TEST_USER_ID, username: 'samuel' }),
   };
 }
 
@@ -100,15 +81,10 @@ async function parse(response: Response): Promise<Parsed> {
 /** Route so skutočným repozitárom aj skutočným auditom — bez fakes. */
 const realScopeRoute = () =>
   createScopeModeRoute({
-    // `requireSudo` zostáva produkčný — sudo okno nesú `claims` vyššie. MUSÍ sa
-    // však prepísať aj `now`: route si ho drží zvlášť od `routeDeps` a bez
-    // prepisu by sa okno porovnávalo s hodinami stroja, takže by test prešiel
-    // alebo padol podľa toho, koľko je práve hodín.
-    now: () => NOW,
-    routeDeps: sessionRouteDeps(),
+    routeDeps: actorRouteDeps({ now: () => NOW }),
   });
 
-const realSettingsRoute = () => createSettingsRoute({ routeDeps: sessionRouteDeps() });
+const realSettingsRoute = () => createSettingsRoute({ routeDeps: actorRouteDeps() });
 
 async function scopeAuditRows(): Promise<AuditRecord[]> {
   const page = await listAudit({ eventType: 'scope_mode_changed', perPage: 50 });
@@ -127,12 +103,14 @@ describe.skipIf(!available)('K1 bod 4 — `pilot → plny` končí v DB aj v aud
     // `truncateAll()` používateľov zmaže. Bez tohto riadku by audit zápis
     // padol na FK — a `appendAudit()` chyby ZÁMERNE prehĺta, aby výpadok
     // auditu nezhodil operáciu, takže by test nevidel chybu, len chýbajúci
-    // riadok. Používateľ musí mať `id = 1`, lebo toľko nesú `claims.sub`.
+    // riadok. Používateľ musí mať `id = 1`, lebo toľko nesie `testActor()`
+    // v harnesse — a od 27. 8. 2026 aj lokálny actor (D102), ktorý actora
+    // v DB vyžaduje presne kvôli tomuto FK.
     await withAppConn(async (conn) => {
       await conn.query('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)', [
-        claims.sub,
-        claims.username,
-        'argon2id$fake-hash-pre-test',
+        TEST_USER_ID,
+        'samuel',
+        'no-login-D99',
       ]);
     });
   });
@@ -152,6 +130,10 @@ describe.skipIf(!available)('K1 bod 4 — `pilot → plny` končí v DB aj v aud
         makeRequest('POST', '/api/settings/scope-mode', {
           mode: 'plny',
           maxProductsPerCampaign: 150,
+          // D106 (28. 8. 2026) — uvoľnenie rozsahu si žiada výslovné
+          // potvrdenie. Bez neho route vráti 409 a v DB nezmení nič; že to
+          // tak naozaj je, stráži test/unit/rozsah-a-zapisy.spec.ts.
+          confirmed: true,
         }),
       ),
     );
@@ -169,7 +151,7 @@ describe.skipIf(!available)('K1 bod 4 — `pilot → plny` končí v DB aj v aud
     const row = rows[0] as AuditRecord;
     expect(isAuditEventType(row.eventType)).toBe(true);
     expect(row.beforeSnapshot).toMatchObject({ scopeMode: 'pilot' });
-    expect(row.afterSnapshot).toMatchObject({ scopeMode: 'plny', requiredSudo: true });
+    expect(row.afterSnapshot).toMatchObject({ scopeMode: 'plny', looseningScope: true });
 
     // Popis v histórii je slovenský, nie surový kód (K10).
     const label = auditEventLabelSk(row.eventType);
@@ -185,7 +167,7 @@ describe.skipIf(!available)('K1 bod 4 — `pilot → plny` končí v DB aj v aud
       await realScopeRoute()(makeRequest('POST', '/api/settings/scope-mode', { mode: 'pilot' })),
     );
     expect(res.status).toBe(200);
-    expect(res.body.data?.requiredSudo).toBe(false);
+    expect(res.body.data?.looseningScope).toBe(false);
 
     const after = await settingsRepo.readScope();
     expect(after.mode).toBe('pilot');
@@ -206,8 +188,8 @@ describe.skipIf(!available)('K1 bod 4 — `pilot → plny` končí v DB aj v aud
       pilotMaxProducts: PILOT_MAX_PRODUCTS,
       hardMaxProducts: 10_000,
       scopeFailClosed: false,
-      scopeSwitchToFullRequiresSudo: false,
-      scopeSwitchToPilotRequiresSudo: false,
+      scopeSwitchToFullIsLoosening: false,
+      scopeSwitchToPilotIsLoosening: false,
     });
   });
 });

@@ -41,9 +41,10 @@
  *  4. **Žiadny `rateLimit`.** Je to čítanie, ktoré UI robí často; okenný limit
  *     by zhasol hlavičku appky presne vtedy, keď je najviac potrebná.
  *
- * `auth: 'session'` — na rozdiel od `/api/health` (ten je `none` kvôli docker
- * healthchecku) tu sú počty produktov, režim rozsahu a stav rozpočtu, teda
- * prevádzkové údaje appky. Sudo netreba: nič sa nemení.
+ * Prihlásenie ani sudo tu od 27. 8. 2026 nie sú (D99, D100) a netreba ich: je
+ * to `GET`, ktorý nič nemení. Na rozdiel od `/api/health` sem patria počty
+ * produktov, režim rozsahu a stav rozpočtu — prevádzkové údaje appky, ktorá
+ * beží výhradne na `127.0.0.1` (I5).
  *
  * Vlastník: S2.
  */
@@ -200,7 +201,6 @@ export function createStatusRoute(deps: StatusRouteDeps = {}): NextRouteHandler 
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async (ctx): Promise<StatusPayload> => {
         const payload = await readStatusPayload(sourcesFor());
         ctx.log.debug('status_read', {

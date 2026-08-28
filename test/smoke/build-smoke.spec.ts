@@ -16,9 +16,18 @@
  *   1. `next build` prejde a vyrobí `.next/standalone/server.js`,
  *   2. boot fail-fast pri `PUBLIC_BIND=0.0.0.0` (I5, I14) — proces skončí exit 1,
  *   3. `/api/health` 200 bez auth, nič citlivé v odpovedi (I1),
- *   4. login flow + atribúty session cookie `httpOnly`/`Secure`/`SameSite=Strict` (D69),
+ *   4. **appka odpovedá BEZ prihlásenia** (D99): `/` je 200, nie presmerovanie
+ *      na `/login`, a žiadna odpoveď neposiela session cookie,
  *   5. **`GET /api/key` bez uloženého kľúča vracia 200, NIE 500** — regresia §A.3,
- *   6. zápisová route bez potvrdenia je odmietnutá (I3).
+ *      a je dostupný bez akejkoľvek autentifikácie (D99),
+ *   6. zápisová route bez potvrdenia je odmietnutá (I3),
+ *   7. **origin check (D72) drží aj v zbuildovanej appke** — mutácia bez
+ *      hlavičky `Origin` aj mutácia s CUDZÍM `Origin` skončí 403.
+ *
+ * Body 4, 5 a 7 nahradili 27. 8. 2026 (D99) pôvodný login flow a tvrdenie
+ * „bez session cookie je `/api/key` 401". Zmysel testu sa nemenil: je to
+ * poistka proti celej triede chýb nasadenia (viď vyššie) a po zrušení
+ * prihlásenia musí dokazovať práve to, čo sa zmenilo.
  *
  * INVARIANT I6: appka v tomto teste nemá nastavenú doménu shopu ani
  * `SHOP_BASE_URL_OVERRIDE` (v produkcii zakázaný) — nemá teda kam volať.
@@ -32,7 +41,6 @@ import {
   call,
   ensureDatabase,
   ensureSecrets,
-  login,
   runMigrations,
   runNextBuild,
   seedBaseline,
@@ -45,10 +53,6 @@ import {
 import { spawn } from 'node:child_process';
 
 let server: StartedServer | null = null;
-/** Cookie prihláseného admina — plní ju `beforeAll`. */
-let sessionCookie = '';
-let loginSetCookie = '';
-let loginStatus = 0;
 
 beforeAll(async () => {
   ensureSecrets();
@@ -60,11 +64,6 @@ beforeAll(async () => {
 
   server = startStandalone();
   await waitForHealth(server);
-
-  const result = await login();
-  sessionCookie = result.cookie;
-  loginSetCookie = result.rawSetCookie;
-  loginStatus = result.status;
 }, 1_200_000);
 
 afterAll(async () => {
@@ -117,30 +116,35 @@ describe('smoke nad produkčným buildom', () => {
       'secret',
       'token',
       'master',
-      SMOKE.adminPassword,
     ]) {
       expect(res.text.toLowerCase()).not.toContain(forbidden.toLowerCase());
     }
   });
 
-  it('login flow funguje a session cookie je httpOnly + Secure + SameSite=Strict (D69)', () => {
-    expect(loginStatus).toBe(200);
-    expect(loginSetCookie).not.toBe('');
-    expect(loginSetCookie).toMatch(/HttpOnly/i);
-    expect(loginSetCookie).toMatch(/Secure/i);
-    expect(loginSetCookie).toMatch(/SameSite=Strict/i);
-    expect(loginSetCookie).toMatch(/Path=\//i);
-    // Samotná hodnota cookie nesmie byť heslo ani meno v čitateľnej forme.
-    expect(loginSetCookie).not.toContain(SMOKE.adminPassword);
+  it('D99: appka odpovedá bez prihlásenia — `/` je 200, nie presmerovanie na /login', async () => {
+    /* `redirect: 'manual'` je tu podstatné: s automatickým nasledovaním by aj
+     * presmerovanie na prihlásenie skončilo ako 200 a test by nič nestrážil. */
+    const res = await fetch(`${BASE_URL}/`, { redirect: 'manual' });
+    expect(res.status, `Location: ${res.headers.get('location') ?? '—'}`).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+
+    const html = await res.text();
+    // K2 — do prihlásenia nevedie ani odkaz; stránka `/login` neexistuje.
+    expect(html).not.toContain('/login');
+
+    // Appka nemá session, takže nesmie posielať ani jej cookie.
+    const cookies = res.headers.getSetCookie();
+    expect(cookies.some((c) => c.includes('ovl_zliav_session'))).toBe(false);
   });
 
-  it('bez session cookie je /api/key 401 (fail-closed)', async () => {
+  it('D99: /api/key je dostupný bez akejkoľvek autentifikácie', async () => {
     const res = await call('GET', '/api/key');
-    expect(res.status).toBe(401);
+    expect(res.status, res.text).toBe(200);
+    expect(res.setCookie.some((c) => c.includes('ovl_zliav_session'))).toBe(false);
   });
 
   it('REGRESIA §A.3: GET /api/key bez uloženého kľúča vracia 200, nie 500', async () => {
-    const res = await call('GET', '/api/key', { cookie: sessionCookie });
+    const res = await call('GET', '/api/key');
     // Toto presne padalo na 500 kvôli miscompile Turbopacku — a padalo LEN
     // v zbuildovanej appke, nikdy v testoch nad zdrojákom.
     expect(res.status, res.text).toBe(200);
@@ -152,7 +156,6 @@ describe('smoke nad produkčným buildom', () => {
 
   it('I3: POST /api/campaigns bez potvrdenia je odmietnutý', async () => {
     const res = await call('POST', '/api/campaigns', {
-      cookie: sessionCookie,
       body: { name: 'Smoke bez potvrdenia', mode: 'eager' },
     });
     expect(res.status).toBeGreaterThanOrEqual(400);
@@ -164,14 +167,35 @@ describe('smoke nad produkčným buildom', () => {
     expect(body.error?.code).toBeTruthy();
   });
 
-  it('I3: mutácia bez hlavičky Origin je odmietnutá (CSRF, D72)', async () => {
+  it('D72: mutácia bez hlavičky Origin je odmietnutá (CSRF)', async () => {
     const res = await fetch(`${BASE_URL}/api/campaigns`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', Cookie: sessionCookie },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'bez originu', mode: 'eager' }),
     });
     expect(res.status).toBe(403);
     expect((await res.text()).includes('origin_missing')).toBe(true);
+  });
+
+  /*
+   * Toto je po D99 JEDINÁ brána, ktorá cudzej stránke bráni zapísať do
+   * produkčného eshopu (§2 a §3 kontraktu `KONTRAKT-BEZ-LOGINU-2026-08-27.md`).
+   * Preto ju smoke test overuje aj v zbuildovanom artefakte, nielen nad
+   * zdrojákom: keby ju build zahodil tak, ako Turbopack zahodil null-guard
+   * (§A.3), nezostalo by nič.
+   */
+  it('D72: mutácia s CUDZÍM Origin je odmietnutá aj v zbuildovanej appke', async () => {
+    const res = await fetch(`${BASE_URL}/api/campaigns`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        // Cudzia stránka. Host sa nerovná hostu požiadavky → fail-closed.
+        Origin: 'https://zlomyselna.example',
+      },
+      body: JSON.stringify({ name: 'cudzi origin', mode: 'eager' }),
+    });
+    expect(res.status).toBe(403);
+    expect((await res.text()).includes('origin_mismatch')).toBe(true);
   });
 
   it('I5/I14: PUBLIC_BIND=0.0.0.0 zhodí boot zbuildovanej appky (exit 1)', async () => {

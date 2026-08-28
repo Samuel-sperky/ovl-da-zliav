@@ -28,11 +28,9 @@ import { useState } from 'react';
 
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import SudoPrompt from '@/components/ui/SudoPrompt';
 import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
-import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
-  SUDO_REQUIRED_CODE,
   putOrdersKey,
   validateApiKey,
   type KeyMetaView,
@@ -113,8 +111,6 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [stored, setStored] = useState<{ last4: string; verifyStatus: string } | null>(null);
-  const [needSudo, setNeedSudo] = useState(false);
-  const [pending, setPending] = useState<string | null>(null);
 
   /** Neúspech je vždy hlasný: úspešné hlásenie zmizne, chyba sa pomenuje. */
   function fail(error: { code?: string | null; message?: string | null } | null) {
@@ -134,19 +130,12 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
     setBusy(false);
     if (res.ok) {
       setApiKey('');
-      setPending(null);
       setFailure(null);
       setStored({ last4: res.data.last4, verifyStatus: res.data.verifyStatus });
       onStored();
       return;
     }
-    if (res.error.code === SUDO_REQUIRED_CODE) {
-      setPending(value);
-      setNeedSudo(true);
-      return;
-    }
     setApiKey('');
-    setPending(null);
     fail(res.error);
   }
 
@@ -224,21 +213,6 @@ export function OrdersKeyForm({ keyMeta, onStored }: OrdersKeyFormProps) {
         ho nikdy nezobrazia. Červená zóna maže oba kľúče naraz.
       </p>
 
-      {needSudo ? (
-        <SudoPrompt
-          actionLabel="uloženie kľúča na objednávky"
-          onSuccess={() => {
-            setNeedSudo(false);
-            const value = pending;
-            setPending(null);
-            if (value) void submit(value);
-          }}
-          onCancel={() => {
-            setNeedSudo(false);
-            setPending(null);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

@@ -83,9 +83,10 @@ export interface HeaderRightProps {
 }
 
 /**
- * Pravá strana hlavičky. Vykresľuje sa aj na prihlasovacej obrazovke — vtedy
- * sú čísla neznáme a hlavička to prizná namiesto toho, aby mlčala alebo
- * hádala.
+ * Pravá strana hlavičky. Keď sú čísla neznáme, hlavička to prizná namiesto
+ * toho, aby mlčala alebo hádala. Do 27. 8. 2026 sa to týkalo najmä
+ * prihlasovacej obrazovky — tá zmizla s D99, dôvod priznať neznalosť zostal
+ * (načítanie, nedostupná appka).
  */
 export function HeaderRight({ state }: HeaderRightProps) {
   const { queue } = useQueueHeader();

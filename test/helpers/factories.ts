@@ -226,8 +226,15 @@ export function makeCampaign(options: CampaignFactoryOptions = {}): CampaignReco
 }
 
 /**
- * Kampaň, ktorá SMIE zapisovať: má `confirmed_at`, `confirm_payload_hash` nad
- * vlastnou sadou parametrov a platné sudo okno (I3, D70).
+ * Kampaň, ktorá SMIE zapisovať: má `confirmed_at` a `confirm_payload_hash` nad
+ * vlastnou sadou parametrov (I3).
+ *
+ * `sudo_at` je ZÁMERNE `null` — presne to od 27. 8. 2026 zapisuje produkčná
+ * cesta (`_shared.ts`), odkedy D100 zrušilo sudo. Keby tu factory dosadila
+ * čas, testy by bežali na kampani, aká v DB nikdy nevznikne, a zakryli by
+ * chybu typu „niekto vrátil kontrolu `sudo_at` do `assertConfirmed()`" —
+ * appka by prestala zapisovať a testy by o tom mlčali. Práve to sa 27. 8.
+ * stalo a zachytil to `no-write-without-confirm.spec.ts`.
  */
 export function makeConfirmedCampaign(options: CampaignFactoryOptions = {}): CampaignRecord {
   const base = makeCampaign(options);
@@ -246,7 +253,7 @@ export function makeConfirmedCampaign(options: CampaignFactoryOptions = {}): Cam
           dateTo: base.dateTo,
         }),
       ),
-    sudoAt: options.sudoAt ?? testTime(-2),
+    sudoAt: options.sudoAt ?? null,
     scheduledAt: options.scheduledAt ?? testTime(-2),
   };
 }

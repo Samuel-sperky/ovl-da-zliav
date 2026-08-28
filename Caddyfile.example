@@ -1,19 +1,13 @@
-# Aura Zľavy — Caddyfile PRÍKLAD (D94, D95, D97).
+# Aura Zľavy — Caddyfile PRÍKLAD (D94, D95).
 #
-# Repo obsahuje LEN tento example (I1). Reálny súbor ži je v `secrets/Caddyfile`
-# (mimo gitu) a bcrypt hash v `secrets/basicauth.hash`. Postup: docs/21-RUNBOOKY.md.
+# Repo obsahuje LEN tento example (I1). Reálny súbor žije v `secrets/Caddyfile`
+# (mimo gitu). Postup: docs/21-RUNBOOKY.md.
 #
-# Hash vygeneruješ:
-#   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'TVOJE-HESLO'
-# a výsledok VLOŽÍŠ namiesto reťazca NAHRAD-BCRYPT-HASHOM nižšie — do súboru
-# `secrets/Caddyfile`, ktorý je mimo gitu (D97). Do tohto example súboru ani do
-# repa hash NEPATRÍ.
-#
-# Toto celé urobí za teba `scripts/setup-local.sh` (alebo `.ps1` na Windows).
-#
-# POZOR: Caddy nevie načítať súbor do placeholdera `{$PREMENNA}` — hash musí byť
-# v Caddyfile priamo. Skoršia verzia tu mala env placeholder, ktorý nikto
-# nenastavoval, takže Caddy nenaštartoval.
+# 27. 8. 2026 (D98) z tohto súboru zmizol blok `basic_auth`, a s ním aj heslo,
+# bcrypt hash a `secrets/basicauth.hash`. Kópia je odteraz doslovná:
+#   cp Caddyfile.example secrets/Caddyfile
+# a nič sa v nej nedopĺňa. To isté robí `scripts/setup-local.sh` (alebo `.ps1`
+# na Windows).
 
 {
   admin off
@@ -22,11 +16,10 @@
 }
 
 # HTTP bez TLS — vedomé rozhodnutie Samuela (6.8.2026, odchýlka od D94):
-# appka beží výhradne na 127.0.0.1 za basic auth, TLS s lokálnou CA robil viac
-# trenia než úžitku (neznámy cert, trust root). Session cookie zostáva Secure —
-# prehliadače považujú localhost aj 127.0.0.1 za dôveryhodný pôvod, takže
-# Secure cookie cez http://localhost FUNGUJE. Mimo localhostu by nefungovala,
-# čo je ďalšia poistka proti expozícii (I5).
+# appka beží výhradne na 127.0.0.1, TLS s lokálnou CA robil viac trenia než
+# úžitku (neznámy cert, trust root). Od 27. 8. 2026 (D99) tu nie je ani session
+# cookie — jedinou ochranou pred sieťou je I5: publikovaný je len
+# 127.0.0.1:3070, nič viac.
 #
 # Explicitná schéma http:// vypína automatické HTTPS aj presmerovania.
 #
@@ -36,9 +29,11 @@
 # port zapísaný tiež — je to zámer, nech sa port nedá zmeniť omylom (I5).
 http://localhost:3070, http://127.0.0.1:3070 {
 
-  basic_auth {                                   # D97 — hash žije v secrets/Caddyfile
-    samuel NAHRAD-BCRYPT-HASHOM
-  }
+  # `basic_auth` ZRUŠENÉ 27. 8. 2026 (D98, ruší D97). Bola to tretia vrstva
+  # prihlásenia pred appkou, ktorá mala vlastnú bránu; nechránila nič, čo
+  # nechráni I5 (publikovaný je len 127.0.0.1:3070). Žiadny bcrypt hash sa už
+  # negeneruje a `secrets/basicauth.hash` neexistuje. Dôvod a prijaté riziko:
+  # KONTRAKT-BEZ-LOGINU-2026-08-27.md.
 
   header {                                       # D95
     Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"

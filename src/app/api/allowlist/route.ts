@@ -28,7 +28,6 @@ export function createAllowlistGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: (ctx) =>
         withRouteErrors(async () => {
           void ctx;
@@ -80,7 +79,6 @@ export function createAllowlistPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: addBodySchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -94,7 +92,7 @@ export function createAllowlistPost(
             actor: 'user',
             eventType: 'allowlist_added',
             ok: true,
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
             productId: record.productId,
             message: `Produkt ${record.productId} pridaný do allowlistu (slot ${record.slot}).`,
           });

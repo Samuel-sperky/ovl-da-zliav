@@ -10,8 +10,9 @@
  *  - PUT overí kľúč sondou `reduction=0` (D53), uloží s TTL ≤ 48 h a dopáli
  *    `needs_key` kampane, ktoré sú stále vo svojom okne (D24, D25),
  *  - kľúč bez scope sa NEULOŽÍ (403 → 409 `key_invalid`),
- *  - DELETE (panic, D67) vyžaduje heslo + literál `KLUC UNIKOL`, wipne kľúč,
- *    zruší čakajúce kampane a vráti runbook.
+ *  - DELETE (panic, D67) vyžaduje vypísaný literál `KLUC UNIKOL` — heslo tu
+ *    stálo do 27. 8. 2026 (D99) — wipne kľúč, zruší čakajúce kampane a vráti
+ *    runbook. Bez literálu sa nesmie wipnúť NIČ (I3: potvrdenie, D100).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -51,48 +52,17 @@ import {
 const APP_ORIGIN = 'https://zlavy.local';
 const APP_HOST = 'zlavy.local';
 const NOW = TEST_NOW; // 2026-08-05T08:00:00Z → dnes je 2026-08-05
-const GOOD_PASSWORD = 'Spravne-Heslo-123';
-const VALID_COOKIE = 'ovl_zliav_session=token';
 
-function claims(sudoMinutes: number | null) {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: sudoMinutes === null ? null : new Date(NOW.getTime() + sudoMinutes * 60_000),
-  };
-}
-
-function routeDeps(sessionClaims: ReturnType<typeof claims> | null): RouteDeps {
+/**
+ * Deps pre `defineRoute()`. Do 27. 8. 2026 tu bol stub SESSION vrstvy
+ * (`verifySession`) a testy si ním vedeli vyrobiť aj stav „bez session" alebo
+ * „bez sudo okna". Prihlásenie zmizlo (D99, D100), takže tie stavy neexistujú
+ * a stub sa zúžil na lokálneho actora, ktorého route potrebuje pre FK a audit.
+ */
+function routeDeps(): RouteDeps {
   return {
     now: () => NOW,
-    verifySession: async (token) => {
-      if (!token || !sessionClaims) {
-        const error = new Error('Session chýba alebo je neplatná.');
-        error.name = 'SessionError';
-        (error as Error & { code: string }).code = 'missing';
-        throw error;
-      }
-      return {
-        claims: sessionClaims,
-        refreshed: {
-          token: 'refreshed',
-          claims: sessionClaims,
-          cookie: {
-            name: 'ovl_zliav_session' as const,
-            value: 'refreshed',
-            options: {
-              httpOnly: true as const,
-              secure: true as const,
-              sameSite: 'strict' as const,
-              path: '/',
-              maxAge: 1800,
-            },
-          },
-        },
-      };
-    },
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -104,7 +74,6 @@ function makeRequest(options: {
   const method = options.method ?? 'GET';
   const headers = new Headers({ host: APP_HOST, 'x-forwarded-for': '127.0.0.1' });
   if (options.origin !== null) headers.set('origin', APP_ORIGIN);
-  headers.set('cookie', VALID_COOKIE);
   const init: RequestInit = { method, headers };
   if (options.body !== undefined && method !== 'GET') {
     init.body = JSON.stringify(options.body);
@@ -268,15 +237,13 @@ function baseDeps(overrides: Partial<KeyRouteDeps> = {}): KeyRouteDeps {
   return {
     apiKey: makeApiKeyFake().repo,
     campaigns: makeCampaignsFake([]).repo,
-    users: { getById: async () => ({ passwordHash: 'argon2-fake-hash' }) },
-    verify: async (_hash, password) => password === GOOD_PASSWORD,
     audit: async () => {},
     inspectKey: inspectAgainstMock,
     execute: async (campaignId) =>
       ({ campaignId, status: 'done', itemsTotal: 0, itemsOk: 0, itemsFailed: 0, itemsUncertain: 0, items: [] }) as ExecutorResult,
     now: () => NOW,
     timeZone: 'Europe/Bratislava',
-    routeDeps: routeDeps(claims(10)),
+    routeDeps: routeDeps(),
     ...overrides,
   };
 }
@@ -403,23 +370,6 @@ describe('PUT /api/key', () => {
     expect(apiKey.stored).toHaveLength(0);
   });
 
-  it('bez sudo okna je 401 sudo_required a sonda sa ani nespustí (I3)', async () => {
-    let probed = false;
-    const route = createKeyPutRoute(
-      baseDeps({
-        routeDeps: routeDeps(claims(null)),
-        probeKey: async () => {
-          probed = true;
-          return 'valid';
-        },
-      }),
-    );
-    const response = await route(makeRequest({ method: 'PUT', body: { apiKey: VALID_API_KEY } }));
-    expect(response.status).toBe(401);
-    expect((await readBody(response)).error?.code).toBe('sudo_required');
-    expect(probed).toBe(false);
-  });
-
   it('prikrátky kľúč odmietne zod 400', async () => {
     const route = createKeyPutRoute(baseDeps());
     const response = await route(makeRequest({ method: 'PUT', body: { apiKey: 'kratky' } }));
@@ -430,7 +380,7 @@ describe('PUT /api/key', () => {
 /* ═══════════════════════════════ DELETE ═══════════════════════════════════ */
 
 describe('DELETE /api/key (panic button, D67)', () => {
-  it('heslo + literál KLUC UNIKOL: wipe, zrušené čakajúce kampane, runbook', async () => {
+  it('vypísaný literál KLUC UNIKOL: wipe, zrušené čakajúce kampane, runbook', async () => {
     const apiKey = makeApiKeyFake({ last4: '0001' });
     const audits: AuditInput[] = [];
     const campaigns = makeCampaignsFake([
@@ -449,10 +399,7 @@ describe('DELETE /api/key (panic button, D67)', () => {
     );
 
     const response = await route(
-      makeRequest({
-        method: 'DELETE',
-        body: { password: GOOD_PASSWORD, confirm: PANIC_CONFIRM_LITERAL },
-      }),
+      makeRequest({ method: 'DELETE', body: { confirm: PANIC_CONFIRM_LITERAL } }),
     );
     expect(response.status).toBe(200);
     const body = await readBody(response);
@@ -468,7 +415,12 @@ describe('DELETE /api/key (panic button, D67)', () => {
     expect(campaigns.campaigns.find((c) => c.id === 21)?.status).toBe('cancelled');
     expect(campaigns.campaigns.find((c) => c.id === 22)?.status).toBe('cancelled');
     expect(campaigns.campaigns.find((c) => c.id === 23)?.status).toBe('done');
-    expect(audits.filter((a) => a.eventType === 'campaign_cancelled')).toHaveLength(2);
+    const cancelledAudits = audits.filter((a) => a.eventType === 'campaign_cancelled');
+    expect(cancelledAudits).toHaveLength(2);
+    // Panic button je nevratný krok a audit sa nesmie prestať pýtať „kto" len
+    // preto, že zmizlo prihlásenie (I11). Od 27. 8. 2026 je to LOKÁLNY ACTOR
+    // (`samuel`, id 1, D102), nie `sub` zo session.
+    expect(cancelledAudits.every((a) => a.userId === 1)).toBe(true);
   });
 
   it('zruší aj viac než 100 čakajúcich kampaní napriek clampu perPage (E9)', async () => {
@@ -507,10 +459,7 @@ describe('DELETE /api/key (panic button, D67)', () => {
     const route = createKeyDeleteRoute(baseDeps({ apiKey: apiKey.repo, campaigns: repo }));
 
     const response = await route(
-      makeRequest({
-        method: 'DELETE',
-        body: { password: GOOD_PASSWORD, confirm: PANIC_CONFIRM_LITERAL },
-      }),
+      makeRequest({ method: 'DELETE', body: { confirm: PANIC_CONFIRM_LITERAL } }),
     );
 
     expect(response.status).toBe(200);
@@ -523,23 +472,46 @@ describe('DELETE /api/key (panic button, D67)', () => {
   it('zlý literál odmietne zod 400 a nič sa newipne', async () => {
     const apiKey = makeApiKeyFake({ last4: '0001' });
     const route = createKeyDeleteRoute(baseDeps({ apiKey: apiKey.repo }));
-    const response = await route(
-      makeRequest({ method: 'DELETE', body: { password: GOOD_PASSWORD, confirm: 'nie' } }),
-    );
+    const response = await route(makeRequest({ method: 'DELETE', body: { confirm: 'nie' } }));
     expect(response.status).toBe(400);
     expect(apiKey.wipes).toHaveLength(0);
   });
 
-  it('zlé heslo vráti 401 a nič sa newipne', async () => {
+  /*
+   * Do 27. 8. 2026 tu stálo „zlé heslo vráti 401 a nič sa newipne". Heslo
+   * zmizlo (D99), potvrdenie NIE (D100, I3): jediné, čo teraz stojí medzi
+   * jedným klikom a nevratným dopálením OBOCH kľúčov, je vypísaný literál.
+   * Preto sa tu strážia obe podoby „nepotvrdené": chýbajúce pole aj prázdne.
+   */
+  it('bez potvrdenia (chýbajúci `confirm`) je 400 a nič sa newipne', async () => {
     const apiKey = makeApiKeyFake({ last4: '0001' });
-    const route = createKeyDeleteRoute(baseDeps({ apiKey: apiKey.repo }));
-    const response = await route(
-      makeRequest({
-        method: 'DELETE',
-        body: { password: 'Zle-Heslo-12345', confirm: PANIC_CONFIRM_LITERAL },
+    const campaigns = makeCampaignsFake([makeCampaign({ id: 21, status: 'scheduled' })]);
+    const audits: AuditInput[] = [];
+    const route = createKeyDeleteRoute(
+      baseDeps({
+        apiKey: apiKey.repo,
+        campaigns: campaigns.repo,
+        audit: async (input) => {
+          audits.push(input);
+        },
       }),
     );
-    expect(response.status).toBe(401);
+
+    const response = await route(makeRequest({ method: 'DELETE', body: {} }));
+    expect(response.status).toBe(400);
+    // Fail-closed: kľúč zostal, čakajúca kampaň zostala a audit nič nehlási.
     expect(apiKey.wipes).toHaveLength(0);
+    expect(apiKey.meta().present).toBe(true);
+    expect(campaigns.campaigns.find((c) => c.id === 21)?.status).toBe('scheduled');
+    expect(audits).toHaveLength(0);
+  });
+
+  it('prázdne potvrdenie je 400 a nič sa newipne', async () => {
+    const apiKey = makeApiKeyFake({ last4: '0001' });
+    const route = createKeyDeleteRoute(baseDeps({ apiKey: apiKey.repo }));
+    const response = await route(makeRequest({ method: 'DELETE', body: { confirm: '' } }));
+    expect(response.status).toBe(400);
+    expect(apiKey.wipes).toHaveLength(0);
+    expect(apiKey.meta().present).toBe(true);
   });
 });

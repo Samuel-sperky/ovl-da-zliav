@@ -61,7 +61,6 @@ export function createAckPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       params: idParamSchema,
       handler: (ctx) =>
         withRouteErrors(async () => {

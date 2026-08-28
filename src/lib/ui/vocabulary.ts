@@ -448,12 +448,15 @@ export const GUARD_SENTENCES: Readonly<Record<GuardSentenceCode, GuardSentence>>
   },
   writes_locked: {
     text: 'Zápisy sú zastavené.',
-    hint: 'Odomknúť ich musíte ručne heslom v Nastaveniach.',
+    // 27. 8. 2026 (D105): heslo zmizlo (D99), zámok otvára zaškrtnuté
+    // potvrdenie v Nastaveniach (`confirmed: true` v POST /api/settings/unlock-writes).
+    hint: 'Odomknúť ich musíte ručne v Nastaveniach — zaškrtnutím potvrdenia.',
     tone: 'critical',
   },
   runaway_limit: {
     text: 'Appka zapisovala rýchlejšie, než je bezpečné, a sama sa zastavila.',
-    hint: 'Skontrolujte, či nebežia dve zľavy naraz, a zápisy odomknite heslom.',
+    // 27. 8. 2026 (D105): žiadne heslo — potvrdenie v Nastaveniach.
+    hint: 'Skontrolujte, či nebežia dve zľavy naraz, a zápisy odomknite v Nastaveniach.',
     tone: 'critical',
   },
   budget_exhausted: {

@@ -39,9 +39,10 @@
  *    Vedľa neho stojí čas, ku ktorému čísla platia, aby sa dalo poznať staré
  *    číslo od nového.
  *
- * 4. **Kým stav nepoznáme, nekreslia sa štyri menovky „nevieme".** Pri načítaní,
- *    na prihlasovacej obrazovke a pri nedostupnej appke je v pruhu JEDNA
- *    pilulka a JEDNA veta, ktorá povie prečo. Štyri neznáme hodnoty vyzerajú
+ * 4. **Kým stav nepoznáme, nekreslia sa štyri menovky „nevieme".** Pri načítaní
+ *    a pri nedostupnej appke je v pruhu JEDNA pilulka a JEDNA veta, ktorá
+ *    povie prečo. (Do 27. 8. 2026 sem patrila aj prihlasovacia obrazovka —
+ *    zmizla s D99.) Štyri neznáme hodnoty vyzerajú
  *    ako štyri poruchy. Tlačidlo Obnoviť zostáva aj vtedy — práve vtedy je
  *    najpotrebnejšie.
  *

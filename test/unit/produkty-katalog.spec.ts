@@ -14,7 +14,8 @@
  *     neexistuje", hoci ho appka len ešte nenačítala.
  *  C. **Strop výberu je vidieť dopredu a s cestou von.** Pilotná desiatka sa
  *     ukáže ako zámok s dôvodom, a keď ju výber prekročí, veta povie koľko
- *     prejde z koľkých a že sa to uvoľní v Nastaveniach (heslom).
+ *     prejde z koľkých a že sa to uvoľní v Nastaveniach (potvrdením; do
+ *     27. 8. 2026 heslom — D105).
  *  D. **Farbu volí `resolution`, nie `severity`.** Vyčerpaný rozpočet je
  *     `blokuje`, a predsa nie je chyba (K2).
  *  E. **Prečo neprejde práve tento kus.** Riadok, ktorý shop nenašiel, to má
@@ -452,7 +453,7 @@ describe('V10 — strop výberu a tón vysvetliviek', () => {
     const cap = notes.find((blocker) => blocker.id === 'scope_pilot_cap');
     expect(cap).toBeDefined();
     expect(cap?.severity).toBe('informuje');
-    expect(cap?.resolution).toBe('sudo');
+    expect(cap?.resolution).toBe('potvrdenie');
     expect(cap?.what).toContain(String(PILOT_MAX_PRODUCTS));
   });
 
@@ -463,11 +464,12 @@ describe('V10 — strop výberu a tón vysvetliviek', () => {
     expect(cap?.what).toContain('150');
     expect(cap?.nextStep).toContain('Zúžte výber');
     expect(cap?.nextStep).toContain('Nastaveniach');
-    // Že si prepnutie vypýta heslo, hovorí od 20. 8. 2026 ZÁMOK
-    // (`resolution: 'sudo'` → `ui/blocker-look.ts`), nie druhýkrát tá istá
-    // veta. Tvrdenie sa nestratilo, len sa pýta tam, kde to teraz stojí.
-    expect(cap?.resolution).toBe('sudo');
-    expect(cap?.nextStep).not.toContain('heslo');
+    // Že si prepnutie vyžiada výslovné potvrdenie, hovorí od 20. 8. 2026 ZÁMOK
+    // (`resolution: 'potvrdenie'` → `ui/blocker-look.ts`), nie druhýkrát tá istá
+    // veta. Tvrdenie sa nestratilo, len sa pýta tam, kde to teraz stojí. Do
+    // 27. 8. 2026 sa kód volal `sudo` a zámok sľuboval heslo (D105).
+    expect(cap?.resolution).toBe('potvrdenie');
+    expect(cap?.nextStep).not.toMatch(/heslo|potvrd/i);
     expect(cap?.path).toBe('/nastavenia');
   });
 
@@ -489,11 +491,11 @@ describe('V10 — strop výberu a tón vysvetliviek', () => {
   it('tón vysvetlivky určuje riešiteľ, nie závažnosť (K2)', () => {
     expect(noteVariantForResolution('cakanie')).toBe('info');
     expect(noteVariantForResolution('sam')).toBe('warn');
-    expect(noteVariantForResolution('sudo')).toBe('warn');
+    expect(noteVariantForResolution('potvrdenie')).toBe('warn');
     expect(noteVariantForResolution('mimo_appky')).toBe('err');
   });
 
-  it('prekážka, ktorú otvorí heslo, sa kreslí ako zámok s dôvodom', () => {
+  it('prekážka, ktorú otvorí potvrdenie, sa kreslí ako zámok s dôvodom', () => {
     const notes = pickBlockers(collectOperationBlockers(snapshotFor(3)), SELECTION_BLOCKERS);
     const html = renderToStaticMarkup(
       createElement(BlockerNotes, { blockers: notes, here: '/produkty' }),

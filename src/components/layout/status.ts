@@ -231,7 +231,8 @@ const NEVIEME = '—';
  *  - `cakanie`    — nič sa nepokazilo, appka čaká na čas → neutrál,
  *  - `mimo_appky` — appka je v najbezpečnejšom stave (napr. vypnuté zápisy),
  *                   z obrazovky sa s tým nedá nič robiť → neutrál,
- *  - `sam`/`sudo` — používateľ TERAZ môže niečo urobiť → jantárová výzva.
+ *  - `sam`/`potvrdenie` — používateľ TERAZ môže niečo urobiť → jantárová
+ *                   výzva. Kód `sudo` premenovala 27. 8. 2026 D105.
  *
  * Červená sa z prekážok NEVYRÁBA vôbec — je vyhradená pre stratu dát
  * a zastavený zápis (runaway zámok), ktorý prichádza mimo zoznamu prekážok.

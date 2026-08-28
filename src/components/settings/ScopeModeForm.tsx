@@ -9,10 +9,13 @@
  *
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
- * 1. **Uvoľnenie stojí heslo, sprísnenie nikdy.** Prechod na plný rozsah si
- *    server vypýta znova heslom; návrat do pilotného ide bez neho, aby sa dala
- *    appka pribrzdiť aj v núdzi. Táto asymetria je celý zmysel poistky a
- *    obrazovka ju nesmie „zjednodušiť" na jeden spoločný dialóg.
+ * 1. **Uvoľnenie stojí výslovné potvrdenie, sprísnenie nikdy.** Prechod na plný
+ *    rozsah si obrazovka vypýta druhým kliknutím po tom, čo napíše, čo prestane
+ *    platiť; návrat do pilotného ide bez toho, aby sa dala appka pribrzdiť aj
+ *    v núdzi. Táto asymetria je celý zmysel poistky a obrazovka ju nesmie
+ *    „zjednodušiť" na jeden spoločný krok — ani ju vyrovnať na „oboje voľné".
+ *    Do 27. 8. 2026 uvoľnenie chcelo heslo (sudo); D100 sudo zrušilo a D105
+ *    prepísalo texty na potvrdenie. ASYMETRIA ZOSTÁVA.
  * 2. **Používateľ musí vedieť, čo prepína.** Pred prepnutím na plný rozsah je
  *    na obrazovke doslova napísané, čo prestane platiť: strop desiatich
  *    produktov aj zoznam povolených produktov. Bez toho je to prepínač
@@ -38,13 +41,11 @@ import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
-import SudoPrompt from '@/components/ui/SudoPrompt';
-import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 import {
   SCOPE_MODE_LABELS,
-  SUDO_REQUIRED_CODE,
   postScopeMode,
   type ScopeModeValue,
   type SettingsView,
@@ -58,8 +59,6 @@ export interface ScopeModeFormProps {
 export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ActionFailure | null>(null);
-  const [needSudo, setNeedSudo] = useState(false);
-  const [pending, setPending] = useState<ScopeModeValue | null>(null);
   const [confirming, setConfirming] = useState(false);
 
   const mode = settings.scopeMode;
@@ -68,25 +67,33 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
      jantárové upozornenie, pilotný zelené potvrdenie. */
   const scopeSig: SigVariant = full ? 'warn' : 'ok';
 
+  /**
+   * `confirmed` posielame len pri UVOĽNENÍ (prechod na plný rozsah), a to
+   * preto, že používateľ sa cezeň už preklikal dvojkrokovým potvrdením nižšie
+   * (`scope-open-full` → `scope-confirm-full`). Do 27. 8. 2026 túto bránu
+   * držalo sudo; od 28. 8. 2026 ju server žiada ako `confirmed: true` (D106)
+   * a bez neho vracia 409 — dvojkrok v UI dovtedy serveru nič nehlásil, takže
+   * uvoľnenie prepustil jeden POST, ktorý o obrazovke nič nevedel.
+   *
+   * Sprísnenie (`pilot`) potvrdenie NEPOSIELA a ani ho server nechce — návrat
+   * do pilotného rozsahu musí zostať voľný, aby sa appka dala pribrzdiť aj
+   * v núdzi.
+   */
   async function switchTo(next: ScopeModeValue) {
     setFailure(null);
     setBusy(true);
-    const res = await postScopeMode(next);
+    const res = await postScopeMode(
+      next,
+      undefined,
+      next === 'plny' ? true : undefined,
+    );
     setBusy(false);
     if (res.ok) {
-      setPending(null);
       setConfirming(false);
       setFailure(null);
       onChanged();
       return;
     }
-    if (res.error.code === SUDO_REQUIRED_CODE) {
-      // Vypršané okno hesla NIE JE odhlásenie — pýtame heslo, nie prihlásenie.
-      setPending(next);
-      setNeedSudo(true);
-      return;
-    }
-    setPending(null);
     setFailure(describeActionFailure(res.error, { action: 'Zmena rozsahu zliav' }));
   }
 
@@ -124,7 +131,9 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
         <StatTile
           label={full ? 'Po sprísnení by prešlo' : 'Po uvoľnení by prešlo'}
           value={`${formatCountSk(full ? settings.pilotMaxProducts : settings.maxProductsPerCampaign)} produktov`}
-          detail={full ? 'návrat do pilotného rozsahu, bez hesla' : 'uložený strop plného rozsahu'}
+          detail={
+            full ? 'návrat do pilotného rozsahu, bez potvrdenia' : 'uložený strop plného rozsahu'
+          }
           testId="scope-other"
         />
       </div>
@@ -154,7 +163,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
                 {formatCountSk(settings.pilotMaxProducts)} produktov
               </td>
               <td data-l="Ktorý produkt prejde">len ten, ktorý je v zozname povolených</td>
-              <td data-l="Ako sa naň prepne">sprísnenie je vždy voľné, heslo netreba</td>
+              <td data-l="Ako sa naň prepne">sprísnenie je vždy voľné, potvrdenie netreba</td>
             </tr>
             <tr>
               <td className="name">
@@ -170,7 +179,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
                 {formatCountSk(settings.maxProductsPerCampaign)} produktov
               </td>
               <td data-l="Ktorý produkt prejde">každý, ktorý appka vidí vo svojom katalógu</td>
-              <td data-l="Ako sa naň prepne">uvoľnenie si vypýta heslo</td>
+              <td data-l="Ako sa naň prepne">uvoľnenie si vypýta potvrdenie</td>
             </tr>
           </tbody>
         </table>
@@ -191,7 +200,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
               <Button onClick={() => setConfirming(true)} data-testid="scope-open-full">
                 Prejsť na plný rozsah
               </Button>
-              <span className="lvl-3">vyžaduje heslo</span>
+              <span className="lvl-3">vyžaduje potvrdenie</span>
             </div>
           ) : (
             <>
@@ -204,7 +213,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
                 sa ich rozsah otvára z desiatok na tisíce.
               </p>
               <p className="set-note">
-                Naspäť do pilotného rozsahu sa dá kedykoľvek a bez hesla. Zmena sa
+                Naspäť do pilotného rozsahu sa dá kedykoľvek a bez potvrdenia. Zmena sa
                 zapíše do histórie aj so starou a novou hodnotou.
               </p>
               <div className="row">
@@ -226,7 +235,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
       ) : (
         <div className="set-form" data-testid="scope-to-pilot">
           {/* Rovnaký tvar ako pri opačnom prechode vyššie: tlačidlo a vedľa
-              neho jedno slovo o hesle. Čo sa pri sprísnení stane s už
+              neho jedno slovo o potvrdení. Čo sa pri sprísnení stane s už
               zapísanými zľavami, stojí pod rozklikom (P6) — na povrchu by to
               bol štvrtý odstavec tejto sekcie. */}
           <div className="row">
@@ -237,7 +246,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
             >
               {busy ? 'Prepínam…' : 'Vrátiť pilotný rozsah'}
             </Button>
-            <span className="lvl-3">heslo netreba</span>
+            <span className="lvl-3">potvrdenie netreba</span>
           </div>
         </div>
       )}
@@ -257,7 +266,7 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
             najbližšom potvrdení zľavy.
           </p>
           <p data-testid="scope-why-pilot-free">
-            Sprísnenie je vždy voľné: návrat do pilotného rozsahu heslo nevyžaduje. Už
+            Sprísnenie je vždy voľné: návrat do pilotného rozsahu potvrdenie nevyžaduje. Už
             zapísané zľavy zostanú v eshope a dobehnú — appka ich zrušiť nedokáže.
           </p>
           <table>
@@ -288,21 +297,6 @@ export function ScopeModeForm({ settings, onChanged }: ScopeModeFormProps) {
         </div>
       </details>
 
-      {needSudo ? (
-        <SudoPrompt
-          actionLabel="prechod na plný rozsah zliav"
-          onSuccess={() => {
-            setNeedSudo(false);
-            const next = pending;
-            setPending(null);
-            if (next !== null) void switchTo(next);
-          }}
-          onCancel={() => {
-            setNeedSudo(false);
-            setPending(null);
-          }}
-        />
-      ) : null}
     </section>
   );
 }

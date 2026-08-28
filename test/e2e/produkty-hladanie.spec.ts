@@ -27,7 +27,7 @@
  *
  * Vlastník: V15 (hľadanie a tabuľka).
  */
-import { expect, login, test, type DbHelper } from './fixtures';
+import { expect, test, type DbHelper } from './fixtures';
 
 /** Zrkadlo je zámerne NEÚPLNÉ — presne to spúšťa značku `≈`. */
 const MIRROR = [
@@ -100,8 +100,6 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
     );
 
     try {
-      await login(page);
-
       await page.goto('/produkty');
       await expect(page.getByTestId('catalog-table')).toBeVisible();
 
@@ -175,8 +173,6 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
     );
 
     try {
-      await login(page);
-
       await page.goto('/produkty');
       await expect(page.getByTestId('catalog-table')).toBeVisible();
 
@@ -242,8 +238,6 @@ test.describe('produkty — hľadanie, počet zhôd a výber', () => {
     );
 
     try {
-      await login(page);
-
       await page.goto('/produkty');
       await expect(page.getByTestId('catalog-table')).toBeVisible();
 

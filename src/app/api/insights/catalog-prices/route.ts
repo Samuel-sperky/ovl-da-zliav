@@ -42,7 +42,6 @@ export function createInsightsCatalogPricesGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async () => {
         const distribution = await prices();
 

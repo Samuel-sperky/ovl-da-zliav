@@ -131,11 +131,14 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
         ],
       },
       {
+        /* Kotva `odhlasenie` („Odhlásenie") tu stála do 28. 8. 2026. Prihlásenie
+           zmazalo D99 spolu s `SignOut.tsx`, takže sekcia `id="odhlasenie"` už
+           neexistuje a rozcestník ponúkal odkaz, ktorý nikam nevedie. Našiel to
+           preklik v prehliadači, nie test — `nastavenia-v12.spec.ts` si tú kotvu
+           z kontroly identifikátorov výslovne vyňal s tým, že „kryje ju e2e",
+           a e2e ju nekryla. Tá výnimka je odteraz zrušená. */
         title: 'Núdzové brzdy',
-        anchors: [
-          { id: 'poistky', label: 'Poistky' },
-          { id: 'odhlasenie', label: 'Odhlásenie' },
-        ],
+        anchors: [{ id: 'poistky', label: 'Poistky' }],
       },
     ],
   },

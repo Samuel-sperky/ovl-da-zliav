@@ -9,7 +9,8 @@
  *   `GET  /api/campaigns/[id]`       — detail: pásma, položky, audit stopa,
  *   `GET  /api/catalog/search`       — z čoho sa výber skladá (K7, K8),
  *   `POST /api/campaigns/preview`    — skúška naprázdno; jediný zdroj tokenu (I3),
- *   `POST /api/campaigns`            — zaradenie do fronty (sudo, D70),
+ *   `POST /api/campaigns`            — zaradenie do fronty (token z dry-runu,
+ *                                      I3; sudo z D70 zrušila D100 27. 8. 2026),
  *   `GET  /api/queue`                — ŽIVÝ stav fronty, rozpočtu a prekážok,
  *   `GET  /api/status`               — celý obraz stavu appky + prekážky,
  *   `GET  /api/campaigns/[id]/retry-failed` — popis toho, čo by zopakovanie urobilo.

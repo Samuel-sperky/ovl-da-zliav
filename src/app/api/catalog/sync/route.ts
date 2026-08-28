@@ -167,7 +167,6 @@ export function createCatalogSyncStatusRoute(deps: CatalogSyncRouteDeps = {}): N
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async () => {
         const source = deps.status ?? defaultCatalogRepo;
         return {
@@ -191,7 +190,6 @@ export function createCatalogSyncRoute(deps: CatalogSyncRouteDeps = {}): NextRou
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: bodySchema,
       // Jeden beh za minútu na IP. Katalóg sa nezosynchronizuje rýchlejšie tým,
       // že sa tlačidlo stlačí päťkrát.

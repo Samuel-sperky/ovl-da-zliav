@@ -5,14 +5,14 @@
  * kontrakt V3 K1).
  *
  * Appka má dva režimy rozsahu: pilotný so stropom desiatich produktov na jednu
- * zľavu a plný až do desaťtisíc. Prepínač žije v Nastaveniach a chráni ho heslo.
- * Lenže používateľ o ňom nevie — a keď narazil na strop, obrazovka mu výber
- * ticho orezala a nepovedala prečo. Presne to je jeden z dôvodov, prečo appku
- * nevedel použiť.
+ * zľavu a plný až do desaťtisíc. Prepínač žije v Nastaveniach a chráni ho
+ * výslovné potvrdenie (do 27. 8. 2026 heslo — D105). Lenže používateľ o ňom
+ * nevie — a keď narazil na strop, obrazovka mu výber ticho orezala a nepovedala
+ * prečo. Presne to je jeden z dôvodov, prečo appku nevedel použiť.
  *
  * Tento panel je odpoveď: keď strop výber orezal, obrazovka to POVIE, ukáže obe
  * čísla vedľa seba a rovno ponúkne cestu von — aj s upozornením, že si vyžiada
- * heslo. Odmietnuť bez ponuky je tu zakázané.
+ * potvrdenie. Odmietnuť bez ponuky je tu zakázané.
  *
  * PREČO TU NIE JE JANTÁROVÁ ŠKATUĽA (šprint 20, B3, 20. 8. 2026)
  * --------------------------------------------------------------
@@ -33,16 +33,16 @@
  *
  * 1. **Ďalší krok prichádza z `lib/status/blockers.ts`.** Prekážka
  *    `scope_pilot_cap` má hotovú vetu o ceste von a je označená ako riešiteľná
- *    heslom. Prepísať ju tu vlastnými slovami by znamenalo dve formulácie toho
- *    istého pravidla, ktoré sa časom rozídu.
+ *    potvrdením. Prepísať ju tu vlastnými slovami by znamenalo dve formulácie
+ *    toho istého pravidla, ktoré sa časom rozídu.
  * 2. **Tri čísla sa nesmú vrátiť do vety.** Ani ako `Note`, ani ako podnadpis:
  *    kým `scopeNumbers` kreslí `wanted`, `allowed` a `dropped`, je ktorákoľvek
  *    veta s tými istými číslami tretia kópia toho istého faktu.
  *    Stráži `test/unit/text-zlavy-duplicity.spec.ts`.
  * 3. **Panel neprepína rozsah.** Prepnutie je zmena, ktorá otvorí zápis do
- *    desaťtisíc produktov naraz — patrí do Nastavení, kde má vlastné potvrdenie
- *    a heslo. Odtiaľto vedie odkaz, nie akcia.
- * 4. **Zámok stojí pri ponuke, nie v pätke.** Používateľ má vedieť o hesle
+ *    desaťtisíc produktov naraz — patrí do Nastavení, kde má vlastné výslovné
+ *    potvrdenie. Odtiaľto vedie odkaz, nie akcia.
+ * 4. **Zámok stojí pri ponuke, nie v pätke.** Používateľ má vedieť o potvrdení
  *    SKÔR, než klikne — inak sa dozvie až v dialógu a bude to prekvapenie.
  *
  * Vlastník: V11; text šprint 20, B3.
@@ -69,7 +69,7 @@ export interface ScopeReleaseProps {
 
 export function ScopeRelease({ wanted, allowed, blocker, testId }: ScopeReleaseProps) {
   const dropped = Math.max(0, wanted - allowed);
-  const needsSudo = blocker === null ? true : blocker.resolution === 'sudo';
+  const needsConfirmation = blocker === null ? true : blocker.resolution === 'potvrdenie';
 
   return (
     <div className={styles.scopeRelease} data-testid={testId ?? 'scope-release'}>
@@ -101,10 +101,10 @@ export function ScopeRelease({ wanted, allowed, blocker, testId }: ScopeReleaseP
         <Link className="btn primary sm" href="/nastavenia#rozsah" data-testid="scope-release-link">
           Prepnúť rozsah v Nastaveniach
         </Link>
-        {needsSudo ? (
+        {needsConfirmation ? (
           <LockBadge
-            label="Vyžiada si heslo"
-            reason="Plný rozsah otvorí zápis do tisícov produktov naraz, preto ho appka nepustí bez overenia."
+            label="Vyžiada si potvrdenie"
+            reason="Plný rozsah otvorí zápis do tisícov produktov naraz, preto ho appka nepustí bez výslovného potvrdenia."
             testId="scope-release-lock"
           />
         ) : null}

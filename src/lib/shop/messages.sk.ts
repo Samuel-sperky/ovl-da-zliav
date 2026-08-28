@@ -260,7 +260,8 @@ export const CODE_MESSAGES: Readonly<Record<string, ShopMessage>> = {
   },
   local_no_base_url: {
     message: 'Doména shopu nie je nastavená alebo nie je platná https adresa.',
-    recommendation: 'Nastav doménu shopu v Nastaveniach (vyžaduje heslo) a spusti test spojenia.',
+    recommendation:
+      'Nastav doménu shopu v Nastaveniach (vyžaduje potvrdenie) a spusti test spojenia.',
   },
 };
 

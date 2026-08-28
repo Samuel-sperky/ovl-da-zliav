@@ -80,7 +80,6 @@ export function createCatalogDetailsPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: bodySchema,
       handler: (ctx) =>
         withRouteErrors(async () => {

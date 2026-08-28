@@ -1,7 +1,12 @@
 ﻿# Aura Zľavy — jednorazová lokálna príprava pre Windows (docs/13-OVERENIE.md §E).
 #
 # Vytvorí secrets/, vygeneruje master key, session key a DB heslá, pripraví .env
-# pre Docker a Caddyfile s bcrypt hashom basic auth.
+# pre Docker a skopíruje Caddyfile.
+#
+# ŽIADNE HESLO SI TENTO SKRIPT NEPÝTA (27. 8. 2026, D98–D100). Do 27. 8. 2026
+# tu bol krok 5, ktorý si vyžiadal heslo pre Caddy basic auth a vyrobil z neho
+# bcrypt hash — tá vrstva je zrušená, nie presunutá. Master key, session key
+# a DB heslá sú INÉ tajomstvá a generujú sa ďalej.
 #
 # BEZPEČNOSŤ: všetko vyrobené žije v `secrets/` a `.env` — oboje je v .gitignore.
 # Skript je idempotentný: existujúce tajomstvá NEPREPISUJE (prepis master key by
@@ -9,10 +14,9 @@
 #
 # Použitie (PowerShell v priečinku projektu):
 #   .\scripts\setup-local.ps1
-#   .\scripts\setup-local.ps1 -BasicAuthHeslo 'moje-heslo'
 
 [CmdletBinding()]
-param([string]$BasicAuthHeslo = '')
+param()
 
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
@@ -79,42 +83,15 @@ if (Test-Path .env) {
   Info 'tajomstvá appky sa čítajú z /run/keys (named volume, R1w)'
 }
 
-Krok '5/6  Caddyfile s basic auth'
+Krok '5/6  Caddyfile'
 if (Test-Path secrets/Caddyfile) {
   Info 'secrets/Caddyfile už existuje — NEPREPISUJEM'
 } else {
-  if (-not $BasicAuthHeslo) {
-    $sec = Read-Host -AsSecureString '  Zadaj heslo pre Caddy basic auth (prvá vrstva pred appkou)'
-    $BasicAuthHeslo = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-      [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
-  }
-  if (-not $BasicAuthHeslo) { throw 'Heslo je prázdne.' }
-  # Caddy basic_auth berie výhradne bcrypt; ten vie vyrobiť sám Caddy v kontajneri.
-  # Preto tu treba BEŽIACI docker daemon, nielen nainštalovanú binárku.
-  $dockerOk = $false
-  if (Get-Command docker -ErrorAction SilentlyContinue) {
-    docker info *> $null; $dockerOk = ($LASTEXITCODE -eq 0)
-  }
-  if (-not $dockerOk) {
-    throw @'
-Docker nebeží — bez neho neviem vygenerovať bcrypt hash pre basic auth.
-
-Buď spusti Docker Desktop a pusti skript znova, alebo si hash vyrob inde:
-    docker run --rm caddy:2-alpine caddy hash-password --plaintext 'TVOJE-HESLO'
-potom skopíruj Caddyfile.example do secrets/Caddyfile a nahraď v ňom
-reťazec NAHRAD-BCRYPT-HASHOM tým hashom.
-'@
-  }
-  $hash = (docker run --rm caddy:2-alpine caddy hash-password --plaintext $BasicAuthHeslo).Trim()
-  # Caddy vracia bcrypt v tvare $2a$14$... — čokoľvek iné je chyba, nie hash.
-  if (-not $hash -or -not $hash.StartsWith('$2')) {
-    throw "Caddy nevrátil bcrypt hash (dostal som: '$hash')."
-  }
-  # Hash ide priamo do Caddyfile — Caddy nevie načítať súbor do placeholdera.
-  (Get-Content Caddyfile.example -Raw).Replace('NAHRAD-BCRYPT-HASHOM', $hash) |
-    Set-Content secrets/Caddyfile -Encoding UTF8 -NoNewline
-  $BasicAuthHeslo = $null
-  Info 'secrets/Caddyfile vytvorený s bcrypt hashom (užívateľ: samuel)'
+  # Doslovná kópia example-u: od 27. 8. 2026 (D98) v ňom nie je blok basic_auth,
+  # takže sa nič nedopĺňa a nič sa nepýta. Docker tu už netreba — bcrypt hash
+  # sa negeneruje.
+  Copy-Item Caddyfile.example secrets/Caddyfile
+  Info 'secrets/Caddyfile vytvorený (bez basic auth — D98)'
 }
 
 Krok '6/6  Kontrola, že do gitu nič neuniklo'
@@ -139,16 +116,13 @@ Príprava hotová. Ďalej:
      (ak si stack skúšal už PRED opravou migračného usera, raz spusti
       `docker compose down -v` — init skript DB beží len na prázdnom volume;
       dáta neprídu nazmar, migrácie dovtedy nikdy neprebehli)
-  2. docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/seed-admin.ts
-     (interaktívne si vypýta meno a heslo do appky — heslo min. 12 znakov;
-      spúšťaj v NORMÁLNOM termináli — maskovanie hesla potrebuje skutočné TTY,
-      cez rúru/skript sa preruší)
-  3. Otvor http://localhost:3070  (funguje aj http://127.0.0.1:3070)
-     - najprv basic auth (užívateľ "samuel" + heslo z kroku 5)
-     - potom login do appky (účet z bodu 2)
-     (HTTP bez TLS je vedomá voľba — appka žije len na 127.0.0.1 za basic auth;
-      Secure cookie na localhoste funguje, prehliadače mu dôverujú)
-  4. V appke prejdi onboarding: doména shopu -> API kľúč -> allowlist (max 10 ID).
+  2. Otvor http://localhost:3070  (funguje aj http://127.0.0.1:3070)
+     Appka sa otvorí HNEĎ — žiadny dialóg, žiadne prihlásenie (D98-D100,
+     27. 8. 2026). Seed admina sa už nerobí, riadok actora si appka dohľadá
+     alebo vyrobí sama.
+     (HTTP bez TLS je vedomá voľba — appka žije len na 127.0.0.1 a to je
+      po zrušení prihlásenia jej jediná ochrana pred sieťou, invariant I5)
+  3. V appke prejdi onboarding: doména shopu -> API kľúč -> allowlist (max 10 ID).
 
 ZÁPISY SÚ ZATIAĽ VYPNUTÉ (WRITES_ENABLED=false v .env) — appka fyzicky nemôže
 zmeniť cenu v shope. Preklikaj si dry-run naprázdno; zápisy zapni až vtedy, keď

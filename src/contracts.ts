@@ -156,6 +156,15 @@ export type AuditActor = 'user' | 'scheduler' | 'system';
 
 /** Presný zoznam z BUILD-SPEC §3. Runtime enum vlastní A2 (`lib/audit/events.ts`). */
 export type AuditEventType =
+  /*
+   * HISTORICKÉ TYPY — appka ich od 27. 8. 2026 už NEZAPISUJE.
+   *
+   * Prihlásenie, lockout a sudo zmizli (D99, D100), ale riadky s týmito
+   * hodnotami v `audit_log` ZOSTÁVAJÚ a musia sa dať prečítať a zobraziť.
+   * Vyhodiť ich z tejto únie by znamenalo, že staršia história appky prestane
+   * prechádzať typovou kontrolou a obrazovka Histórie na nej spadne — čiže
+   * strata záznamu, ktorý v DB fyzicky je. Nemazať.
+   */
   | 'login_ok'
   | 'login_fail'
   | 'lockout'
@@ -844,44 +853,39 @@ export interface ApiKeyRepo {
   touchLastUsed(conn?: Queryable): Promise<void>;
 }
 
+/**
+ * 27. 8. 2026 (D99, D102): `upsertAdmin()` a `touchLastLogin()` odtiaľ zmizli
+ * spolu so svojimi implementáciami. Zakladanie správcu s heslom aj stopa
+ * posledného prihlásenia patrili prihláseniu, ktoré je zmazané.
+ *
+ * POZOR, `local-actor.ts` tento repozitár NEPOUŽÍVA: dohľadanie aj založenie
+ * lokálneho actora si robí vlastným SQL (`SELECT id, username FROM users
+ * ORDER BY id ASC LIMIT 1`), lebo hľadá riadok s najnižším id, nie riadok
+ * podľa mena. Do 28. 8. 2026 tu stálo, že ho dohľadáva „cez
+ * `getByUsername`/`getById`" — nebola to pravda a poslalo by to čitateľa
+ * hľadať cestu, ktorou zápis nechodí.
+ */
 export interface UsersRepo {
   getByUsername(username: string, conn?: Queryable): Promise<UserRecord | null>;
   getById(id: number, conn?: Queryable): Promise<UserRecord | null>;
-  upsertAdmin(username: string, passwordHash: string, conn?: Queryable): Promise<UserRecord>;
-  touchLastLogin(id: number, conn?: Queryable): Promise<void>;
 }
 
-export interface LockoutState {
-  locked: boolean;
-  /** Kedy blokáda skončí; `null` keď netrvá. */
-  until: UtcDate | null;
-  failedAttempts: number;
-  retryAfterSeconds: number;
-}
+/* 27. 8. 2026 (D99): `LockoutState` a `LoginAttemptsRepo` zmazané — lockout
+   (D71) zmizol s prihlásením a `src/lib/repo/login-attempts.repo.ts` už
+   neexistuje. */
 
-export interface LoginAttemptsRepo {
-  record(username: string, ip: string, success: boolean, conn?: Queryable): Promise<void>;
-  /** Stav prežíva restart procesu — in-memory je zakázané (O4). */
-  getState(ip: string, username: string, conn?: Queryable): Promise<LockoutState>;
-}
+/* ══════════ 9. Lokálny actor (D102; nahradil session z D69) ══════════════ */
 
-/* ═══════════════════ 9. Autentifikácia, session, sudo ════════════════════ */
-
-export interface SessionClaims {
-  sub: number;
-  username: string;
-  /** Absolútny konec platnosti — 8 h (D69). */
-  absoluteExpiresAt: UtcDate;
-  /** Idle konec — 30 min, obnovuje sa pri každom požiadaní (D69). */
-  idleExpiresAt: UtcDate;
-  /** Konec sudo okna — 15 min od poslednej autentifikácie (D70). */
-  sudoUntil: UtcDate | null;
-}
-
-export interface SudoCheck {
-  /** Pri pochybnosti VŽDY `false` (fail-closed, I3). */
-  valid: boolean;
-  sudoUntil: UtcDate | null;
+/**
+ * Kto zapísal. Appka od 27. 8. 2026 nemá prihlásenie (D99), ale meno potrebuje
+ * ďalej: `campaigns.created_by` a `audit_log.user_id` majú FK na `users(id)`,
+ * a auditný riadok bez actora by bol „nevieme" — presne to, čo I11 zakazuje.
+ *
+ * Vyhľadanie a vytvorenie vlastní `src/lib/auth/local-actor.ts`.
+ */
+export interface LocalActor {
+  readonly id: number;
+  readonly username: string;
 }
 
 /* ════════════════════ 10. Preview token (I3, O2) ════════════════════════ */

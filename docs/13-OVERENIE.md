@@ -138,8 +138,8 @@ log: {"msg":"http_request","path":"/api/key","userId":1,"httpStatus":500,"errorN
 Deterministicky, pri každom volaní, **vždy keď nie je uložený API kľúč** — čo je
 presne stav pri prvom setupe, po expirácii TTL a po panic buttone. Ostatné
 route-y (`/api/settings`, `/api/campaigns`, `/api/allowlist`, `/api/audit`,
-`/api/notifications`, `/api/auth/session`, `/api/health`) aj všetky HTML
-stránky vracali 200.
+`/api/notifications`, `/api/auth/session` — tá je od 27. 8. 2026 zrušená
+(D99) —, `/api/health`) aj všetky HTML stránky vracali 200.
 
 **Ako sa to našlo:** `docker compose up` nešlo, tak sa spustil priamo
 `node .next/standalone/server.js` s produkčným ENV proti reálnej MariaDB

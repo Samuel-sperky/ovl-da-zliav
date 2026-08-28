@@ -3,7 +3,10 @@
 /**
  * Aura Zľavy — ČERVENÁ ZÓNA: kľúč unikol (V12; pôvodne A16).
  *
- * Vyžaduje heslo A doslovné opísanie textu `KLUC UNIKOL` (bez diakritiky).
+ * Vyžaduje doslovné opísanie textu `KLUC UNIKOL` (bez diakritiky). Do
+ * 27. 8. 2026 k tomu chcela route aj heslo (D67); heslá zmazalo D99, ale
+ * potvrdenie NEZMIZLO — vypísaná fráza je odteraz jediná brána a preto sa
+ * oslabiť nesmie.
  * Po vykonaní sú oba kľúče z appky zmazané, všetky čakajúce zľavy zrušené a na
  * obrazovke je postup, čo robiť ďalej. Appka kľúč revokovať NEVIE — vie ho len
  * zabudnúť; skutočnú revokáciu robí správca eshopu. Po incidente nebeží nič
@@ -18,11 +21,9 @@ import { useState } from 'react';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import RunbookPanel from '@/components/ui/RunbookPanel';
-import SudoPrompt from '@/components/ui/SudoPrompt';
-import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
   PANIC_CONFIRM_LITERAL,
-  SUDO_REQUIRED_CODE,
   panicWipeKey,
   type PanicResult,
 } from '@/components/settings/api';
@@ -42,24 +43,17 @@ export interface PanicButtonProps {
 
 export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
   const [open, setOpen] = useState(false);
-  const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [result, setResult] = useState<PanicResult | null>(null);
-  const [needSudo, setNeedSudo] = useState(false);
-  const [pending, setPending] = useState<string | null>(null);
 
   const confirmOk = confirm === PANIC_CONFIRM_LITERAL;
 
   const fail = (error: { code?: string | null; message?: string | null } | null) =>
     setFailure(describeActionFailure(error, { action: 'Zmazanie kľúčov' }));
 
-  async function submit(pwd: string) {
-    if (pwd.length === 0) {
-      fail({ code: 'validation_failed', message: 'Zmazanie kľúčov vyžaduje tvoje heslo.' });
-      return;
-    }
+  async function submit() {
     if (!confirmOk) {
       fail({
         code: 'validation_failed',
@@ -69,24 +63,16 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
     }
     setFailure(null);
     setBusy(true);
-    const res = await panicWipeKey(pwd);
+    const res = await panicWipeKey();
     setBusy(false);
     if (res.ok) {
-      setPassword('');
       setConfirm('');
-      setPending(null);
       setFailure(null);
       setResult(res.data);
       onWiped();
       return;
     }
-    if (res.error.code === SUDO_REQUIRED_CODE) {
-      setPending(pwd);
-      setNeedSudo(true);
-      return;
-    }
-    setPassword('');
-    setPending(null);
+    setConfirm('');
     fail(res.error);
   }
 
@@ -151,18 +137,6 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
       {open ? (
         <div className="set-form" id="panic-editor" data-testid="panic-editor">
           <label className="field set-w">
-            <span className="lb">Heslo</span>
-            <input
-              className="inp"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={busy}
-              data-testid="panic-password"
-            />
-          </label>
-          <label className="field set-w">
             <span className="lb">Opíš presne text {PANIC_CONFIRM_LITERAL}</span>
             <input
               className="inp"
@@ -176,11 +150,9 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
           <div className="row">
             <Button
               variant="danger"
-              onClick={() => void submit(password)}
-              disabled={busy || !confirmOk || password.length === 0}
-              disabledReason={
-                !confirmOk ? `Najprv opíš text ${PANIC_CONFIRM_LITERAL}.` : 'Zadaj heslo.'
-              }
+              onClick={() => void submit()}
+              disabled={busy || !confirmOk}
+              disabledReason={`Najprv opíš text ${PANIC_CONFIRM_LITERAL}.`}
               data-testid="panic-submit"
             >
               {busy ? 'Mažem kľúče…' : 'Zmazať kľúče a zrušiť čakajúce zľavy'}
@@ -188,7 +160,6 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
             <Button
               onClick={() => {
                 setOpen(false);
-                setPassword('');
                 setConfirm('');
                 setFailure(null);
               }}
@@ -201,21 +172,6 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
         </div>
       ) : null}
 
-      {needSudo ? (
-        <SudoPrompt
-          actionLabel="zmazanie kľúčov po úniku"
-          onSuccess={() => {
-            setNeedSudo(false);
-            const pwd = pending;
-            setPending(null);
-            if (pwd) void submit(pwd);
-          }}
-          onCancel={() => {
-            setNeedSudo(false);
-            setPending(null);
-          }}
-        />
-      ) : null}
     </section>
   );
 }

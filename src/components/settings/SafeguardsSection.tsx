@@ -81,7 +81,8 @@ export function SafeguardsSection({ settings, onChanged }: SafeguardsSectionProp
               <tr>
                 <td>Zámok zápisov</td>
                 <td className="mono">
-                  {settings.writesLocked ? 'zamknuté' : 'otvorené'} · odomyká sa heslom
+                  {settings.writesLocked ? 'zamknuté' : 'otvorené'} · odomyká sa výslovným
+                  potvrdením
                 </td>
               </tr>
             </tbody>

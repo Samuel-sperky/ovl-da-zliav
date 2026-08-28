@@ -23,7 +23,6 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { SessionClaims } from '@/contracts';
 
 import { createStatusRoute, productionStatusSources } from '@/app/api/status/route';
 import type { RouteDeps } from '@/lib/http/define-route';
@@ -434,7 +433,8 @@ describe('statusSnapshotFromPayload — prepočet prekážok nad vlastným výbe
     );
 
     expect(scopeBlocker?.severity).toBe('blokuje');
-    expect(scopeBlocker?.resolution).toBe('sudo');
+    // 'sudo' → 'potvrdenie' (D105, 27. 8. 2026).
+    expect(scopeBlocker?.resolution).toBe('potvrdenie');
     expect(scopeBlocker?.what).toContain('150');
     expect(scopeBlocker?.assumed).toBe(false);
   });
@@ -472,39 +472,12 @@ describe('statusSnapshotFromPayload — prepočet prekážok nad vlastným výbe
 
 const ORIGIN = 'https://zlavy.local';
 
-function claims(): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
 /** Falošná session vrstva — route sa testuje celá, len bez prihlásenia. */
 function sessionDeps(): RouteDeps {
   return {
     now: () => NOW,
     newRequestId: () => '01J0000000000000000000TEST',
-    verifySession: async () => ({
-      claims: claims(),
-      refreshed: {
-        token: 'refreshed-token',
-        claims: claims(),
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed-token',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -602,26 +575,12 @@ describe('GET /api/status — celá pipeline vrátane redaktora (I1)', () => {
     }
   });
 
-  it('bez session vráti 401 a žiadne dáta o stave', async () => {
-    const handler = createStatusRoute({
-      sources: healthySources(),
-      now: () => NOW,
-      routeDeps: {
-        now: () => NOW,
-        verifySession: async () => {
-          const error = new Error('Session chýba alebo je neplatná.');
-          error.name = 'SessionError';
-          (error as Error & { code: string }).code = 'missing';
-          throw error;
-        },
-      },
-    });
-    const response = await handler(new Request(`${ORIGIN}/api/status`, { method: 'GET' }));
-
-    expect(response.status).toBe(401);
-    expect(await response.text()).not.toContain('scope');
-  });
-
+  /*
+   * Test „bez session vráti 401 a žiadne dáta o stave" tu bol do 27. 8. 2026.
+   * Prihlásenie zmizlo (D99), takže stav „bez session" neexistuje. Čo z I1 na
+   * tejto ceste PRETRVÁVA a je strážené nižšie: do odpovede sa nikdy nedostane
+   * hodnota z denylistu redaktora.
+   */
   it('odpoveď sa nikdy necachuje', async () => {
     const handler = createStatusRoute({
       sources: healthySources(),

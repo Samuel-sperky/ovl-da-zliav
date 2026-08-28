@@ -106,17 +106,18 @@ describe('farbu volí spôsob riešenia, nie závažnosť (kontrakt UI, bod 7)',
     expect(resolutionLook('cakanie').tone).toBe('idle');
   });
 
-  it('to, s čím sa TERAZ dá pohnúť, je jantárové — aj keď si pýta heslo', () => {
+  it('to, s čím sa TERAZ dá pohnúť, je jantárové — aj keď si pýta potvrdenie', () => {
     expect(resolutionLook('sam').tone).toBe('attention');
-    expect(resolutionLook('sudo').tone).toBe('attention');
+    expect(resolutionLook('potvrdenie').tone).toBe('attention');
   });
 
   it('zámok je spôsob riešenia, NIE tón', () => {
-    // Do 19. 8. mal Prehľad pre `sudo` šiesty „tón" `lock` (tlmená sivá), kým
-    // tab Zľavy ho kreslil jantárovo. Zámok je odvtedy vlastnosť, nie farba.
-    expect(resolutionLook('sudo').locked).toBe(true);
+    // Do 19. 8. mal Prehľad pre `potvrdenie` (vtedy `sudo`) šiesty „tón" `lock`
+    // (tlmená sivá), kým tab Zľavy ho kreslil jantárovo. Zámok je odvtedy
+    // vlastnosť, nie farba. Kód sa 27. 8. 2026 prekrstil (D105), zámok zostal.
+    expect(resolutionLook('potvrdenie').locked).toBe(true);
     for (const code of BLOCKER_RESOLUTION_CODES) {
-      if (code === 'sudo') continue;
+      if (code === 'potvrdenie') continue;
       expect(resolutionLook(code).locked, code).toBe(false);
     }
     // Ani jeden tón sa nevolá „lock" — inak by sa zámok opäť stal závažnosťou.
@@ -156,12 +157,12 @@ describe('A — tá istá prekážka vyzerá rovnako na každej obrazovke', () =
     }
   });
 
-  it('glyf tiež — `sudo` má zámok všade, nie len tam, kde naň niekto myslel', () => {
+  it('glyf tiež — `potvrdenie` má zámok všade, nie len tam, kde naň niekto myslel', () => {
     for (const code of BLOCKER_RESOLUTION_CODES) {
       expect(RESOLUTION_ICON[code], code).toBe(resolutionLook(code).icon);
       expect(blockerIcon({ resolution: code }), code).toBe(resolutionLook(code).icon);
     }
-    expect(resolutionLook('sudo').icon).toBe('lock');
+    expect(resolutionLook('potvrdenie').icon).toBe('lock');
   });
 
   it('Prehľad a Detail zľavy kreslia pre `writes_disabled` ten istý tón', () => {
@@ -298,7 +299,8 @@ describe('prevod `resolution → vzhľad` je v zdroji práve raz', () => {
   }
 
   /**
-   * Modul, ktorý smie mať doslovnú tabuľku `sam / sudo / cakanie / mimo_appky`
+   * Modul, ktorý smie mať doslovnú tabuľku
+   * `sam / potvrdenie / cakanie / mimo_appky`
    * s hodnotami vzhľadu. Presne jeden.
    */
   const JEDINY = 'components/ui/blocker-look.ts';
@@ -309,7 +311,8 @@ describe('prevod `resolution → vzhľad` je v zdroji práve raz', () => {
      * taký tvar mali všetky tri rozídené tabuľky; kto ho napíše znova, sem
      * spadne aj s cestou k súboru.
      */
-    const literal = /sam:[^\n]*\n\s*(?:.*\n\s*)?sudo:[\s\S]{0,200}?cakanie:[\s\S]{0,200}?mimo_appky:/;
+    const literal =
+      /sam:[^\n]*\n\s*(?:.*\n\s*)?potvrdenie:[\s\S]{0,200}?cakanie:[\s\S]{0,200}?mimo_appky:/;
     const hriesnici = sources()
       .filter((s) => s.path !== JEDINY)
       .filter((s) => literal.test(s.text))

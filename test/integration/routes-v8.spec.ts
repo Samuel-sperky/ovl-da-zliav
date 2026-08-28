@@ -11,9 +11,11 @@
  *  2. **K2 — stav fronty.** `/api/queue` počíta „koľko dnes z rozpočtu",
  *     „koľko vo fronte" a odhad dobehnutia z DB, nie z in-process stavu
  *     schedulera (ten je v Next.js iný module graph — pasca z CLAUDE.md).
- *  3. **K1 bod 4 — asymetria sudo.** `pilot → plny` bez sudo okna NEPREJDE;
- *     `plny → pilot` prejde vždy. Obe zmeny sú v audite so starou aj novou
- *     hodnotou.
+ *  3. **K1 bod 4 — asymetria rozsahu.** Do 27. 8. 2026 od nej záviselo, či sa
+ *     vypýta heslo (uvoľnenie chcelo sudo). Sudo zrušilo D100, ROZLÍŠENIE ale
+ *     zostalo: každá zmena je v audite so starou aj novou hodnotou a s tým, či
+ *     rozsah ROZŠÍRILA (`looseningScope`) alebo zúžila. Bez toho sa o pol roka
+ *     z auditu nedá zistiť, kto appku pustil z pilota do plného režimu.
  *
  * Na shop neodíde ani jeden request — všetky tri cesty sú lokálne (I6 tým
  * zostáva nedotknuté aj bez mock servera).
@@ -30,7 +32,6 @@ import {
 } from '@/app/api/catalog/search/route';
 import { createQueueRoute } from '@/app/api/queue/route';
 import { createScopeModeRoute } from '@/app/api/settings/scope-mode/route';
-import { SudoRequiredError } from '@/lib/auth/sudo';
 import type { BudgetStatus } from '@/lib/engine/budget';
 import type {
   CatalogCounts,
@@ -40,7 +41,7 @@ import type {
 } from '@/lib/repo/catalog.repo';
 import { FAIL_CLOSED_SCOPE, PILOT_MAX_PRODUCTS, type ScopeMode } from '@/lib/repo/settings.repo';
 
-import { makeRequest, parse, sessionRouteDeps } from './routes-harness';
+import { makeRequest, parse, actorRouteDeps } from './routes-harness';
 
 /* ═══════════════════════ 1. `/api/catalog/search` (K8) ════════════════════ */
 
@@ -100,7 +101,7 @@ function catalogFake(): {
 describe('GET /api/catalog/search — zamknuté filtre (K8)', () => {
   it('vráti `locked: true` za každý filter bez dát a poslaný filter NEAPLIKUJE', async () => {
     const { repo, searched } = catalogFake();
-    const route = createCatalogSearchRoute({ catalog: repo, routeDeps: sessionRouteDeps() });
+    const route = createCatalogSearchRoute({ catalog: repo, routeDeps: actorRouteDeps() });
 
     const res = await parse(
       await route(
@@ -153,7 +154,7 @@ describe('GET /api/catalog/search — zamknuté filtre (K8)', () => {
 
   it('neznáme hodnoty filtrov ticho zahodí, nezmení nimi zmysel otázky', async () => {
     const { repo, searched } = catalogFake();
-    const route = createCatalogSearchRoute({ catalog: repo, routeDeps: sessionRouteDeps() });
+    const route = createCatalogSearchRoute({ catalog: repo, routeDeps: actorRouteDeps() });
 
     const res = await parse(
       await route(
@@ -244,7 +245,7 @@ describe('GET /api/queue — stav fronty (K2, K5)', () => {
       gate: () => ({ paused: false, reason: null, since: null, downtimeMs: null }),
       lastRun: () => null,
       now: () => new Date('2026-08-10T11:40:00.000Z'),
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(await route(makeRequest('GET', '/api/queue')));
@@ -301,7 +302,7 @@ describe('GET /api/queue — stav fronty (K2, K5)', () => {
       gate: () => ({ paused: true, reason: 'pc_downtime', since: null, downtimeMs: null }),
       lastRun: () => null,
       now: () => new Date('2026-08-10T11:40:00.000Z'),
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(await route(makeRequest('GET', '/api/queue')));
@@ -324,9 +325,9 @@ describe('GET /api/queue — stav fronty (K2, K5)', () => {
 
 /* ═════════════════ 3. `/api/settings/scope-mode` (K1 bod 4) ═══════════════ */
 
-function scopeFake(initial: ScopeMode) {
+function scopeFake(initial: ScopeMode, initialMaxProducts = 10_000) {
   let mode: ScopeMode = initial;
-  let maxProducts = 10_000;
+  let maxProducts = initialMaxProducts;
   const audit: AuditInput[] = [];
   return {
     audit,
@@ -355,33 +356,70 @@ function scopeFake(initial: ScopeMode) {
   };
 }
 
-describe('POST /api/settings/scope-mode — uvoľnenie vyžaduje sudo (K1 bod 4)', () => {
-  it('`pilot → plny` bez sudo okna NEPREJDE a rozsah zostane `pilot`', async () => {
-    const world = scopeFake('pilot');
+describe('POST /api/settings/scope-mode — uvoľnenie sa musí dať prečítať z auditu (K1 bod 4)', () => {
+  /*
+   * Test „`pilot → plny` bez sudo okna NEPREJDE" tu stál do 27. 8. 2026. Sudo
+   * zrušilo D100, takže brána, ktorú tvrdil, už neexistuje — a tvrdiť ju ďalej
+   * by znamenalo tvrdiť o produkčnej ceste nepravdu. Čo z K1 bodu 4 pretrváva,
+   * je ROZLÍŠENIE uvoľnenia od sprísnenia v audite, a to strážia testy nižšie.
+   * Vrátane zdvihnutia stropu v rámci `plny`: to je tiež rozšírenie rozsahu
+   * a bolo to práve to, čo si sudo pýtalo aj bez zmeny režimu.
+   */
+  it('zdvihnutie stropu v rámci `plny` je UVOĽNENIE a audit to tak zapíše', async () => {
+    const world = scopeFake('plny', 500);
     const route = createScopeModeRoute({
       ...world.deps,
-      requireSudo: () => {
-        throw new SudoRequiredError();
-      },
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(
-      await route(makeRequest('POST', '/api/settings/scope-mode', { mode: 'plny' })),
+      await route(
+        makeRequest('POST', '/api/settings/scope-mode', {
+          mode: 'plny',
+          maxProductsPerCampaign: 5_000,
+          confirmed: true,
+        }),
+      ),
     );
-    expect(res.status).toBe(401);
-    expect(res.body.error?.code).toBe('sudo_required');
-    // Fail-closed: nič sa nezmenilo a nič sa nezapísalo do auditu.
-    expect(world.mode).toBe('pilot');
-    expect(world.audit).toHaveLength(0);
+    expect(res.status).toBe(200);
+    expect((res.body.data as { looseningScope: boolean }).looseningScope).toBe(true);
+    expect((res.body.data as { maxProducts: number }).maxProducts).toBe(5_000);
+
+    expect(world.audit).toHaveLength(1);
+    const event = world.audit[0] as AuditInput;
+    expect((event.beforeSnapshot as { effectiveMaxProducts: number }).effectiveMaxProducts).toBe(500);
+    expect((event.afterSnapshot as { effectiveMaxProducts: number }).effectiveMaxProducts).toBe(5_000);
+    expect((event.afterSnapshot as { looseningScope: boolean }).looseningScope).toBe(true);
   });
 
-  it('`pilot → plny` so sudo oknom prejde a zapíše audit so starou aj novou hodnotou', async () => {
+  it('zníženie stropu v rámci `plny` je SPRÍSNENIE a audit to tak zapíše', async () => {
+    const world = scopeFake('plny', 5_000);
+    const route = createScopeModeRoute({
+      ...world.deps,
+      routeDeps: actorRouteDeps(),
+    });
+
+    const res = await parse(
+      await route(
+        makeRequest('POST', '/api/settings/scope-mode', {
+          mode: 'plny',
+          maxProductsPerCampaign: 500,
+          confirmed: true,
+        }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect((res.body.data as { looseningScope: boolean }).looseningScope).toBe(false);
+    expect((world.audit[0]?.afterSnapshot as { looseningScope: boolean }).looseningScope).toBe(
+      false,
+    );
+  });
+
+  it('`pilot → plny` prejde a zapíše audit so starou aj novou hodnotou', async () => {
     const world = scopeFake('pilot');
     const route = createScopeModeRoute({
       ...world.deps,
-      requireSudo: () => new Date(Date.now() + 600_000),
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(
@@ -389,6 +427,7 @@ describe('POST /api/settings/scope-mode — uvoľnenie vyžaduje sudo (K1 bod 4)
         makeRequest('POST', '/api/settings/scope-mode', {
           mode: 'plny',
           maxProductsPerCampaign: 8000,
+          confirmed: true,
         }),
       ),
     );
@@ -402,16 +441,17 @@ describe('POST /api/settings/scope-mode — uvoľnenie vyžaduje sudo (K1 bod 4)
     expect(event.eventType).toBe('scope_mode_changed');
     expect((event.beforeSnapshot as { scopeMode: string }).scopeMode).toBe('pilot');
     expect((event.afterSnapshot as { scopeMode: string }).scopeMode).toBe('plny');
+    // Rozšírenie rozsahu sa musí dať z auditu prečítať ako rozšírenie (K1 bod 4)
+    // a musí mať actora — po zrušení prihlásenia je to `samuel`, id 1 (D102, I11).
+    expect((event.afterSnapshot as { looseningScope: boolean }).looseningScope).toBe(true);
+    expect(event).toMatchObject({ actor: 'user', userId: 1 });
   });
 
-  it('`plny → pilot` sudo NEVYŽADUJE — sprísnenie je vždy voľné', async () => {
+  it('`plny → pilot` je sprísnenie — prejde vždy a audit ho tak označí', async () => {
     const world = scopeFake('plny');
     const route = createScopeModeRoute({
       ...world.deps,
-      requireSudo: () => {
-        throw new Error('sudo sa pri sprísnení nesmie pýtať');
-      },
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(
@@ -421,6 +461,9 @@ describe('POST /api/settings/scope-mode — uvoľnenie vyžaduje sudo (K1 bod 4)
     expect(world.mode).toBe('pilot');
     expect((res.body.data as { maxProducts: number }).maxProducts).toBe(PILOT_MAX_PRODUCTS);
     expect(world.audit).toHaveLength(1);
+    expect((world.audit[0]?.afterSnapshot as { looseningScope: boolean }).looseningScope).toBe(
+      false,
+    );
   });
 
   it('fail-closed default z V4 je `pilot` so stropom 10 (K1 bod 1)', () => {

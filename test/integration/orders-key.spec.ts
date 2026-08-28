@@ -319,45 +319,16 @@ const APP_ORIGIN = 'https://zlavy.local';
 const APP_HOST = 'zlavy.local';
 const NOW = TEST_NOW;
 
-function claims(sudoMinutes: number | null) {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: sudoMinutes === null ? null : new Date(NOW.getTime() + sudoMinutes * 60_000),
-  };
-}
-
-function routeDeps(sessionClaims: ReturnType<typeof claims> | null): RouteDeps {
+/**
+ * Deps pre `defineRoute()`. Do 27. 8. 2026 tu bol stub SESSION vrstvy
+ * (`verifySession`) a testy si ním vedeli vyrobiť aj stav „bez session" alebo
+ * „bez sudo okna". Prihlásenie zmizlo (D99, D100), takže tie stavy neexistujú
+ * a stub sa zúžil na lokálneho actora, ktorého route potrebuje pre FK a audit.
+ */
+function routeDeps(): RouteDeps {
   return {
     now: () => NOW,
-    verifySession: async (token) => {
-      if (!token || !sessionClaims) {
-        const error = new Error('Session chýba alebo je neplatná.');
-        error.name = 'SessionError';
-        (error as Error & { code: string }).code = 'missing';
-        throw error;
-      }
-      return {
-        claims: sessionClaims,
-        refreshed: {
-          token: 'refreshed',
-          claims: sessionClaims,
-          cookie: {
-            name: 'ovl_zliav_session' as const,
-            value: 'refreshed',
-            options: {
-              httpOnly: true as const,
-              secure: true as const,
-              sameSite: 'strict' as const,
-              path: '/',
-              maxAge: 1800,
-            },
-          },
-        },
-      };
-    },
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -396,13 +367,11 @@ function baseDeps(db: FakeDb, overrides: Partial<KeyRouteDeps> = {}): KeyRouteDe
       },
       async setStatus() {},
     },
-    users: { getById: async () => ({ passwordHash: 'argon2-fake-hash' }) },
-    verify: async (_hash, password) => password === GOOD_PASSWORD,
     audit: async () => {},
     probeKey: async () => 'valid' as KeyProbeResult,
     now: () => NOW,
     timeZone: 'Europe/Bratislava',
-    routeDeps: routeDeps(claims(10)),
+    routeDeps: routeDeps(),
     ...overrides,
   };
 }
@@ -649,27 +618,6 @@ describe('PUT /api/key s kind=orders_read', () => {
     expect(response.status).toBe(200);
     expect(calls).toBe(1);
     expect(db.rows.has('orders_read')).toBe(true);
-  });
-
-  it('bez sudo okna sa objednávková sonda ani nespustí (I3)', async () => {
-    const db = createFakeDb();
-    let probed = false;
-    const route = createKeyPutRoute(
-      baseDeps(db, {
-        routeDeps: routeDeps(claims(null)),
-        probeOrdersKey: async () => {
-          probed = true;
-          return 'valid';
-        },
-      }),
-    );
-    const response = await route(
-      makeRequest({ method: 'PUT', body: { apiKey: ORDERS_KEY_PLAINTEXT, kind: 'orders_read' } }),
-    );
-    expect(response.status).toBe(401);
-    expect((await readBody(response)).error?.code).toBe('sudo_required');
-    expect(probed).toBe(false);
-    expect(db.rows.size).toBe(0);
   });
 
   it('zápisový kľúč sa ďalej overuje sondou reduction=0 a objednávkovou NIE', async () => {

@@ -392,7 +392,6 @@ export function createQueueRoute(deps: QueueRouteDeps = {}): NextRouteHandler {
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async () => {
         const at = now();
 

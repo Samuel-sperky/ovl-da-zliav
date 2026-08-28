@@ -20,7 +20,6 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { SessionClaims } from '@/contracts';
 
 import { createStatusRoute, productionStatusSources } from '@/app/api/status/route';
 import { closePool } from '@/db/pool';
@@ -43,32 +42,10 @@ const ORIGIN = 'https://zlavy.local';
 /** Nikdy nie tvar reálneho kľúča poskytovateľa (I1). */
 const PLAINTEXT_KEY = fakeApiKey('7788');
 
-function claims(): SessionClaims {
-  return {
-    sub: 1,
-    username: 'samuel',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
 function sessionDeps(): RouteDeps {
-  const value = claims();
   return {
     now: () => NOW,
-    verifySession: async () => ({
-      claims: value,
-      refreshed: {
-        token: 'test-token',
-        claims: value,
-        cookie: {
-          name: 'ovl_zliav_session',
-          value: 'test-token',
-          options: { httpOnly: true, secure: true, sameSite: 'strict', path: '/', maxAge: 1800 },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 

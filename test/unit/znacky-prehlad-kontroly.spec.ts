@@ -197,7 +197,7 @@ function renderBlockers(): string {
         blocker({
           id: 'scope_pilot_cap',
           severity: 'informuje',
-          resolution: 'sudo',
+          resolution: 'potvrdenie',
           what: 'V pilotnom režime prejde na jednu zľavu najviac 10 produktov.',
           nextStep: 'Prepnite rozsah na plný v Nastaveniach.',
           assumed: true,

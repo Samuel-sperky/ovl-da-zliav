@@ -17,8 +17,10 @@
  * Čo sa mení s KONTRAKTOM V3:
  *  - **K1** — `checkAllowlist` sa volá `checkScope`. I2 nezaniká, mení sa:
  *    „appka nikdy nezapíše do produktu, ktorý nie je v povolenom rozsahu
- *    platného režimu, a rozsah sa nedá rozšíriť bez sudo". Fail-closed pri
- *    výnimke repozitára ZOSTÁVA — pri pochybnosti sa nezapisuje.
+ *    platného režimu, a rozsah sa nedá rozšíriť bez výslovného potvrdenia"
+ *    (do 27. 8. 2026 „bez sudo" — D100 sudo zrušilo, D105 prepísalo texty).
+ *    Fail-closed pri výnimke repozitára ZOSTÁVA — pri pochybnosti sa
+ *    nezapisuje.
  *  - **K2** — runaway strop je `daily_write_budget` + 20 %, nie fixných 60/h.
  *    Pri 200 zápisoch na deň by 60/h zamklo zápisy počas normálnej prevádzky.
  *    Podlaha 60/h zostáva (`MIN_RUNAWAY_LIMIT_PER_HOUR`), aby rozpočet
@@ -48,7 +50,7 @@
  *     `collectOperationBlockers()` chýbajúce sekcie dopĺňa fail-closed, takže
  *     nezúžený zoznam by tvrdil aj o kľúči a rozpočte, ktoré tu nikto nečítal.
  *  3. **Zúženie výberu nie je jediná odpoveď.** Strop je prepínač (K1) — detail
- *     preto vždy nesie aj to, že sa dá zdvihnúť, a že to chce heslo.
+ *     preto vždy nesie aj to, že sa dá zdvihnúť, a že to chce potvrdenie.
  *
  * Vlastník: A9 / V5.
  */
@@ -323,8 +325,9 @@ export async function readScopeForWrite(deps: GuardsDeps = {}): Promise<Resolved
  * v režime „pilot" zapísať najviac 10 produktov" a nič viac. Obrazovka z toho
  * vedela postaviť len oznam. Aby vedela ponúknuť „prepnúť do plného rozsahu",
  * musí dostať fakty: KTORÝ režim platí, AKÝ je efektívny a tvrdý strop a či
- * prepnutie chce heslo. Vety k tomu NEPÍŠEME znova — berú sa z jediného zdroja
- * pravdy `lib/status/blockers.ts`, ktorý ich už raz zložil pre celú appku.
+ * prepnutie chce potvrdenie. Vety k tomu NEPÍŠEME znova — berú sa z jediného
+ * zdroja pravdy `lib/status/blockers.ts`, ktorý ich už raz zložil pre celú
+ * appku.
  *
  * `blockers` je preto zúžený výsledok `collectOperationBlockers()`. Zúženie na
  * jednu OBLASŤ je zámerné: brána vie povedať pravdu o rozsahu a o env poistke,
@@ -344,8 +347,6 @@ export interface ScopeRefusalDetail {
   pilotMaxProducts: number;
   /** Tvrdý strop DB (10 000) — vyššie sa nedá ísť ani v plnom režime. */
   hardMaxProducts: number;
-  /** `true` = zdvihnúť strop sa dá len s heslom (K1 bod 4). Nikdy nie `false`. */
-  requiresSudoToRelease: boolean;
   /** Prekážky oblasti `rozsah` presne tak, ako ich pomenúva `blockers.ts`. */
   blockers: readonly Blocker[];
 }
@@ -389,11 +390,6 @@ function scopeRefusalDetail(scope: ResolvedScope, count: number): ScopeRefusalDe
     failClosed: scope.failClosed,
     pilotMaxProducts: PILOT_MAX_PRODUCTS,
     hardMaxProducts: HARD_MAX_PRODUCTS,
-    // Obe cesty k vyššiemu stropu si pýtajú heslo (K1 bod 4,
-    // `scopeChangeRequiresSudo()`): z `pilot` prepnutie do `plny`, v `plny`
-    // zdvihnutie `max_products_per_campaign`. Konštanta je preto pravda, nie
-    // zjednodušenie — a `false` by tu bol sľub, ktorý route nedodrží.
-    requiresSudoToRelease: true,
     blockers: scopeBlockers(scope, count),
   };
 }
@@ -428,7 +424,7 @@ export async function checkWritesNotLocked(deps: GuardsDeps = {}): Promise<Guard
   if (!settings.writesLocked) return { ok: true };
   return refuse(
     GUARD_CODES.writesLocked,
-    `Zápisy sú zamknuté${settings.writesLockedReason ? ` (dôvod: ${settings.writesLockedReason})` : ''} — odomknúť ich možno len manuálne heslom (D79).`,
+    `Zápisy sú zamknuté${settings.writesLockedReason ? ` (dôvod: ${settings.writesLockedReason})` : ''} — odomknúť ich možno len manuálne výslovným potvrdením (D79).`,
     { reason: settings.writesLockedReason },
   );
 }

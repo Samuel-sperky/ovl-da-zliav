@@ -58,7 +58,7 @@ export const BLOCKER_SEVERITIES = ['blokuje', 'obmedzuje', 'informuje'] as const
 export type BlockerSeverityCode = (typeof BLOCKER_SEVERITIES)[number];
 
 /** Ako sa prekážka odstráni — štyri hodnoty z `lib/status/blockers.ts`. */
-export const BLOCKER_RESOLUTIONS = ['sam', 'sudo', 'cakanie', 'mimo_appky'] as const;
+export const BLOCKER_RESOLUTIONS = ['sam', 'potvrdenie', 'cakanie', 'mimo_appky'] as const;
 export type BlockerResolutionCode = (typeof BLOCKER_RESOLUTIONS)[number];
 
 /**

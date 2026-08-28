@@ -23,7 +23,6 @@ export function createMarkUnknownPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       params: productIdParamSchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -36,7 +35,7 @@ export function createMarkUnknownPost(
             actor: 'user',
             eventType: 'allowlist_marked_unknown',
             ok: true,
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
             productId: ctx.params.productId,
             message: `Stav produktu ${ctx.params.productId} označený ako neznámy (D38).`,
           });

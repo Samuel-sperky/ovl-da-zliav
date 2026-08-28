@@ -8,7 +8,7 @@
  *   2. **control server** na `127.0.0.1:E2E_CONTROL_PORT` — jediný spôsob, akým
  *      testy (bežia v iných procesoch) prepínajú scenáre mocku a čítajú jeho
  *      `recordedRequests`,
- *   3. migrácie proti e2e schéme + seed admin používateľa a `settings`,
+ *   3. migrácie proti e2e schéme + riadok v `users` pre FK (D101) a `settings`,
  *   4. `next dev` s `SHOP_BASE_URL_OVERRIDE` na mock.
  *
  * INVARIANT I6 — nepodkročiteľné: mock aj appka žijú na `127.0.0.1`, appka nemá
@@ -36,7 +36,6 @@ import { request as httpsRequest } from 'node:https';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
 
-import argon2 from 'argon2';
 import mariadb from 'mariadb';
 
 import { DEFAULT_PRODUCTS, DEFAULT_KEYS } from '../mock-shop/fixtures';
@@ -47,13 +46,20 @@ import { APP_BASE_URL, CONTROL_BASE_URL, E2E_CONFIG, E2E_HOST, REPO_ROOT } from 
 
 const execFileAsync = promisify(execFile);
 
-/** argon2id s parametrami zo `scripts/seed-admin.ts` (D68). */
-const ARGON2_OPTIONS = {
-  type: argon2.argon2id,
-  memoryCost: 19_456,
-  timeCost: 2,
-  parallelism: 1,
-} as const;
+/**
+ * Hodnota do `users.password_hash` pre e2e riadok.
+ *
+ * Do 27. 8. 2026 sa tu hashovalo `E2E_CONFIG.adminPassword` cez argon2id
+ * s parametrami zo `scripts/seed-admin.ts` (D68). D99 zmazalo prihlásenie
+ * a D104 vyhodilo `argon2` zo závislostí, takže tu nie je čo hashovať ani
+ * čím. Riadok napriek tomu MUSÍ existovať: `campaigns.created_by`
+ * a `audit_log.user_id` majú FK na `users(id)` `ON DELETE RESTRICT` (D101).
+ *
+ * Sentinel je zhodný s `NO_LOGIN_SENTINEL` v `src/lib/auth/local-actor.ts`
+ * a zámerne NIE je platný argon2/bcrypt hash (tie majú tvar `$...$`), takže
+ * keby sa overovacia cesta niekedy vrátila, na tomto reťazci neoverí nič.
+ */
+const NO_LOGIN_SENTINEL = 'no-login-D99';
 
 /* ═══════════════════════════ 2. Tajomstvá a DB ═════════════════════════════ */
 
@@ -169,11 +175,10 @@ async function seedBaseline(): Promise<void> {
     allowPublicKeyRetrieval: true,
   });
   try {
-    const hash = await argon2.hash(E2E_CONFIG.adminPassword, ARGON2_OPTIONS);
     await conn.query(
       'INSERT INTO users (username, password_hash) VALUES (?, ?) ' +
         'ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)',
-      [E2E_CONFIG.adminUsername, hash],
+      [E2E_CONFIG.adminUsername, NO_LOGIN_SENTINEL],
     );
     await conn.query(
       'UPDATE settings SET shop_domain = ?, shop_domain_confirmed_at = UTC_TIMESTAMP(3) WHERE id = 1',

@@ -119,7 +119,8 @@ export const ICON_PATHS = {
   loader: ['M14.5 8a6.5 6.5 0 1 1-4.49-6.18'],
   /** Plný štvorec obrysom — „strop vyčerpaný" (Lucide `square`). */
   square: ['M3.6 2.6h8.8a1 1 0 0 1 1 1v8.8a1 1 0 0 1-1 1H3.6a1 1 0 0 1-1-1V3.6a1 1 0 0 1 1-1Z'],
-  /** Visiaci zámok — „zamknuté / vypýta si heslo" (Lucide `lock`). */
+  /** Visiaci zámok — „zamknuté / vyžiada si výslovné potvrdenie" (Lucide
+   *  `lock`). Do 27. 8. 2026 to znelo „vypýta si heslo"; heslá zmizli s D99. */
   lock: [
     'M3.3 7.2h9.4a1.1 1.1 0 0 1 1.1 1.1v4.9a1.1 1.1 0 0 1-1.1 1.1H3.3a1.1 1.1 0 0 1-1.1-1.1V8.3a1.1 1.1 0 0 1 1.1-1.1Z',
     'M4.8 7.2V5a3.2 3.2 0 0 1 6.4 0v2.2',

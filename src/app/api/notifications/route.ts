@@ -45,7 +45,6 @@ export function createNotificationsGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: (ctx) =>
         withRouteErrors(async () => {
           void ctx;

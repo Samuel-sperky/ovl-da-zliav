@@ -21,7 +21,7 @@
  *
  * Vlastník: P2/P3 kontraktu produktov.
  */
-import { expect, login, test } from './fixtures';
+import { expect, test } from './fixtures';
 
 /** Kus, ktorý eshop pozná a ktorý sme už raz zlacnili. */
 const KNOWN = { id: 911, name: 'Strieborný náramok Lumen 19 cm', price: 44.9 };
@@ -58,7 +58,6 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
     expect(campaignId).toBeGreaterThan(0);
 
     try {
-      await login(page);
       await page.goto('/produkty');
       await expect(page.getByTestId('catalog-table')).toBeVisible();
 
@@ -133,7 +132,6 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
     );
 
     try {
-      await login(page);
       await page.goto('/produkty');
       await expect(page.getByTestId('catalog-table')).toBeVisible();
 

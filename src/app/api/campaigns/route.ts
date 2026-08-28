@@ -1,13 +1,19 @@
 /**
  * Aura Zľavy — `/api/campaigns` (BUILD-SPEC §5; KONTRAKT V3: K2, K3, K5, K6).
  *
- *  - `GET`  (session): stránkovaný zoznam zliav + PÁSMA (K3) + odhad dobehnutia
- *    fronty (K5) + príznak `late` + DERIVOVANÉ UI stavy „aktívna"/„expirovaná"
+ *  - `GET`: stránkovaný zoznam zliav + PÁSMA (K3) + odhad dobehnutia fronty
+ *    (K5) + príznak `late` + DERIVOVANÉ UI stavy „aktívna"/„expirovaná"
  *    (O1, D14). Derivát sa nikdy neukladá do DB.
- *  - `POST` (sudo): potvrdenie dry-runu → vytvorenie zľavy (I3, D2, D22).
+ *  - `POST`: potvrdenie dry-runu → vytvorenie zľavy (I3, D2, D22).
  *    Bez platného jednorazového `previewToken` so zhodným hashom parametrov
  *    sa NEODOŠLE ani jeden request na shop — token sa overuje PRED akýmkoľvek
  *    dotykom shopu aj pred vložením zľavy.
+ *
+ *    Sudo pred týmto `POST`om stálo do 27. 8. 2026 (D100). Brána zápisu tým
+ *    NEZMIZLA, len sa stiahla na to, čo naozaj chráni: I3 znie odteraz „žiadny
+ *    zápis bez dry-runu + potvrdenia" a obe polovice sú tu — token z
+ *    `/api/campaigns/preview` je dôkaz dry-runu a mutáciu navyše prepustí len
+ *    origin check (`checkOrigin()`, D72), takže cudzia stránka sem nezapíše.
  *
  * Čo mení KONTRAKT V3 oproti pôvodnému tvaru:
  *
@@ -87,7 +93,6 @@ export function createCampaignsGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: listQuerySchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -220,7 +225,6 @@ export function createCampaignsPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'sudo',
       body: createBodySchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -261,7 +265,7 @@ export function createCampaignsPost(
               from: peeked.from,
               to: peeked.to,
             },
-            ctx.claims.sub,
+            ctx.actor.id,
           );
 
           /* 3. K3 — pásma musia sedieť s percentami z overeného tokenu. */
@@ -301,7 +305,7 @@ export function createCampaignsPost(
             mode: ctx.body.mode,
             status: eager ? QUEUED : 'scheduled',
             fireAt: eager ? null : fireAtUtc(claims.from, d.fireTime, d.timeZone),
-            createdBy: ctx.claims.sub,
+            createdBy: ctx.actor.id,
           });
 
           const itemsTotal = claims.productIds.length;
@@ -312,7 +316,7 @@ export function createCampaignsPost(
           if (eager && itemsTotal <= EAGER_INLINE_MAX_ITEMS) {
             const result = await makeExecutor(d).executeCampaign(record.id, {
               actor: 'user',
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
             });
             return {
               campaignId: record.id,

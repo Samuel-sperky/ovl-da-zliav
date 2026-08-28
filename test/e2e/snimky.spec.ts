@@ -26,7 +26,7 @@
  *
  * Vlastník: A18.
  */
-import { expect, login, storeApiKey, test } from './fixtures';
+import { expect, storeApiKey, test } from './fixtures';
 
 /** Zrkadlo skutočnej zľavy z 12. 8. 2026 — 21 produktov, všetky zapísané. */
 const PRODUKTY = Array.from({ length: 21 }, (_, i) => 201 + i);
@@ -36,7 +36,6 @@ test.describe('snímky obrazoviek', () => {
     // Naplnenie 41 220 riadkov po dávkach trvá pár sekúnd — 90 s na celý test
     // by pri jedenástich snímkach nemuselo stačiť.
     test.setTimeout(180_000);
-    await login(page);
     await storeApiKey(page);
 
     const riadkov = await db.seedCatalogFromFixture();

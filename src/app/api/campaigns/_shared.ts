@@ -703,8 +703,12 @@ export interface InsertCampaignArgs {
 
 /**
  * Vloží kampaň + pásma + položky z OVERENÝCH claims preview tokenu.
- * `confirmed_at`, `confirm_payload_hash` a `sudo_at` sa zapisujú hneď pri
- * vzniku — executor si ich pri štarte dávky znova prepočíta a overí (I3).
+ * `confirmed_at` a `confirm_payload_hash` sa zapisujú hneď pri vzniku —
+ * executor si ich pri štarte dávky znova prepočíta a overí (I3).
+ *
+ * `sudo_at` zostáva `NULL`. Stĺpec v DB je (D101 nemení schému), ale sudo
+ * zrušilo D100 — a zapísať doň čas by bolo tvrdenie „potvrdené heslom vtedy",
+ * ktoré by nebolo pravdivé. Staré riadky si svoj čas ponechávajú.
  *
  * Položky dostanú `position` podľa vzostupného `product_id` (I10),
  * `price_at_preview` z tokenu (D39c) a **`percent` svojho pásma** (K3).
@@ -751,7 +755,8 @@ export async function insertConfirmedCampaign(
         scheduledAt: now,
         confirmedAt: now,
         confirmPayloadHash: args.claims.payloadHash,
-        sudoAt: now,
+        // `NULL`, nie `now` — žiadne sudo sa nekonalo (D100). Viď docblock.
+        sudoAt: null,
         createdBy: args.createdBy,
         // K1 bod 3 — počet položiek poznáme z overeného tokenu, takže DB
         // poistka sa smie vyhodnotiť hneď a nie až po zápise do shopu.

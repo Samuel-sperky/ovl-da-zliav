@@ -327,11 +327,12 @@ describe('Rozsah zliav: dva dôsledky sa presunuli pod rozklik, nezmizli', () =>
     expect(povrch).not.toContain('zostanú v eshope a dobehnú');
   });
 
-  it('na povrchu zostalo pri TLAČIDLE to podstatné — že heslo netreba', () => {
+  it('na povrchu zostalo pri TLAČIDLE to podstatné — že potvrdenie netreba', () => {
     /*
-     * Sprísnenie bez hesla je celá asymetria poistky. Presun dôvodu pod
+     * Sprísnenie bez potvrdenia je celá asymetria poistky. Presun dôvodu pod
      * rozklik ju nesmie schovať; na povrchu ostáva v tom istom tvare, aký
-     * má opačný prechod („vyžaduje heslo").
+     * má opačný prechod („vyžaduje potvrdenie"). Do 27. 8. 2026 tu stálo
+     * „heslo" — D105 ho vymenilo, asymetriu nie.
      *
      * Meria sa VÝREZ pri tlačidle, nie celá obrazovka: tá istá dvojica slov
      * stojí aj v bunke tabuľky oboch rozsahov, takže tvrdenie nad celým
@@ -341,7 +342,7 @@ describe('Rozsah zliav: dva dôsledky sa presunuli pod rozklik, nezmizli', () =>
     expect(at, 'vetva sprísnenia sa nevykreslila').toBeGreaterThan(-1);
     const vyrez = surfaceBlocks(SCOPE.slice(at)).join(' ');
     expect(vyrez).toContain('Vrátiť pilotný rozsah');
-    expect(vyrez).toContain('heslo netreba');
+    expect(vyrez).toContain('potvrdenie netreba');
   });
 });
 

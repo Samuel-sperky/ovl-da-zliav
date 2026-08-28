@@ -29,7 +29,6 @@ export function createInsightsProductGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       params: productIdParamSchema,
       handler: async (ctx) => {
         const writes = await d.insightsRepo.productWrites(ctx.params.productId);

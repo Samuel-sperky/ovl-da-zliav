@@ -13,7 +13,7 @@
  * preto prepisujú z kódov na vety — a pribúda tvrdenie, že kód na povrchu
  * naozaj NIE JE.
  */
-import { api, expect, login, test } from './fixtures';
+import { api, expect, test } from './fixtures';
 
 const PRODUCT_OK = 201;
 const PRODUCT_MISMATCH = 202;
@@ -70,7 +70,6 @@ test.describe('audit', () => {
       message: MSG_FAILED,
     });
 
-    await login(page);
     await page.goto('/audit');
     await expect(page.getByTestId('audit-filters')).toBeVisible();
     await expect(page.getByTestId('audit-table')).toContainText(MSG_OK);
@@ -116,13 +115,18 @@ test.describe('audit', () => {
   });
 
   test('I4: audit sa z UI nedá upraviť ani zmazať', async ({ page, db }) => {
+    /*
+     * 27. 8. 2026 (D99): tu stálo `login_ok`. Prihlásenie zmizlo, takže tú
+     * udalosť už nikto nezapíše a test by strážil minulosť. `allowlist_added`
+     * appka zapisuje ďalej (`POST /api/allowlist`), takže riadok, ktorý sa
+     * v Histórii nedá upraviť ani zmazať, je riadok, aký v nej naozaj vzniká.
+     */
     await db.seedAuditRow({
-      eventType: 'login_ok',
+      eventType: 'allowlist_added',
       ok: true,
-      message: 'prihlásenie',
+      message: 'produkt pridaný do zoznamu',
     });
 
-    await login(page);
     await page.goto('/audit');
     await expect(page.getByTestId('audit-table')).toBeVisible();
     await expect(page.getByRole('button', { name: /Zmazať záznam|Upraviť záznam|Vymazať audit/ })).toHaveCount(0);
@@ -135,7 +139,6 @@ test.describe('audit', () => {
   test('dátumový filter zúži výsledok na zvolený deň', async ({ page, db }) => {
     await db.seedAuditRow({ eventType: 'key_stored', ok: true, message: 'kľúč na zápis uložený' });
 
-    await login(page);
     await page.goto('/audit');
     const today = new Date().toISOString().slice(0, 10);
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);

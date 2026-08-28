@@ -61,16 +61,22 @@
  *     formulou, vedľa seba v jednom paneli stáli dva odhady, ktoré sa líšili
  *     o deň. A keď odhad prišiel už spočítaný v snapshote, použije sa ON:
  *     `syncStatus()` pozná pokrok prechodu, tento modul len počty riadkov.
- *  5. **Veta nehovorí to, čo už povedal zámok.** `resolution: 'sudo'` sa vedľa
- *     každej vety kreslí ikonou zámku a slovom „rieši sa v appke, vypýta si
- *     heslo" (`ui/blocker-look.ts`). Kým `nextStep` pri pilotnom strope končil
- *     na „— prepnutie si vyžiada heslo", stálo to isté na piatich obrazovkách
- *     dvakrát vedľa seba a veta mala 103 znakov (P2 dáva 90). Od 20. 8. 2026
- *     znie „Zúžte výber na 10 produktov, alebo prepnite rozsah v Nastaveniach."
- *     — 66 znakov. Čo sa tým smie TICHO pokaziť: keby niekto `resolution`
- *     prepol z `sudo` na `sam`, zámok zmizne a heslo už nepovie NIKTO —
- *     používateľ klikne do Nastavení a nečakane naň vyskočí sudo okno. Tú
- *     dvojicu (`pilot` ⟹ `sudo`) preto stráži `test/unit/slovnik-prekazky.spec.ts`.
+ *  5. **Veta nehovorí to, čo už povedal zámok.** `resolution: 'potvrdenie'` sa
+ *     vedľa každej vety kreslí ikonou zámku a slovom „rieši sa v appke,
+ *     vyžaduje výslovné potvrdenie" (`ui/blocker-look.ts`). Kým `nextStep` pri
+ *     pilotnom strope končil na „— prepnutie si vyžiada heslo", stálo to isté
+ *     na piatich obrazovkách dvakrát vedľa seba a veta mala 103 znakov (P2 dáva
+ *     90). Od 20. 8. 2026 znie „Zúžte výber na 10 produktov, alebo prepnite
+ *     rozsah v Nastaveniach." — 66 znakov. Čo sa tým smie TICHO pokaziť: keby
+ *     niekto `resolution` prepol z `potvrdenie` na `sam`, zámok zmizne a to, že
+ *     cestu treba vedome otvoriť, už nepovie NIKTO — používateľ klikne do
+ *     Nastavení a nečakane naň vyskočí potvrdzovací krok. Tú dvojicu
+ *     (`pilot` ⟹ `potvrdenie`) preto stráži
+ *     `test/unit/slovnik-prekazky.spec.ts`.
+ *
+ *     Kód sa do 27. 8. 2026 volal `sudo` a slovo pri zámku sľubovalo heslo.
+ *     D100 sudo zrušilo (I3 je odteraz „dry-run + potvrdenie"), takže D105 kód
+ *     premenovalo na `potvrdenie` — zámok zostal, len ho otvára potvrdenie.
  *  6. **Dátum vo vete prechádza cez `formatDateSk`.** `writeBudget.day` je
  *     `YYYY-MM-DD` — prenosový tvar, nie tvar, v akom sa dátum po slovensky
  *     píše. Do 20. 8. 2026 sa vypisoval priamo a na povrchu stálo „(UTC deň
@@ -253,11 +259,12 @@ export type BlockerSubject = 'operacia' | 'produkt';
  * Ako sa prekážka odstráni.
  *
  *  - `sam`        — používateľ to vyrieši sám v appke (`path`),
- *  - `sudo`       — cesta v appke existuje, ale vyžiada si heslo (sudo okno),
+ *  - `potvrdenie` — cesta v appke existuje, ale vyžiada si výslovné potvrdenie
+ *                   (do 27. 8. 2026 sa kód volal `sudo` a pýtal heslo — D105),
  *  - `cakanie`    — nedá sa urobiť nič, čaká sa (`clearsAt`),
  *  - `mimo_appky` — rieši sa mimo appky (konfigurácia počítača).
  */
-export type BlockerResolution = 'sam' | 'sudo' | 'cakanie' | 'mimo_appky';
+export type BlockerResolution = 'sam' | 'potvrdenie' | 'cakanie' | 'mimo_appky';
 
 /**
  * Stabilné ID prekážky. Je to KĽÚČ, nie text — na povrch sa nikdy nevypisuje
@@ -958,7 +965,7 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
         ? 'Rozsah sa prepína v Nastaveniach.'
         : `Strop sa dá zmeniť v Nastaveniach, najviac na ${products(HARD_MAX_PRODUCTS)}.`,
       path: BLOCKER_PATHS.settings,
-      resolution: pilot ? 'sudo' : 'sam',
+      resolution: pilot ? 'potvrdenie' : 'sam',
       passableNow: true,
       clearsAt: null,
       assumed: true,
@@ -978,7 +985,7 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
         ? 'Rozsah sa prepína v Nastaveniach.'
         : `Strop sa dá zmeniť v Nastaveniach, najviac na ${products(HARD_MAX_PRODUCTS)}.`,
       path: BLOCKER_PATHS.settings,
-      resolution: pilot ? 'sudo' : 'sam',
+      resolution: pilot ? 'potvrdenie' : 'sam',
       passableNow: true,
       clearsAt: null,
       assumed: capAssumed,
@@ -999,8 +1006,8 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
     // tvar, ktorý bod 1 hlavičky uvádza ako VZOR — obe čísla aj zvyšok.
     what: `${capText}, vo výbere ${isAre(selected)} ${formatCountSk(selected)} — ${remainderPhrase(over)}.`,
     nextStep: pilot
-      ? // Že si prepnutie vypýta heslo, hovorí `resolution: 'sudo'` — zámok
-        // aj slovo „vypýta si heslo" kreslí `ui/blocker-look.ts` vedľa tejto
+      ? // Že si prepnutie vyžiada potvrdenie, hovorí `resolution: 'potvrdenie'`
+        // — zámok aj slovo o potvrdení kreslí `ui/blocker-look.ts` vedľa tejto
         // vety. Druhýkrát to tu už nestojí (bod 5 hlavičky).
         `Zúžte výber na ${products(cap)}, alebo prepnite rozsah v Nastaveniach.`
       : atHardMax
@@ -1009,7 +1016,7 @@ function scopeBlockers(scope: ResolvedScope, selected: number | null): Blocker[]
           // zopakovalo a držalo radu na 91 znakoch (P2 dáva 90).
           `Zúžte výber na ${products(cap)}, alebo strop zvýšte v Nastaveniach (najviac ${formatCountSk(HARD_MAX_PRODUCTS)}).`,
     path: BLOCKER_PATHS.settings,
-    resolution: pilot ? 'sudo' : 'sam',
+    resolution: pilot ? 'potvrdenie' : 'sam',
     passableNow: true,
     clearsAt: null,
     assumed: capAssumed,
@@ -1269,10 +1276,11 @@ function salesSyncBlockers(snapshot: StatusSnapshot): Blocker[] {
       // Vety píše `sales/stop-policy.ts` — to isté znenie vidí aj log spúšťača.
       what: salesBlockWhat(kind),
       nextStep: salesBlockNextStep(kind),
-      // Odblokovanie adresy sa v appke urobiť nedá; vloženie kľúča áno, a je
-      // za sudo oknom (`PUT /api/key`), čo podľa bodu 5 hlavičky povie zámok.
+      // Odblokovanie adresy sa v appke urobiť nedá; vloženie kľúča áno, a je to
+      // vedomý krok v Nastaveniach (`PUT /api/key`), čo podľa bodu 5 hlavičky
+      // povie zámok.
       path: banned ? null : BLOCKER_PATHS.settings,
-      resolution: banned ? 'mimo_appky' : 'sudo',
+      resolution: banned ? 'mimo_appky' : 'potvrdenie',
       passableNow: true,
       clearsAt: null,
       assumed: false,

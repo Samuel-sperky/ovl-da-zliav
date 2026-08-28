@@ -6,7 +6,9 @@
  *
  * INVARIANT I6: každá adresa je `127.0.0.1`; reálna doména shopu tu nie je
  * a nikdy nebude. `shopDomain` je `.invalid` TLD (RFC 2606) — neexistujúci host.
- * INVARIANT I1: žiadne reálne tajomstvo — heslo aj kľúč sú syntetické.
+ * INVARIANT I1: žiadne reálne tajomstvo — všetko tu je syntetické. Heslo tu
+ * od 27. 8. 2026 nie je vôbec: prihlásenie zmizlo (D99), takže e2e nemá čo
+ * vypĺňať ani čím sa autentifikovať.
  *
  * Vlastník: A18.
  */
@@ -46,22 +48,27 @@ export const E2E_CONFIG = {
   masterKeyFile: process.env.MASTER_KEY_FILE ?? 'secrets/e2e-master.key',
   sessionSecretFile: process.env.SESSION_SECRET_FILE ?? 'secrets/e2e-session.key',
   /**
-   * TLS pre e2e (D69, F.6). Harness servuje appku cez HTTPS, pretože session
-   * cookie je `Secure` a Playwright `APIRequestContext` ju cez `http://`
-   * neposiela. Certifikát je self-signed, generuje ho harness do
-   * gitignorovaného `secrets/` a Playwright ho akceptuje cez
-   * `ignoreHTTPSErrors` (viď `playwright.config.ts`). Do repa sa nedostane
+   * TLS pre e2e (F.6). Pôvodným dôvodom bola `Secure` session cookie (D69) —
+   * tá 27. 8. 2026 zmizla (D99). Certifikát zostáva, pretože harness
+   * (`serve.ts`) appku ďalej servuje cez HTTPS a `APP_BASE_URL` nižšie na to
+   * spoléha. Je self-signed, generuje ho harness do gitignorovaného
+   * `secrets/` a Playwright ho akceptuje cez `ignoreHTTPSErrors`
+   * (viď `playwright.config.ts`). Do repa sa nedostane
    * (I1: `secrets/`, `*.key`, `*.pem` sú v `.gitignore`).
    */
   tlsKeyFile: 'secrets/e2e-tls.key',
   tlsCertFile: 'secrets/e2e-tls.pem',
+  /**
+   * Meno riadku v `users`, ktorý harness seeduje. Po D99 to NIE JE
+   * prihlasovacie meno — nikde sa ním neprihlasuje, existuje len preto, že
+   * `campaigns.created_by` a `audit_log.user_id` majú FK na `users(id)`
+   * (D101). `E2E_ADMIN_PASSWORD` k nemu zaniklo spolu s prihlásením.
+   */
   adminUsername: process.env.E2E_ADMIN_USERNAME ?? 'e2e-admin',
-  /** Heslo ≥ 12 znakov (D68) — syntetické, nikde inde sa nepoužíva (I1). */
-  adminPassword: process.env.E2E_ADMIN_PASSWORD ?? 'e2e-heslo-1234567',
   /** Doména v `settings`. Nikdy sa na ňu nepripája — klient ide na mock (I6). */
   shopDomain: 'https://shop.e2e.invalid',
 } as const;
 
-/** Appka beží cez HTTPS (self-signed) — inak `Secure` session cookie nefunguje. */
+/** Appka beží cez HTTPS (self-signed) — tak ju harness servuje (viď `tlsKeyFile`). */
 export const APP_BASE_URL = `https://${E2E_HOST}:${E2E_CONFIG.appPort}`;
 export const CONTROL_BASE_URL = `http://${E2E_HOST}:${E2E_CONFIG.controlPort}`;

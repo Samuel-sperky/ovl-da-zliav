@@ -1,13 +1,16 @@
 /**
  * Aura Zľavy — `POST /api/settings/unlock-writes` (BUILD-SPEC §5, D79, I12).
  *
- * Runaway zámok (`writes_locked`) sa odomyká VÝHRADNE explicitne: sudo okno
- * + heslo znova. Audit `writes_unlocked` je povinný (I4).
+ * Runaway zámok (`writes_locked`) sa odomyká VÝHRADNE explicitne. Do
+ * 27. 8. 2026 to znamenalo sudo okno + heslo znova; sudo zrušilo D100 (I3 znie
+ * odteraz „žiadny zápis bez dry-runu + potvrdenia") a heslo strieda výslovné
+ * `confirmed: true` z tela — viď schéma nižšie. Audit `writes_unlocked` je
+ * povinný (I4).
  *
  * DVE RÔZNE VECI, KTORÉ SA DAJÚ ĽAHKO POMÝLIŤ
  * -------------------------------------------
  *  - **`writes_locked`** je poistka appky v DB (D79). Odomyká ju tento endpoint
- *    heslom, teda z obrazovky.
+ *    výslovným potvrdením, teda z obrazovky.
  *  - **`WRITES_ENABLED`** je env poistka (I13). Z obrazovky sa nedá prepnúť
  *    vôbec a tento endpoint s ňou NIČ neurobí.
  *
@@ -23,22 +26,26 @@ import { z } from 'zod';
 import type { SettingsRepo } from '@/contracts';
 
 import { writesAllowedByEnv } from '@/env';
-import { verifyPassword } from '@/lib/auth';
 import { appendAudit } from '@/lib/audit/write';
 import { writesBlockers } from '@/lib/engine/guards';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
-import { unauthorized } from '@/lib/http/errors';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
-import { usersRepo as defaultUsersRepo } from '@/lib/repo/users.repo';
 
+/**
+ * Telo požiadavky. Heslo tu stálo do 27. 8. 2026 (D99) a bolo JEDINÉ potvrdenie
+ * tejto akcie. Keby sa len vytrhlo, odomknutie zápisov do produkčného eshopu by
+ * sa stalo jedným tichým klikom — a to nie je „bez hesla", to je „bez
+ * potvrdenia". I3 potvrdenie vyžaduje aj po zrušení sudo (D100), takže heslo
+ * strieda výslovné `confirmed: true`, ktoré UI posiela zo zaškrtávacieho polia.
+ *
+ * `z.literal(true)` je zámer: chýbajúce aj `false` skončí 400, nikdy odomknutím.
+ */
 export const unlockWritesBodySchema = z.object({
-  password: z.string().min(1).max(200),
+  confirmed: z.literal(true),
 });
 
 export interface UnlockWritesRouteDeps {
   settings?: Pick<SettingsRepo, 'get' | 'unlockWrites'>;
-  users?: { getById(id: number): Promise<{ passwordHash: string } | null> };
-  verify?: typeof verifyPassword;
   audit?: typeof appendAudit;
   /** Env poistka I13 (`writesAllowedByEnv()`) — injektovateľná pre testy. */
   writesEnabled?: () => boolean;
@@ -47,29 +54,20 @@ export interface UnlockWritesRouteDeps {
 
 export function createUnlockWritesRoute(deps: UnlockWritesRouteDeps = {}): NextRouteHandler {
   const settings = deps.settings ?? defaultSettingsRepo;
-  const users = deps.users ?? defaultUsersRepo;
-  const verify = deps.verify ?? verifyPassword;
   const audit = deps.audit ?? appendAudit;
   const readWritesEnabled = deps.writesEnabled ?? ((): boolean => writesAllowedByEnv());
 
   return defineRoute(
     {
       method: 'POST',
-      auth: 'sudo',
       body: unlockWritesBodySchema,
       rateLimit: { limit: 30, windowMs: 60_000, bucket: 'settings-unlock-writes' },
       handler: async (ctx) => {
-        const user = await users.getById(ctx.claims.sub);
-        const matches = await verify(user?.passwordHash ?? null, ctx.body.password);
-        if (!matches) {
-          throw unauthorized('Nesprávne heslo.', 'invalid_password', { logAsError: false });
-        }
-
         const before = await settings.get();
         await settings.unlockWrites();
         await audit({
           actor: 'user',
-          userId: ctx.claims.sub,
+          userId: ctx.actor.id,
           eventType: 'writes_unlocked',
           ok: true,
           message: `zápisy explicitne odomknuté (predtým zamknuté: ${before.writesLockedReason ?? 'bez dôvodu / neboli'})`,

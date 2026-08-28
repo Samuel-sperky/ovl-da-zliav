@@ -47,11 +47,11 @@
  *    / idle). Sú zmerané aj pri farbosleposti (`test/unit/paleta.spec.ts`).
  *    Teal (`--accent`), zlatá (`--gold*`) ani `--brand` nekódujú stav NIKDY.
  *
- * 4. **`lock` NIE JE tón.** Do 19. 8. mal Prehľad pre `sudo` šiesty „tón"
+ * 4. **`lock` NIE JE tón.** Do 19. 8. mal Prehľad pre `potvrdenie` šiesty „tón"
  *    `lock` (tlmená sivá) a tá istá prekážka bola na Zľavách jantárová. Zámok
- *    je SPÔSOB RIEŠENIA — „cesta existuje, len si vypýta heslo" — nie miera
- *    závažnosti, a preto je v tomto slovníku samostatné pole `locked` a
- *    samostatná ikona zámku. Tón `sudo` je `attention` ako pri `sam`, lebo
+ *    je SPÔSOB RIEŠENIA — „cesta existuje, len ju treba vedome otvoriť" — nie
+ *    miera závažnosti, a preto je v tomto slovníku samostatné pole `locked` a
+ *    samostatná ikona zámku. Tón `potvrdenie` je `attention` ako pri `sam`, lebo
  *    používateľ s tým TERAZ vie pohnúť. Trieda `.sig.lock` v `globals.css`
  *    zostáva, ale patrí trvalému obmedzeniu (pilotný strop), nie prekážke —
  *    kreslí ju `scopeCheck()` (`dashboard/overview-verdict.ts`) na Prehľade.
@@ -66,7 +66,15 @@
  * 6. **Vety sa tu neskladajú.** `what` a `nextStep` píše server; tento modul
  *    dodáva len tón, glyf a jedno slovo o spôsobe riešenia.
  *
- * Vlastník: R-A, opravná vlna 19. 8. 2026.
+ * ČO SA ZMENILO 27. 8. 2026 (D105, dôsledok D100)
+ * -----------------------------------------------
+ * Kód spôsobu riešenia `sudo` sa volá `potvrdenie` a jeho slovo už nesľubuje
+ * heslo. D100 zrušilo sudo a invariant I3 znie „žiadny zápis bez dry-runu +
+ * potvrdenia" — cesta von teda ďalej existuje a ďalej sa musí vedome otvoriť,
+ * len ju otvára výslovné potvrdenie, nie heslo. Tón (jantárová) ani ikona
+ * (zámok) sa nemenili: tri kanály zostávajú tri.
+ *
+ * Vlastník: R-A, opravná vlna 19. 8. 2026; slovo D105, 27. 8. 2026.
  */
 import type { IconName } from '@/components/ui/Icon';
 import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
@@ -78,7 +86,7 @@ import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
  * `lib/status/blockers.ts`; keby tam pribudol piaty kód, tabuľky nižšie sa
  * neskompilujú a chyba sa ukáže tu, nie ako prázdne miesto na obrazovke.
  */
-export type BlockerResolutionCode = 'sam' | 'sudo' | 'cakanie' | 'mimo_appky';
+export type BlockerResolutionCode = 'sam' | 'potvrdenie' | 'cakanie' | 'mimo_appky';
 
 /** Čo cez prekážku neprejde. Zhodné s `BlockerSeverity` v `blockers.ts`. */
 export type BlockerSeverityCode = 'blokuje' | 'obmedzuje' | 'informuje';
@@ -86,7 +94,7 @@ export type BlockerSeverityCode = 'blokuje' | 'obmedzuje' | 'informuje';
 /** Poradie je poradím hľadania, nie dôležitosti — tú určuje server. */
 export const BLOCKER_RESOLUTION_CODES: readonly BlockerResolutionCode[] = [
   'sam',
-  'sudo',
+  'potvrdenie',
   'cakanie',
   'mimo_appky',
 ];
@@ -108,9 +116,9 @@ export interface BlockerLook {
   /** Tretí kanál — kto a ako to vyrieši. Neosobne, bez oslovenia. */
   readonly word: string;
   /**
-   * Cesta von existuje, ale vypýta si heslo. Je to VLASTNOSŤ spôsobu riešenia,
-   * nie tón: obrazovka podľa nej kreslí zámok (`LockBadge`), farbu z toho
-   * nikdy neodvodzuje.
+   * Cesta von existuje, ale vyžaduje výslovné potvrdenie (do 27. 8. 2026 heslo
+   * — D105). Je to VLASTNOSŤ spôsobu riešenia, nie tón: obrazovka podľa nej
+   * kreslí zámok (`LockBadge`), farbu z toho nikdy neodvodzuje.
    */
   readonly locked: boolean;
 }
@@ -119,8 +127,9 @@ export interface BlockerLook {
  * Jediná tabuľka `resolution → vzhľad` v celej appke.
  *
  *  - `sam`        — jantár. Používateľ s tým vie pohnúť, len ešte nepohol.
- *  - `sudo`       — jantár rovnako ako `sam`: cesta v appke existuje, len si
- *                   vypýta heslo. Zámok nesie glyf a slovo, nie farba.
+ *  - `potvrdenie` — jantár rovnako ako `sam`: cesta v appke existuje, len si
+ *                   vyžiada výslovné potvrdenie. Zámok nesie glyf a slovo, nie
+ *                   farba.
  *  - `cakanie`    — pokojná sivá. Nič sa nepokazilo, appka čaká na polnoc (K2).
  *  - `mimo_appky` — červená. Zápis stojí a z obrazovky sa s tým nedá urobiť
  *                   nič; červená je vyhradená pre stratu dát a zastavený zápis
@@ -133,12 +142,13 @@ export const RESOLUTION_LOOK: Readonly<Record<BlockerResolutionCode, BlockerLook
     word: 'rieši sa v appke',
     locked: false,
   },
-  sudo: {
+  potvrdenie: {
     tone: 'attention',
-    /* Zámok, nie trojuholník: `sudo` má rovnaký TÓN ako `sam`, takže ikona je
-       jediné, čo tie dva spôsoby riešenia od seba na prvý pohľad odlíši. */
+    /* Zámok, nie trojuholník: `potvrdenie` má rovnaký TÓN ako `sam`, takže
+       ikona je jediné, čo tie dva spôsoby riešenia od seba na prvý pohľad
+       odlíši. */
     icon: 'lock',
-    word: 'rieši sa v appke, vypýta si heslo',
+    word: 'rieši sa v appke, vyžaduje výslovné potvrdenie',
     locked: true,
   },
   cakanie: {
@@ -189,7 +199,7 @@ export function lookChannel<K extends keyof BlockerLook>(
 ): Readonly<Record<BlockerResolutionCode, BlockerLook[K]>> {
   return {
     sam: RESOLUTION_LOOK.sam[channel],
-    sudo: RESOLUTION_LOOK.sudo[channel],
+    potvrdenie: RESOLUTION_LOOK.potvrdenie[channel],
     cakanie: RESOLUTION_LOOK.cakanie[channel],
     mimo_appky: RESOLUTION_LOOK.mimo_appky[channel],
   };

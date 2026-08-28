@@ -639,7 +639,6 @@ function odpoved(url: URL, method: string): Response | null {
   if (cesta === '/api/audit') {
     return ok({ data: [...HISTORIA], page: 1, perPage: 40, total: 512 } satisfies AuditPage);
   }
-  if (cesta === '/api/auth/session') return ok({ userId: 1, sudoUntil: null });
 
   const detail = /^\/api\/campaigns\/(\d+)$/.exec(cesta);
   if (detail !== null) {
@@ -675,7 +674,7 @@ function odpoved(url: URL, method: string): Response | null {
       possible: true,
       blockedBy: null,
       what: 'Zopakovať sa dá 11 kusov, ktoré eshop odmietol.',
-      nextStep: 'Skúška naprázdno ukáže ceny; zaradenie si vypýta heslo.',
+      nextStep: 'Skúška naprázdno ukáže ceny; zaradenie si vypýta potvrdenie.',
       productIds: KATALOG.slice(0, 11).map((r) => r.productId),
       items: {
         total: kampan.itemsTotal,
@@ -687,7 +686,6 @@ function odpoved(url: URL, method: string): Response | null {
         skipped: 0,
       },
       window: { from: kampan.dateFrom, to: kampan.dateTo, today: DNES },
-      requiresSudo: true,
     } satisfies RetryPlanView);
   }
 

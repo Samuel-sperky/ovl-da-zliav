@@ -2,25 +2,23 @@
  * Aura Zľavy — testy HTTP pipeline `defineRoute()` (A5).
  *
  * Pokrývajú akceptačné kritériá A5:
- *  - mutácia (POST/PUT/PATCH/DELETE) bez zodpovedajúceho `Origin` je odmietnutá
- *    403 ešte PRED handlerom (D72),
- *  - `auth:'sudo'` bez platného sudo okna vracia 401 `sudo_required` (I3),
+ *  - mutácia (POST/PUT/PATCH/DELETE) bez hlavičky `Origin` alebo s `Origin`,
+ *    ktorý sa nerovná hostu požiadavky, je odmietnutá 403 ešte PRED
+ *    handlerom (D72),
  *  - neplatný zod vstup vracia 400 so zoznamom polí,
  *  - neodchytená výnimka sa nikdy nedostane do odpovede ako stacktrace a nikdy
  *    nenesie hodnoty z denylistu redaktora (I1),
  *  - každé volanie je zalogované s `request_id`.
  *
- * Tabuľkové testy idú cez všetky kombinácie auth × metóda × origin × zod.
+ * Tabuľkové testy idú cez všetky kombinácie metóda × origin × zod.
  *
- * Bez DB a bez `fetch` (I6): session vrstva je injektovaná cez `RouteDeps`,
- * takže sa netestuje JWT podpis (to vlastní A4), ale poradie a fail-closed
- * chovanie pipeline.
+ * Bez DB a bez `fetch` (I6): lokálny actor (D102) je injektovaný cez
+ * `RouteDeps`, takže sa testuje poradie a fail-closed chovanie pipeline.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import type { LogLine } from '@/lib/log/logger';
-import type { SessionClaims } from '@/contracts';
 
 import { setLogLevel, setLogSink } from '@/lib/log/logger';
 import { resetRedactionState, setActiveSecretForScan } from '@/lib/log/redact';
@@ -29,7 +27,6 @@ import {
   consumeRateLimit,
   defineRoute,
   resetRateLimiter,
-  type AuthMode,
   type RouteDeps,
 } from '@/lib/http/define-route';
 import { AppError, toAppError } from '@/lib/http/errors';
@@ -45,54 +42,25 @@ const FAKE_KEY = 'fake-shop-key-ABCD1234';
 
 const NOW = new Date('2026-08-05T10:00:00.000Z');
 
-function claimsWithSudo(sudoMinutes: number | null): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: sudoMinutes === null ? null : new Date(NOW.getTime() + sudoMinutes * 60_000),
-  };
-}
+/** Id lokálneho actora, ktoré musí dojsť až do logu (`userId`). */
+const ACTOR_ID = 7;
 
-/** Falošná session vrstva — vracia dodané claims a „obnovenú" cookie. */
-function sessionDeps(claims: SessionClaims | null): RouteDeps {
+/**
+ * Deps pipeline. Do 27. 8. 2026 tu bola falošná SESSION vrstva, ktorou si testy
+ * vedeli vyrobiť aj stav „bez session" a „bez sudo okna" (D69, D70). Oboje
+ * zmizlo (D99, D100) a zostal lokálny actor (D102).
+ */
+function actorDeps(): RouteDeps {
   return {
     now: () => NOW,
     newRequestId: () => '01J0000000000000000000TEST'.slice(0, 26),
-    verifySession: async (token) => {
-      if (!token || !claims) {
-        const error = new Error('Session chýba alebo je neplatná.');
-        error.name = 'SessionError';
-        (error as Error & { code: string }).code = 'missing';
-        throw error;
-      }
-      return {
-        claims,
-        refreshed: {
-          token: 'refreshed-token',
-          claims,
-          cookie: {
-            name: 'ovl_zliav_session' as const,
-            value: 'refreshed-token',
-            options: {
-              httpOnly: true as const,
-              secure: true as const,
-              sameSite: 'strict' as const,
-              path: '/',
-              maxAge: 1800,
-            },
-          },
-        },
-      };
-    },
+    localActor: async () => ({ id: ACTOR_ID, username: 'samuel' }),
   };
 }
 
 interface RequestOptions {
   method?: string;
   origin?: string | null;
-  cookie?: string | null;
   body?: unknown;
   rawBody?: string;
   path?: string;
@@ -105,7 +73,6 @@ function makeRequest(options: RequestOptions = {}): Request {
   if (options.origin !== null && options.origin !== undefined) {
     headers.set('origin', options.origin);
   }
-  if (options.cookie) headers.set('cookie', options.cookie);
   headers.set('x-forwarded-for', options.ip ?? '127.0.0.1');
   const init: RequestInit = { method, headers };
   if (options.rawBody !== undefined) {
@@ -118,7 +85,8 @@ function makeRequest(options: RequestOptions = {}): Request {
   return new Request(`${APP_ORIGIN}${options.path ?? '/api/test'}`, init);
 }
 
-const VALID_COOKIE = 'ovl_zliav_session=token';
+/* 27. 8. 2026 (D99): `VALID_COOKIE` a voľba `cookie` v `makeRequest()` zmazané
+   — app session je zmazaná a appka žiadny session cookie nevydáva. */
 
 interface Body {
   ok: boolean;
@@ -183,71 +151,63 @@ describe('checkOrigin (D72)', () => {
   });
 });
 
-describe('tabuľka auth × metóda × origin', () => {
+describe('tabuľka metóda × origin (D72)', () => {
+  /*
+   * Do 27. 8. 2026 to bola tabuľka `auth × metóda × origin` a niesla tri osi:
+   * session, sudo okno a Origin. Prihlásenie aj sudo zmizli (D99, D100), takže
+   * ostala tá jedna os, ktorá appku pred cudzím zápisom naozaj chráni — a je
+   * dôležitejšia než predtým, lebo je posledná.
+   *
+   * ČO SA TU MERÍ: mutácia z cudzieho (alebo chýbajúceho) Originu sa NESMIE
+   * dostať k handleru. Čítanie Origin nepotrebuje — GET nič nemení a prehliadač
+   * pri navigácii hlavičku neposiela.
+   */
   const cases: Array<{
-    auth: AuthMode;
     method: 'GET' | 'POST';
     origin: string | null;
-    cookie: string | null;
-    sudoMinutes: number | null;
     expected: number;
     code?: string;
   }> = [
-    // auth: none
-    { auth: 'none', method: 'GET', origin: null, cookie: null, sudoMinutes: null, expected: 200 },
-    { auth: 'none', method: 'POST', origin: APP_ORIGIN, cookie: null, sudoMinutes: null, expected: 200 },
-    { auth: 'none', method: 'POST', origin: null, cookie: null, sudoMinutes: null, expected: 403, code: 'origin_missing' },
-    { auth: 'none', method: 'POST', origin: 'https://zlodej.example', cookie: null, sudoMinutes: null, expected: 403, code: 'origin_mismatch' },
-    // auth: session
-    { auth: 'session', method: 'GET', origin: null, cookie: VALID_COOKIE, sudoMinutes: null, expected: 200 },
-    { auth: 'session', method: 'GET', origin: null, cookie: null, sudoMinutes: null, expected: 401, code: 'unauthorized' },
-    { auth: 'session', method: 'POST', origin: APP_ORIGIN, cookie: VALID_COOKIE, sudoMinutes: null, expected: 200 },
-    { auth: 'session', method: 'POST', origin: null, cookie: VALID_COOKIE, sudoMinutes: null, expected: 403, code: 'origin_missing' },
-    // auth bez session má prednosť pred Origin checkom (poradie vrstiev §5)
-    { auth: 'session', method: 'POST', origin: null, cookie: null, sudoMinutes: null, expected: 401, code: 'unauthorized' },
-    // auth: sudo (I3)
-    { auth: 'sudo', method: 'POST', origin: APP_ORIGIN, cookie: VALID_COOKIE, sudoMinutes: 10, expected: 200 },
-    { auth: 'sudo', method: 'POST', origin: APP_ORIGIN, cookie: VALID_COOKIE, sudoMinutes: null, expected: 401, code: 'sudo_required' },
-    { auth: 'sudo', method: 'POST', origin: APP_ORIGIN, cookie: VALID_COOKIE, sudoMinutes: -1, expected: 401, code: 'sudo_required' },
-    // okno dlhšie než 15 min = pozmenené → fail-closed
-    { auth: 'sudo', method: 'POST', origin: APP_ORIGIN, cookie: VALID_COOKIE, sudoMinutes: 60, expected: 401, code: 'sudo_required' },
-    { auth: 'sudo', method: 'POST', origin: null, cookie: VALID_COOKIE, sudoMinutes: 10, expected: 403, code: 'origin_missing' },
-    { auth: 'sudo', method: 'POST', origin: APP_ORIGIN, cookie: null, sudoMinutes: 10, expected: 401, code: 'unauthorized' },
+    // Čítanie: Origin sa nevyžaduje ani nekontroluje.
+    { method: 'GET', origin: null, expected: 200 },
+    { method: 'GET', origin: 'https://zlodej.example', expected: 200 },
+    // Mutácia: Origin sa musí presne zhodovať s hostom požiadavky.
+    { method: 'POST', origin: APP_ORIGIN, expected: 200 },
+    { method: 'POST', origin: null, expected: 403, code: 'origin_missing' },
+    { method: 'POST', origin: 'https://zlodej.example', expected: 403, code: 'origin_mismatch' },
+    // Poddomena nie je ten istý host.
+    { method: 'POST', origin: 'https://sub.zlavy.local', expected: 403, code: 'origin_mismatch' },
   ];
 
-  it.each(cases)(
-    'auth=$auth $method origin=$origin cookie=$cookie sudo=$sudoMinutes → $expected',
-    async (testCase) => {
-      let handlerRan = false;
-      const route = defineRoute(
-        {
-          auth: testCase.auth,
-          method: testCase.method,
-          handler: () => {
-            handlerRan = true;
-            return { hello: 'svet' };
-          },
+  it.each(cases)('$method origin=$origin → $expected', async (testCase) => {
+    let handlerRan = false;
+    const route = defineRoute(
+      {
+        method: testCase.method,
+        handler: () => {
+          handlerRan = true;
+          return { hello: 'svet' };
         },
-        sessionDeps(testCase.cookie ? claimsWithSudo(testCase.sudoMinutes) : null),
-      );
+      },
+      actorDeps(),
+    );
 
-      const response = await route(
-        makeRequest({ method: testCase.method, origin: testCase.origin, cookie: testCase.cookie }),
-      );
+    const response = await route(
+      makeRequest({ method: testCase.method, origin: testCase.origin }),
+    );
 
-      expect(response.status).toBe(testCase.expected);
-      const body = await readBody(response);
-      if (testCase.expected === 200) {
-        expect(handlerRan).toBe(true);
-        expect(body).toEqual({ ok: true, data: { hello: 'svet' } });
-      } else {
-        // Odmietnutie MUSÍ prebehnúť pred handlerom.
-        expect(handlerRan).toBe(false);
-        expect(body.ok).toBe(false);
-        expect(body.error?.code).toBe(testCase.code);
-      }
-    },
-  );
+    expect(response.status).toBe(testCase.expected);
+    const body = await readBody(response);
+    if (testCase.expected === 200) {
+      expect(handlerRan).toBe(true);
+      expect(body).toEqual({ ok: true, data: { hello: 'svet' } });
+    } else {
+      // Odmietnutie MUSÍ prebehnúť pred handlerom.
+      expect(handlerRan).toBe(false);
+      expect(body.ok).toBe(false);
+      expect(body.error?.code).toBe(testCase.code);
+    }
+  });
 });
 
 describe('metóda a tvar odpovede', () => {
@@ -255,14 +215,13 @@ describe('metóda a tvar odpovede', () => {
     let handlerRan = false;
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'GET',
         handler: () => {
           handlerRan = true;
           return {};
         },
       },
-      sessionDeps(null),
+      actorDeps(),
     );
     const response = await route(makeRequest({ method: 'DELETE', origin: APP_ORIGIN }));
     expect(response.status).toBe(405);
@@ -272,8 +231,8 @@ describe('metóda a tvar odpovede', () => {
 
   it('úspešná odpoveď má jednotný tvar, no-store a X-Request-Id', async () => {
     const route = defineRoute(
-      { auth: 'none', method: 'GET', handler: () => ({ a: 1 }) },
-      sessionDeps(null),
+      { method: 'GET', handler: () => ({ a: 1 }) },
+      actorDeps(),
     );
     const response = await route(makeRequest());
     expect(response.headers.get('Content-Type')).toContain('application/json');
@@ -282,37 +241,6 @@ describe('metóda a tvar odpovede', () => {
     expect(await readBody(response)).toEqual({ ok: true, data: { a: 1 } });
   });
 
-  it('session route obnoví idle okno a priloží Set-Cookie (D69)', async () => {
-    const route = defineRoute(
-      { auth: 'session', method: 'GET', handler: (ctx) => ({ userId: ctx.claims.sub }) },
-      sessionDeps(claimsWithSudo(null)),
-    );
-    const response = await route(makeRequest({ cookie: VALID_COOKIE }));
-    expect(response.status).toBe(200);
-    const cookie = response.headers.get('set-cookie') ?? '';
-    expect(cookie).toContain('ovl_zliav_session=refreshed-token');
-    expect(cookie).toContain('HttpOnly');
-    expect(cookie).toContain('Secure');
-    expect(cookie).toContain('SameSite=Strict');
-  });
-
-  it('handler dostane platné sudoUntil pri auth:sudo', async () => {
-    const route = defineRoute(
-      {
-        auth: 'sudo',
-        method: 'POST',
-        handler: (ctx) => ({ sudoUntil: ctx.sudoUntil?.toISOString() ?? null }),
-      },
-      sessionDeps(claimsWithSudo(10)),
-    );
-    const response = await route(
-      makeRequest({ method: 'POST', origin: APP_ORIGIN, cookie: VALID_COOKIE }),
-    );
-    const body = await readBody(response);
-    expect((body.data as { sudoUntil: string }).sudoUntil).toBe(
-      new Date(NOW.getTime() + 10 * 60_000).toISOString(),
-    );
-  });
 });
 
 describe('zod validácia (vrstva 4)', () => {
@@ -325,7 +253,6 @@ describe('zod validácia (vrstva 4)', () => {
     let handlerRan = false;
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'POST',
         body: bodySchema,
         handler: () => {
@@ -333,7 +260,7 @@ describe('zod validácia (vrstva 4)', () => {
           return {};
         },
       },
-      sessionDeps(null),
+      actorDeps(),
     );
 
     const response = await route(
@@ -352,12 +279,11 @@ describe('zod validácia (vrstva 4)', () => {
   it('platné telo prejde a handler dostane typovaný vstup', async () => {
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'POST',
         body: bodySchema,
         handler: (ctx) => ({ sum: ctx.body.percent + ctx.body.productIds.length }),
       },
-      sessionDeps(null),
+      actorDeps(),
     );
     const response = await route(
       makeRequest({ method: 'POST', origin: APP_ORIGIN, body: { percent: 20, productIds: [1, 2] } }),
@@ -367,8 +293,8 @@ describe('zod validácia (vrstva 4)', () => {
 
   it('Origin check je PRED zodom — neplatné telo z cudzieho originu dá 403', async () => {
     const route = defineRoute(
-      { auth: 'none', method: 'POST', body: bodySchema, handler: () => ({}) },
-      sessionDeps(null),
+      { method: 'POST', body: bodySchema, handler: () => ({}) },
+      actorDeps(),
     );
     const response = await route(
       makeRequest({ method: 'POST', origin: 'https://zlodej.example', body: { percent: 999 } }),
@@ -378,8 +304,8 @@ describe('zod validácia (vrstva 4)', () => {
 
   it('nevalidný JSON je 400 malformed_json', async () => {
     const route = defineRoute(
-      { auth: 'none', method: 'POST', body: bodySchema, handler: () => ({}) },
-      sessionDeps(null),
+      { method: 'POST', body: bodySchema, handler: () => ({}) },
+      actorDeps(),
     );
     const response = await route(
       makeRequest({ method: 'POST', origin: APP_ORIGIN, rawBody: '{nie json' }),
@@ -391,13 +317,12 @@ describe('zod validácia (vrstva 4)', () => {
   it('query a params sa validujú a chyba nesie správny `source`', async () => {
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'GET',
         query: z.object({ page: z.coerce.number().int().positive() }),
         params: z.object({ productId: z.coerce.number().int().positive() }),
         handler: (ctx) => ({ page: ctx.query.page, productId: ctx.params.productId }),
       },
-      sessionDeps(null),
+      actorDeps(),
     );
 
     const okResponse = await route(makeRequest({ path: '/api/x?page=2' }), {
@@ -428,13 +353,12 @@ describe('mapovanie chýb (vrstva 6, I1)', () => {
     setActiveSecretForScan(FAKE_KEY);
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'GET',
         handler: () => {
           throw new Error(`zlyhalo pri kľúči ${FAKE_KEY} v /home/user/ovl-da-zliav/src/x.ts`);
         },
       },
-      sessionDeps(null),
+      actorDeps(),
     );
 
     const response = await route(makeRequest());
@@ -455,11 +379,10 @@ describe('mapovanie chýb (vrstva 6, I1)', () => {
     setActiveSecretForScan(FAKE_KEY);
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'GET',
         handler: () => ({ apiKey: FAKE_KEY, note: `hlavička X-Api-Key: ${FAKE_KEY}` }),
       },
-      sessionDeps(null),
+      actorDeps(),
     );
     const text = await (await route(makeRequest())).text();
     expect(text).not.toContain(FAKE_KEY);
@@ -469,13 +392,12 @@ describe('mapovanie chýb (vrstva 6, I1)', () => {
   it('AppError z handlera si nesie svoj status a kód', async () => {
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'POST',
         handler: () => {
           throw new AppError(409, 'allowlist_full', 'Allowlist je plný (10/10).');
         },
       },
-      sessionDeps(null),
+      actorDeps(),
     );
     const response = await route(makeRequest({ method: 'POST', origin: APP_ORIGIN }));
     expect(response.status).toBe(409);
@@ -485,7 +407,6 @@ describe('mapovanie chýb (vrstva 6, I1)', () => {
   it('doménová chyba s kódom sa mapuje na status podľa katalógu', async () => {
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'POST',
         handler: () => {
           const error = new Error('Zápisy sú zamknuté (runaway strop).') as Error & {
@@ -495,48 +416,22 @@ describe('mapovanie chýb (vrstva 6, I1)', () => {
           throw error;
         },
       },
-      sessionDeps(null),
+      actorDeps(),
     );
     const response = await route(makeRequest({ method: 'POST', origin: APP_ORIGIN }));
     expect(response.status).toBe(409);
     expect((await readBody(response)).error?.code).toBe('write_locked');
   });
 
-  it('LockoutError z preflight je 429 s Retry-After (D71)', async () => {
-    const route = defineRoute(
-      {
-        auth: 'none',
-        method: 'POST',
-        preflight: () => {
-          const error = new Error('Príliš veľa neúspešných pokusov.') as Error & {
-            code: string;
-            retryAfterSeconds: number;
-          };
-          error.name = 'LockoutError';
-          error.code = 'too_many_attempts';
-          error.retryAfterSeconds = 300;
-          throw error;
-        },
-        handler: () => ({}),
-      },
-      sessionDeps(null),
-    );
-    const response = await route(makeRequest({ method: 'POST', origin: APP_ORIGIN }));
-    expect(response.status).toBe(429);
-    expect(response.headers.get('Retry-After')).toBe('300');
-    expect((await readBody(response)).error?.code).toBe('too_many_attempts');
-  });
-
   it('neznámy objekt ako výnimka je 500, nie 200', async () => {
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'GET',
         handler: () => {
           throw { nieje: 'error', apiKey: FAKE_KEY };
         },
       },
-      sessionDeps(null),
+      actorDeps(),
     );
     const response = await route(makeRequest());
     expect(response.status).toBe(500);
@@ -548,12 +443,11 @@ describe('rateLimit (vrstva 2)', () => {
   it('okno tlmí ďalšie požiadavky a vracia Retry-After', async () => {
     const route = defineRoute(
       {
-        auth: 'none',
         method: 'POST',
         rateLimit: { limit: 2, windowMs: 60_000, bucket: 'test' },
         handler: () => ({}),
       },
-      sessionDeps(null),
+      actorDeps(),
     );
     const send = () => route(makeRequest({ method: 'POST', origin: APP_ORIGIN }));
     expect((await send()).status).toBe(200);
@@ -570,48 +464,38 @@ describe('rateLimit (vrstva 2)', () => {
     expect(consumeRateLimit('k', rule, 1500).allowed).toBe(true);
   });
 
-  it('rateLimit beží PO auth — neprihlásený dostane 401, nie 429', async () => {
-    const route = defineRoute(
-      {
-        auth: 'session',
-        method: 'POST',
-        rateLimit: { limit: 1, windowMs: 60_000, bucket: 'poradie' },
-        handler: () => ({}),
-      },
-      sessionDeps(null),
-    );
-    for (let i = 0; i < 3; i += 1) {
-      const response = await route(makeRequest({ method: 'POST', origin: APP_ORIGIN }));
-      expect(response.status).toBe(401);
-    }
-  });
 });
 
 describe('logovanie (akceptačné kritérium: každé volanie s request_id)', () => {
   it('úspech aj odmietnutie majú v logu requestId a status', async () => {
     const route = defineRoute(
-      { auth: 'sudo', method: 'POST', handler: () => ({}) },
-      sessionDeps(claimsWithSudo(null)),
+      { method: 'POST', handler: () => ({}) },
+      actorDeps(),
     );
 
-    await route(makeRequest({ method: 'POST', origin: APP_ORIGIN, cookie: VALID_COOKIE }));
+    /*
+     * Odmietnutie sa tu do 27. 8. 2026 vyrábalo chýbajúcim sudo oknom. Sudo
+     * zmizlo (D100), tak sa berie odmietnutie, ktoré appka má ďalej: mutácia
+     * bez hlavičky Origin (D72).
+     */
+    await route(makeRequest({ method: 'POST', origin: null }));
 
     const request = lines.filter((l) => l.msg === 'http_request');
     expect(request).toHaveLength(1);
     expect(request[0]!.requestId).toHaveLength(26);
-    expect(request[0]!.httpStatus).toBe(401);
+    expect(request[0]!.httpStatus).toBe(403);
     expect(request[0]!.level).toBe('warn');
-    expect(request[0]!.errorCode).toBe('sudo_required');
+    expect(request[0]!.errorCode).toBe('origin_missing');
     // Do logu nesmie ísť message chyby (mohla by nesť vstup, I1).
-    expect(JSON.stringify(request[0])).not.toContain('heslo');
+    expect(JSON.stringify(request[0])).not.toContain('CSRF');
   });
 
   it('úspešné volanie sa loguje na úrovni info s userId', async () => {
     const route = defineRoute(
-      { auth: 'session', method: 'GET', handler: () => ({}) },
-      sessionDeps(claimsWithSudo(null)),
+      { method: 'GET', handler: () => ({}) },
+      actorDeps(),
     );
-    await route(makeRequest({ cookie: VALID_COOKIE }));
+    await route(makeRequest());
     const line = lines.find((l) => l.msg === 'http_request');
     expect(line?.level).toBe('info');
     expect(line?.httpStatus).toBe(200);

@@ -31,7 +31,7 @@ import {
   makeRequest,
   makeRoutesWorld,
   parse,
-  sessionRouteDeps,
+  actorRouteDeps,
   type RoutesWorld,
 } from './routes-harness';
 
@@ -72,7 +72,7 @@ interface PreviewData {
 }
 
 async function extendPreview(w: RoutesWorld, campaignId: number, to: string): Promise<PreviewData> {
-  const handler = createExtendPreviewPost(w.deps, sessionRouteDeps());
+  const handler = createExtendPreviewPost(w.deps, actorRouteDeps());
   const res = await parse(
     await handler(makeRequest('POST', `/api/campaigns/${campaignId}/extend/preview`, { to }), {
       params: { id: String(campaignId) },
@@ -143,7 +143,7 @@ describe('catalog/refresh — obnova katalógu prechádza rozpočtom (K7, B1)', 
   }
 
   async function refresh(w: RoutesWorld): Promise<RefreshData> {
-    const handler = createCatalogRefreshPost(w.deps, sessionRouteDeps());
+    const handler = createCatalogRefreshPost(w.deps, actorRouteDeps());
     const res = await parse(await handler(makeRequest('POST', '/api/catalog/refresh', {})));
     expect(res.status).toBe(200);
     return res.body.data as unknown as RefreshData;

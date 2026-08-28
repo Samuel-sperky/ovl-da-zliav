@@ -18,7 +18,7 @@
  * `POST /api/campaigns/[id]/retry-failed` bez čerstvého jednorazového tokenu
  * MUSÍ skončiť 4xx a na shop nesmie odísť ani jeden zápis.
  */
-import { api, expect, login, storeApiKey, test } from './fixtures';
+import { api, expect, storeApiKey, test } from './fixtures';
 
 const OK_PRODUCTS = [201, 202] as const;
 const FAILED_PRODUCT = 203;
@@ -31,7 +31,6 @@ function dateOnly(offsetDays: number): string {
 
 test.describe('čiastočné zlyhanie', () => {
   test('detail zľavy ukáže, koľko prešlo a koľko sa nepodarilo', async ({ page, db }) => {
-    await login(page);
     await storeApiKey(page);
     await db.seedAllowlist([...OK_PRODUCTS, FAILED_PRODUCT]);
 
@@ -68,7 +67,6 @@ test.describe('čiastočné zlyhanie', () => {
     db,
     control,
   }) => {
-    await login(page);
     await storeApiKey(page);
     await db.seedAllowlist([...OK_PRODUCTS, FAILED_PRODUCT]);
 
@@ -111,7 +109,6 @@ test.describe('čiastočné zlyhanie', () => {
   });
 
   test('I7: v UI neexistuje akcia, ktorá by zľavu v shope rušila', async ({ page, db }) => {
-    await login(page);
     await storeApiKey(page);
     await db.seedAllowlist([...OK_PRODUCTS]);
 

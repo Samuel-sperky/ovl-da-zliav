@@ -115,7 +115,6 @@ describe('štruktúra podstránok', () => {
       'diagnostika',
       'zamknute',
       'poistky',
-      'odhlasenie',
       'cervena',
     ]);
   });

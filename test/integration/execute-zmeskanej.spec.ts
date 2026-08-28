@@ -13,20 +13,13 @@
  * Happy path (`needs_key`/`missed` s tokenom, ktorý sedí) je v
  * `routes-campaigns.spec.ts`; tu je len jeho pásmová podoba (K3).
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-// `defineRoute` → `auth/sudo` → `auth/password` → natívny modul `argon2`.
-// Session aj sudo sú v tomto teste stubnuté (`sessionRouteDeps()`), takže sa
-// tu žiadne heslo nikdy nehashuje; načítanie natívnej knižnice by len ťahalo
-// binárku, ktorú Windows App Control na tomto stroji blokuje. Preto je
-// nahradená — nič z toho, čo tento súbor meria, sa jej netýka.
-vi.mock('argon2', () => ({
-  default: {
-    argon2id: 2,
-    hash: async () => '$argon2id$stub',
-    verify: async () => false,
-  },
-}));
+// Do 27. 8. 2026 tu stál `vi.mock('argon2', …)`: `defineRoute` ťahal
+// `auth/sudo` → `auth/password` → natívny modul `argon2`, ktorý Windows
+// Application Control na tomto stroji blokuje, a import padol ešte pred prvým
+// tvrdením. D100 zrušilo sudo a D104 vyhodilo `argon2` zo závislostí, takže
+// tá reťaz už neexistuje a stub nemá čo nahrádzať.
 
 import { createExecutePost } from '@/app/api/campaigns/[id]/execute/route';
 
@@ -37,7 +30,7 @@ import {
   makeRequest,
   makeRoutesWorld,
   parse,
-  sessionRouteDeps,
+  actorRouteDeps,
   type RoutesWorld,
 } from './routes-harness';
 
@@ -51,7 +44,7 @@ function world(productIds: number[] = [201, 202]): RoutesWorld {
 }
 
 async function execute(w: RoutesWorld, campaignId: number, previewToken: string) {
-  const handler = createExecutePost(w.deps, sessionRouteDeps());
+  const handler = createExecutePost(w.deps, actorRouteDeps());
   return parse(
     await handler(makeRequest('POST', `/api/campaigns/${campaignId}/execute`, { previewToken }), {
       params: { id: String(campaignId) },

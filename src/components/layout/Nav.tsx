@@ -52,7 +52,9 @@ const ALIASES: readonly { prefix: string; href: string }[] = [
 
 /**
  * Ktorý tab je aktívny pre danú cestu. Čistá funkcia — `null` znamená
- * „žiadny tab", čo je legitímny stav (napr. `/login`).
+ * „žiadny tab", čo je legitímny stav (napr. `/onboarding` alebo cesta, ktorú
+ * appka nepozná). Do 27. 8. 2026 tu ako príklad stálo `/login` — tú stránku
+ * zmazalo D99.
  */
 export function activeTab(pathname: string | null): string | null {
   if (pathname === null || pathname === '') return null;

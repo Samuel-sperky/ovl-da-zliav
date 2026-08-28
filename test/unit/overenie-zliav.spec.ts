@@ -35,7 +35,6 @@ import type {
   ProductFullDetail,
   SecretHandle,
   SecretRef,
-  SessionClaims,
   ShopReductionState,
 } from '@/contracts';
 
@@ -664,38 +663,11 @@ describe('overenie nič neukladá', () => {
 
 /* ═══════════════════════════ 6. Route ═════════════════════════════════════ */
 
-function claims(): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
 function sessionDeps(): RouteDeps {
   return {
     now,
     newRequestId: () => '01J0000000000000000CHECK1',
-    verifySession: async () => ({
-      claims: claims(),
-      refreshed: {
-        token: 'refreshed',
-        claims: claims(),
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 

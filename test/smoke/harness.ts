@@ -3,8 +3,13 @@
  *
  * Postaví produkčný artefakt (`next build`, `output: 'standalone'`) a spustí ho
  * tak, ako ho spúšťa kontejner: `node .next/standalone/server.js`
- * s `NODE_ENV=production`, heslami zo SÚBOROV (D89), master keyom a session
- * secretom zo súborov (D61, D69), proti reálnej MariaDB, na `127.0.0.1`.
+ * s `NODE_ENV=production`, heslami DB zo SÚBOROV (D89), master keyom a session
+ * secretom zo súborov (D61), proti reálnej MariaDB, na `127.0.0.1`.
+ *
+ * 27. 8. 2026 (D99, D104): appka nemá prihlásenie, takže harness nemá čo
+ * hashovať ani čím — `argon2` zmizol zo závislostí a s ním odtiaľto import,
+ * hashovanie hesla a `login()`. Riadok v `users` seedujeme ďalej: majú na neho
+ * FK `campaigns.created_by` a `audit_log.user_id` (D101).
  *
  * PREČO EXISTUJE: chyba §A.3 protokolu (`docs/13-OVERENIE.md`) — Turbopack
  * zahodil `if (!row)` guardy v `src/lib/repo/api-key.repo.ts` a `GET /api/key`
@@ -24,10 +29,9 @@
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 
-import argon2 from 'argon2';
 import mariadb from 'mariadb';
 
 /** Koreň repozitára — vitest beží s `cwd` = koreň. */
@@ -49,14 +53,25 @@ export const SMOKE = {
   dbPassword: process.env.DB_PASSWORD ?? 'test_app_password',
   migUser: process.env.DB_MIGRATION_USER ?? 'ovl_zliav_mig',
   migPassword: process.env.DB_MIGRATION_PASSWORD ?? 'test_mig_password',
+  /**
+   * Meno riadku v `users`. Po D99 to NIE JE prihlasovacie meno — nikde sa ním
+   * neprihlasuje, existuje len pre FK z `campaigns` a `audit_log` (D101).
+   */
   adminUsername: 'smoke-admin',
-  /** ≥ 12 znakov (D68), syntetické, nikde inde sa nepoužíva (I1). */
-  adminPassword: 'smoke-heslo-1234567',
   /** Port appky. 0 = necháme OS vybrať a prečítame ho z logu. */
   port: Number(process.env.SMOKE_PORT ?? 3141),
 } as const;
 
 export const BASE_URL = `http://${SMOKE_HOST}:${SMOKE.port}`;
+
+/**
+ * Hodnota do `users.password_hash`. Stĺpec je `NOT NULL`, takže niečo dostať
+ * musí; overovacia cesta k nemu ale neexistuje (D99). Sentinel je zhodný
+ * s `NO_LOGIN_SENTINEL` v `src/lib/auth/local-actor.ts` a zámerne NIE je platný
+ * argon2/bcrypt hash (tie majú tvar `$...$`), takže keby sa overovanie niekedy
+ * vrátilo, na tomto reťazci neoverí nič a spadne fail-closed.
+ */
+const NO_LOGIN_SENTINEL = 'no-login-D99';
 
 const SECRET_DIR = resolvePath(REPO_ROOT, 'secrets');
 const FILES = {
@@ -73,7 +88,25 @@ function writeSecret(path: string, content: string): void {
   writeFileSync(path, content, { mode: 0o600, flag: 'w' });
 }
 
-/** Master key + session secret (32 B hex) a DB heslá v súboroch (D61, D69, D89). */
+/**
+ * Master key musí byť pre boot assertion (§11.5, D61, I14) len na čítanie.
+ *
+ * `writeFileSync(..., { mode: 0o600 })` to na Windowse NEZARIADI: NTFS unixové
+ * bity nepozná, Node z nich vie prepnúť jedine atribút read-only, takže súbor
+ * so zápisovým bitom sa hlási ako `666` — a maska pre win32 je `0o022`
+ * (`src/lib/crypto/master-key.ts`), takže boot v produkčnom režime skončí
+ * `boot_assertions_failed` a smoke test sa k prvému tvrdeniu ani nedostane.
+ * `chmodSync(…, 0o400)` read-only atribút zapne (hlási sa `444`) a na POSIXe
+ * vyrobí presne `400`, ktoré sa tam čaká.
+ *
+ * Beží pri KAŽDOM behu, nielen po vytvorení súboru: kľúč vyrobený predchádzajúcou
+ * verziou harnessu má práva ešte staré.
+ */
+function hardenSecret(path: string): void {
+  chmodSync(path, 0o400);
+}
+
+/** Master key + session secret (32 B hex) a DB heslá v súboroch (D61, D89). */
 export function ensureSecrets(): void {
   if (!existsSync(FILES.masterKey)) {
     writeSecret(FILES.masterKey, `${randomBytes(32).toString('hex')}\n`);
@@ -81,6 +114,8 @@ export function ensureSecrets(): void {
   if (!existsSync(FILES.sessionSecret)) {
     writeSecret(FILES.sessionSecret, `${randomBytes(32).toString('hex')}\n`);
   }
+  hardenSecret(FILES.masterKey);
+  hardenSecret(FILES.sessionSecret);
   // Heslá DB userov sú dané prostredím (CI service container / lokálna DB),
   // v produkčnom režime ich appka ale smie čítať LEN zo súboru (D89).
   writeSecret(FILES.dbPassword, `${SMOKE.dbPassword}\n`);
@@ -159,13 +194,15 @@ const DATA_TABLES = [
   'catalog_cache',
   'products_allowlist',
   'api_key',
+  // `login_attempts` po D99 nikto nezapisuje, tabuľka ale zostáva (D101 — DB sa
+  // nemení), takže ju čistíme ďalej: `DELETE` z neexistujúcej by spadol.
   'login_attempts',
   'users',
 ] as const;
 
 /**
  * Čistý východiskový stav: žiadny API kľúč, žiadna doména shopu (I6 — appka
- * teda nemá kam volať), jeden admin používateľ na login flow.
+ * teda nemá kam volať), jeden riadok v `users` pre FK (D101).
  */
 export async function seedBaseline(): Promise<void> {
   const conn = await mariadb.createConnection({
@@ -184,16 +221,10 @@ export async function seedBaseline(): Promise<void> {
       'UPDATE settings SET shop_domain = NULL, shop_domain_confirmed_at = NULL, ' +
         'writes_locked = 0, writes_locked_reason = NULL, writes_locked_at = NULL WHERE id = 1',
     );
-    const hash = await argon2.hash(SMOKE.adminPassword, {
-      type: argon2.argon2id,
-      memoryCost: 19_456,
-      timeCost: 2,
-      parallelism: 1,
-    });
     await conn.query(
       'INSERT INTO users (username, password_hash) VALUES (?, ?) ' +
         'ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)',
-      [SMOKE.adminUsername, hash],
+      [SMOKE.adminUsername, NO_LOGIN_SENTINEL],
     );
   } finally {
     await conn.end();
@@ -342,18 +373,20 @@ export interface HttpResult {
 /**
  * Jedno HTTP volanie na appku. `Origin` posielame pri mutáciách — bez neho je
  * každý POST/PUT/DELETE odmietnutý ako `origin_missing` (CSRF obrana, D72).
+ *
+ * 27. 8. 2026 (D99): voľba `cookie` zanikla. Session neexistuje, takže appka
+ * nemá čo z cookie čítať a smoke test nemá čo posielať.
  */
 export async function call(
   method: string,
   path: string,
-  opts: { body?: unknown; cookie?: string | null } = {},
+  opts: { body?: unknown } = {},
 ): Promise<HttpResult> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (opts.body !== undefined) {
     headers['content-type'] = 'application/json';
     headers.Origin = BASE_URL;
   }
-  if (opts.cookie) headers.Cookie = opts.cookie;
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers,
@@ -374,20 +407,9 @@ export async function call(
   };
 }
 
-export interface LoginResult {
-  /** Hodnota do hlavičky `Cookie`. */
-  cookie: string;
-  /** Celé `Set-Cookie` (kontrola atribútov D69). */
-  rawSetCookie: string;
-  status: number;
-}
-
-/** Prihlásenie cez `POST /api/auth/login` — po ňom platí sudo okno (D70). */
-export async function login(): Promise<LoginResult> {
-  const res = await call('POST', '/api/auth/login', {
-    body: { username: SMOKE.adminUsername, password: SMOKE.adminPassword },
-  });
-  const raw = res.setCookie.find((c) => c.startsWith('ovl_zliav_session=')) ?? '';
-  const value = raw.split(';')[0] ?? '';
-  return { cookie: value, rawSetCookie: raw, status: res.status };
-}
+/*
+ * 27. 8. 2026 (D99): `login()` a `LoginResult` sú zmazané. `POST
+ * /api/auth/login` neexistuje, session tiež nie — appka je dostupná hneď
+ * a `call()` vyššie nepotrebuje žiadnu cookie. Čo mutáciu ďalej chráni, je
+ * origin check (D72), a smoke test to overuje priamo.
+ */

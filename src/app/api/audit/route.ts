@@ -43,7 +43,6 @@ export function createAuditGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: querySchema,
       handler: (ctx) =>
         withRouteErrors(async () => {

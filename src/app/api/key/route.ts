@@ -11,7 +11,7 @@
  *  - **GET** — výhradne metadáta: `last4`, časy, `verifyStatus` (D65, I1)
  *    a posledné známe oprávnenia kľúča (v5, bod D3).
  *    Celý kľúč sa NEVRÁTI nikdy a nikam — repozitár (A1) ho ani nevie vydať.
- *  - **PUT** (sudo) — kľúč sa najprv overí u shopu a až potom uloží:
+ *  - **PUT** — kľúč sa najprv overí u shopu a až potom uloží:
  *      * `shop_write` cez `GET /api/whoami` (v5). TTL max 48 h (R2), a po
  *        uložení sa dopália kampane v stave `needs_key`, ktoré sú stále vo
  *        svojom okne (D24, D25);
@@ -22,11 +22,24 @@
  *        spoločné (I8' bod 4).
  *    Keď sonda kľúč neprejde, kľúč sa NEULOŽÍ a používateľ dostane pravdivú
  *    hlášku — nikdy „uložené" bez uloženia.
- *  - **DELETE** (sudo) — panic button (D67): heslo + literál `KLUC UNIKOL`,
+ *  - **DELETE** — panic button (D67): literál `KLUC UNIKOL` vypísaný rukou,
  *    wipe OBOCH kľúčov (wipe procedúru pre `panic_button` vlastní repozitár
  *    a maže cez všetky druhy naraz), zrušenie čakajúcich kampaní, audit
  *    `key_panic_wipe` za každý zmazaný kľúč a odkaz na runbook. Po incidente
  *    nič nebeží automaticky.
+ *
+ * ČO TIETO DVE MUTÁCIE CHRÁNI OD 27. 8. 2026
+ * ------------------------------------------
+ * Do 27. 8. 2026 mali `PUT` aj `DELETE` `auth: 'sudo'` a panic button chcel
+ * navyše heslo v tele. Sudo zrušilo D100, heslá D99. Zostalo to, čo tu bránilo
+ * kľúč dopáliť aj predtým:
+ *  - **origin check (D72)** v `defineRoute()` — mutácia bez zhodnej hlavičky
+ *    `Origin` neprejde, takže cudzia stránka kľúč nedopáli ani nevymení;
+ *  - **rate limit** 30/min per IP na oba buckety (`key-put`, `key-delete`);
+ *  - **potvrdenie akcie** pri `DELETE` — vypísaná fráza `KLUC UNIKOL`, ktorá
+ *    z nevratného wipe robí vedomý krok, nie jeden klik (I3).
+ * Čo sa NEDÁ nahradiť origin checkom: lokálny proces na tomto PC si hlavičku
+ * dosadí. Prijaté riziko, §3 kontraktu `KONTRAKT-BEZ-LOGINU-2026-08-27.md`.
  *
  * ČO SA ZMENILO S API v5 A ČO SA V TOM NESMIE POKAZIŤ
  * ---------------------------------------------------
@@ -66,7 +79,6 @@ import type {
 } from '@/contracts';
 
 import { env } from '@/env';
-import { verifyPassword } from '@/lib/auth';
 import { appendAudit } from '@/lib/audit/write';
 import { wipeBuffer } from '@/lib/crypto/secret-box';
 import { resolveFireWindow } from '@/lib/domain/campaign-rules';
@@ -77,7 +89,7 @@ import {
   type ExecutorResultV3,
 } from '@/lib/engine/executor';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
-import { conflict, unauthorized } from '@/lib/http/errors';
+import { conflict } from '@/lib/http/errors';
 import {
   apiKeyRepo as defaultApiKeyRepo,
   ordersKeyRepo as defaultOrdersKeyRepo,
@@ -88,7 +100,6 @@ import {
 } from '@/lib/repo/api-key.repo';
 import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
-import { usersRepo as defaultUsersRepo } from '@/lib/repo/users.repo';
 import {
   createShopClientFromSettings,
   hasShopScope,
@@ -157,8 +168,12 @@ export const putKeyBodySchema = z.object({
   kind: keyKindSchema,
 });
 
+/**
+ * Telo panic buttonu. Heslo tu stálo do 27. 8. 2026 (D99). Potvrdenie akcie tým
+ * NEZMIZLO: `confirm` je vypísaná fráza, ktorú musí človek prepísať, takže
+ * nevratné dopálenie kľúčov ďalej nejde jedným kliknutím (I3, D67).
+ */
 export const deleteKeyBodySchema = z.object({
-  password: z.string().min(1).max(200),
   confirm: z.literal(PANIC_CONFIRM_LITERAL),
 });
 
@@ -182,8 +197,6 @@ export interface KeyRouteDeps {
   /** Repozitár OBJEDNÁVKOVÉHO kľúča (`orders_read`, P5). */
   ordersKey?: ApiKeyRepository;
   campaigns?: Pick<CampaignsRepo, 'findNeedsKey' | 'list' | 'setStatus'>;
-  users?: { getById(id: number): Promise<{ passwordHash: string } | null> };
-  verify?: typeof verifyPassword;
   audit?: typeof appendAudit;
   /**
    * Overenie zápisového kľúča cez `GET /api/whoami` (v5). Default: shop klient
@@ -215,8 +228,6 @@ function resolveDeps(deps: KeyRouteDeps) {
   const apiKey = deps.apiKey ?? defaultApiKeyRepo;
   const ordersKey = deps.ordersKey ?? defaultOrdersKeyRepo;
   const campaigns = deps.campaigns ?? defaultCampaignsRepo;
-  const users = deps.users ?? defaultUsersRepo;
-  const verify = deps.verify ?? verifyPassword;
   const audit = deps.audit ?? appendAudit;
   const now = deps.now ?? (() => new Date());
   const inspectKey =
@@ -242,8 +253,6 @@ function resolveDeps(deps: KeyRouteDeps) {
     apiKey,
     ordersKey,
     campaigns,
-    users,
-    verify,
     audit,
     now,
     inspectKey,
@@ -594,7 +603,6 @@ export function createKeyGetRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: keyQuerySchema,
       handler: async (ctx) => {
         // Tvar odpovede je pre oba druhy ROVNAKÝ a plochý. Zámerne sa nevnára do
@@ -650,7 +658,6 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
   return defineRoute(
     {
       method: 'PUT',
-      auth: 'sudo',
       body: putKeyBodySchema,
       rateLimit: { limit: 30, windowMs: 60_000, bucket: 'key-put' },
       handler: async (ctx) => {
@@ -727,7 +734,7 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
         const ttlHours = ttlHoursForKind(kind);
         const plain = Buffer.from(ctx.body.apiKey, 'utf8');
         const stored = await repo.store(plain, ctx.body.apiKey.slice(-4), ttlHours, undefined, {
-          userId: ctx.claims.sub,
+          userId: ctx.actor.id,
         });
 
         /* 3. Verify status podľa overenia; `unknown` (sieť) aj `address_banned`
@@ -756,7 +763,7 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
          * Výhradne pre zápisový kľúč: objednávkový kľúč nemá so zápisom zliav
          * nič spoločné (I8' bod 4), takže ním sa nikdy nič nedopaľuje. */
         if (kind === 'shop_write' && verifyStatus === 'valid') {
-          await relightNeedsKeyCampaigns(resolved, ctx.claims.sub, ctx.log);
+          await relightNeedsKeyCampaigns(resolved, ctx.actor.id, ctx.log);
         }
 
         /* 5. Odpoveď. Ide do nej uzavretý číselník scopes a dve čísla rozpočtu
@@ -793,23 +800,15 @@ export function createKeyPutRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
 /* ═══════════════════════════════ DELETE ═══════════════════════════════════ */
 
 export function createKeyDeleteRoute(deps: KeyRouteDeps = {}): NextRouteHandler {
-  const { apiKey, campaigns, users, verify, audit, now } = resolveDeps(deps);
+  const { apiKey, campaigns, audit, now } = resolveDeps(deps);
 
   return defineRoute(
     {
       method: 'DELETE',
-      auth: 'sudo',
       body: deleteKeyBodySchema,
       rateLimit: { limit: 30, windowMs: 60_000, bucket: 'key-delete' },
       handler: async (ctx) => {
-        /* 1. Heslo znova aj v sudo okne — panic button je nevratný (D67). */
-        const user = await users.getById(ctx.claims.sub);
-        const matches = await verify(user?.passwordHash ?? null, ctx.body.password);
-        if (!matches) {
-          throw unauthorized('Nesprávne heslo.', 'invalid_password', { logAsError: false });
-        }
-
-        /* 2. Okamžitý wipe (prepis náhodnými bajtmi → DELETE → audit, D63).
+        /* 1. Okamžitý wipe (prepis náhodnými bajtmi → DELETE → audit, D63).
          *
          * Jedno volanie mazá OBA kľúče: `panic_button` je v repozitári zámerne
          * jediný dôvod, ktorý ignoruje `kind` a prejde celú tabuľku (P5, D67,
@@ -817,7 +816,7 @@ export function createKeyDeleteRoute(deps: KeyRouteDeps = {}): NextRouteHandler 
          * tretí druh kľúča by taký cyklus tichým opomenutím obišiel. */
         await apiKey.wipe('panic_button', undefined, {
           actor: 'user',
-          userId: ctx.claims.sub,
+          userId: ctx.actor.id,
           message: `panic button „${PANIC_CONFIRM_LITERAL}" — kľúč unikol (D67)`,
         });
 
@@ -854,7 +853,7 @@ export function createKeyDeleteRoute(deps: KeyRouteDeps = {}): NextRouteHandler 
             });
             await audit({
               actor: 'user',
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
               eventType: 'campaign_cancelled',
               ok: true,
               campaignId: campaign.id,

@@ -142,11 +142,21 @@ export const AUDIT_EVENT_LABELS: Readonly<Record<string, string>> = {
   canary_fail: 'skúška spojenia neprešla',
   writes_locked: 'zápisy zastavené',
   writes_unlocked: 'zápisy odomknuté',
+  /*
+   * Vety k HISTORICKÝM udalostiam. Appka ich od 27. 8. 2026 nezapisuje (D99,
+   * D100), ale staršie riadky auditu ich nesú a `audit_log` sa nemení (D101).
+   * Bez týchto prekladov by o nich História povedala len „iná udalosť appky",
+   * čiže by sa vlastná minulosť appky prestala dať prečítať — a „nevieme" je
+   * horšie než odpoveď (I11). Nemazať.
+   */
   login_ok: 'prihlásenie',
   login_fail: 'neúspešné prihlásenie',
   lockout: 'účet dočasne uzamknutý',
-  sudo_ok: 'potvrdenie heslom',
-  sudo_fail: 'neúspešné potvrdenie heslom',
+  /* HISTORICKÉ — appka ich už nezapisuje (D100, 27. 8. 2026); pozri
+     src/lib/audit/events.ts. Dátum je v menovke zámerne: bez neho by
+     používateľ čítal o hesle, ktoré appka dnes nikde nepýta. */
+  sudo_ok: 'potvrdenie heslom (do 27. 8. 2026)',
+  sudo_fail: 'neúspešné potvrdenie heslom (do 27. 8. 2026)',
 };
 
 /** Kód udalosti → veta. Neznámy kód sa NIKDY nezobrazí surový. */

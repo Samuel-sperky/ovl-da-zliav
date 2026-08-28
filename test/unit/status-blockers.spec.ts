@@ -459,18 +459,19 @@ describe('denný rozpočet zápisov', () => {
 /* ═══════════════════ 6. Režim rozsahu (K1: pilot vs plny) ═════════════════ */
 
 describe('režim rozsahu — pilot stropuje na 10, plny na uložený strop', () => {
-  it('pilotný strop pri prekročení blokuje a prepnutie chce heslo (povie to zámok)', () => {
+  it('pilotný strop pri prekročení blokuje a prepnutie chce potvrdenie (povie to zámok)', () => {
     const blocker = byId(
       collectOperationBlockers(healthy({ selection: { selectedCount: 150 } })),
       'scope_pilot_cap',
     );
     expect(blocker.severity).toBe('blokuje');
-    // Heslo nesie `resolution: 'sudo'` — zámok a slovo „vypýta si heslo" kreslí
-    // `ui/blocker-look.ts`. Veta ho od 20. 8. 2026 neopakuje (bod 5 hlavičky
-    // `blockers.ts`); tvrdenie „prepnutie chce heslo" tým nezaniklo, len sa
-    // pýta toho poľa, ktoré ho naozaj nesie.
-    expect(blocker.resolution).toBe('sudo');
-    expect(blocker.nextStep).not.toContain('heslo');
+    // Potvrdenie nesie `resolution: 'potvrdenie'` — zámok a slovo „vyžaduje
+    // výslovné potvrdenie" kreslí `ui/blocker-look.ts`. Veta ho od 20. 8. 2026
+    // neopakuje (bod 5 hlavičky `blockers.ts`); tvrdenie „prepnutie chce
+    // potvrdenie" tým nezaniklo, len sa pýta toho poľa, ktoré ho naozaj nesie.
+    // Do 27. 8. 2026 sa kód volal `sudo` a zámok sľuboval heslo (D105).
+    expect(blocker.resolution).toBe('potvrdenie');
+    expect(blocker.nextStep).not.toMatch(/heslo|potvrd/i);
     expect(blocker.path).toBe(BLOCKER_PATHS.settings);
     expect(blocker.what).toContain('najviac 10 produktov');
     for (const n of [150, 140]) {
@@ -1063,7 +1064,7 @@ describe('plošné invarianty každej prekážky', () => {
 
   it('cesta v appke chýba len tam, kde sa to v appke vyriešiť nedá', () => {
     for (const blocker of EVERY_BLOCKER) {
-      if (blocker.resolution === 'sam' || blocker.resolution === 'sudo') {
+      if (blocker.resolution === 'sam' || blocker.resolution === 'potvrdenie') {
         expect(blocker.path).not.toBeNull();
       }
       if (blocker.path !== null) {
@@ -1231,7 +1232,7 @@ describe('predajnosť — shop odmieta čítanie objednávok', () => {
     );
   });
 
-  it('chýbajúce oprávnenie vedie do Nastavení a vypýta si heslo', () => {
+  it('chýbajúce oprávnenie vedie do Nastavení a vypýta si potvrdenie', () => {
     const blocker = byId(
       collectOperationBlockers(healthy({ salesSync: { block: 'permission' } })),
       'sales_reads_forbidden',
@@ -1239,10 +1240,10 @@ describe('predajnosť — shop odmieta čítanie objednávok', () => {
 
     expect(blocker.severity).toBe('obmedzuje');
     expect(blocker.path).toBe(BLOCKER_PATHS.settings);
-    // Uloženie kľúča je za sudo oknom (`PUT /api/key`) — zámok to povie sám,
-    // veta to opakovať nesmie (bod 5 hlavičky modulu).
-    expect(blocker.resolution).toBe('sudo');
-    expect(blocker.nextStep).not.toMatch(/heslo/i);
+    // Uloženie kľúča je vedomý krok v Nastaveniach (`PUT /api/key`) — zámok to
+    // povie sám, veta to opakovať nesmie (bod 5 hlavičky modulu).
+    expect(blocker.resolution).toBe('potvrdenie');
+    expect(blocker.nextStep).not.toMatch(/heslo|potvrd/i);
     expect(blocker.assumed).toBe(false);
   });
 

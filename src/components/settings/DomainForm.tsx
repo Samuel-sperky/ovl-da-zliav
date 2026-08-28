@@ -3,8 +3,15 @@
 /**
  * Aura Zľavy — sekcia PRIPOJENIE (V12; predloha `design/v3/nastavenia.html`).
  *
- * Adresa eshopu je JEDNA, výhradne `https://` a jej zmena vyžaduje heslo.
- * Server pred uložením overí, že na tej adrese naozaj odpovedá eshop — bez
+ * Adresa eshopu je JEDNA a výhradne `https://`. Do 27. 8. 2026 si jej zmena
+ * vyžiadala heslo (D80); heslá zmazalo D99 a sudo D100, a 28. 8. 2026 heslo
+ * vystriedalo zaškrtávacie potvrdenie (D106) — bez neho server vracia 400.
+ * Prečo vôbec nejaká brána: na túto adresu ide zápisová cesta s dešifrovaným
+ * produkčným API kľúčom v hlavičke, takže kto prepíše adresu, prepíše aj to,
+ * komu appka kľúč pošle. Canary to nezastaví, tá číta bez kľúča.
+ *
+ * Ďalej platí origin check (D72) proti cudzej stránke a canary proti zlej
+ * adrese: server pred uložením overí, že tam naozaj odpovedá eshop — bez
  * úspešného overenia sa adresa neuloží. Appka nezapisuje do niečoho, o čom
  * nevie, či to vôbec existuje.
  *
@@ -18,12 +25,10 @@ import { useState } from 'react';
 
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import SudoPrompt from '@/components/ui/SudoPrompt';
 import { SigMark } from '@/components/ui/StatusMark';
 import { formatDateTimeSk } from '@/lib/ui/format';
-import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
-  SUDO_REQUIRED_CODE,
   putDomain,
   testConnection,
   validateDomain,
@@ -66,14 +71,16 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
    */
   const [open, setOpen] = useState(shopDomain === null);
   const [domain, setDomain] = useState(shopDomain ?? 'https://');
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [canary, setCanary] = useState<{ ok: boolean; total: number } | null>(null);
+  /* D106 (28. 8. 2026) — potvrdenie zmeny adresy. Do 27. 8. 2026 si ju vypýtalo
+     heslo (D80); po jeho zmazaní by adresa, na ktorú appka posiela produkčný
+     API kľúč, išla zmeniť jedným tichým klikom. */
+  const [confirmed, setConfirmed] = useState(false);
   const [connection, setConnection] = useState<CanaryView | null>(null);
-  const [needSudo, setNeedSudo] = useState(false);
 
-  /** Neúspech je vždy hlasný a pri chýbajúcej prihlásenej relácii ľudský. */
+  /** Neúspech je vždy hlasný a vždy hovorí, čo sa nestalo. */
   function fail(error: { code?: string | null; message?: string | null } | null) {
     setCanary(null);
     setFailure(describeActionFailure(error, { action: 'Uloženie adresy eshopu' }));
@@ -87,28 +94,26 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
       fail({ code: 'validation_failed', message: localError });
       return;
     }
-    if (password.length === 0) {
-      fail({ code: 'validation_failed', message: 'Zmena adresy eshopu vyžaduje tvoje heslo.' });
+    if (!confirmed) {
+      fail({
+        code: 'validation_failed',
+        message: 'Najprv zaškrtni potvrdenie — adresa sa neuložila.',
+      });
       return;
     }
     setFailure(null);
     setBusy(true);
-    const res = await putDomain(domain.trim(), password);
+    const res = await putDomain(domain.trim(), true);
     setBusy(false);
     if (res.ok) {
-      setPassword('');
       setFailure(null);
       setCanary(res.data.canary);
+      setConfirmed(false);
       setOpen(false);
       onSaved();
       return;
     }
-    if (res.error.code === SUDO_REQUIRED_CODE) {
-      // Vypršané okno hesla NIE JE odhlásenie; pýtame heslo, nie prihlásenie.
-      setNeedSudo(true);
-      return;
-    }
-    setPassword('');
+    setConfirmed(false);
     fail(res.error);
   }
 
@@ -175,23 +180,25 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
               data-testid="domain-input"
             />
           </label>
+          <p className="set-note">
+            Na túto adresu appka posiela zápisy aj svoj API kľúč. Kým je adresa
+            zlá, kľúč odchádza tam, kam ukazuje.
+          </p>
           <label className="field set-w">
-            <span className="lb">Heslo</span>
             <input
-              className="inp"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              type="checkbox"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
               disabled={busy}
-              data-testid="domain-password"
+              data-testid="domain-confirm"
             />
+            <span className="lb">Adresu som skontroloval a chcem ju uložiť</span>
           </label>
           <div className="row">
             <Button
               variant="primary"
               onClick={() => void save()}
-              disabled={busy}
+              disabled={busy || !confirmed}
               data-testid="domain-save"
             >
               {busy ? 'Ukladám…' : 'Uložiť adresu'}
@@ -229,16 +236,6 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
         </div>
       </details>
 
-      {needSudo ? (
-        <SudoPrompt
-          actionLabel="zmena adresy eshopu"
-          onSuccess={() => {
-            setNeedSudo(false);
-            void save();
-          }}
-          onCancel={() => setNeedSudo(false)}
-        />
-      ) : null}
     </section>
   );
 }

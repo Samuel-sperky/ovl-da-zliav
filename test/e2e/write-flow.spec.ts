@@ -24,7 +24,7 @@
  * nedovoľuje). Ostrý zápis je preto vynútene odmietnutý; testy nižšie o zápise
  * nič netvrdia — tvrdia, že sa NEDEJE.
  */
-import { addAllowlist, api, expect, login, storeApiKey, test } from './fixtures';
+import { addAllowlist, api, expect, storeApiKey, test } from './fixtures';
 
 const PRODUCT = 201;
 
@@ -56,7 +56,6 @@ async function previewToken(
 
 test.describe('zápisový flow', () => {
   test('I3: bez potvrdenia sa na shop nepošle žiadny zápis', async ({ page, control }) => {
-    await login(page);
     await storeApiKey(page);
     await addAllowlist(page, [PRODUCT]);
     const before = await control.state();
@@ -85,7 +84,6 @@ test.describe('zápisový flow', () => {
   });
 
   test('I3: preview token je jednorazový — druhé použitie je 409', async ({ page, control }) => {
-    await login(page);
     await storeApiKey(page);
     await addAllowlist(page, [PRODUCT]);
     const before = await control.state();
@@ -116,7 +114,6 @@ test.describe('zápisový flow', () => {
     page,
     control,
   }) => {
-    await login(page);
     await storeApiKey(page);
     await addAllowlist(page, [PRODUCT]);
     const before = await control.state();

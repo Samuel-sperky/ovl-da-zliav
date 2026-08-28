@@ -2,8 +2,9 @@
  * Aura Zľavy — `PUT /api/settings/eager-write-default` (BUILD-SPEC §5, D22).
  *
  * Prepína default režim vytvárania kampaní (`eager` = zápis hneď pri
- * potvrdení). Samotné potvrdenie kampane vždy vyžaduje sudo + preview token
- * (I3) — tento prepínač nič nezapisuje do shopu.
+ * potvrdení). Samotné potvrdenie kampane vždy vyžaduje preview token z dry-runu
+ * (I3; sudo pred ním stálo do 27. 8. 2026, zrušilo ho D100) — tento prepínač
+ * nič nezapisuje do shopu a nemá ako obísť to, čo pri zápise platí.
  *
  * Vlastník: A11.
  */
@@ -29,7 +30,6 @@ export function createEagerWriteDefaultRoute(deps: EagerWriteRouteDeps = {}): Ne
   return defineRoute(
     {
       method: 'PUT',
-      auth: 'session',
       body: eagerWriteBodySchema,
       handler: async (ctx) => {
         await settings.setEagerWriteDefault(ctx.body.enabled);

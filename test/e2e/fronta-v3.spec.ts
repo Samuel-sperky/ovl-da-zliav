@@ -29,7 +29,7 @@
  *
  * Vlastník: V14.
  */
-import { api, expect, login, storeApiKey, test } from './fixtures';
+import { api, expect, storeApiKey, test } from './fixtures';
 
 /** Produkty bez jediného predaja → pásmo A („0 predaných"). */
 const NEVER_SOLD = Array.from({ length: 18 }, (_, i) => 5001 + i);
@@ -66,11 +66,9 @@ test.describe('K12 — celá cesta appky', () => {
     ]);
     await db.seedSales(SLOW_SOLD.map((productId) => ({ productId, day: dayOffset(-5), unitsSold: 2 })));
 
-    /* ── 1. Prihlásenie ── */
-    await login(page);
-
-    // K1 — 30 produktov sa do pilotu (strop 10) nezmestí; uvoľnenie rozsahu je
-    // sudo akcia a zapisuje sa do auditu. Sudo okno platí od prihlásenia.
+    // K1 — 30 produktov sa do pilotu (strop 10) nezmestí; uvoľnenie rozsahu
+    // preto treba a zapisuje sa do auditu. Od D100 na to netreba sudo, len
+    // mutáciu so správnym Origin (D72).
     const scope = await api(page, 'POST', '/api/settings/scope-mode', { mode: 'plny' });
     expect(scope.status(), await scope.text()).toBe(200);
     await storeApiKey(page);

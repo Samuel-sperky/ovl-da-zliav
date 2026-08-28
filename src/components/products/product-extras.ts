@@ -426,9 +426,15 @@ const ENTITIES: Readonly<Record<string, string>> = {
  * HTML popis zo shopu → obyčajný text.
  *
  * Popis je jediné pole, ktoré shop posiela ako HTML. Do stránky sa NIKDY
- * nevkladá ako HTML (bod d hlavičky) — appka je verejne tunelovaná a obsah
- * produktu je cudzí vstup. Odseky a `<br>` sa menia na zlomy riadku, aby sa
- * dlhý popis nezliaol do jednej vety.
+ * nevkladá ako HTML (bod d hlavičky) — obsah produktu je cudzí vstup a appka
+ * po zrušení prihlásenia (D99, 27. 8. 2026) nemá pred sebou už žiadnu bránu.
+ *
+ * 27. 8. 2026: pôvodné znenie tvrdilo „appka je verejne tunelovaná". To je
+ * PRIAMY opak I5 a §2 kontraktu: jediný publikovaný port je `127.0.0.1:3070`
+ * (docker-compose.yml, strážené `scripts/check-compose-bind`), `ports:` na
+ * app ani DB nie sú a R4 tunel výslovne zakazuje. Na tom stojí celé
+ * rozhodnutie zrušiť prihlásenie — bez auth vrstvy by verejný tunel bol
+ * verejná brána do produkčného eshopu.
  */
 export function plainText(html: string | null | undefined): string | null {
   if (html === null || html === undefined) return null;

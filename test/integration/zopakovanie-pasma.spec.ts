@@ -41,7 +41,7 @@ import {
   makeRequest,
   makeRoutesWorld,
   parse,
-  sessionRouteDeps,
+  actorRouteDeps,
   TEST_USER_ID,
   type RoutesWorld,
 } from './routes-harness';
@@ -117,7 +117,7 @@ describe('K3/I3 — zopakovanie zlyhaných pri zľave s pásmami', () => {
      * nemá — pri oprave nie sú voľbou človeka. Dopĺňa ich SERVER z riadkov
      * rodiča, a práve to musí tento test prejsť.
      */
-    const previewPost = createPreviewPost(w.deps, sessionRouteDeps());
+    const previewPost = createPreviewPost(w.deps, actorRouteDeps());
     const previewRes = await parse(
       await previewPost(
         makeRequest('POST', '/api/campaigns/preview', {
@@ -134,7 +134,7 @@ describe('K3/I3 — zopakovanie zlyhaných pri zľave s pásmami', () => {
     const token = (previewRes.body.data as { previewToken: string }).previewToken;
     expect(token).not.toBe('');
 
-    const retryPost = createRetryFailedPost(w.deps, sessionRouteDeps());
+    const retryPost = createRetryFailedPost(w.deps, actorRouteDeps());
     const retryRes = await parse(
       await retryPost(
         makeRequest('POST', `/api/campaigns/${parent.id}/retry-failed`, { previewToken: token }),
@@ -204,7 +204,7 @@ describe('K3/I3 — zopakovanie zlyhaných pri zľave s pásmami', () => {
       percents: { '201': 20, '202': 30 },
     });
 
-    const retryPost = createRetryFailedPost(w.deps, sessionRouteDeps());
+    const retryPost = createRetryFailedPost(w.deps, actorRouteDeps());
     const res = await parse(
       await retryPost(
         makeRequest('POST', `/api/campaigns/${parent.id}/retry-failed`, { previewToken: token }),

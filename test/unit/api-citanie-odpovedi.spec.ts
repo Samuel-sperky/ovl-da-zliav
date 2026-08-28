@@ -61,7 +61,7 @@ import {
   parseAuditRow,
   type AuditFilterState,
 } from '@/components/audit/api';
-import { getJson, parseSession, postJson } from '@/components/campaigns/api';
+import { getJson, postJson } from '@/components/campaigns/api';
 
 /* ═══════════════════════ 0. Podstrčený `fetch` ════════════════════════════ */
 
@@ -211,43 +211,15 @@ describe('poriadna obálka prejde nedotknutá', () => {
   });
 });
 
-/* ═══════════════════ 2. Session — sudo okno stojí na obsahu ═══════════════ */
-
-describe('session sa čita, nie pretypúva', () => {
-  it('platná session prejde so všetkými štyrmi poľami', () => {
-    const s = parseSession({
-      username: 'admin',
-      absoluteExpiresAt: '2026-08-13T10:00:00.000Z',
-      idleExpiresAt: '2026-08-12T11:00:00.000Z',
-      sudoUntil: '2026-08-12T10:30:00.000Z',
-    });
-    expect(s?.username).toBe('admin');
-    expect(s?.sudoUntil).toBe('2026-08-12T10:30:00.000Z');
-  });
-
-  it('chýbajúce `absoluteExpiresAt` je „session sa nedá prečítať", nie NaN v odpočte', () => {
-    expect(parseSession({ username: 'admin', idleExpiresAt: '2026-08-12T11:00:00.000Z' })).toBeNull();
-  });
-
-  it('`sudoUntil` ako číslo je `null`, nie čas z roku 1970', () => {
-    // Toto je ten prípad, ktorý sa NESMIE zliať: `new Date(12345)` je platný
-    // dátum, takže `sudoValid()` by povedal `false` a používateľ by dostal
-    // heslové okno navyše. `null` znamená to isté, ale úmyselne.
-    const s = parseSession({
-      username: 'admin',
-      absoluteExpiresAt: '2026-08-13T10:00:00.000Z',
-      idleExpiresAt: '2026-08-12T11:00:00.000Z',
-      sudoUntil: 12_345,
-    });
-    expect(s?.sudoUntil).toBeNull();
-  });
-
-  it('čokoľvek, čo nie je objekt, je `null`', () => {
-    for (const zle of [null, undefined, 'admin', 42, [{ username: 'admin' }]]) {
-      expect(parseSession(zle)).toBeNull();
-    }
-  });
-});
+/*
+ * ODDIEL 2 (Session — sudo okno stojí na obsahu) TU BOL DO 27. 8. 2026.
+ *
+ * Meral `parseSession()`: že sa obsah session ČÍTA a neprepytuje, a hlavne že
+ * `sudoUntil: 12345` skončí ako `null` a nie ako platný čas z roku 1970.
+ * Prihlásenie aj sudo zmizli (D99, D100), takže funkcia aj jej riziko zmizli
+ * s nimi. Zásada, ktorú ten oddiel stelesňoval, PRETRVÁVA a je strážená
+ * v oddieloch 1 a 3: obálka overená neznamená obsah overený.
+ */
 
 /* ═══════════════ 3. História: riadok sa zahodí, stránka nie ═══════════════ */
 

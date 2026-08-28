@@ -23,7 +23,6 @@ import type {
   CampaignRecord,
   CampaignStatus,
   ItemStatus,
-  SessionClaims,
 } from '@/contracts';
 
 import {
@@ -35,7 +34,6 @@ import {
 import { createAckPost, uncertainNote } from '@/app/api/campaigns/[id]/ack/route';
 import type { RoutesDeps } from '@/app/api/campaigns/_shared';
 import type { RouteDeps } from '@/lib/http/define-route';
-import { SudoRequiredError } from '@/lib/auth/sudo';
 
 /* ═══════════════════════════ 1. Fixtures ══════════════════════════════════ */
 
@@ -43,44 +41,11 @@ const NOW = new Date('2026-08-12T09:00:00.000Z');
 const TODAY = '2026-08-12';
 const APP_ORIGIN = 'https://zlavy.local';
 
-function claims(sudo: boolean): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: sudo ? new Date(NOW.getTime() + 10 * 60_000) : null,
-  };
-}
-
-function sessionDeps(sudo = false): RouteDeps {
+function actorDeps(): RouteDeps {
   return {
     now: () => NOW,
     newRequestId: () => '01J0000000000000000RETRY01',
-    requireSudo: (c: SessionClaims | null | undefined) => {
-      // Rovnaká výnimka, akú hodí produkčný `requireSudo()` — inak by test
-      // dokazoval 500 namiesto fail-closed 401 `sudo_required` (I3).
-      if (c === null || c === undefined || c.sudoUntil === null) throw new SudoRequiredError();
-      return c.sudoUntil;
-    },
-    verifySession: async () => ({
-      claims: claims(sudo),
-      refreshed: {
-        token: 'refreshed',
-        claims: claims(sudo),
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -112,7 +77,7 @@ function campaign(patch: Partial<CampaignRecord> = {}): CampaignRecord {
     confirmPayloadHash: 'hash',
     sudoAt: NOW,
     resultAckAt: null,
-    createdBy: 7,
+    createdBy: 1,
     createdAt: NOW,
     updatedAt: NOW,
     ...patch,
@@ -206,11 +171,9 @@ interface Body {
 }
 
 async function callGet(world: World, id = 5): Promise<{ status: number; body: Body }> {
-  const handler = createRetryFailedGet(world.deps, sessionDeps());
+  const handler = createRetryFailedGet(world.deps, actorDeps());
   const response = await handler(
-    new Request(`${APP_ORIGIN}/api/campaigns/${id}/retry-failed`, {
-      headers: { cookie: 'ovl_zliav_session=x' },
-    }),
+    new Request(`${APP_ORIGIN}/api/campaigns/${id}/retry-failed`),
     { params: { id: String(id) } },
   );
   return { status: response.status, body: (await response.json()) as Body };
@@ -219,14 +182,12 @@ async function callGet(world: World, id = 5): Promise<{ status: number; body: Bo
 async function callPost(
   world: World,
   body: unknown,
-  sudo = true,
 ): Promise<{ status: number; body: Body }> {
-  const handler = createRetryFailedPost(world.deps, sessionDeps(sudo));
+  const handler = createRetryFailedPost(world.deps, actorDeps());
   const response = await handler(
     new Request(`${APP_ORIGIN}/api/campaigns/5/retry-failed`, {
       method: 'POST',
       headers: {
-        cookie: 'ovl_zliav_session=x',
         origin: APP_ORIGIN,
         host: 'zlavy.local',
         'content-type': 'application/json',
@@ -341,7 +302,11 @@ describe('GET /api/campaigns/[id]/retry-failed', () => {
     expect(data.productIds).toEqual([304, 305, 306]);
     expect(data.items).toMatchObject({ retryable: 3, notWritten: 2, uncertain: 1, ok: 2, skipped: 1 });
     expect(data.window).toMatchObject({ from: TODAY, to: '2026-08-31' });
-    expect(data.requires).toEqual({ freshPreview: true, confirmation: true, sudo: true });
+    // `sudo: true` tu stálo do 27. 8. 2026; D100 sudo zrušilo a I3 odvtedy znie
+    // „žiadny zápis bez dry-runu a potvrdenia". Zoznam je preto ÚPLNÝ (`toEqual`,
+    // nie `toMatchObject`): keby sa do neho vrátilo pole, ktoré route nedodrží,
+    // alebo z neho vypadol čerstvý náhľad či potvrdenie, tento test spadne.
+    expect(data.requires).toEqual({ freshPreview: true, confirmation: true });
   });
 
   it('neexistujúca zľava je 404, nie prázdny popis', async () => {
@@ -364,12 +329,12 @@ describe('GET /api/campaigns/[id]/retry-failed', () => {
 /* ═════════════════ 5. POST — I3 a zrozumiteľné odmietnutia ════════════════ */
 
 describe('POST /api/campaigns/[id]/retry-failed', () => {
-  it('bez sudo okna sa nedostane ani k načítaniu zľavy (I3, D70)', async () => {
-    const { status, body } = await callPost(makeWorld(campaign(), MIXED_ITEMS), {}, false);
-    expect(status).toBe(401);
-    expect(body.error?.code).toBe('sudo_required');
-  });
-
+  /*
+   * Test „bez sudo okna sa nedostane ani k načítaniu zľavy" tu bol do
+   * 27. 8. 2026 (I3, D70). Sudo zrušilo D100. Čo z I3 na TEJTO ceste
+   * pretrváva a je strážené hneď nižšie: bez čerstvého preview tokenu je to
+   * 400 a zľava sa nezopakuje — potvrdenie drží token, nie heslo.
+   */
   it('chýbajúci token je 400 s vetou o tom, že treba nový náhľad (I3, D16)', async () => {
     const { status, body } = await callPost(makeWorld(campaign(), MIXED_ITEMS), {});
     expect(status).toBe(400);
@@ -409,12 +374,11 @@ describe('POST /api/campaigns/[id]/retry-failed', () => {
 
 describe('POST /api/campaigns/[id]/ack', () => {
   async function callAck(world: World, id = 5): Promise<{ status: number; body: Body }> {
-    const handler = createAckPost(world.deps, sessionDeps());
+    const handler = createAckPost(world.deps, actorDeps());
     const response = await handler(
       new Request(`${APP_ORIGIN}/api/campaigns/${id}/ack`, {
         method: 'POST',
         headers: {
-          cookie: 'ovl_zliav_session=x',
           origin: APP_ORIGIN,
           host: 'zlavy.local',
         },

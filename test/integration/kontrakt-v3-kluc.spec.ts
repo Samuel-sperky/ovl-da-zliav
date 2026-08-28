@@ -41,7 +41,7 @@ import {
   makeRequest,
   makeRoutesWorld,
   parse,
-  sessionRouteDeps,
+  actorRouteDeps,
   type RoutesWorld,
 } from './routes-harness';
 
@@ -134,7 +134,7 @@ async function tokenFor(w: RoutesWorld): Promise<string> {
 }
 
 async function createDiscount(deps: RoutesDeps, token: string) {
-  const post = createCampaignsPost(deps, sessionRouteDeps());
+  const post = createCampaignsPost(deps, actorRouteDeps());
   return parse(
     await post(
       makeRequest('POST', '/api/campaigns', {

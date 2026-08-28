@@ -25,7 +25,6 @@ import type {
   CampaignRecord,
   CampaignStatus,
   Paged,
-  SessionClaims,
 } from '@/contracts';
 
 import { createQueueResumePost } from '@/app/api/queue/resume/route';
@@ -38,38 +37,16 @@ import { isQueuePaused, pauseQueue, resetQueueGate } from '@/lib/scheduler/pause
 const NOW = new Date('2026-08-12T09:00:00.000Z');
 const APP_ORIGIN = 'https://zlavy.local';
 
-function claims(): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
-function sessionDeps(): RouteDeps {
+/**
+ * Deps pre `defineRoute()`. Do 27. 8. 2026 sa tu stubovala SESSION vrstva;
+ * prihlásenie zmizlo (D99), takže zostal len lokálny actor (`samuel`, id 1),
+ * ktorého route potrebuje pre FK `audit_log.user_id` a pre I11 (D102).
+ */
+function actorDeps(): RouteDeps {
   return {
     now: () => NOW,
     newRequestId: () => '01J000000000000000RESUME01',
-    verifySession: async () => ({
-      claims: claims(),
-      refreshed: {
-        token: 'refreshed',
-        claims: claims(),
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -99,9 +76,12 @@ function campaign(id: number, status: CampaignStatus, name: string): CampaignRec
     itemsUncertain: 0,
     confirmedAt: NOW,
     confirmPayloadHash: 'hash',
-    sudoAt: NOW,
+    // 27. 8. 2026 (D100): produkčná cesta (`campaigns/_shared.ts`,
+    // `campaigns/[id]/execute`) zapisuje `sudoAt: null` — sudo zmizlo. Fixtúra
+    // s časom by merala stav, ktorý appka už nevyrobí.
+    sudoAt: null,
     resultAckAt: null,
-    createdBy: 7,
+    createdBy: 1,
     createdAt: NOW,
     updatedAt: NOW,
   };
@@ -186,7 +166,6 @@ function resumeRequest(): Request {
   return new Request(`${APP_ORIGIN}/api/queue/resume`, {
     method: 'POST',
     headers: {
-      cookie: 'ovl_zliav_session=x',
       origin: APP_ORIGIN,
       host: 'zlavy.local',
       'content-type': 'application/json',
@@ -196,7 +175,7 @@ function resumeRequest(): Request {
 }
 
 async function callResume(world: World): Promise<ResumeBody> {
-  const handler = createQueueResumePost(world.deps, sessionDeps());
+  const handler = createQueueResumePost(world.deps, actorDeps());
   const response = await handler(resumeRequest());
   expect(response.status).toBe(200);
   return (await response.json()) as ResumeBody;
@@ -231,7 +210,9 @@ describe('POST /api/queue/resume — brána po odstávke sa naozaj otvorí', () 
     await callResume(world);
 
     expect(world.audit).toHaveLength(1);
-    expect(world.audit[0]).toMatchObject({ eventType: 'queue_resumed', actor: 'user', userId: 7 });
+    // `userId` je od 27. 8. 2026 LOKÁLNY ACTOR (`samuel`, id 1, D102) — nie
+    // `sub` zo session, tá zmizla (D99). Audit ale actora stratiť nesmie (I11).
+    expect(world.audit[0]).toMatchObject({ eventType: 'queue_resumed', actor: 'user', userId: 1 });
     expect(world.audit[0]?.campaignId).toBeUndefined();
   });
 
@@ -310,12 +291,11 @@ describe('POST /api/queue/resume — zľavy, ktorým chýba kľúč', () => {
 
   it('odpoveď neprejde cez masku redaktora — pole sa nesmie volať „…Key" (I1)', async () => {
     const world = makeWorld({ missed: [], needs_key: [campaign(21, 'needs_key', 'Letná')] });
-    const handler = createQueueResumePost(world.deps, sessionDeps());
+    const handler = createQueueResumePost(world.deps, actorDeps());
     const response = await handler(
       new Request(`${APP_ORIGIN}/api/queue/resume`, {
         method: 'POST',
         headers: {
-          cookie: 'ovl_zliav_session=x',
           origin: APP_ORIGIN,
           host: 'zlavy.local',
           'content-type': 'application/json',
@@ -360,7 +340,7 @@ describe('POST /api/queue/resume — okenný limit', () => {
     const world = makeWorld({
       missed: [campaign(1, 'missed', 'Prvá'), campaign(2, 'missed', 'Druhá')],
     });
-    const handler = createQueueResumePost(world.deps, sessionDeps());
+    const handler = createQueueResumePost(world.deps, actorDeps());
 
     const statuses: number[] = [];
     for (let i = 0; i < 8; i += 1) {
@@ -376,7 +356,7 @@ describe('POST /api/queue/resume — okenný limit', () => {
 
   it('utlmená odpoveď povie, kedy to skúsiť znova', async () => {
     const world = makeWorld({ missed: [] });
-    const handler = createQueueResumePost(world.deps, sessionDeps());
+    const handler = createQueueResumePost(world.deps, actorDeps());
 
     let last = await handler(resumeRequest());
     for (let i = 0; i < 8 && last.status !== 429; i += 1) {

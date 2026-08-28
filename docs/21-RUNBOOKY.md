@@ -1,7 +1,13 @@
 # Aura Zľavy — RUNBOOKY (A14)
 
 Prevádzkové postupy pre lokálne nasadenie. Vzťahujú sa na `docker-compose.yml`
-v koreni repa a rozhodnutia D61, D62, D67, D76, D88–D100.
+v koreni repa a rozhodnutia D61, D62, D67, D76, D88–D100 (dotazníkové) a
+D98–D105 z 27. 8. 2026 (sprint „bez prihlásenia"; čísla kolidujú, viď úvod
+`docs/10-KONTRAKT.md`).
+
+**Appka nemá prihlásenie** (D98–D100, 27. 8. 2026). Žiadny krok nižšie nepýta
+heslo do appky, negeneruje bcrypt hash pre Caddy a neseeduje admina — tie kroky
+tu stáli do 27. 8. 2026 a sú zrušené, nie presunuté.
 
 **Zásada I1:** žiadny krok v týchto runbookoch nikdy nevkladá tajomstvo do
 repa. Všetky tajomstvá žijú v `secrets/` (je v `.gitignore`) alebo v `.env`
@@ -19,11 +25,15 @@ Predpoklady: Docker + Docker Compose v2, Node 22 (na generovanie kľúčov).
    chmod 700 secrets backups
    ```
 
-2. **Vygeneruj master key a session key (D61):**
+2. **Vygeneruj master key a podpisový („session") key (D61, O2):**
+
+   `secrets/session.key` sa menuje po session, ktorá už neexistuje (D99), ale
+   **potrebný je ďalej**: podpisuje PREVIEW TOKEN (O2), teda tú mašinériu, ktorá
+   po zrušení sudo drží I3. Nevynechaj ho a nemaž ho.
    ```sh
    npm ci
    npm run gen-master-key            # zapíše secrets/master.key
-   # session key — 64 náhodných hex znakov:
+   # podpisový key — 64 náhodných hex znakov:
    node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))" > secrets/session.key
    chmod 400 secrets/master.key secrets/session.key
    # vlastníkom musí byť uid 10050 (non-root user appky v kontajneri):
@@ -39,18 +49,23 @@ Predpoklady: Docker + Docker Compose v2, Node 22 (na generovanie kľúčov).
    ```
 
 4. **Priprav `.env`** podľa `.env.example` (skopíruj a vyplň). `WRITES_ENABLED`
-   nechaj na `false`, kým neprebehne celý onboarding (I13). Doména shopu do
-   `.env` NEPATRÍ — zadáva sa v UI (R5, D80).
+   nechaj na `false`, kým nie je nastavená doména, kľúč a rozsah (I13). Doména
+   shopu do `.env` NEPATRÍ — zadáva sa v UI (R5, D80).
+   `SESSION_ABSOLUTE_HOURS`, `SESSION_IDLE_MINUTES`, `SUDO_WINDOW_MINUTES`,
+   `LOGIN_MAX_ATTEMPTS` a `LOGIN_WINDOW_MINUTES` appka od 27. 8. 2026 **nečíta**
+   (D99, D100) — keď ich v `.env` nájdeš, nič nerozbijú, len sú mŕtve.
 
-5. **Priprav Caddy (D94, D97):**
+5. **Priprav Caddy (D94):**
    ```sh
    cp Caddyfile.example secrets/Caddyfile
-   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'TVOJE-BASICAUTH-HESLO' > secrets/basicauth.hash
-   chmod 600 secrets/Caddyfile secrets/basicauth.hash
+   chmod 600 secrets/Caddyfile
    ```
-   V `secrets/Caddyfile` nastav, aby sa hash načítal (env `OVL_ZLIAV_BASICAUTH_HASH`
-   naplň z `/etc/caddy/basicauth.hash`, alebo hash vlož priamo do
-   `secrets/Caddyfile` — ten je mimo gitu, takže je to povolené).
+   Je to **doslovná kópia** — nič sa v nej nedopĺňa a nič sa nepýta.
+   `basic_auth` zrušila D98 (27. 8. 2026, ruší D97) a s ňou padol aj
+   `secrets/basicauth.hash`; `Caddyfile.example` ani `scripts/setup-local.{sh,ps1}`
+   ten blok už nevyrábajú. Ak máš `secrets/Caddyfile` z inštalácie pred
+   27. 8. 2026, blok `basic_auth` v ňom **zmaž ručne** — súbor je mimo gitu (I1),
+   takže ho žiadna zmena v repe neprepíše, a dialóg pred appkou už nemá čo chrániť.
 
 6. **Spusti stack:**
    ```sh
@@ -63,19 +78,29 @@ Predpoklady: Docker + Docker Compose v2, Node 22 (na generovanie kľúčov).
 7. **Vytvor DB userov a granty** — vykoná migrácia `0008_grants.sql`
    automaticky. Skontroluj, že app user nemá `UPDATE`/`DELETE` na `audit_log` (I4).
 
-8. **Seed admina:**
-   ```sh
-   docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON /app/scripts/seed-admin.ts
-   ```
+8. **Seed admina sa už nerobí.** Krok „spusti `scripts/seed-admin.ts`" tu stál
+   do 27. 8. 2026; D99 heslá zmazalo a skript s nimi. Riadok lokálneho actora
+   v tabuľke `users` **nevytvára žiadna migrácia** — `db/` na to nemá ani jeden
+   `INSERT INTO users`. Vyrobí ho až appka sama pri prvom zápise, funkciou
+   `resolveLocalActor()` v `src/lib/auth/local-actor.ts` (D102). Nič nezadávaš,
+   ale vedz, čo tam nájdeš:
+   - **existujúca inštalácia** (bežala ešte s prihlásením) má v `users` riadok
+     `samuel` s `id 1` — appka si dohľadá riadok s najnižším `id` a nikdy ho
+     neprepíše, takže audit má kontinuitu (D101);
+   - **čerstvá inštalácia** má tabuľku prázdnu a appka si vyrobí riadok
+     s neutrálnym menom `local` (konštanta `FRESH_INSTALL_USERNAME`), nie
+     `samuel` — jednoužívateľský nástroj si nemá vymýšľať meno človeka.
 
 9. **Smoke test:**
    ```sh
-   curl -u samuel http://localhost:3070/api/health   # očakávaj 200 (po basic auth)
+   curl http://localhost:3070/api/health        # 200, bez akéhokoľvek dialógu (D98)
    curl http://127.0.0.1:3000                   # MUSÍ zlyhať — app port nie je publikovaný (I5)
    ```
 
-10. **Trust root certu** (nižšie R2), prihlás sa a prejdi onboardingom:
-    doména → API kľúč → allowlist → testovací dry-run (D20).
+10. **Trust root certu** (nižšie R2) a nastav appku: otvor `http://localhost:3070`
+    (žiadne prihlásenie, D98–D100) a prejdi prázdnymi stavmi na Prehľade v
+    poradí doména → API kľúč → povolené produkty → testovací dry-run.
+    Sprievodca podľa D20 v architektúre V3 neexistuje.
 
 11. **Nastav denné zálohy** (host cron, D90):
     ```
@@ -122,14 +147,17 @@ Postup je rovnaký ako R1, ale Windows má tri pasce, ktoré R1 nepokrýva.
    skúšal s pokazenými koncami riadkov, urob raz `docker compose down -v` —
    dovtedy migrácie aj tak nikdy neprebehli, takže o nič neprídeš.
 
-5. Seed admina spúšťaj v **normálnom termináli** — maskovanie hesla potrebuje
-   skutočné TTY, cez rúru sa preruší.
+5. Krok „seed admina spúšťaj v normálnom termináli, maskovanie hesla potrebuje
+   TTY" tu stál do 27. 8. 2026. Padol s heslami (D99) — na Windows teda o jednu
+   pascu menej.
 
 Smoke test na Windows (HTTP bez TLS, odchýlka od D94 z 6. 8. 2026):
 ```powershell
-curl.exe -u samuel:HESLO http://localhost:3070/api/health   # 200, {"db":true}
-curl.exe -s -o NUL -w "%{http_code}" http://localhost:3070/api/health  # 401 bez auth
+curl.exe http://localhost:3070/api/health                              # 200, {"db":true}
+curl.exe -s -o NUL -w "%{http_code}" http://localhost:3070/api/health  # 200 — appka nemá prihlásenie (D98–D100)
 ```
+Do 27. 8. 2026 tu druhý riadok očakával `401` bez basic auth. Ak `401` vidíš
+dnes, v `secrets/Caddyfile` ti zostal blok `basic_auth` — viď R1 krok 5.
 
 ---
 
@@ -143,9 +171,10 @@ koľko KUSOV ktorého produktu sa predalo. Kontrakt:
    kľúč (`product:edit`) na to nestačí a naopak — sú to dva rôzne kľúče a
    appka ich drží oddelene (`api_key.kind`).
 2. V **Nastaveniach** appky vlož kľúč do formulára „kľúč na čítanie predajov".
-   Vyžaduje sudo okno (heslo). Appka kľúč **overí proti shopu ešte pred
-   uložením** — keď shop čítanie objednávok odmietne (403), kľúč sa NEULOŽÍ a
-   dozvieš sa to.
+   Heslo si nevyžiada — sudo okno tu stálo do 27. 8. 2026 a zrušila ho D100.
+   Bránou zostáva to, čo ňou naozaj bolo: appka kľúč **overí proti shopu ešte
+   pred uložením** — keď shop čítanie objednávok odmietne (403), kľúč sa NEULOŽÍ
+   a dozvieš sa to.
 3. Platnosť je **30 dní** (`ORDERS_KEY_TTL_DAYS`), nie 48 hodín ako pri
    zápisovom kľúči. Je to vedomá odchýlka (rozhodnutie P2): kľúč je len na
    čítanie a objednávkové endpointy nevracajú žiadne osobné údaje — len id,
@@ -213,7 +242,7 @@ Zápisy MUSIA byť počas migrácie blokované — postup drž presne v tomto po
    ```
    Entrypoint spustí migrácie fail-fast (D88); ak zlyhajú, appka nenabehne —
    NEOPAKUJ up naslepo, pozri logy a rieš manuálne (rollback je vždy manuálny).
-5. **Smoke test:** `curl -u samuel http://localhost:3070/api/health` → 200 a
+5. **Smoke test:** `curl http://localhost:3070/api/health` → 200 a
    `scheduler.heartbeat` čerstvý.
 6. Pri zlyhaní: obnov zálohu (R4) a vráť sa na predchádzajúci git tag.
 
@@ -244,7 +273,9 @@ rieš OKAMŽITE, nemáš funkčnú zálohu.
 
 Ak existuje čo i len podozrenie, že shop API kľúč unikol:
 
-1. **V UI:** Nastavenia → Panic button → zadaj heslo a opíš `KLUC UNIKOL`.
+1. **V UI:** Nastavenia → Panic button → opíš presnú frázu `KLUC UNIKOL`.
+   Heslo sa tu zadávalo do 27. 8. 2026 (D99); potvrdenie akcie NEZMIZLO — fráza
+   sa musí prepísať ručne, takže nevratné dopálenie kľúča nejde jedným klikom.
    Appka okamžite: wipne kľúč (prepis ciphertextu + zmazanie, D63), zruší
    všetky čakajúce kampane a zapíše audit event. Po incidente nič nebeží
    automaticky.
@@ -282,5 +313,5 @@ Tooling na rotáciu zámerne neexistuje — postup je „zahoď a zadaj znova":
 | appka nenabieha | `docker compose logs ovl-zliav-app` — boot assertions vypíšu presnú príčinu (env, master key, migrácie, PUBLIC_BIND) a proces skončí (I14) |
 | 502 z Caddy | `docker compose ps` — healthcheck appky; Caddy štartuje až po healthy app |
 | „scheduler naposledy pred X min" červené | `docker compose restart ovl-zliav-app`; heartbeat je v DB (`scheduler_state`) |
-| „ZÁPISY ZAMKNUTÉ" | runaway strop 60 zápisov/h (D79) — odomknúť heslom v Nastaveniach, predtým zisti z auditu, ČO tie zápisy generovalo |
-| zabudnuté admin heslo | `docker compose exec ovl-zliav-app node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON /app/scripts/seed-admin.ts` (reset) |
+| „ZÁPISY ZAMKNUTÉ" | runaway strop 60 zápisov/h (D79) — odomknúť v Nastaveniach zaškrtnutím výslovného potvrdenia (heslo tam stálo do 27. 8. 2026, D99); predtým zisti z auditu, ČO tie zápisy generovalo |
+| appka pýta heslo alebo basic auth dialóg | nemá čo — prihlásenie zrušili D98–D100 (27. 8. 2026). Skontroluj `secrets/Caddyfile` na zabudnutý blok `basic_auth` (R1 krok 5) |

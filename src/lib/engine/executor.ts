@@ -27,7 +27,9 @@
  *   - **I10** — položky idú prísne sekvenčne podľa `position`; v tomto súbore
  *     ani jeden `Promise.all` nad zápismi neexistuje a existovať nesmie.
  *   - **I3** — bez `confirmed_at` + `confirm_payload_hash` (zhodný s hashom
- *     skutočnej sady) + `sudo_at` sa NEODOŠLE ani jeden request.
+ *     skutočnej sady) sa NEODOŠLE ani jeden request. `sudo_at` v tejto vete
+ *     stálo do 27. 8. 2026; sudo zrušilo D100 a I3 odvtedy znie „žiadny zápis
+ *     bez dry-runu a potvrdenia". Podrobne v `assertConfirmed()` nižšie.
  *   - **D34** — zlyhanie položky dávku nezastaví; pokračuje sa a report je
  *     na konci (`done`/`partial`/`failed`).
  *   - **D39c** — zmena ceny medzi preview a write zápis NEZASTAVÍ, ale
@@ -274,7 +276,16 @@ export interface ExecutorDeps {
 export interface ExecuteOptions {
   /** Kto dávku spustil — do auditu (`user` = manuál/eager, `scheduler` = fire). */
   actor?: 'user' | 'scheduler';
-  /** ID prihláseného usera (pri `actor='user'`). */
+  /**
+   * `id` lokálneho actora (D102) — ide do `audit_log.user_id` KAŽDÉHO riadku,
+   * ktorý tento beh zapíše. Do 27. 8. 2026 tu hodnota len stála: route ju
+   * posielali, ale `commonAudit` ju neobsahoval, takže práve riadky
+   * dokladujúce zápis do PRODUKCIE (`write_ok`, `write_failed`,
+   * `write_uncertain`) mali `user_id = NULL` a nevedeli, kto ich spustil.
+   * To bolo porušenie D102 aj I11 („nevieme" je horšie než odpoveď).
+   *
+   * Pri `actor='scheduler'` je `null` v poriadku — dávku nespustil človek.
+   */
   userId?: number | null;
 }
 
@@ -325,13 +336,21 @@ export function assertConfirmed(campaign: ExecutorCampaign, items: ExecutorItem[
       { campaignId: campaign.id },
     );
   }
-  if (campaign.sudoAt === null) {
-    throw new EngineError(
-      'confirmation_missing',
-      'Kampaň nemá doložené sudo potvrdenie — zápis je zakázaný (I3, D70).',
-      { campaignId: campaign.id },
-    );
-  }
+  /*
+   * Tu do 27. 8. 2026 stála TRETIA podmienka: `campaign.sudoAt === null` →
+   * odmietnuté. Sudo zrušilo D100 a `_shared.ts` odvtedy zapisuje `sudo_at`
+   * ako NULL (zapisovať čas by bolo tvrdenie „potvrdené heslom vtedy", ktoré
+   * by nebolo pravdivé). Podmienka by teda odmietla KAŽDÚ novú kampaň —
+   * appka by prestala zapisovať a hlásila by pritom chýbajúce potvrdenie.
+   *
+   * NIE JE to medzera v I3. I3 po D100 znie „žiadny zápis bez dry-runu
+   * a potvrdenia" a obe nohy sú tu nad aj pod týmto komentárom:
+   *  - `confirmed_at` + `confirm_payload_hash` musia byť doložené (vyššie),
+   *  - hash sa PREPOČÍTAVA z riadkov položiek a musí sedieť (nižšie) — to je
+   *    tá silná noha, ktorá zachytí aj podvrhnuté potvrdenie.
+   *
+   * Staré kampane si svoj `sudo_at` v DB ponechávajú; nikto ho už nečíta.
+   */
   // K3/K4 — hash z riadkov položiek. Bez percenta sa hash nedá poskladať a
   // I3 tak zápis odmieta ešte pred prvým requestom.
   const broken = items.filter((item) => itemPercent(item) === null).map((i) => i.productId);
@@ -473,6 +492,7 @@ export function createExecutor(deps: ExecutorDeps): {
     campaign: ExecutorCampaign,
     items: ExecutorItem[],
     actor: 'user' | 'scheduler',
+    userId: number | null,
   ): Promise<ExecutorResultV3> {
     const statuses = items.map((i) => i.status);
     const finalStatus = resolveFinalStatus(statuses);
@@ -490,6 +510,7 @@ export function createExecutor(deps: ExecutorDeps): {
     });
     await audit.appendAudit({
       actor,
+      userId,
       eventType: 'campaign_finished',
       ok: finalStatus === 'done',
       campaignId: campaign.id,
@@ -513,6 +534,7 @@ export function createExecutor(deps: ExecutorDeps): {
     items: ExecutorItem[],
     reason: string,
     actor: 'user' | 'scheduler',
+    userId: number | null,
   ): Promise<ExecutorResultV3> {
     await campaignsRepo.setStatus(campaign.id, 'needs_key', {
       statusReason: reason,
@@ -520,6 +542,7 @@ export function createExecutor(deps: ExecutorDeps): {
     });
     await audit.appendAudit({
       actor,
+      userId,
       eventType: 'campaign_needs_key',
       ok: false,
       campaignId: campaign.id,
@@ -615,6 +638,14 @@ export function createExecutor(deps: ExecutorDeps): {
   ): Promise<ExecutorResultV3> {
     installSigtermHandler();
     const actor = opts.actor ?? 'user';
+    /*
+     * D102 — `user_id` do KAŽDÉHO auditného riadku tohto behu (27. 8. 2026).
+     * Do tohto dátumu sa `opts.userId` deklarovalo, route ho posielali a
+     * `commonAudit` ho neobsahoval, takže `write_ok`/`write_failed`/
+     * `write_uncertain` — teda práve riadky dokladujúce zápis do PRODUKCIE —
+     * mali `user_id = NULL`. Audit potom nevedel, kto zápis spustil (I11).
+     */
+    const userId = opts.userId ?? null;
 
     /* 1. Globálny mutex — druhá operácia sa odmietne, nečaká (D37, I12). */
     const held = await mutex.tryAcquire(`campaign:${campaignId}`);
@@ -650,7 +681,7 @@ export function createExecutor(deps: ExecutorDeps): {
       /* 4. Kľúč — chýbajúci/expirovaný = `needs_key`, nikdy `failed` (D21). */
       const keyRef: SecretRef | null = await apiKeyRepo.loadForUse();
       if (keyRef === null) {
-        return toNeedsKey(campaign, items, 'no_key', actor);
+        return toNeedsKey(campaign, items, 'no_key', actor, userId);
       }
 
       /* 5. Claim → running (D84). Ak kampaň ešte nie je `running`, prevezmi ju. */
@@ -696,6 +727,7 @@ export function createExecutor(deps: ExecutorDeps): {
 
         await audit.appendAudit({
           actor,
+          userId,
           eventType: 'campaign_claimed',
           ok: true,
           campaignId: campaign.id,
@@ -830,6 +862,7 @@ export function createExecutor(deps: ExecutorDeps): {
           );
           await audit.appendAudit({
             actor,
+            userId,
             eventType: 'allowlist_marked_unknown',
             ok: false,
             campaignId: campaign.id,
@@ -872,6 +905,7 @@ export function createExecutor(deps: ExecutorDeps): {
           });
           await audit.appendAudit({
             actor,
+            userId,
             eventType: 'write_failed',
             ok: false,
             campaignId: campaign.id,
@@ -893,7 +927,7 @@ export function createExecutor(deps: ExecutorDeps): {
           for (const rest of ordered.slice(index + 1)) {
             if (rest.status === 'pending') rest.status = 'interrupted';
           }
-          return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor);
+          return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor, userId);
         }
 
         if (outcome.kind === 'error') {
@@ -908,6 +942,7 @@ export function createExecutor(deps: ExecutorDeps): {
           });
           await audit.appendAudit({
             actor,
+            userId,
             eventType: 'write_failed',
             ok: false,
             campaignId: campaign.id,
@@ -937,6 +972,7 @@ export function createExecutor(deps: ExecutorDeps): {
           });
           await audit.appendAudit({
             actor,
+            userId,
             eventType: 'write_skipped',
             ok: true,
             campaignId: campaign.id,
@@ -971,6 +1007,7 @@ export function createExecutor(deps: ExecutorDeps): {
         });
         await audit.appendAudit({
           actor,
+          userId,
           eventType: 'write_attempt',
           campaignId: campaign.id,
           campaignItemId: item.id,
@@ -1012,6 +1049,7 @@ export function createExecutor(deps: ExecutorDeps): {
           });
           await audit.appendAudit({
             actor,
+            userId,
             eventType: 'write_failed',
             ok: false,
             campaignId: campaign.id,
@@ -1031,13 +1069,16 @@ export function createExecutor(deps: ExecutorDeps): {
           for (const rest of ordered.slice(index + 1)) {
             if (rest.status === 'pending') rest.status = 'interrupted';
           }
-          return toNeedsKey(campaign, ordered, 'key_unavailable', actor);
+          return toNeedsKey(campaign, ordered, 'key_unavailable', actor, userId);
         }
         await apiKeyRepo.touchLastUsed();
         const finishedAt = now();
 
         const commonAudit = {
           actor,
+          // D102 — bez tohto poľa mali `write_ok`/`write_failed`/
+          // `write_uncertain` `user_id = NULL` (27. 8. 2026).
+          userId,
           campaignId: campaign.id,
           campaignItemId: item.id,
           productId: item.productId,
@@ -1139,7 +1180,7 @@ export function createExecutor(deps: ExecutorDeps): {
             for (const rest of ordered.slice(index + 1)) {
               if (rest.status === 'pending') rest.status = 'interrupted';
             }
-            return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor);
+            return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor, userId);
           } else if (keyRejected) {
             /* D51/D52 — wipe + zvyšok `interrupted` + kampaň `needs_key`. */
             item.status = 'failed';
@@ -1173,6 +1214,7 @@ export function createExecutor(deps: ExecutorDeps): {
               ordered,
               error.kind === 'forbidden' ? 'key_forbidden' : 'key_rejected',
               actor,
+              userId,
             );
           } else {
             item.status = 'failed';
@@ -1198,7 +1240,7 @@ export function createExecutor(deps: ExecutorDeps): {
       }
 
       /* 7. Report a koncový stav (D34, §4). */
-      return await finishCampaign(campaign, ordered, actor);
+      return await finishCampaign(campaign, ordered, actor, userId);
     } finally {
       await held.release();
     }

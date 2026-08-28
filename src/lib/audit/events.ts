@@ -17,7 +17,17 @@ export const AUDIT_EVENT_TYPE_MAX_LENGTH = 48;
 
 /** Presný zoznam z BUILD-SPEC §3, v tom istom poradí. */
 export const AUDIT_EVENT_TYPES = [
-  // autentifikácia (D68–D71)
+  /*
+   * HISTORICKÉ udalosti — appka ich od 27. 8. 2026 už NEZAPISUJE. Prihlásenie
+   * a lockout zmizli (D99), sudo zrušilo D100, takže neexistuje kód, ktorý by
+   * niektorú z nich vyrobil.
+   *
+   * Zo zoznamu ich napriek tomu NEMAŽEME: `audit_log` sa nemení (D101), takže
+   * riadky z obdobia pred 27. 8. 2026 v ňom fyzicky zostávajú. Bez týchto
+   * hodnôt by `isAuditEventType()` povedalo o vlastnej minulosti appky „toto
+   * nepoznám" a História by ju nedokázala pomenovať — a „nevieme" je horšie
+   * než odpoveď (I11). To isté platí pre popisky v `AUDIT_EVENT_LABEL_SK`.
+   */
   'login_ok',
   'login_fail',
   'lockout',
@@ -101,6 +111,7 @@ export function isAuditActor(value: unknown): value is AuditActor {
  * Zabraňuje tichým typom v stringoch na strane volajúcich modulov.
  */
 export const AuditEvent = {
+  /* Historické (D99, D100, 27. 8. 2026) — appka ich už nezapisuje, viď hore. */
   LOGIN_OK: 'login_ok',
   LOGIN_FAIL: 'login_fail',
   LOCKOUT: 'lockout',
@@ -169,12 +180,21 @@ export const KEY_WIPE_EVENTS = ['key_wiped', 'key_panic_wipe'] as const satisfie
  * nevznikli dva rozdielne preklady toho istého eventu.
  */
 export const AUDIT_EVENT_LABEL_SK: Record<AuditEventType, string> = {
+  /*
+   * Historické popisky (D99, D100, 27. 8. 2026). Tieto udalosti už nevznikajú,
+   * ale staršie riadky auditu ich nesú a musia sa v Histórii zobraziť menom,
+   * nie kódom (I11). Preto sú vety naďalej v minulom čase o tom, čo sa vtedy
+   * naozaj stalo — nie o tom, čo appka dnes robí.
+   */
   login_ok: 'Prihlásenie — úspech',
   login_fail: 'Prihlásenie — zlyhanie',
   lockout: 'Blokovanie prihlásenia',
   logout: 'Odhlásenie',
-  sudo_ok: 'Potvrdenie heslom — úspech',
-  sudo_fail: 'Potvrdenie heslom — zlyhanie',
+  /* HISTORICKÉ (do 27. 8. 2026, D100). Appka ich už nezapisuje — sudo zmizlo —
+     ale v `audit_log` ležia staré riadky a I11 hovorí, že „nevieme" je horšie
+     než odpoveď, takže menovky zostávajú a nesú aj to, že ide o minulosť. */
+  sudo_ok: 'Potvrdenie heslom (do 27. 8. 2026) — úspech',
+  sudo_fail: 'Potvrdenie heslom (do 27. 8. 2026) — zlyhanie',
   key_stored: 'API kľúč uložený',
   key_verified: 'API kľúč overený sondou',
   key_wiped: 'API kľúč vymazaný',

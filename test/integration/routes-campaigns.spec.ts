@@ -35,7 +35,7 @@ import {
   makeRequest,
   makeRoutesWorld,
   parse,
-  sessionRouteDeps,
+  actorRouteDeps,
   type RoutesWorld,
 } from './routes-harness';
 
@@ -54,7 +54,7 @@ function world(opts: { allowlistIds?: number[]; apiKey?: string | null } = {}): 
 }
 
 async function previewToken(w: RoutesWorld, body: Record<string, unknown>): Promise<string> {
-  const handler = createPreviewPost(w.deps, sessionRouteDeps());
+  const handler = createPreviewPost(w.deps, actorRouteDeps());
   const res = await parse(await handler(makeRequest('POST', '/api/campaigns/preview', body)));
   expect(res.status).toBe(200);
   const data = res.body.data as { previewToken: string; blockers: unknown[] };
@@ -74,7 +74,7 @@ describe('POST /api/campaigns/preview + POST /api/campaigns', () => {
       kind: 'new',
     });
 
-    const post = createCampaignsPost(w.deps, sessionRouteDeps());
+    const post = createCampaignsPost(w.deps, actorRouteDeps());
     const res = await parse(
       await post(
         makeRequest('POST', '/api/campaigns', {
@@ -105,7 +105,7 @@ describe('POST /api/campaigns/preview + POST /api/campaigns', () => {
       kind: 'new',
     });
 
-    const post = createCampaignsPost(w.deps, sessionRouteDeps());
+    const post = createCampaignsPost(w.deps, actorRouteDeps());
     const res = await parse(
       await post(
         makeRequest('POST', '/api/campaigns', {
@@ -137,7 +137,7 @@ describe('POST /api/campaigns/preview + POST /api/campaigns', () => {
       oneDayAcknowledged: true,
     });
 
-    const post = createCampaignsPost(w.deps, sessionRouteDeps());
+    const post = createCampaignsPost(w.deps, actorRouteDeps());
     const missing = await parse(
       await post(
         makeRequest('POST', '/api/campaigns', {
@@ -178,7 +178,7 @@ describe('GET /api/campaigns — derivované UI stavy (O1, D14)', () => {
       [{ productId: 202, priceAtPreview: '19.99' }],
     );
 
-    const get = createCampaignsGet(w.deps, sessionRouteDeps());
+    const get = createCampaignsGet(w.deps, actorRouteDeps());
     const res = await parse(await get(makeRequest('GET', '/api/campaigns')));
     expect(res.status).toBe(200);
     const rows = (res.body.data as { data: Array<{ id: number; derived: string | null }> }).data;
@@ -218,7 +218,7 @@ describe('POST /api/campaigns/[id]/execute (D33b, I3)', () => {
       pricesAtPreview: { '201': '19.99', '202': '19.99' },
     });
 
-    const execute = createExecutePost(w.deps, sessionRouteDeps());
+    const execute = createExecutePost(w.deps, actorRouteDeps());
     const res = await parse(
       await execute(makeRequest('POST', `/api/campaigns/${campaign.id}/execute`, { previewToken: token }), {
         params: { id: String(campaign.id) },
@@ -237,7 +237,7 @@ describe('POST /api/campaigns/[id]/execute (D33b, I3)', () => {
       [{ productId: 201, priceAtPreview: '19.99' }],
     );
 
-    const execute = createExecutePost(w.deps, sessionRouteDeps());
+    const execute = createExecutePost(w.deps, actorRouteDeps());
     const res = await parse(
       await execute(
         makeRequest('POST', `/api/campaigns/${campaign.id}/execute`, { previewToken: 'xxx' }),
@@ -267,7 +267,7 @@ describe('POST /api/campaigns/[id]/execute (D33b, I3)', () => {
       pricesAtPreview: { '201': '19.99' },
     });
 
-    const execute = createExecutePost(w.deps, sessionRouteDeps());
+    const execute = createExecutePost(w.deps, actorRouteDeps());
     const res = await parse(
       await execute(makeRequest('POST', `/api/campaigns/${campaign.id}/execute`, { previewToken: token }), {
         params: { id: String(campaign.id) },
@@ -290,7 +290,7 @@ describe('cancel a ack', () => {
       [{ productId: 202, priceAtPreview: '19.99' }],
     );
 
-    const cancel = createCancelPost(w.deps, sessionRouteDeps());
+    const cancel = createCancelPost(w.deps, actorRouteDeps());
     const okRes = await parse(
       await cancel(makeRequest('POST', `/api/campaigns/${scheduled.id}/cancel`, {}), {
         params: { id: String(scheduled.id) },
@@ -314,13 +314,13 @@ describe('cancel a ack', () => {
       [{ productId: 201, priceAtPreview: '19.99', status: 'failed' }],
     );
 
-    const notifications = createNotificationsGet(w.deps, sessionRouteDeps());
+    const notifications = createNotificationsGet(w.deps, actorRouteDeps());
     const before = await parse(await notifications(makeRequest('GET', '/api/notifications')));
     expect(
       (before.body.data as { unacked: Array<{ campaignId: number }> }).unacked.map((u) => u.campaignId),
     ).toContain(finished.id);
 
-    const ack = createAckPost(w.deps, sessionRouteDeps());
+    const ack = createAckPost(w.deps, actorRouteDeps());
     const ackRes = await parse(
       await ack(makeRequest('POST', `/api/campaigns/${finished.id}/ack`), {
         params: { id: String(finished.id) },
@@ -338,7 +338,7 @@ describe('allowlist (I2, D40)', () => {
     const ids = Array.from({ length: 10 }, (_, i) => 201 + i);
     const w = world({ allowlistIds: ids });
 
-    const post = createAllowlistPost(w.deps, sessionRouteDeps());
+    const post = createAllowlistPost(w.deps, actorRouteDeps());
     const res = await parse(await post(makeRequest('POST', '/api/allowlist', { productId: 999 })));
     expect(res.status).toBe(409);
     expect(res.body.error?.code).toBe('allowlist_full');
@@ -351,7 +351,7 @@ describe('allowlist (I2, D40)', () => {
       [{ productId: 201, priceAtPreview: '19.99' }],
     );
 
-    const del = createAllowlistDelete(w.deps, sessionRouteDeps());
+    const del = createAllowlistDelete(w.deps, actorRouteDeps());
     const blocked = await parse(
       await del(makeRequest('DELETE', '/api/allowlist/201'), { params: { productId: '201' } }),
     );
@@ -379,7 +379,7 @@ describe('allowlist (I2, D40)', () => {
       raw: {},
     });
 
-    const get = createAllowlistGet(w.deps, sessionRouteDeps());
+    const get = createAllowlistGet(w.deps, actorRouteDeps());
     const res = await parse(await get(makeRequest('GET', '/api/allowlist')));
     expect(res.status).toBe(200);
     const rows = res.body.data as Array<{ productId: number; name: string | null }>;
@@ -398,7 +398,7 @@ describe('catalog refresh (D56, D57)', () => {
       { id: 202, name: 'Šperk 202', price: 29.99, has_attributes: true },
     ]);
 
-    const refresh = createCatalogRefreshPost(w.deps, sessionRouteDeps());
+    const refresh = createCatalogRefreshPost(w.deps, actorRouteDeps());
     const res = await parse(await refresh(makeRequest('POST', '/api/catalog/refresh', {})));
     expect(res.status).toBe(200);
     const data = res.body.data as { staleCount: number; items: Array<{ productId: number; refreshed: boolean }> };
@@ -429,7 +429,7 @@ describe('GET /api/audit/[id] — príznak priceMismatch (D39c)', () => {
       afterSnapshot: { price_mismatch: false },
     });
 
-    const get = createAuditDetailGet(w.deps, sessionRouteDeps());
+    const get = createAuditDetailGet(w.deps, actorRouteDeps());
     const first = await parse(
       await get(makeRequest('GET', '/api/audit/1'), { params: { id: '1' } }),
     );
@@ -462,7 +462,7 @@ describe('GET /api/campaigns/[id] — detail s položkami a audit stopou', () =>
       campaignId: campaign.id,
     });
 
-    const get = createCampaignGet(w.deps, sessionRouteDeps());
+    const get = createCampaignGet(w.deps, actorRouteDeps());
     const res = await parse(
       await get(makeRequest('GET', `/api/campaigns/${campaign.id}`), {
         params: { id: String(campaign.id) },

@@ -18,7 +18,7 @@
  *  3. Stavy kariet sú MERANÉ, nie predvolené: kým sa nevie, či kľúč je,
  *     appka nepíše „chýba" (P7).
  */
-import { expect, login, storeApiKey, test } from './fixtures';
+import { expect, storeApiKey, test } from './fixtures';
 import { E2E_CONFIG } from './config';
 
 test.describe('prvé spustenie', () => {
@@ -32,7 +32,6 @@ test.describe('prvé spustenie', () => {
   test('tri karty povedia, čo chýba — a nič pri tom nezapíšu', async ({ page, control }) => {
     const before = await control.state();
 
-    await login(page);
     await page.goto('/onboarding');
     const onboarding = page.getByTestId('onboarding');
     await expect(onboarding).toBeVisible();
@@ -54,7 +53,6 @@ test.describe('prvé spustenie', () => {
   });
 
   test('D55: doména sa bez úspešného canary čítania NEULOŽÍ', async ({ page, db }) => {
-    await login(page);
     // Formulár domény býval v onboardingu; od V3 má jediné miesto — Nastavenia.
     await page.goto('/nastavenia#pripojenie');
 
@@ -62,7 +60,6 @@ test.describe('prvé spustenie', () => {
     // nie cez mock override — na `.invalid` host sa spojenie nedá vytvoriť (I6),
     // takže canary zlyhá a doména sa fail-closed neuloží.
     await page.getByTestId('domain-input').fill(E2E_CONFIG.shopDomain);
-    await page.getByTestId('domain-password').fill(E2E_CONFIG.adminPassword);
     await page.getByTestId('domain-save').click();
 
     // Chybová hláška patrí formuláru domény. `getByRole('alert')` globálne by

@@ -11,7 +11,7 @@
  *  - **strop sady je 10 000** (K1 bod 3), nie 10. Strop režimu `pilot` sa TU
  *    nevynucuje: pozná ho `checkScope()` v engine, ktorý číta `scope_mode`
  *    fail-closed z DB. Keby tu stálo natvrdo 10, prepnutie do režimu `plny`
- *    (so sudo a auditom) by nemalo žiadny účinok a K1 by bol na papieri.
+ *    (s auditom) by nemalo žiadny účinok a K1 by bol na papieri.
  *  - **pásma (K3)**: `tiers` rozdelia sadu na skupiny s vlastným percentom.
  *    Token potom nesie percento KAŽDEJ položky a zápis sa nedá „preklopiť"
  *    do iného pásma medzi potvrdením a zápisom.
@@ -63,7 +63,6 @@ export function createPreviewPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: bodySchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -110,7 +109,7 @@ export function createPreviewPost(
 
           const result = await buildPreview(
             {
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
               kind: ctx.body.kind,
               productIds: ctx.body.productIds,
               percent: ctx.body.percent,

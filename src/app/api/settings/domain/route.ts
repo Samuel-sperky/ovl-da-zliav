@@ -2,7 +2,9 @@
  * Aura Zľavy — `PUT /api/settings/domain` (BUILD-SPEC §5, D55, D80).
  *
  *  - prijíma VÝHRADNE `https://` URL (zod + `normalizeShopBaseUrl`, D80),
- *  - vyžaduje sudo okno A navyše explicitné heslo v tele (D80),
+ *  - do 27. 8. 2026 vyžadovala sudo okno A navyše heslo v tele (D80). Sudo
+ *    zrušilo D100 a heslá D99; 28. 8. 2026 heslo vystriedalo výslovné
+ *    `confirmed: true` zo zaškrtávacieho poľa (D106) — viď schéma nižšie,
  *  - PRED uložením spustí canary `GET /api/products?per_page=1` proti NOVEJ
  *    doméne (D55) — pri zlyhaní sa doména NEULOŽÍ (fail-closed),
  *  - audit: `canary_ok`/`canary_fail` + `domain_changed` (I4 cez `appendAudit`).
@@ -13,16 +15,30 @@ import { z } from 'zod';
 
 import type { CanaryResult, ShopCtx, Ulid } from '@/contracts';
 
-import { verifyPassword } from '@/lib/auth';
 import { appendAudit } from '@/lib/audit/write';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
-import { AppError, badRequest, unauthorized } from '@/lib/http/errors';
+import { AppError, badRequest } from '@/lib/http/errors';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
-import { usersRepo as defaultUsersRepo } from '@/lib/repo/users.repo';
 import { createShopClient, normalizeShopBaseUrl } from '@/lib/shop/client';
 import { ShopConfigError } from '@/lib/shop/errors';
 import { newRequestId } from '@/lib/shop/correlation';
 
+/**
+ * Telo požiadavky.
+ *
+ * PREČO TU JE `confirmed` (D106, 28. 8. 2026)
+ * -------------------------------------------
+ * Heslo (D80) bolo do 27. 8. 2026 jediné, čo túto mutáciu držalo, a jeho
+ * vytrhnutie z nej urobilo tichý jeden POST. To NIE JE „bez hesla", to je
+ * „bez potvrdenia" — a pri tejto konkrétnej route je to najdrahšie miesto
+ * celej appky: kto prepíše doménu, tomu zápisová cesta pošle DEŠIFROVANÝ
+ * produkčný API kľúč v `X-Api-Key` na jeho adresu. Canary to nezastaví,
+ * lebo je `phase: 'read'` bez kľúča a cudzí host si ju uspokojí sám.
+ *
+ * `z.literal(true)` je zámer: chýbajúce aj `false` skončí 400, nikdy zmenou
+ * domény. Nie je to prihlásenie — nič si nepamätáš a nič nezadávaš, len raz
+ * zaškrtneš (D99 zostáva v platnosti).
+ */
 export const domainBodySchema = z.object({
   domain: z
     .string()
@@ -30,7 +46,7 @@ export const domainBodySchema = z.object({
     .refine((value) => value.startsWith('https://'), {
       message: 'Doména shopu musí začínať na https:// (D80).',
     }),
-  password: z.string().min(1).max(200),
+  confirmed: z.literal(true),
 });
 
 /** Canary funkcia proti KANDIDÁTSKEJ doméne (ešte neuloženej). */
@@ -43,8 +59,6 @@ export interface DomainRouteDeps {
   settings?: {
     setShopDomain(domain: string, confirmedAt: Date | null): Promise<void>;
   };
-  users?: { getById(id: number): Promise<{ passwordHash: string } | null> };
-  verify?: typeof verifyPassword;
   audit?: typeof appendAudit;
   canary?: CanaryForBaseUrl;
   routeDeps?: RouteDeps;
@@ -52,28 +66,18 @@ export interface DomainRouteDeps {
 
 export function createDomainRoute(deps: DomainRouteDeps = {}): NextRouteHandler {
   const settings = deps.settings ?? defaultSettingsRepo;
-  const users = deps.users ?? defaultUsersRepo;
-  const verify = deps.verify ?? verifyPassword;
   const audit = deps.audit ?? appendAudit;
   const canary = deps.canary ?? defaultCanary;
 
   return defineRoute(
     {
       method: 'PUT',
-      auth: 'sudo',
       body: domainBodySchema,
       rateLimit: { limit: 30, windowMs: 60_000, bucket: 'settings-domain' },
       handler: async (ctx) => {
         const now = (deps.routeDeps?.now ?? (() => new Date()))();
 
-        /* 1. Heslo znova, aj v platnom sudo okne (D80). */
-        const user = await users.getById(ctx.claims.sub);
-        const matches = await verify(user?.passwordHash ?? null, ctx.body.password);
-        if (!matches) {
-          throw unauthorized('Nesprávne heslo.', 'invalid_password', { logAsError: false });
-        }
-
-        /* 2. Normalizácia — len https, bez query/fragmentu/credentials (D80). */
+        /* 1. Normalizácia — len https, bez query/fragmentu/credentials (D80). */
         let normalized: string;
         try {
           normalized = normalizeShopBaseUrl(ctx.body.domain);
@@ -89,7 +93,7 @@ export function createDomainRoute(deps: DomainRouteDeps = {}): NextRouteHandler 
         const result = await canary(normalized, { operationId });
         await audit({
           actor: 'user',
-          userId: ctx.claims.sub,
+          userId: ctx.actor.id,
           eventType: result.ok ? 'canary_ok' : 'canary_fail',
           ok: result.ok,
           operationId,
@@ -113,7 +117,7 @@ export function createDomainRoute(deps: DomainRouteDeps = {}): NextRouteHandler 
         await settings.setShopDomain(normalized, now);
         await audit({
           actor: 'user',
-          userId: ctx.claims.sub,
+          userId: ctx.actor.id,
           eventType: 'domain_changed',
           ok: true,
           operationId,

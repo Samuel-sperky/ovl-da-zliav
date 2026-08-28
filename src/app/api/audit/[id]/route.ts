@@ -32,7 +32,6 @@ export function createAuditDetailGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       params: idParamSchema,
       handler: (ctx) =>
         withRouteErrors(async () => {

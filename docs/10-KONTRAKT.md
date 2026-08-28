@@ -15,11 +15,23 @@ Značenie:
 - **R1–R10** — rámcové rozhodnutia z `00-KONTEXT-10-OTAZOK.md`
 - **D1–D100** — rozhodnutia z `01-DOTAZNIK-100-OTAZOK.md` / `02-ODPOVEDI-100-OTAZOK.md`
   (číslo D sa rovná číslu otázky, aby krížové odkazy fungovali)
+- **D98–D107 (27.–28. 8. 2026)** — rozhodnutia sprintu „bez prihlásenia" z
+  `KONTRAKT-BEZ-LOGINU-2026-08-27.md`; žijú v sekcii **F2**
 - **I1–I14** — invarianty (nadradené všetkému ostatnému)
 - **B1–B4** — backlog na maintainera shopu
 
 Sloveso **MUSÍ / NESMIE** je normatívne. Kde je uvedený variant (napr. `38b`),
 ide o zvolenú možnosť z dotazníka.
+
+> **Kolízia čísel — čítaj pozorne (27. 8. 2026).** Sprint „bez prihlásenia" si
+> vzal čísla D98–D107, takže **D98, D99 a D100 existujú v tomto dokumente
+> dvakrát**: v sekcii F pôvodné z dotazníka (kontajner hardening / CI / upgrade
+> runbook) a v sekcii F2 nové (Caddy `basic_auth` / app session / sudo). Kód
+> cituje obe sady — `src/lib/scheduler/pause.ts` píše „upgradom podľa D100"
+> (sekcia F), `src/lib/http/define-route.ts` píše „D100 zrušilo sudo"
+> (sekcia F2). Čísla sa **neprečíslovávajú**: prepísalo by to desiatky odkazov
+> v kóde aj v dokumentoch. Pri odkaze na D98–D100 rozhoduje kontext; keď je
+> pochybnosť, uveď k číslu aj dátum.
 
 ---
 
@@ -30,13 +42,13 @@ ide o zvolenú možnosť z dotazníka.
 | R1 | Appka MUSÍ držať v DB allowlist maximálne 10 konkrétnych product ID a MUSÍ fail-closed odmietnuť akékoľvek ID mimo allowlistu ešte pred volaním shop API; jedna operácia MUSÍ zapisovať maximálne 10 produktov. | ot. 1 |
 | R2 | API kľúč sa MUSÍ zadávať výhradne v UI, ukladať šifrovane (AES-256-GCM) s TTL 48 h a po expirácii automaticky wipovať; kľúč NESMIE byť nikdy v repozitári, v `.env`, v obraze ani v zálohe. | ot. 2 |
 | R3 | Appka MUSÍ byť postavená na Node 22 + Next.js 16 (App Router, `output: 'standalone'`) + React 19 + TypeScript + MariaDB 11.4 s numerovanými migráciami a `defineRoute()` pipeline (auth → rateLimit → zod → handler). | ot. 3 |
-| R4 | Appka MUSÍ byť dostupná výhradne lokálne — jediný publikovaný port `127.0.0.1:3070` obsluhuje Caddy (TLS + basic auth + security hlavičky); tunel ani verejná expozícia sa NESMIE konfigurovať. | ot. 4 |
+| R4 | Appka MUSÍ byť dostupná výhradne lokálne — jediný publikovaný port `127.0.0.1:3070` obsluhuje Caddy (security hlavičky); tunel ani verejná expozícia sa NESMIE konfigurovať. Dve veci z pôvodného znenia už neplatia: TLS je od 6. 8. 2026 vedome vypnuté (HTTP na 127.0.0.1) a `basic auth` zrušila **D98 z 27. 8. 2026**. Lokálnosť portu je invariant I5 a tou sa nič nemení. | ot. 4 |
 | R5 | Appka MUSÍ považovať `sperky-eshop.sk` za produkčný shop bez stagingu, preto dry-run náhľad a explicitné potvrdenie pred každým zápisom MUSÍ byť povinné a nevypnuteľné; doména sa NESMIE zapisovať do repozitára. | ot. 5 |
 | R6 | Appka NESMIE implementovať rušenie zľavy (ani hack s `to` do minulosti) — zľavy len prirodzene expirujú; appka vie zľavu zakladať, prepísať a predĺžiť. | ot. 6 |
 | R7 | Appka MUSÍ podporovať manuálne zápisy aj plánované kampane so schedulerom. | ot. 7 |
 | R8 | Appka MUSÍ pracovať výhradne so scope `product:edit` a NESMIE pýtať ani použiť `orders:read` (žiadne zákaznícke dáta). | ot. 8 |
-| R9 | Appka MUSÍ viesť plný append-only audit každej operácie so snapshotom pred/po a allowlist držať v DB; prihlasuje sa jediný admin (Samuel), roly sa neimplementujú. | ot. 9 |
-| R10 | Appka MUSÍ používať port 3070, kontajnery `ovl-zliav-app` + `ovl-zliav-db` + `ovl-zliav-caddy`, DB `ovl_zliav`, cookie `ovl_zliav_session` a zobrazovaný názov „Aura Zľavy". | ot. 10 |
+| R9 | Appka MUSÍ viesť plný append-only audit každej operácie so snapshotom pred/po a allowlist držať v DB; roly sa neimplementujú. **Prihlásenie zrušili D98–D100 (27. 8. 2026)** — namiesto prihláseného admina je jediný **lokálny actor** (`samuel`, id 1) z `src/lib/auth/local-actor.ts` (D102), ktorým sa pripisuje každý zápis aj každý audit riadok. | ot. 9 |
+| R10 | Appka MUSÍ používať port 3070, kontajnery `ovl-zliav-app` + `ovl-zliav-db` + `ovl-zliav-caddy`, DB `ovl_zliav` a zobrazovaný názov „Aura Zľavy". Cookie `ovl_zliav_session` zmizla s app session (**D99, 27. 8. 2026**); názov zostal len v histórii rozhodnutí. | ot. 10 |
 
 ---
 
@@ -44,7 +56,7 @@ ide o zvolenú možnosť z dotazníka.
 
 | Č. | Rozhodnutie | Ref. |
 | --- | --- | --- |
-| D1 | Hlavná obrazovka po prihlásení MUSÍ byť kombinovaný dashboard so stavom kľúča, ohrozenými/bežiacimi/zmeškanými kampaňami a stavom 10 allowlist produktov. | 1a |
+| D1 | Hlavná obrazovka po otvorení appky (prihlásenie zrušila **D99, 27. 8. 2026**) MUSÍ byť kombinovaný dashboard so stavom kľúča, ohrozenými/bežiacimi/zmeškanými kampaňami a stavom 10 allowlist produktov. | 1a |
 | D2 | Ostrý zápis MUSÍ prebehnúť dvojkrokovo: dry-run náhľad → samostatné tlačidlo „Zapísať do PRODUKCIE"; jednokrokový zápis NESMIE existovať v žiadnej ceste UI. | 2a |
 | D3 | Dry-run náhľad MUSÍ zobraziť diff tabuľku per produkt: názov, aktuálna cena, percento, okno od–do a posledný vlastný zápis; raw JSON payloady sa do náhľadu NESMÚ vykresľovať (idú do auditu). | 3a |
 | D4 | UI MUSÍ zobraziť vypočítanú zľavnenú cenu `price × (1 − r/100)` vždy s upozornením „orientačný výpočet appky; zaokrúhlenie shopu sa môže líšiť". | 4a |
@@ -132,10 +144,10 @@ ide o zvolenú možnosť z dotazníka.
 | D65 | UI NESMIE nikdy zobraziť API kľúč — len posledné 4 znaky, čas uloženia a odpočet. | 65a |
 | D66 | MUSÍ existovať centrálny redaktor (maskovanie `Authorization`, `X-Api-Key` a denylist polí) **a** test, ktorý zlyhá, ak sa kľúč objaví v serializovaných logoch alebo audite. | 66a |
 | D67 | Panic button „kľúč unikol" MUSÍ okamžite wipnuť kľúč, zrušiť všetky čakajúce kampane, zapísať audit event a zobraziť runbook „kontaktuj maintainera na revokáciu"; po incidente NESMIE nič bežať automaticky. | 67a |
-| D68 | Admin heslo MUSÍ mať minimálne 12 znakov a hashovať sa argon2id s parametrami zo sperky-ai; zložitostné pravidlá sa NESMÚ vynucovať. | 68a |
-| D69 | Session (jose JWT v cookie `ovl_zliav_session`) MUSÍ mať 8 h absolútnu platnosť a 30 min idle timeout; cookie MUSÍ byť `httpOnly`, `Secure`, `SameSite=Strict`. | 69a |
-| D70 | Pred ostrým zápisom MUSÍ appka vyžiadať heslo znova („sudo mode"), ak je od poslednej autentifikácie viac než 15 minút. | 70a |
-| D71 | Login MUSÍ byť chránený rate limitom 5 pokusov / 15 min per IP s exponenciálnym lockoutom a každý pokus MUSÍ byť v audite; CAPTCHA sa NESMIE implementovať. | 71a |
+| D68 | **ZRUŠENÉ 27. 8. 2026 (D99).** Appka nemá heslá; s nimi zmizla aj závislosť `argon2` (D104). Pôvodné znenie: „Admin heslo MUSÍ mať minimálne 12 znakov a hashovať sa argon2id s parametrami zo sperky-ai; zložitostné pravidlá sa NESMÚ vynucovať." | 68a |
+| D69 | **ZRUŠENÉ 27. 8. 2026 (D99).** App session je zmazaná z kódu, nie vypnutá prepínačom; kto zapísal, hovorí lokálny actor (D102). Pôvodné znenie: „Session (jose JWT v cookie `ovl_zliav_session`) MUSÍ mať 8 h absolútnu platnosť a 30 min idle timeout; cookie MUSÍ byť `httpOnly`, `Secure`, `SameSite=Strict`." | 69a |
+| D70 | **ZRUŠENÉ 27. 8. 2026 (D100).** Sudo neexistuje a **invariant I3 sa tým zmenil** na „žiadny zápis bez dry-runu + potvrdenia"; dry-run a potvrdenie zostávajú nedotknuté. Pôvodné znenie: „Pred ostrým zápisom MUSÍ appka vyžiadať heslo znova („sudo mode"), ak je od poslednej autentifikácie viac než 15 minút." | 70a |
+| D71 | **ZRUŠENÉ 27. 8. 2026 (D99).** Login neexistuje, takže ani lockout; tabuľka `login_attempts` zostáva v schéme prázdna (D101 — žiadna migrácia). Pôvodné znenie: „Login MUSÍ byť chránený rate limitom 5 pokusov / 15 min per IP s exponenciálnym lockoutom a každý pokus MUSÍ byť v audite; CAPTCHA sa NESMIE implementovať." | 71a |
 | D72 | CSRF obrana MUSÍ byť `SameSite=Strict` cookie **a** Origin check v pipeline na všetkých mutáciách; double-submit token sa NESMIE pridávať. | 72a |
 | D73 | 2FA/TOTP sa NESMIE implementovať. | 73a |
 | D74 | Audit log MUSÍ byť append-only vynútené na úrovni DB: aplikačný DB user NESMIE mať `UPDATE` ani `DELETE` grant na `audit_log`. | 74a |
@@ -143,8 +155,8 @@ ide o zvolenú možnosť z dotazníka.
 | D76 | Tabuľka s API kľúčom MUSÍ byť vylúčená zo záloh DB. | 76a |
 | D77 | Ostrý zápis MUSÍ byť povolený len ak `NODE_ENV=production` **A** `WRITES_ENABLED=true`; v dev prostredí MUSÍ byť vynútený dry-run. | 77a |
 | D78 | Pri štarte MUSÍ prebehnúť assertion, že appka je dostupná výhradne z `127.0.0.1` (publikovaný bind + neexistencia iných publikovaných portov), inak proces MUSÍ skončiť; MUSÍ existovať CI test, ktorý to overí nad compose konfiguráciou. Middleware filter na zdrojovú IP sa NESMIE použiť (za Caddy je nespoľahlivý). | 78a |
-| D79 | MUSÍ existovať tvrdý strop 60 zápisov / hodinu vyhodnocovaný z DB; prekročenie MUSÍ zamknúť zápisy do manuálneho odomknutia heslom a zapísať audit event. | 79a |
-| D80 | Doména shopu MUSÍ byť výhradne `https` a jedna, potvrdená pri onboardingu; jej zmena MUSÍ vyžadovať heslo. DNS-resolve blokovanie privátnych rozsahov sa neimplementuje. | 80a |
+| D79 | MUSÍ existovať tvrdý strop 60 zápisov / hodinu vyhodnocovaný z DB; prekročenie MUSÍ zamknúť zápisy do manuálneho odomknutia a zapísať audit event. **Od 27. 8. 2026 (D99)** odomknutie nežiada heslo, ale výslovné `confirmed: true` z Nastavení (`POST /api/settings/unlock-writes`) — potvrdenie akcie NEZMIZLO, len prestalo byť heslom. | 79a |
+| D80 | Doména shopu MUSÍ byť výhradne `https` a jedna, potvrdená pri prvom nastavení; pred uložením MUSÍ prejsť canary podľa D55 (fail-closed). DNS-resolve blokovanie privátnych rozsahov sa neimplementuje. **Od 27. 8. 2026 (D99, D100)** jej zmena nežiada heslo ani sudo — appka žiadne nemá. **Od 28. 8. 2026 (D106)** ale žiada výslovné `confirmed: true` zo zaškrtávacieho poľa: na uloženú adresu ide zápisová cesta s dešifrovaným API kľúčom v hlavičke, takže bez akejkoľvek brány by kľúč vynieslo jedno POST. Bránami sú teda potvrdenie, canary (fail-closed) a audit `domain_changed`. | 80a |
 
 ---
 
@@ -152,7 +164,7 @@ ide o zvolenú možnosť z dotazníka.
 
 | Č. | Rozhodnutie | Ref. |
 | --- | --- | --- |
-| D81 | DB schéma MUSÍ obsahovať tabuľky `campaigns`, `campaign_items`, `products_allowlist`, `catalog_cache`, `audit_log`, `api_key`, `settings`, `users` (+ technicky nevyhnutné `_migrations`, `login_attempts`, `scheduler_state` — viď `11-BUILD-SPEC.md` §3). | 81a |
+| D81 | DB schéma MUSÍ obsahovať tabuľky `campaigns`, `campaign_items`, `products_allowlist`, `catalog_cache`, `audit_log`, `api_key`, `settings`, `users` (+ technicky nevyhnutné `_migrations`, `login_attempts`, `scheduler_state` — viď `11-BUILD-SPEC.md` §3). **Od 27. 8. 2026 (D101)** schéma zostáva presne takáto aj po zrušení prihlásenia: `users` drží jediný riadok lokálneho actora (FK z `campaigns.created_by` a `audit_log.user_id` je `ON DELETE RESTRICT`) a do `login_attempts` už nikto nezapisuje. | 81a |
 | D82 | Scheduler MUSÍ byť in-process tick (60 s) vnútri Next.js standalone procesu so stavom v DB; samostatný worker kontajner ani host cron sa NESMIE zavádzať. | 82a |
 | D83 | Kampane MUSIA prechádzať stavovým strojom `scheduled → needs_key → running → done \| partial \| failed \| missed \| cancelled` (+ `lapsed` = prepadnutá podľa D25) a každý prechod MUSÍ mať timestamp a dôvod. | 83a |
 | D84 | Proti dvojitému fire MUSÍ appka použiť atomický claim `UPDATE campaigns SET status='running' WHERE id=? AND status IN ('scheduled','needs_key')` a pokračovať len ak `affectedRows = 1`. | 84a |
@@ -168,10 +180,55 @@ ide o zvolenú možnosť z dotazníka.
 | D94 | Caddy MUSÍ používať `tls internal` (lokálna CA) a repo MUSÍ obsahovať návod na trust root certifikátu v OS. | 94a |
 | D95 | Caddy MUSÍ posielať `Content-Security-Policy` (`default-src 'self'`, zladené s Next.js), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy` a HSTS (len s TLS); COOP/COEP sa nepridáva. | 95a |
 | D96 | Publikovaný MUSÍ byť výhradne jediný port `127.0.0.1:3070` obsluhovaný Caddy; `ovl-zliav-app` a `ovl-zliav-db` NESMÚ publikovať žiadny port. | 96a |
-| D97 | Caddy basic auth **aj** aplikačný login MUSIA byť aktívne súčasne; bcrypt hash MUSÍ byť v súbore mimo gitu a v repe MUSÍ byť len `Caddyfile.example`. | 97a |
+| D97 | **ZRUŠENÉ 27. 8. 2026 (D98 zo sekcie F2).** `basic_auth` je zo `secrets/Caddyfile` odstránené a aplikačný login zmazaný (D99). Pôvodné znenie: „Caddy basic auth **aj** aplikačný login MUSIA byť aktívne súčasne; bcrypt hash MUSÍ byť v súbore mimo gitu a v repe MUSÍ byť len `Caddyfile.example`." Pravidlo „reálny Caddyfile žije mimo gitu" platí ďalej (I1). | 97a |
 | D98 | Kontajner appky MUSÍ bežať ako non-root s `read_only: true` rootfs, `tmpfs: /tmp`, `cap_drop: [ALL]` a `security_opt: no-new-privileges:true`; vlastný seccomp profil sa nepridáva. | 98a |
 | D99 | CI MUSÍ na push spustiť lint + typecheck + vitest + build a na PR Playwright; testy MUSIA bežať výhradne proti mock shop serveru a `npm audit` + `gitleaks` MUSIA blokovať pri high/critical. | 99a |
 | D100 | Upgrade MUSÍ prebiehať podľa runbooku: záloha DB → build → `compose up` → migrácie fail-fast → smoke test `/api/health`; zápisy MUSIA byť blokované počas migrácie. | 100a |
+
+> **Pozor na čísla.** D98, D99 a D100 v tejto tabuľke sú tie **dotazníkové**
+> (hardening, CI, upgrade). Rovnaké čísla si 27. 8. 2026 vzal aj sprint „bez
+> prihlásenia" — tie sú v sekcii F2 nižšie. Viď kolíziu opísanú v „Ako sa tento
+> dokument používa".
+
+---
+
+## F2. Sprint „bez prihlásenia" (D98–D107, 27.–28. 8. 2026)
+
+Zdroj: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` (dôvod, čo prihlásenie nechránilo,
+prijaté riziko a akceptačné kritériá K1–K8). Appka je jednoužívateľský lokálny
+nástroj na jednom PC a mala **tri vrstvy toho istého hesla**; Samuel ich
+27. 8. 2026 informovane zrušil. Čísla kolidujú s dotazníkovými D98–D100 vyššie —
+viď poznámku v úvode dokumentu.
+
+| Č. | Rozhodnutie | Dôvod |
+| --- | --- | --- |
+| D98 | Caddy `basic_auth` sa zo `secrets/Caddyfile` odstraňuje. **D97 sa ruší.** | Čistý duplikát pred appkou, ktorá mala vlastnú bránu. Nechránil nič, čo nechráni I5. |
+| D99 | App session, `/login`, heslá a lockout sa **mažú z kódu**, nie vypínajú prepínačom. **D68, D69, D71 sa rušia.** | Voľba Samuela z dvoch ponúknutých variantov; prepínač v `.env` bol odmietnutý. |
+| D100 | sudo sa ruší. **D70 sa ruší. Invariant I3 sa mení** z „žiadny zápis bez dry-runu + potvrdenia + sudo" na **„žiadny zápis bez dry-runu + potvrdenia"**. | Voľba Samuela. Dry-run a potvrdenie v UI zostávajú a sú strážené testom. |
+| D101 | Tabuľka `users` a jeden riadok v nej (`samuel`, id 1) **zostávajú**. DB sa nemení vôbec, žiadna migrácia. | `campaigns.created_by` a `audit_log.user_id` majú FK na `users(id)` `ON DELETE RESTRICT`. Bez `users` by sa nedala zapísať kampaň ani audit riadok. Žiadna migrácia = žiadne riziko na dátach. |
+| D102 | Každý zápis a každý audit riadok sa pripisuje **lokálnemu actorovi** (`samuel`, id 1) z `src/lib/auth/local-actor.ts`. | Audit trail nesmie stratiť zmysel len preto, že zmizlo prihlásenie (I11 — „nevieme" je horšie než odpoveď). |
+| D103 | `ctx.claims` v `defineRoute()` sa mení na `ctx.actor` (`{ id, username }`). Vlastnosť `auth:` z `RouteDefinition` **zmizne**. | 53 rút ju deklarovalo. Odstránenie z typu spôsobí TS chybu na každom zabudnutom mieste — typecheck je dôkaz úplnosti, nie niečia pamäť. |
+| D104 | Závislosť `argon2` sa odstraňuje z `package.json`. | Bez hesiel ju nič nepotrebuje. Vedľajší efekt: v git worktree padali VŠETKY route integračné testy na importe `argon2.glibc.node` (blokuje ho Windows Application Control) — táto trieda bolesti zmizla. |
+| D105 | Slovník prekážok (`src/lib/status/blockers.ts`) a UI texty prestávajú sľubovať heslo: prekážka `sudo` sa mení na `potvrdenie`. | Po D99/D100 žiadne heslo neexistuje a zámok, ktorý sa nemá čím otvoriť, je klamstvo v UI. Dôsledok D100. |
+| **D106** | **Uvoľňujúce mutácie v Nastaveniach dostávajú späť bránu — nie heslom, ale zaškrtávacím potvrdením.** `PUT /api/settings/domain` a `POST /api/settings/scope-mode` (len pri UVOĽNENÍ) žiadajú `confirmed: true`; `POST /api/settings/unlock-writes` ho už má z D99 a `DELETE /api/key` má vypísaný literál `KLUC UNIKOL`. Sprísnenie rozsahu zostáva VOĽNÉ. | Overenie sprintu ukázalo, že §3 kontraktu popisoval riziko UŽŠIE, než aké bolo: heslo v tele bolo pri týchto akciách JEDINÁ brána a jeho zmazaním sa z nich stal jeden tichý POST. Najdrahšia z nich je doména — kto ju prepíše, tomu zápisová cesta pošle **dešifrovaný produkčný API kľúč** v `X-Api-Key`, teda BEZ prístupu k `secrets/`; canary to nezastaví, číta bez kľúča. Samuel to rozhodol 28. 8. 2026 z troch ponúknutých variantov. Nie je to návrat prihlásenia (D99 platí): nič sa nepamätá a nič sa nezadáva, len raz zaškrtne. |
+| **D107** | Mŕtve prihlasovacie tajomstvá sa z disku **mažú**: `secrets/basic-auth.txt`, `secrets/app-admin.txt`, `secrets/Caddyfile.bak-2026-08-27`. | Po D98/D99 už nič nechránia. §3 obhajuje prijaté riziko vetou „kto vie čítať tento disk" — heslo, ktoré používateľ môže mať aj inde, tam nemá ležať bez dôvodu. Netrackované (I1), takže v gite sa nič nemení. Samuel potvrdil 28. 8. 2026. |
+
+**Čo sa zrušením prihlásenia stratilo** (povedané nahlas, kontrakt §3):
+ktorýkoľvek lokálny proces na tomto PC vie zapísať zľavy do produkčného eshopu
+jedným HTTP POST-om — hlavičku `Origin` si dosadí ľubovoľne, D72 je obrana proti
+prehliadačom, nie proti lokálnym skriptom. Nedotknuté zostávajú I5 (publikovaný
+je len `127.0.0.1:3070`) a D72 origin check na každej mutácii. Samuel toto riziko
+prijal 27. 8. 2026.
+
+**Doplnenie 28. 8. 2026 — riziko bolo širšie, než §3 napísalo.** Overenie sprintu
+našlo, že heslo v tele požiadavky bolo pri štyroch akciách JEDINÁ brána, a s ním
+padli všetky: zmena domény shopu, panic wipe kľúča, odomknutie runaway zámku
+a uvoľnenie rozsahu z 10 na 10 000 produktov. Zmena domény bola pritom cesta
+k **vyneseniu produkčného API kľúča bez prístupu k disku** — teda presne to, čo
+§3 vylučovala vetou „musí ukradnúť tajomstvo zo disku". **D106 tie brány
+obnovilo** ako zaškrtávacie potvrdenie. Poučenie: keď sa ruší autentifikácia,
+treba prejsť KAŽDÚ mutáciu a spísať, čo ju drží po zrušení — nie iba tú, ktorú
+invariant menuje (I3 hovorí o zápise zliav a o týchto štyroch mlčí).
 
 ---
 
@@ -230,7 +287,7 @@ Ak ich implementácia nedokáže splniť, úloha sa NEDOKONČÍ a nahlási sa ko
 | --- | --- |
 | **I1** | **API kľúč nikdy v repe, logoch, audite ani v UI.** Kľúč NESMIE byť v žiadnom trackovanom súbore, v `.env.example`, v obraze, v `docker inspect`, v stdout logu, v `audit_log`, v HTTP odpovedi appky ani v error stacktrace. Redaktor je centrálny a test, ktorý ho overuje, MUSÍ existovať a byť blokujúci. (R2, D50, D65, D66) |
 | **I2** | **Max 10 produktov, fail-closed.** Allowlist má maximálne 10 aktívnych záznamov (vynútené aj na úrovni DB), jedna operácia zapíše maximálne 10 produktov a akékoľvek product ID mimo aktívneho allowlistu MUSÍ byť odmietnuté **pred** volaním shop API. Pri pochybnosti sa NESMIE zapísať. (R1) |
-| **I3** | **Žiadny zápis bez potvrdenia.** Každý ostrý zápis MUSÍ mať v DB doložený predchádzajúci dry-run tej istej sady parametrov, potvrdenie používateľa a platné sudo okno (D70). Neexistuje cesta kódu, ktorá zapíše do shopu bez týchto troch vecí. Výnimka je jedine schedulerový fire kampane, ktorá potvrdením prešla pri vytvorení. (R5, D2, D16, D70) |
+| **I3** | **Žiadny zápis bez potvrdenia.** Každý ostrý zápis MUSÍ mať v DB doložený predchádzajúci dry-run tej istej sady parametrov a potvrdenie používateľa. Neexistuje cesta kódu, ktorá zapíše do shopu bez týchto dvoch vecí. Výnimka je jedine schedulerový fire kampane, ktorá potvrdením prešla pri vytvorení. **Znenie zmenila D100 (27. 8. 2026)**: dovtedy invariant žiadal aj „platné sudo okno (D70)". Sudo zmizlo — dry-run a potvrdenie NIE a oslabiť sa nesmú. (R5, D2, D16, D100) |
 | **I4** | **Audit je append-only.** Aplikačný kód NESMIE obsahovať `UPDATE`/`DELETE` nad `audit_log` a DB user na to NESMIE mať grant. Audit sa nemaže nikdy. (D74, D75) |
 | **I5** | **Bind len na 127.0.0.1.** Jediný publikovaný port je `127.0.0.1:3070` (Caddy). `ovl-zliav-app` a `ovl-zliav-db` NESMÚ mať `ports:`. Startup assertion + CI kontrola compose konfigurácie sú povinné. (R4, D78, D96) |
 | **I6** | **Testy len proti mocku.** Žiadny test (unit, integračný, e2e) NESMIE poslať request na reálnu doménu shopu. Test setup MUSÍ globálne zablokovať `fetch` na iný host než lokálny mock a pokus o reálny host MUSÍ test zhodiť. (D99, R5) |
@@ -279,7 +336,7 @@ sa len uvedené miesto v `11-BUILD-SPEC.md`.
 | O1 | Vzťah „kampaň" ↔ „job" (D14 vs D83 majú rôzne sady stavov) | Kampaň **je** job; v DB je jeden `status` s lifecycle hodnotami (`draft`, `scheduled`, `needs_key`, `running`, `done`, `partial`, `failed`, `missed`, `cancelled`, `lapsed`) a UI stavy „aktívna"/„expirovaná" sa **derivujú** z `status='done'` a dátumov okna. |
 | O2 | Prenos potvrdenej dry-run sady do zápisu | Podpísaný `preview_token` (JWT, TTL 15 min) obsahujúci hash sady parametrov a `price_at_preview` per produkt; zápis bez platného tokenu sa odmietne (podpora I3). |
 | O3 | Kde žije heartbeat, write-lock a runaway počítadlo | Tabuľka `scheduler_state` (heartbeat, tick metriky) a `settings` (write lock); runaway počet sa počíta dotazom nad `audit_log` (append-only, teda neobíditeľné). |
-| O4 | Brute-force lockout musí prežiť restart | Tabuľka `login_attempts`; in-memory riešenie je zakázané. |
+| O4 | Brute-force lockout musí prežiť restart | Tabuľka `login_attempts`; in-memory riešenie je zakázané. **Bezpredmetné od 27. 8. 2026 (D99):** login neexistuje, takže ani lockout — tabuľka v schéme zostáva prázdna (D101, žiadna migrácia). |
 | O5 | „Bind 127.0.0.1" vs. dosiahnuteľnosť z Caddy kontajnera | V kontajneri appka počúva na `0.0.0.0` **internej compose siete** a nepublikuje port; localhost-only garanciu dáva publikovaný mapping Caddy `127.0.0.1:3070` + CI kontrola, že `ovl-zliav-app`/`ovl-zliav-db` nemajú `ports:`. Startup assertion kontroluje deklarovaný `PUBLIC_BIND` a odmietne štart, ak nie je `127.0.0.1`. |
 | O6 | Notifikačný panel (D17) bez ďalšej tabuľky | Stĺpec `result_ack_at` na `campaigns`; „neodkliknuté" = `status IN (done, partial, failed, missed, lapsed) AND result_ack_at IS NULL`. |
 | O7 | Kto vlastní `package.json` | Úloha A0 vytvorí `package.json` s **kompletnou** sadou závislostí pre celý projekt; žiadna ďalšia úloha ho NESMIE upravovať (viď `12-SPRINT-PLAN.md`). |

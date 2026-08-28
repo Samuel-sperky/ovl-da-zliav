@@ -40,7 +40,6 @@ import type {
   ProductFullDetail,
   SecretHandle,
   SecretRef,
-  SessionClaims,
   ShopError,
 } from '@/contracts';
 
@@ -920,39 +919,11 @@ describe('doťahovanie zrkadlo nenapĺňa, len obohacuje', () => {
 
 /* ═════════════ 6. Route `POST /api/catalog/details` ═══════════════════════ */
 
-function claims(): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
-/** Session vrstva bez JWT — testuje sa route, nie podpis (to vlastní A4). */
 function sessionDeps(): RouteDeps {
   return {
     now,
     newRequestId: () => '01J000000000000000DETAIL',
-    verifySession: async () => ({
-      claims: claims(),
-      refreshed: {
-        token: 'refreshed',
-        claims: claims(),
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 

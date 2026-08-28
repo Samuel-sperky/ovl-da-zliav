@@ -22,7 +22,6 @@ export function createInsightsDiscountDepthGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async () => {
         const products = await d.insightsRepo.discountDepth();
         return { today: todayOf(d), products };

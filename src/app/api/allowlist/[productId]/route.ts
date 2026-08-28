@@ -35,7 +35,6 @@ export function createAllowlistDelete(
   return defineRoute(
     {
       method: 'DELETE',
-      auth: 'session',
       params: productIdParamSchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -62,7 +61,7 @@ export function createAllowlistDelete(
             actor: 'user',
             eventType: 'allowlist_removed',
             ok: true,
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
             productId: ctx.params.productId,
             message: `Produkt ${ctx.params.productId} odobraný z allowlistu.`,
           });

@@ -98,7 +98,6 @@ export function createInsightsSalesDailyGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: querySchema,
       handler: async (ctx) => {
         // LAZY čítanie ENV — eager by spustilo validáciu už počas zostavenia.

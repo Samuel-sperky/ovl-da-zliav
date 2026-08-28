@@ -184,15 +184,17 @@ describe('panel rozsahu povie fakt raz — nie vetou aj číslami naraz', () => 
     }
   });
 
-  it('cesta von zo stropu zostala celá — krok, odkaz aj upozornenie na heslo', () => {
+  it('cesta von zo stropu zostala celá — krok, odkaz aj upozornenie na potvrdenie', () => {
     const html = scopeHtml();
     // Bod E — veta sa pýta zo `blockers.ts`, neporovnáva sa na literál.
     expect(text(html), 'ďalší krok zmizol so škatuľou').toContain(stropBlocker!.nextStep);
     expect(html).toContain('/nastavenia#rozsah');
     expect(text(html)).toContain('Prepnúť rozsah v Nastaveniach');
-    expect(text(html), 'zámok nesmie zmiznúť — heslo je prekvapenie až v dialógu').toContain(
-      'heslo',
-    );
+    // Do 27. 8. 2026 tu stálo „heslo"; D105 ho vymenilo za „potvrdenie".
+    expect(
+      text(html),
+      'zámok nesmie zmiznúť — potvrdenie je prekvapenie až pri prepnutí',
+    ).toContain('potvrdenie');
   });
 
   it('panel bez prekážky povie čísla aj cestu — a tiež bez škatule', () => {

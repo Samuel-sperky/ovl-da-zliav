@@ -15,10 +15,11 @@
  *    v doc-bloku `blockers.ts` a je to jediný spôsob, ako sa čakanie na denný
  *    rozpočet neprefarbí na poruchu — vyčerpaný rozpočet je `blokuje`, a pritom
  *    sa nič nepokazilo (K2). Mapovanie drží `noteVariantForResolution()`.
- * 2. **Prekážka, ktorú otvorí heslo, vyzerá ako ZÁMOK.** `resolution: 'sudo'`
- *    dostane `LockBadge` s dôvodom — používateľ tak vidí, že cesta existuje,
- *    ešte skôr, než na ňu má právo. Zámok bez dôvodu sa v tejto appke nekreslí,
- *    preto ide do `reason` celá veta, nie len názov.
+ * 2. **Prekážka, ktorú otvorí potvrdenie, vyzerá ako ZÁMOK.**
+ *    `resolution: 'potvrdenie'` dostane `LockBadge` s dôvodom — používateľ tak
+ *    vidí, že cesta existuje, ešte skôr, než ju vedome otvorí. Zámok bez dôvodu
+ *    sa v tejto appke nekreslí, preto ide do `reason` celá veta, nie len názov.
+ *    Kód sa do 27. 8. 2026 volal `sudo` a zámok sľuboval heslo (D105).
  * 3. **Domnienka sa PRIZNÁVA.** `assumed: true` znamená, že veta stojí na
  *    fail-closed predpoklade, lebo sa údaj nedal prečítať. Appka sa nesmie
  *    tváriť, že niečo vie — je to tretí riadok vysvetlivky, nie skrytý detail.
@@ -106,10 +107,11 @@ export function BlockerNotes({ blockers, here, testId }: BlockerNotesProps) {
       data-testid={testId}
     >
       {blockers.map((blocker) =>
-        // Zámok kreslíme len tam, kde cesta existuje a otvorí ju heslo. Kým
-        // prekážka nič nezastavuje, je to tichá poznámka o pravidle — a presne
-        // tak má vyzerať: strop sa má vidieť skôr, než doň niekto narazí.
-        blocker.resolution === 'sudo' && blocker.severity === 'informuje' ? (
+        // Zámok kreslíme len tam, kde cesta existuje a otvorí ju potvrdenie.
+        // Kým prekážka nič nezastavuje, je to tichá poznámka o pravidle —
+        // a presne tak má vyzerať: strop sa má vidieť skôr, než doň niekto
+        // narazí.
+        blocker.resolution === 'potvrdenie' && blocker.severity === 'informuje' ? (
           <LockBadge
             key={blocker.id}
             reason={<BlockerBody blocker={blocker} here={here ?? null} />}

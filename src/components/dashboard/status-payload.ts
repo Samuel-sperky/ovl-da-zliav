@@ -70,7 +70,9 @@ const SUBJECTS = ['operacia', 'produkt'] as const satisfies readonly BlockerWire
 
 const RESOLUTIONS = [
   'sam',
-  'sudo',
+  // Do 27. 8. 2026 tu stálo 'sudo'; D105 (dôsledok D100) prekážku prekrstilo na
+  // 'potvrdenie', pretože heslo, ktorým sa dala otvoriť, už neexistuje.
+  'potvrdenie',
   'cakanie',
   'mimo_appky',
 ] as const satisfies readonly BlockerWire['resolution'][];

@@ -15,8 +15,9 @@ export const APP_DISPLAY_NAME = 'Aura Zľavy';
 /** Verzia — musí sa rovnať `version` v `package.json`. */
 export const APP_VERSION = '0.1.0';
 
-/** Názov session cookie (R10, D69). */
-export const SESSION_COOKIE_NAME = 'ovl_zliav_session';
+/* 27. 8. 2026 (D99): `SESSION_COOKIE_NAME = 'ovl_zliav_session'` zmazané.
+   App session je zmazaná z kódu a appka taký cookie už nevydáva; názov žije
+   len v histórii rozhodnutí (docs/10-KONTRAKT.md R10, D69). */
 
 /** Názov DB advisory locku pre migrácie (D88). */
 export const MIGRATION_LOCK_NAME = 'ovl_zliav_migrate';

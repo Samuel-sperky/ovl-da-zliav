@@ -42,7 +42,6 @@ export function createExtendPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'sudo',
       body: bodySchema,
       params: idParamSchema,
       handler: (ctx) =>
@@ -105,7 +104,7 @@ export function createExtendPost(
               to: newTo,
               percents,
             },
-            ctx.claims.sub,
+            ctx.actor.id,
           );
 
           const record = await insertConfirmedCampaign(d, {
@@ -116,13 +115,13 @@ export function createExtendPost(
             status: 'draft',
             fireAt: null,
             parentCampaignId: parent.id,
-            createdBy: ctx.claims.sub,
+            createdBy: ctx.actor.id,
             percents,
           });
 
           await makeExecutor(d).executeCampaign(record.id, {
             actor: 'user',
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
           });
           return { campaignId: record.id };
         }),

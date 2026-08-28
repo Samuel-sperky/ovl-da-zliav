@@ -28,8 +28,8 @@
  * ČO TENTO MODUL O ODPOVEDI SERVERA NEOVERUJE
  * -------------------------------------------
  * Obsah `data`. `getJson<T>()` je generický prenos a `T` v ňom za behu
- * neexistuje — kto potrebuje overený OBSAH, dostane ho tak, ako `fetchSession()`
- * nižšie alebo `getAudit()` v `components/audit/api.ts`: `getJson<unknown>()`
+ * neexistuje — kto potrebuje overený OBSAH, dostane ho tak, ako `getAudit()`
+ * v `components/audit/api.ts`: `getJson<unknown>()`
  * a k tomu `parseX()` postavené z `components/dashboard/json.ts`. Tá cesta je
  * jediná; druhá implementácia tých istých piatich funkcií by sa o mesiac
  * rozišla s prvou a jedna obrazovka by začala čítať voľnejšie než druhá.
@@ -39,7 +39,6 @@
  * nečítal — len už nikdy `undefined`. Zoznam obrazoviek, ktoré na ten obsah
  * ešte len čakajú, je v hlavičke `test/unit/api-citanie-odpovedi.spec.ts`.
  */
-import { asRecord, readText } from '@/components/dashboard/json';
 import type {
   CampaignKind,
   CampaignMode,
@@ -221,13 +220,6 @@ export interface AllowlistProduct {
   price: string | null;
   hasAttributes: boolean;
   lastOwnWrite: LastOwnWriteView | null;
-}
-
-export interface SessionInfo {
-  username: string;
-  absoluteExpiresAt: string;
-  idleExpiresAt: string;
-  sudoUntil: string | null;
 }
 
 /* ── fetch helpery ─────────────────────────────────────────────────────── */
@@ -417,56 +409,4 @@ export function validateExtendTo(lockedFrom: string, currentTo: string, newTo: s
   return null;
 }
 
-/* ── sudo okno (D70, plán §7 — 30 min, heslo raz) ──────────────────────── */
 
-/** `true`, keď sudo okno ešte platí (server ho vyhodnocuje fail-closed sám). */
-export function sudoValid(sudoUntil: string | null | undefined): boolean {
-  if (!sudoUntil) return false;
-  const t = new Date(sudoUntil).getTime();
-  return Number.isFinite(t) && t > Date.now();
-}
-
-/** Koľko sekúnd sudo okna zostáva (0 = neplatí) — pre odpočet v UI. */
-export function sudoSecondsLeft(sudoUntil: string | null | undefined): number {
-  if (!sudoUntil) return 0;
-  const t = new Date(sudoUntil).getTime();
-  if (!Number.isFinite(t)) return 0;
-  return Math.max(0, Math.ceil((t - Date.now()) / 1000));
-}
-
-/**
- * Session tak, ako ju appka naozaj prečítala — nie ako ju pretypovala.
- *
- * `sudoValid()` a `sudoSecondsLeft()` nižšie stoja na `sudoUntil`, a zámok
- * sudo okna je poistka proti nechcenému zápisu do ostrého eshopu (D70). Keby
- * server poslal `sudoUntil: 12345` (číslo, nie reťazec), `new Date(…)` z toho
- * vyrobí platný čas z roku 1970, `sudoValid()` povie `false` a používateľ
- * dostane heslové okno navyše. Naopak `absoluteExpiresAt`, ktoré chýba, dnes
- * prejde ako `undefined` a odpočet v UI ukáže „NaN".
- *
- * Preto sa obsah overuje TU: `null` znamená „session sa nedá prečítať", čo je
- * ten istý výsledok, aký volajúci dostane pri chýbajúcej session — a to je
- * fail-closed správne, nie strata informácie.
- */
-export function parseSession(raw: unknown): SessionInfo | null {
-  const record = asRecord(raw);
-  if (record === null) return null;
-  const username = readText(record, 'username');
-  const absoluteExpiresAt = readText(record, 'absoluteExpiresAt');
-  const idleExpiresAt = readText(record, 'idleExpiresAt');
-  // Bez týchto troch nie je čo zobraziť ani čo odpočítavať.
-  if (username === null || absoluteExpiresAt === null || idleExpiresAt === null) return null;
-  return {
-    username,
-    absoluteExpiresAt,
-    idleExpiresAt,
-    // `sudoUntil` chýbať SMIE — znamená to „sudo okno neplatí" a `sudoValid()`
-    // to tak aj číta. Nesmie byť len niečím iným než reťazcom.
-    sudoUntil: readText(record, 'sudoUntil'),
-  };
-}
-
-export async function fetchSession(): Promise<SessionInfo | null> {
-  const res = await getJson<unknown>('/api/auth/session');
-  return res.ok ? parseSession(res.data) : null;
-}

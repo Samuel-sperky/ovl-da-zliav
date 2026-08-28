@@ -75,7 +75,6 @@ export function createAiInsightsGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async () => {
         // LAZY env — rovnaký dôvod ako `api/insights/_shared.ts` (build bez ENV).
         const timeZone = overrides.timeZone ?? env.LOGIC_TIMEZONE;

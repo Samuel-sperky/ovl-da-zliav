@@ -113,11 +113,13 @@ describe('resolutionTone — čakanie nie je poplach', () => {
 
   it('to, s čím používateľ TERAZ môže niečo urobiť, je jantárové', () => {
     expect(resolutionTone('sam')).toBe('attention');
-    expect(resolutionTone('sudo')).toBe('attention');
+    // 'potvrdenie' sa do 27. 8. 2026 volalo 'sudo' (D105) — tón zostal rovnaký,
+    // zámok už len otvára výslovné potvrdenie namiesto hesla.
+    expect(resolutionTone('potvrdenie')).toBe('attention');
   });
 
   it('z prekážky nikdy nevznikne červená — tá je pre zastavený zápis', () => {
-    const tones = (['sam', 'sudo', 'cakanie', 'mimo_appky'] as const).map(resolutionTone);
+    const tones = (['sam', 'potvrdenie', 'cakanie', 'mimo_appky'] as const).map(resolutionTone);
     expect(tones).not.toContain('critical');
   });
 });

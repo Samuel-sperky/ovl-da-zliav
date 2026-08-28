@@ -18,11 +18,17 @@
  *    znamená najprísnejší režim. `get()` naopak hádže ďalej — je to bežné
  *    čítanie nastavení a tichý default by tam bol klamstvo.
  *
- * Čo sa tu NESMIE pokaziť: `scopeChangeRequiresSudo()` je jediné miesto, kde je
+ * Čo sa tu NESMIE pokaziť: `scopeChangeIsLoosening()` je jediné miesto, kde je
  * napísaná asymetria K1 bodu 4 („sprísnenie je vždy voľné, uvoľnenie nikdy").
- * Route ju vynucuje, obrazovka ju ohlasuje dopredu — ale rozhodnutie musí
- * pochádzať z jednej funkcie, inak sa raz rozídu a heslo si vypýta niečo iné,
- * než čo obrazovka sľúbila.
+ * `POST /api/settings/scope-mode` ju zapisuje do auditu, `GET /api/settings` ju
+ * ohlasuje obrazovke dopredu — ale rozhodnutie musí pochádzať z jednej funkcie,
+ * inak sa raz rozídu a obrazovka ohlási iné, než čo audit zapíše.
+ *
+ * 27. 8. 2026 (D100): do tohto dňa od tejto asymetrie záviselo, či si zmena
+ * vypýta sudo okno a heslo. Sudo aj heslá zmizli (D100, D99), takže táto funkcia
+ * NEDRŽÍ ŽIADNU BRÁNU — je to len rozlíšenie „uvoľnenie / sprísnenie" pre audit
+ * a pre dopredné ohlásenie na obrazovke. Kto na nej stavia UI alebo routu, nech
+ * od nej nečaká, že niečo zastaví.
  *
  * Vlastník: V4.
  */
@@ -96,25 +102,28 @@ export interface ScopeChangeIntent {
 /**
  * K1 bod 4 — „sprísnenie je vždy voľné, uvoľnenie nikdy."
  *
- * Vracia `true`, keď zmena rozsah UVOĽŇUJE, a teda si musí vypýtať heslo
- * (sudo). Uvoľnením sú DVE veci, nie jedna:
+ * Vracia `true`, keď zmena rozsah UVOĽŇUJE. Do 27. 8. 2026 si taká zmena
+ * vypýtala sudo okno a heslo; D100 sudo zrušila a D99 heslá, takže návratová
+ * hodnota už NIČ NEZASTAVÍ — audit ju zapíše ako `looseningScope` a obrazovka
+ * ju ohlási dopredu. Uvoľnením sú DVE veci, nie jedna:
  *
  *  1. **`pilot → plny`** — aj pri rovnakom čísle stropu. V `plny` sa prestáva
  *     vynucovať allowlist a nastupuje katalóg (K1 bod 2), takže sa mení to,
  *     KTORÉ produkty prejdú, nie len koľko ich prejde.
  *  2. **zvýšenie efektívneho stropu** — vrátane `plny → plny` z 8 000 na
- *     10 000. Bez tejto vetvy by sa dal strop zdvihnúť bez hesla a z vety
- *     „rozsah sa nedá rozšíriť bez sudo" (I2 po K1) by ostala polovica.
+ *     10 000. Bez tejto vetvy by sa strop dal zdvihnúť tak, že by to audit
+ *     zapísal ako sprísnenie, a z rozlíšenia „rozšírenie rozsahu / zúženie
+ *     rozsahu" (I2 po K1) by ostala polovica.
  *
- * Opačný smer (`plny → pilot`, zníženie stropu, rovnaký stav) heslo NIKDY
- * nepýta — v núdzi sa appka musí dať pribrzdiť aj bez neho. Preto sa tu
+ * Opačný smer (`plny → pilot`, zníženie stropu, rovnaký stav) nie je uvoľnením
+ * NIKDY — v núdzi sa appka musí dať pribrzdiť. Preto sa tu
  * porovnávajú EFEKTÍVNE stropy: uložený `max_products_per_campaign` sa
  * v `pilot` nepoužíva a jeho zmena tam nie je uvoľnením ničoho.
  *
  * Fail-closed: `before` z nečitateľnej DB je `pilot` (`FAIL_CLOSED_SCOPE`),
- * takže prechod z „neviem" do `plny` je uvoľnenie a heslo si vypýta.
+ * takže prechod z „neviem" do `plny` sa vyhodnotí ako uvoľnenie.
  */
-export function scopeChangeRequiresSudo(
+export function scopeChangeIsLoosening(
   before: ScopeSettings,
   intent: ScopeChangeIntent,
 ): boolean {
@@ -123,9 +132,10 @@ export function scopeChangeRequiresSudo(
   // Návrat do `pilot` je SPRÍSNENIE vždy, aj keď efektívny strop pritom
   // číselne stúpne. Stane sa to pri uloženom strope pod desať: `plny` s
   // `max_products_per_campaign = 5` má efektívny strop 5, `pilot` má 10, takže
-  // porovnanie čísel by z brzdy spravilo uvoľnenie a vypýtalo si heslo. To je
-  // presne ten prípad, keď človek appku zastavuje a heslo po ruke mať nemusí —
-  // K1 bod 4 hovorí „sprísnenie je vždy voľné" bez výnimky. Rozsah `pilot` je
+  // porovnanie čísel by z pribrzdenia spravilo uvoľnenie a audit by o zúžení
+  // rozsahu hlásil rozšírenie. To je presne ten prípad, keď človek appku
+  // zastavuje — K1 bod 4 hovorí „sprísnenie je vždy voľné" bez výnimky.
+  // Rozsah `pilot` je
   // navyše užší aj vtedy, keď je číslo vyššie: vynucuje sa v ňom allowlist.
   if (intent.mode === 'pilot') return false;
 

@@ -239,6 +239,50 @@ describe('/api/health — I1: nič citlivé v odpovedi', () => {
     expect((on.body.data as HealthReport).writesEnabled).toBe(true);
   });
 
+  /*
+   * D102 / 27. 8. 2026 — actor vrstva nesmie zhodiť health.
+   *
+   * Po zrušení loginu dohľadáva `defineRoute()` lokálneho actora a robí to
+   * cez DB pool. Kým to robil bezpodmienečne, výnimka z tej vrstvy spadla do
+   * `failWith()` a `GET /api/health` vrátil 500 `internal_error` — teda presne
+   * to, čo docblock route zakazuje. Docker healthcheck by potom appku poslal
+   * do restart loopu vtedy, keď má appka povedať „DB je dole" (I11).
+   *
+   * Stub je ZÁMERNE hrubý: hádže hláškou s heslom z testovacej DB, aby test
+   * zároveň držal I1 — do odpovede nesmie uniknúť ani detail chyby.
+   */
+  it('výnimka z actor vrstvy (D102, DB dole) NEVRÁTI 500', async () => {
+    resetRateLimiter();
+    const handler = createHealthRoute({
+      ...healthDeps({
+        db: async () => {
+          throw new Error('connect ECONNREFUSED 127.0.0.1:3306');
+        },
+      }),
+      routeDeps: {
+        now: () => NOW,
+        localActor: async () => {
+          throw new Error(
+            'connect ECONNREFUSED 127.0.0.1:3306 (heslo test_app_password) — users nedostupné',
+          );
+        },
+      },
+    });
+
+    const response = await handler(new Request('https://app.local/api/health'));
+    const raw = await response.text();
+    const parsed: Parsed = { status: response.status, raw, body: JSON.parse(raw) as Parsed['body'] };
+
+    expect(parsed.status).not.toBe(500);
+    expect(parsed.status).toBe(200);
+    expect(parsed.body.ok).toBe(true);
+    const data = parsed.body.data as HealthReport;
+    // Výpadok sa MENUJE, nezamlčí: `db:false` + `degraded` je tá odpoveď.
+    expect(data.db).toBe(false);
+    expect(data.status).toBe('degraded');
+    assertNoLeak(parsed);
+  });
+
   it('starý scheduler tick => degraded (D87), stále bez citlivých údajov', async () => {
     const parsed = await callHealth(
       healthDeps({

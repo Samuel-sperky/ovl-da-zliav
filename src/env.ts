@@ -61,17 +61,24 @@ export const envSchema = z
     DB_CONNECT_RETRIES: intFromString({ min: 0, max: 60, default: 10 }),
     DB_CONNECT_RETRY_DELAY_MS: intFromString({ min: 100, max: 30_000, default: 2000 }),
 
-    // Tajomstvá zo súborov (D61, D69, O2)
+    // Tajomstvá zo súborov (D61, O2)
     MASTER_KEY_FILE: nonEmpty(512).default('/run/secrets/master.key'),
+    /*
+     * Podpisový materiál. Menuje sa „session", ale session appka od 27. 8. 2026
+     * NEMÁ (D99) — tento secret podpisuje PREVIEW TOKEN (O2), teda tú istú
+     * mašinériu, ktorá po zrušení sudo drží I3 („žiadny zápis bez dry-runu
+     * a potvrdenia"). Preto zostáva a premenovať sa nedá bez zmeny .env.
+     */
     SESSION_SECRET_FILE: nonEmpty(512).default('/run/secrets/session.key'),
 
-    // Kľúč shopu, session, sudo, lockout (R2, D69–D71)
+    // Kľúč shopu (R2)
     API_KEY_TTL_HOURS: intFromString({ min: 1, max: 48, default: 48 }),
-    SESSION_ABSOLUTE_HOURS: intFromString({ min: 1, max: 24, default: 8 }),
-    SESSION_IDLE_MINUTES: intFromString({ min: 1, max: 480, default: 30 }),
-    SUDO_WINDOW_MINUTES: intFromString({ min: 1, max: 60, default: 15 }),
-    LOGIN_MAX_ATTEMPTS: intFromString({ min: 1, max: 20, default: 5 }),
-    LOGIN_WINDOW_MINUTES: intFromString({ min: 1, max: 1440, default: 15 }),
+    /*
+     * SESSION_ABSOLUTE_HOURS, SESSION_IDLE_MINUTES, SUDO_WINDOW_MINUTES,
+     * LOGIN_MAX_ATTEMPTS a LOGIN_WINDOW_MINUTES tu stáli do 27. 8. 2026 (D69,
+     * D70, D71). Zmizli s prihlásením (D99, D100). Schéma nie je `strict`,
+     * takže ich zvyšok v `.env` nič nerozbije — len ich nikto nečíta.
+     */
 
     // Scheduler (D32, D82, D87)
     SCHEDULER_ENABLED: boolFromString(true),

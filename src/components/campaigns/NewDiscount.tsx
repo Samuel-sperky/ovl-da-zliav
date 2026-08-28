@@ -43,7 +43,8 @@
  *     ako číslo** — nákupné ceny appka nemá.
  *  5. **Strop výber neodmietne ticho.** Keď je vo filtri viac produktov, než
  *     pustí režim rozsahu, obrazovka to POVIE a rovno ponúkne prepnutie do
- *     plného rozsahu aj s upozornením na heslo (`ScopeRelease`). Odmietnutie
+ *     plného rozsahu aj s upozornením, že si to vyžiada výslovné potvrdenie
+ *     (`ScopeRelease`; do 27. 8. 2026 heslo — D105). Odmietnutie
  *     bez ponuky je tu zakázané — presne to bol dôvod, prečo sa appka nedala
  *     použiť na viac než desať produktov.
  *  6. **Čas hovorí jedno číslo.** Koľko je vo fronte pred nami vie povedať
@@ -95,7 +96,6 @@ import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import NewDiscountStart from '@/components/campaigns/NewDiscountStart';
 import ScopeRelease from '@/components/campaigns/ScopeRelease';
 import styles from '@/components/campaigns/zlavy.module.css';
-import { fetchSession, sudoValid } from '@/components/campaigns/api';
 import {
   alarmingCards,
   cardOfBlocker,
@@ -141,7 +141,6 @@ import {
   type StatusPayload,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
-import SudoPrompt from '@/components/ui/SudoPrompt';
 import {
   SOLD_WINDOWS,
   catalogFilterKey,
@@ -260,8 +259,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [created, setCreated] = useState<CreateResult | null>(null);
 
-  const [sudoUntil, setSudoUntil] = useState<string | null>(null);
-  const [showSudo, setShowSudo] = useState(false);
 
   /** Generácia načítania — odpoveď starého výberu sa nesmie zapísať do nového. */
   const gen = useRef(0);
@@ -308,9 +305,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       }),
       fetchStatus().then((res) => {
         if (fresh() && res.ok) setStatus(res.data);
-      }),
-      fetchSession().then((session) => {
-        if (fresh()) setSudoUntil(session?.sudoUntil ?? null);
       }),
     ]);
   });
@@ -679,11 +673,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
   function onQueue() {
     if (blockedReason !== null) return;
-    // D70 — od poslednej autentifikácie viac než 15 min → heslo znova.
-    if (!sudoValid(sudoUntil)) {
-      setShowSudo(true);
-      return;
-    }
+    // Do 27. 8. 2026 tu stálo overenie sudo okna (D70). Zaradenie do fronty
+    // ďalej NIE JE jeden klik: `blockedReason` a náhľad (dry-run) držia I3.
     void doQueue();
   }
 
@@ -1138,17 +1129,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         </div>
       </div>
 
-      {showSudo ? (
-        <SudoPrompt
-          actionLabel="Zaradenie zľavy do fronty zápisov"
-          onSuccess={(until) => {
-            setSudoUntil(until);
-            setShowSudo(false);
-            void doQueue();
-          }}
-          onCancel={() => setShowSudo(false)}
-        />
-      ) : null}
     </div>
   );
 }

@@ -1,12 +1,23 @@
 /**
  * Aura Zľavy — `GET /api/health` (BUILD-SPEC §5, D87, D91, I1).
  *
- * Verejný v rámci compose siete (docker healthcheck), preto `auth: 'none'` —
- * a preto NESMIE prezradiť nič citlivé: žiadne `last4`, žiadne detaily kľúča,
- * žiadna doména, žiadne stacktrace. Kľúč sa hlási len ako `{present, expiresAt}`.
+ * Volá ho docker healthcheck z compose siete, takže tu NIKDY nebolo prihlásenie
+ * a od 27. 8. 2026 už nie je nikde (D99) — o to prísnejšie platí, čo route
+ * NESMIE prezradiť: žiadne `last4`, žiadne detaily kľúča, žiadna doména, žiadne
+ * stacktrace. Kľúč sa hlási len ako `{present, expiresAt}`.
  *
  * Fail-closed: ak sa niektorý podsystém nedá prečítať, hlási sa ako nezdravý
  * a celkový stav je `degraded` — health nikdy nehodí 500 kvôli DB výpadku.
+ *
+ * TENTO SĽUB DRŽÍ AJ ACTOR VRSTVA (27. 8. 2026, D102). Od zrušenia loginu
+ * dohľadáva `defineRoute()` lokálneho actora, a to ide do DB poolu. Kým to
+ * robil bezpodmienečne, nedostupná MariaDB skončila ako 500 `internal_error`
+ * ešte pred handlerom — teda presne tu sľub padal a docker healthcheck by
+ * appku poslal do restart loopu vtedy, keď má appka povedať „DB je dole".
+ * Čítacia cesta si preto actora dohľadáva fail-soft a až keď ho handler chce
+ * (`define-route.ts`, vrstva 1); tento handler ho nechce vôbec, takže o výpadku
+ * hovorí `db: false` a `status: 'degraded'`, nie 500. Strážené v
+ * `test/integration/health.spec.ts`.
  *
  * Vlastník: A11.
  */
@@ -61,7 +72,6 @@ export function createHealthRoute(deps: HealthRouteDeps = {}): NextRouteHandler 
   return defineRoute(
     {
       method: 'GET',
-      auth: 'none',
       handler: async (ctx): Promise<HealthReport> => {
         const now = (deps.routeDeps?.now ?? (() => new Date()))();
 

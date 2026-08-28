@@ -3,9 +3,11 @@
  * NIE JE to route — Next.js registruje výhradne `route.ts`.
  *
  * Pravidlá, ktoré tu platia bez výnimky:
- *   · **Žiadna mutácia.** Každá route je `GET`, `auth: 'session'`, a jediné,
- *     čo robí, je `SELECT` cez `insightsRepo`. Neexistuje tu cesta k zápisu do
- *     shopu ani do DB — teda ani cesta, ktorá by obišla potvrdenie (I3).
+ *   · **Žiadna mutácia.** Každá route je `GET` a jediné, čo robí, je `SELECT`
+ *     cez `insightsRepo`. Neexistuje tu cesta k zápisu do shopu ani do DB —
+ *     teda ani cesta, ktorá by obišla potvrdenie (I3). Práve preto tu nič
+ *     nechýba po tom, čo 27. 8. 2026 zmizlo prihlásenie (D99): brániť sa dá
+ *     len zápisu, a tu žiadny nie je.
  *   · **Žiadny kľúč, žiadne tajomstvo v odpovedi (I1).** Telo aj tak prechádza
  *     centrálnym redaktorom v `responses.ts`, ale grafy o kľúči nevedia nič
  *     a ani ho nepotrebujú — TTL kreslí hlavička z vlastných dát.

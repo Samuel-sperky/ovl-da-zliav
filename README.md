@@ -1,9 +1,21 @@
 # Aura Zľavy (ovl-da-zliav)
 
 Lokálna appka na ovládanie zliav v e-shope so šperkami cez jeho API.
-Beží výhradne na `http://localhost:3070` (Caddy, basic auth; HTTP bez TLS je
-vedomá voľba — dôvod je v `Caddyfile.example`) — žiadna verejná expozícia,
-žiadny tunel (R4, I5).
+Beží výhradne na `http://localhost:3070` (Caddy; HTTP bez TLS je vedomá voľba —
+dôvod je v `Caddyfile.example`) — žiadna verejná expozícia, žiadny tunel
+(R4, I5).
+
+**Appka nemá prihlásenie.** Otvoríš adresu a si vnútri. Basic auth, prihlásenie
+do appky aj sudo boli 27. 8. 2026 zrušené (D98–D100): na jednoužívateľskom
+lokálnom nástroji to boli tri vrstvy toho istého hesla. Čo appku chráni, na tom
+nezáviselo — je to I5 (publikovaný je len `127.0.0.1:3070`) a D72 (origin check
+na každej mutácii).
+
+**Čo sa tým stratilo, povedané nahlas:** ktorýkoľvek lokálny proces na tomto PC
+vie zapísať zľavy do produkčného eshopu jedným HTTP POST-om. Hlavičku `Origin`
+si dosadí ľubovoľne — D72 je obrana proti prehliadačom, nie proti lokálnym
+skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
+`KONTRAKT-BEZ-LOGINU-2026-08-27.md` §3.
 
 > **PRODUKCIA BEZ STAGINGU.** Appka zapisuje priamo do produkčného shopu.
 > Každý zápis je dvojkrokový (skúška naprázdno → potvrdenie) a celý sa
@@ -57,17 +69,19 @@ Kompletný postup: **`docs/21-RUNBOOKY.md` → R1. Prvý setup.** Skrátene:
 mkdir -p secrets backups && chmod 700 secrets backups
 npm ci
 npm run gen-master-key                       # secrets/master.key (D61)
-# ... session key, DB heslá, .env, secrets/Caddyfile — viď runbook R1
+# ... session key (podpisuje preview token), DB heslá, .env, secrets/Caddyfile — viď runbook R1
 docker compose up -d --build
-curl -u samuel http://localhost:3070/api/health   # 200 (bez -u je to 401)
+curl http://localhost:3070/api/health              # 200, bez hesla (D98 z 27. 8. 2026)
 ```
 
 Onboarding ako sprievodca (D20) v architektúre V3 **neexistuje** — zrušila ho
 a nahradila prázdnymi stavmi s odkazmi (`design/v3/ARCHITEKTURA.md`, a hovorí to
-o sebe aj `src/app/onboarding/page.tsx`). Prvé prihlásenie teda vedie na Prehľad,
+o sebe aj `src/app/onboarding/page.tsx`). Prvé otvorenie teda vedie na Prehľad,
 ktorý prázdnymi stavmi ukáže, čo chýba: doména, API kľúč, povolené produkty.
 Rozsah začína na `pilot`; prepnutie do `plny` je samostatné, auditované
-rozhodnutie v Nastaveniach a žiada sudo (K1).
+rozhodnutie v Nastaveniach (K1). Heslo si nevyžiada — sudo zrušila D100
+(27. 8. 2026); do auditu sa ďalej zapisuje, či šlo o uvoľnenie alebo sprísnenie
+rozsahu (`looseningScope`).
 
 > **V prehliadači používaj `localhost`, nie `127.0.0.1`.** Caddy poslúcha na
 > oboch menách, ale na `127.0.0.1` si prehliadač mohol pripnúť HSTS od úplne inej
@@ -84,12 +98,13 @@ rozhodnutie v Nastaveniach a žiada sudo (K1).
 | Hranica | Vynútenie |
 | --- | --- |
 | API kľúč nikdy v repe, logoch, audite, UI ani zálohe (I1) | AES-256-GCM + TTL 48 h + wipe; centrálny redaktor; gitleaks v CI; `backup.sh --ignore-table=ovl_zliav.api_key` |
-| Zápis len do produktu v povolenom rozsahu, fail-closed (I2 v tvare K1) | v `pilot` allowlist v DB (UNIQUE slot 1–10), v `plny` podmienka „produkt je v zrkadle katalógu a nie je `not_found`"; neznámy alebo nečitateľný režim = `pilot`; strop drží aj `CHECK` na `campaigns.items_total`; prepnutie do `plny` žiada sudo a zapíše `scope_mode_changed` |
+| Zápis len do produktu v povolenom rozsahu, fail-closed (I2 v tvare K1) | v `pilot` allowlist v DB (UNIQUE slot 1–10), v `plny` podmienka „produkt je v zrkadle katalógu a nie je `not_found`"; neznámy alebo nečitateľný režim = `pilot`; strop drží aj `CHECK` na `campaigns.items_total`; prepnutie do `plny` zapíše `scope_mode_changed` s príznakom uvoľnenia (sudo pred ním zrušila D100, 27. 8. 2026) |
 | Objednávky len na súčty predaja, nikdy zákaznícke dáta (I8') | `/api/order` výhradne v `src/lib/shop/orders-client.ts`; povolené presne dva scopes; DDL kontrola zakazuje `order`/`customer`/`country`/`total_paid`; objednávkový kľúč je mimo zápisovej cesty (`src/lib/sales/sync-runner.ts`) — všetko vynucuje `test/unit/no-orders-scope.spec.ts` a `test/integration/orders-key.spec.ts` |
-| Žiadny zápis bez dry-run + potvrdenia + sudo okna (I3) | preview token (JWT, 15 min) + server-side kontrola |
+| Žiadny zápis bez dry-run + potvrdenia (I3, znenie zmenila D100 z 27. 8. 2026) | preview token (JWT, 15 min) + server-side kontrola |
+| **Žiadna autentifikácia** (D98–D100, 27. 8. 2026) | nič — a je to vedomé. Ktorýkoľvek lokálny proces na tomto PC zapíše zľavu jedným POST-om; ostáva len I5 (bind na `127.0.0.1`) a origin check D72 proti prehliadačom |
 | Len `127.0.0.1:3070` (I5) | jediné `ports:` má Caddy; `scripts/check-compose-bind.ts` + `test/unit/compose-bind.spec.ts` v CI; boot assertion `PUBLIC_BIND` |
 | Zápis len pri `NODE_ENV=production` **a** `WRITES_ENABLED=true` (I13) | env poistky, inak vynútený dry-run |
-| Kontajner hardening (D98) | non-root uid 10050, `read_only`, `tmpfs`, `cap_drop: ALL`, `no-new-privileges` |
+| Kontajner hardening (D98 — to dotazníkové; číslo si 27. 8. 2026 vzal aj sprint bez prihlásenia) | non-root uid 10050, `read_only`, `tmpfs`, `cap_drop: ALL`, `no-new-privileges` |
 
 ## Príkazy
 
@@ -130,7 +145,7 @@ až po `docker compose up -d` z hlavného checkoutu). Spúšťaj ich z
 
 > Prečo nie Tauri: desktopový obal by potreboval Rust toolchain, ktorý na tomto
 > počítači nie je a ktorému Windows Application Control už raz zablokovala
-> binárku (`argon2`). Na okno, ktorého celá práca je zobraziť `:3070`, to nestojí
+> binárku (`argon2` — tú appka od 27. 8. 2026 už nemá, D104). Na okno, ktorého celá práca je zobraziť `:3070`, to nestojí
 > za novú závislosť — rozhodnutie R-4 v `KONTRAKT-KLUC-A-BAN-2026-08-24.md`.
 
 **Pozor na kódovanie:** `.ps1` v tomto repe musí zostať UTF-8 **s BOM** a CRLF
@@ -146,7 +161,9 @@ rozbehnúť).
 
 **Kontrakt a stav**
 
-- `docs/10-KONTRAKT.md` — rozhodnutia R1–R10, D1–D100 a **INVARIANTY I1–I14**
+- `docs/10-KONTRAKT.md` — rozhodnutia R1–R10, D1–D100, D98–D105 z 27. 8. 2026
+  (čísla D98–D100 sú obsadené dvakrát, kolízia je opísaná v úvode dokumentu)
+  a **INVARIANTY I1–I14**
 - `docs/50-KONTRAKT-V3.md` — **kontrakt V3 (K1–K12)**: fronta, denný rozpočet,
   režim rozsahu, pásma. Mení `10-KONTRAKT.md` v menovaných bodoch
 - `docs/40-ODPOVEDE-V3.md` — 100 odpovedí, zdroj pravdy pre správanie V3

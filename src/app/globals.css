@@ -1067,34 +1067,6 @@ input::placeholder {
   flex-wrap: wrap;
 }
 
-.ovl-sudo-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgb(0 0 0 / 0.55);
-  backdrop-filter: blur(3px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-  padding: 1rem;
-}
-.ovl-sudo-dialog {
-  background: var(--surface-solid);
-  border: 1px solid var(--line);
-  border-radius: var(--ovl-radius);
-  box-shadow: var(--ovl-shadow-raised);
-  padding: var(--ovl-s5);
-  max-width: 420px;
-  width: 100%;
-}
-.ovl-sudo-dialog h3 {
-  margin: 0 0 0.5rem;
-}
-.ovl-sudo-dialog input[type='password'] {
-  width: 100%;
-  margin: 0.5rem 0 0.75rem;
-}
-
 
 /* ══════════════════════════════════════════════════════════════════════════
    10. Grafy (B2 kreslí inline SVG do týchto tried, tokeny z §3.1)

@@ -84,7 +84,6 @@ export function createQueueResumePost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       /**
        * JEDEN KLIK JE AŽ ~200 ZÁPISOV DO DB: sto `requeueMissed()` a sto
        * záznamov do `audit_log`, ktorý je append-only (I4) — teda sa nedajú
@@ -123,7 +122,7 @@ export function createQueueResumePost(
             if (!requeued) continue;
             await d.audit.appendAudit({
               actor: 'user',
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
               eventType: AuditEvent.QUEUE_RESUMED,
               campaignId: campaign.id,
               ok: true,
@@ -146,7 +145,7 @@ export function createQueueResumePost(
           if (resumed.length === 0 && gateBefore.paused) {
             await d.audit.appendAudit({
               actor: 'user',
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
               eventType: AuditEvent.QUEUE_RESUMED,
               ok: true,
               message:

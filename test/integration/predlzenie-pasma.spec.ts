@@ -8,14 +8,12 @@
  *
  * Test NIE JE opravou — dokazuje, že cesta predĺženia percentá pásiem stráca.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-// Prostredie: natívny `argon2.node` je na tomto stroji blokovaný Application
-// Control policy, takže KAŽDÝ integračný test route-ov padne už pri importe.
-// Heslá s predĺžením nemajú nič spoločné — stub len odblokuje import.
-vi.mock('argon2', () => ({
-  default: { argon2id: 2, async hash() { return '$stub'; }, async verify() { return false; } },
-}));
+// Do 27. 8. 2026 tu stál `vi.mock('argon2', …)` — natívny `argon2.node` bol na
+// tomto stroji blokovaný Application Control policy a KAŽDÝ integračný test
+// route-ov padol už pri importe. D100 zrušilo sudo a D104 vyhodilo `argon2` zo
+// závislostí, takže route k nemu nevedie a stub je zbytočný.
 
 import { createExtendPost } from '@/app/api/campaigns/[id]/extend/route';
 import { createExtendPreviewPost } from '@/app/api/campaigns/[id]/extend/preview/route';
@@ -27,7 +25,7 @@ import {
   makeRequest,
   makeRoutesWorld,
   parse,
-  sessionRouteDeps,
+  actorRouteDeps,
   type RoutesWorld,
 } from './routes-harness';
 
@@ -57,7 +55,7 @@ describe('D27/K3 — predĺženie zľavy s pásmami', () => {
       })),
     );
 
-    const previewPost = createExtendPreviewPost(w.deps, sessionRouteDeps());
+    const previewPost = createExtendPreviewPost(w.deps, actorRouteDeps());
     const previewRes = await parse(
       await previewPost(
         makeRequest('POST', `/api/campaigns/${parent.id}/extend/preview`, { to: day(20) }),
@@ -68,7 +66,7 @@ describe('D27/K3 — predĺženie zľavy s pásmami', () => {
     const previewToken = (previewRes.body.data as { previewToken: string }).previewToken;
     expect(previewToken).not.toBe('');
 
-    const extendPost = createExtendPost(w.deps, sessionRouteDeps());
+    const extendPost = createExtendPost(w.deps, actorRouteDeps());
     const extendRes = await parse(
       await extendPost(
         makeRequest('POST', `/api/campaigns/${parent.id}/extend`, { previewToken }),

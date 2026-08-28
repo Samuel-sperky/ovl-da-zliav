@@ -454,8 +454,9 @@ export const PRODUCT_DETAIL_ID = 'product-detail';
  * Escape zatvára — panel je jediné miesto obrazovky, z ktorého sa inak
  * klávesnicou nedá vyjsť inak než pretabulovaním celého zvyšku stránky.
  * `defaultPrevented` je tu z toho istého dôvodu ako v `ui/Drawer`: keď si
- * Escape spracoval vnorený dialóg (sudo), panel sa ho nesmie chytiť ako druhý
- * a zatvoriť sa pod ním.
+ * Escape spracoval vnorený dialóg, panel sa ho nesmie chytiť ako druhý
+ * a zatvoriť sa pod ním. (Do 27. 8. 2026 tu ako príklad stálo sudo okno;
+ * D100 ho zrušila.)
  *
  * Je to čistá funkcia, nie `if` v obsluhe, aby sa dala zmerať bez prehliadača.
  */

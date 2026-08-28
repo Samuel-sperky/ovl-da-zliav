@@ -33,11 +33,9 @@ import { useState } from 'react';
 
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import SudoPrompt from '@/components/ui/SudoPrompt';
 import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
-import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
-  SUDO_REQUIRED_CODE,
   putKey,
   validateApiKey,
   type KeyMetaView,
@@ -124,8 +122,6 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [stored, setStored] = useState<{ last4: string; verifyStatus: string } | null>(null);
-  const [needSudo, setNeedSudo] = useState(false);
-  const [pending, setPending] = useState<string | null>(null);
 
   /** Neúspech je vždy hlasný: úspešné hlásenie zmizne, chyba sa pomenuje. */
   function fail(error: { code?: string | null; message?: string | null } | null) {
@@ -146,22 +142,14 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
     if (res.ok) {
       // Kľúč držíme len po dobu odoslania a hneď ho zahadzujeme.
       setApiKey('');
-      setPending(null);
       setFailure(null);
       setStored({ last4: res.data.last4, verifyStatus: res.data.verifyStatus });
       onStored();
       return;
     }
-    if (res.error.code === SUDO_REQUIRED_CODE) {
-      // Vypršané okno hesla NIE JE odhlásenie; pýtame heslo, nie prihlásenie.
-      setPending(value);
-      setNeedSudo(true);
-      return;
-    }
     // Kľúč nedržíme ani po neúspechu — používateľ ho vloží znova. Preto MUSÍ
     // byť na obrazovke nepochybné, že sa nič neuložilo.
     setApiKey('');
-    setPending(null);
     fail(res.error);
   }
 
@@ -240,21 +228,6 @@ export function ApiKeyForm({ keyMeta, onStored }: ApiKeyFormProps) {
         nikdy nezobrazia.
       </p>
 
-      {needSudo ? (
-        <SudoPrompt
-          actionLabel="uloženie kľúča na zápis zliav"
-          onSuccess={() => {
-            setNeedSudo(false);
-            const value = pending;
-            setPending(null);
-            if (value) void submit(value);
-          }}
-          onCancel={() => {
-            setNeedSudo(false);
-            setPending(null);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

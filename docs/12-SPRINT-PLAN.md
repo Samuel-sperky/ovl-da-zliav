@@ -236,6 +236,14 @@ neskôr integračne proti mocku od A6 v úlohe A9.
 
 ## A4 — Autentifikácia, session, sudo mode, lockout
 
+> **ZRUŠENÉ 27. 8. 2026 (D99, D100, D104).** Celý tento agent je história:
+> prihlásenie, session, sudo aj lockout sú zmazané z kódu, nie vypnuté
+> prepínačom. Zmazané sú `src/lib/auth/{password,session,sudo,lockout,
+> lockout-policy}.ts`, `src/lib/repo/login-attempts.repo.ts`
+> aj `test/unit/auth.spec.ts`; `src/lib/repo/users.repo.ts` zostal ako čítacia
+> cesta k `users` (D101) a namiesto session je `src/lib/auth/local-actor.ts`
+> (D102). Znenie nižšie NEPLATÍ a je tu len pre históriu.
+
 **Vlna:** 1 · **Závisí na:** A0
 
 **Vytvorí:** `src/lib/auth/password.ts` (argon2id, min 12 znakov),
@@ -245,8 +253,9 @@ neskôr integračne proti mocku od A6 v úlohe A9.
 exponenciálny lockout), `src/lib/repo/users.repo.ts`,
 `src/lib/repo/login-attempts.repo.ts`, `test/unit/auth.spec.ts`.
 
-**Vlastní súbory:** `src/lib/auth/**`, `src/lib/repo/users.repo.ts`,
-`src/lib/repo/login-attempts.repo.ts`, `test/unit/auth.spec.ts`.
+**Vlastní súbory:** ~~`src/lib/auth/**`~~ (dnes len `local-actor.ts`),
+`src/lib/repo/users.repo.ts`, ~~`src/lib/repo/login-attempts.repo.ts`~~,
+~~`test/unit/auth.spec.ts`~~ — zrušené 27. 8. 2026 (D99).
 
 **Akceptačné kritérium:** heslo pod 12 znakov je odmietnuté; argon2id hash sa
 verifikuje; session token exspiruje absolútne po 8 h aj po 30 min nečinnosti
@@ -535,16 +544,18 @@ test/integration/reconcile` s riadeným časom a fake tickom.
 
 **Vlna:** 3 · **Závisí na:** A1, A2, A3, A4, A5, A8, A10
 
-**Vytvorí:** `src/app/api/auth/login/route.ts`, `logout/route.ts`,
-`session/route.ts`, `sudo/route.ts`; `src/app/api/settings/route.ts`,
+**Vytvorí:** ~~`src/app/api/auth/login/route.ts`, `logout/route.ts`,
+`session/route.ts`, `sudo/route.ts`~~ — celý `src/app/api/auth/` je zmazaný
+27. 8. 2026 (D99, D100); `src/app/api/settings/route.ts`,
 `settings/domain/route.ts`, `settings/test-connection/route.ts`,
 `settings/eager-write-default/route.ts`, `settings/unlock-writes/route.ts`;
 `src/app/api/key/route.ts` (GET/PUT/DELETE); `src/app/api/health/route.ts`;
 `test/integration/routes-auth.spec.ts`, `routes-key.spec.ts`,
 `routes-settings.spec.ts`.
 
-**Vlastní súbory:** `src/app/api/auth/**`, `src/app/api/settings/**`,
-`src/app/api/key/**`, `src/app/api/health/**` + uvedené 3 testy.
+**Vlastní súbory:** ~~`src/app/api/auth/**`~~ (zmazané 27. 8. 2026 — D99,
+vrátane `test/integration/routes-auth.spec.ts`), `src/app/api/settings/**`,
+`src/app/api/key/**`, `src/app/api/health/**` + zvyšné 2 testy.
 
 **Akceptačné kritérium:** presné dodržanie tabuľky v BUILD-SPEC §5 (cesty,
 metódy, auth režimy, zod vstupy, výstupy); `GET /api/key` nikdy nevráti viac než
@@ -770,7 +781,8 @@ retry, predĺženie).
 
 **Vlna:** 3 · **Závisí na:** A13 (API kontrakt z BUILD-SPEC §5)
 
-**Vytvorí:** `src/app/login/page.tsx`, `src/app/onboarding/page.tsx`,
+**Vytvorí:** ~~`src/app/login/page.tsx`~~ (zmazané 27. 8. 2026 — D99),
+`src/app/onboarding/page.tsx`,
 `src/app/produkty/page.tsx`, `src/app/audit/page.tsx`,
 `src/app/nastavenia/page.tsx`; `src/components/products/**` (AllowlistTable,
 AddProductForm, RefreshButton, MarkUnknownButton);
@@ -954,14 +966,14 @@ testu — žiadne nové funkcie, žiadny refaktor.
 | `src/lib/crypto/**`, `src/lib/repo/api-key.repo.ts` | A1 |
 | `src/lib/log/**`, `src/lib/audit/**`, `src/lib/repo/audit.repo.ts` | A2 |
 | `src/lib/shop/**` | A3 |
-| `src/lib/auth/**`, `src/lib/repo/users.repo.ts`, `src/lib/repo/login-attempts.repo.ts` | A4 |
+| `src/lib/auth/**` (od 27. 8. 2026 len `local-actor.ts`, D102), `src/lib/repo/users.repo.ts`; ~~`src/lib/repo/login-attempts.repo.ts`~~ zmazané (D99) | A4 |
 | `src/lib/http/**` | A5 |
 | `test/mock-shop/**`, `test/helpers/mock.ts`, `test/helpers/factories.ts` | A6 |
 | `src/lib/domain/**` | A7 |
 | `src/lib/repo/{settings,allowlist,catalog,campaigns,campaign-items,scheduler-state}.repo.ts` | A8 |
 | `src/lib/engine/**` | A9 |
 | `src/lib/scheduler/**` (`boot.ts` prebrané od A0) | A10 |
-| `src/app/api/{auth,settings,key,health}/**` | A11 |
+| `src/app/api/{settings,key,health}/**`; ~~`src/app/api/auth/**`~~ zmazané 27. 8. 2026 (D99, D100) | A11 |
 | `src/app/api/{campaigns,allowlist,catalog,audit,notifications}/**` | A12 |
 | `src/app/{layout.tsx,globals.css,page.tsx}`, `src/components/{layout,ui,dashboard}/**`, `src/lib/ui/format.ts` | A13 |
 | `Dockerfile`, `docker-compose*.yml`, `Caddyfile.example`, `scripts/{entrypoint.sh,backup.sh,restore-test.sh,check-compose-bind.ts}`, `.gitleaks.toml`, `README.md`, `docs/20-*`, `docs/21-*` | A14 |

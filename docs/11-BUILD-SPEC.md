@@ -5,8 +5,12 @@
 opisuje **ako** sa to postaví. Pri rozpore platí KONTRAKT.
 
 Stack (R3): Node 22 · Next.js 16 App Router, `output: 'standalone'` · React 19 ·
-TypeScript strict · MariaDB 11.4 · zod · jose · argon2 · vitest · Playwright.
+TypeScript strict · MariaDB 11.4 · zod · jose · vitest · Playwright.
 Balíčkovač: `npm` (lockfile v repe).
+
+> **27. 8. 2026 (D104):** `argon2` z tohto zoznamu aj z `package.json` zmizlo —
+> po zrušení prihlásenia (D99) ho nič nepotrebuje. `jose` zostáva pre
+> `previewToken` (I3), nie pre session.
 
 ---
 
@@ -41,7 +45,8 @@ ovl-da-zliav/
 │       └── 0008_grants.sql
 ├── scripts/
 │   ├── migrate.ts                      # runner (spúšťaný entrypointom migračným userom)
-│   ├── seed-admin.ts                    # prvé heslo (argon2id), interaktívne
+│   │                                   # seed-admin.ts ZMAZANÝ 27. 8. 2026 (D99):
+│   │                                   # prvé heslo (argon2id) už niet komu zadať
 │   ├── gen-master-key.ts                # 32 B random → secrets/master.key, chmod 400
 │   ├── backup.sh                        # mysqldump bez api_key, rotácia 14 d
 │   ├── restore-test.sh
@@ -65,13 +70,12 @@ ovl-da-zliav/
 │   │   ├── audit/
 │   │   │   ├── events.ts                 # enum event_type
 │   │   │   └── write.ts                  # appendAudit() — jediná cesta do audit_log (I4)
-│   │   ├── auth/
-│   │   │   ├── password.ts               # argon2id (D68)
-│   │   │   ├── session.ts                # jose JWT, 8 h abs + 30 min idle (D69)
-│   │   │   ├── sudo.ts                   # 15 min okno (D70)
-│   │   │   └── lockout.ts                # 5/15 min + exponenciálny lockout (D71)
+│   │   ├── auth/                          # 27. 8. 2026 (D99, D100): password.ts,
+│   │   │   │                               # session.ts, sudo.ts, lockout.ts a
+│   │   │   │                               # login-attempts.repo.ts ZMAZANÉ
+│   │   │   └── local-actor.ts            # lokálny actor `samuel`, id 1 (D102)
 │   │   ├── http/
-│   │   │   ├── define-route.ts           # pipeline auth→rateLimit→origin→zod→handler
+│   │   │   ├── define-route.ts           # pipeline actor→rateLimit→origin→zod→handler
 │   │   │   ├── errors.ts                 # AppError, HTTP mapovanie
 │   │   │   └── responses.ts              # ok()/fail() tvar odpovedí appky
 │   │   ├── shop/
@@ -188,7 +192,9 @@ CREATE TABLE IF NOT EXISTS _migrations (
 CREATE TABLE users (
   id             INT UNSIGNED  NOT NULL AUTO_INCREMENT PRIMARY KEY,
   username       VARCHAR(64)   NOT NULL,
-  password_hash  VARCHAR(255)  NOT NULL,          -- argon2id (D68)
+  password_hash  VARCHAR(255)  NOT NULL,          -- argon2id (D68); od 27. 8. 2026
+                                                  -- (D99, D101) sa NEZAPISUJE: schéma
+                                                  -- zostala, hesla už niet
   created_at     DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at     DATETIME(3)   NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   last_login_at  DATETIME(3)   NULL,
@@ -492,26 +498,50 @@ stavov `done`/`cancelled`/`lapsed` okrem `ack`.
 
 ## 5. API route-y appky
 
-Všetky pod `defineRoute()` (auth → lockout/rateLimit → Origin check → zod →
-handler → error mapping). `auth: 'session'` = platná session; `auth: 'sudo'` =
-session + sudo okno < 15 min (D70); `auth: 'none'` len login a health.
-Každá mutácia MUSÍ mať Origin check (D72). Odpovede: `{ok:true,data}` / `{ok:false,error}`.
+Všetky pod `defineRoute()`. **Poradie vrstiev je normatívne a od 27. 8. 2026
+(D99, D100, D103) znie:**
+
+1. **actor** — dohľadá sa lokálny actor `samuel`, id 1 (D102). Mutácia ho
+   dohľadá hneď a bez neho neprejde (fail-closed); čítanie fail-soft a len keď
+   ho handler naozaj chce.
+2. **rateLimit** — `preflight` hook a voliteľný okenný limit per IP.
+3. **Origin check** — povinný na KAŽDEJ mutácii (POST/PUT/PATCH/DELETE), D72.
+4. **zod** — `params`, `query`, `body`; zlyhanie = 400 so zoznamom polí.
+5. **handler** — dostane zvalidovaný vstup a `ctx.actor: LocalActor`.
+6. **mapovanie chýb** — `toAppError()` → `fail()`.
+
+Zdroj pravdy je `src/lib/http/define-route.ts` (ten sa odvoláva sem, takže obe
+strany musia znieť rovnako). Odpovede: `{ok:true,data}` / `{ok:false,error}`.
+
+> **27. 8. 2026 — stĺpec Auth v tabuľke nižšie je HISTORICKÝ.** Vlastnosť
+> `auth:` z `RouteDefinition` zmizla (D103): prihlásenie a session zmazala D99,
+> sudo D100 (invariant I3 znie odteraz „žiadny zápis bez dry-runu
+> a potvrdenia"). Hodnoty `session` a `sudo` v tabuľke čítaj ako „takto to
+> bolo do 27. 8. 2026". Jediná brána pred mutáciou je dnes origin check (D72),
+> a pred zápisom do shopu dry-run token + potvrdenie (I3), ktoré drží
+> `assertConfirmed()` v engine. Riadky `/api/auth/*` sú zrušené — tie route-y
+> neexistujú.
+>
+> Kde v tabuľke stálo `password` v zod vstupe: `PUT /api/settings/domain` má
+> telo iba `{ domain }` (brzdou je canary, D55), `POST
+> /api/settings/unlock-writes` má `{ confirmed: z.literal(true) }`, `DELETE
+> /api/key` má `{ confirm: z.literal('KLUC UNIKOL') }`.
 
 | Cesta | Metóda | Auth | Zod vstup | Výstup |
 | --- | --- | --- | --- | --- |
 | `/api/health` | GET | none | — | `{status:'ok'\|'degraded', db, key:{present,expiresAt}, scheduler:{lastTickAt,ageSec}, writesEnabled, writesLocked, version}` — nikdy `last4`, nikdy detaily kľúča |
-| `/api/auth/login` | POST | none | `{username:string(1..64), password:string(12..200)}` | `{user:{id,username}}`; 429 pri lockoute (D71) |
-| `/api/auth/logout` | POST | session | — | `{}` |
-| `/api/auth/session` | GET | session | — | `{username, absoluteExpiresAt, idleExpiresAt, sudoUntil}` |
-| `/api/auth/sudo` | POST | session | `{password:string}` | `{sudoUntil}` (D70) |
+| ~~`/api/auth/login`~~ | POST | — | — | **ZRUŠENÉ 27. 8. 2026 (D99)** — route neexistuje |
+| ~~`/api/auth/logout`~~ | POST | — | — | **ZRUŠENÉ 27. 8. 2026 (D99)** |
+| ~~`/api/auth/session`~~ | GET | — | — | **ZRUŠENÉ 27. 8. 2026 (D99)** — kto zapísal, hovorí lokálny actor (D102) |
+| ~~`/api/auth/sudo`~~ | POST | — | — | **ZRUŠENÉ 27. 8. 2026 (D100)** |
 | `/api/settings` | GET | session | — | `{shopDomain, domainConfirmedAt, eagerWriteDefault, writesLocked, writesLockedReason, onboardingDoneAt}` |
-| `/api/settings/domain` | PUT | sudo | `{domain: z.string().url().startsWith('https://'), password:string}` | `{shopDomain, canary:{ok,total}}` — canary GET pred uložením (D55, D80) |
+| `/api/settings/domain` | PUT | ~~sudo~~ | `{domain: z.string().url().startsWith('https://')}` — `password` zrušené 27. 8. 2026 (D99) | `{shopDomain, canary:{ok,total}}` — canary GET pred uložením (D55, D80) |
 | `/api/settings/test-connection` | POST | session | — | `{ok, httpStatus, total, latencyMs}` (D55) |
 | `/api/settings/eager-write-default` | PUT | session | `{enabled:boolean}` | `{eagerWriteDefault}` (D22) |
-| `/api/settings/unlock-writes` | POST | sudo | `{password:string}` | `{writesLocked:false}` (D79) |
+| `/api/settings/unlock-writes` | POST | ~~sudo~~ | `{confirmed: z.literal(true)}` — heslo strieda výslovné potvrdenie, 27. 8. 2026 (D99, I3) | `{writesLocked:false, writesEnabled, blockers}` (D79, I13) |
 | `/api/key` | GET | session | — | `{present, last4, savedAt, expiresAt, secondsLeft, verifyStatus}` (D65) |
 | `/api/key` | PUT | sudo | `{apiKey: z.string().min(16).max(256)}` | `{last4, expiresAt, verifyStatus}` — sonda `reduction=0` (D53), potom auto-dopálenie `needs_key` kampaní (D24) |
-| `/api/key` | DELETE | sudo | `{password:string, confirm: z.literal('KLUC UNIKOL')}` | `{wiped:true, cancelledCampaigns:n, runbookUrl}` — panic button (D67) |
+| `/api/key` | DELETE | ~~sudo~~ | `{confirm: z.literal('KLUC UNIKOL')}` — `password` zrušené 27. 8. 2026 (D99) | `{wiped:true, cancelledCampaigns:n, runbookUrl}` — panic button (D67) |
 | `/api/allowlist` | GET | session | — | `[{productId,slot,label,shopStatus,name,price,hasAttributes,lastOwnWrite:{percent,from,to,at}\|null}]` (D7) |
 | `/api/allowlist` | POST | session | `{productId:z.number().int().positive(), label?:string}` | `{productId,slot}`; 409 ak by `slot` prekročil 10 (I2) |
 | `/api/allowlist/[productId]` | DELETE | session | — | `{removed:true}`; 409 `campaign_planned` ak existuje `scheduled`/`needs_key`/`missed` kampaň (D40) |
@@ -687,15 +717,15 @@ Jazyk UI je slovenčina, formát dátumu `DD.MM.YYYY`, desatinná čiarka.
 
 | Cesta | Obsah | Stavy |
 | --- | --- | --- |
-| `/login` | formulár, hláška o lockoute so zostávajúcim časom | idle / submitting / locked |
+| ~~`/login`~~ | **ZRUŠENÉ 27. 8. 2026 (D99)** — obrazovka aj `src/app/login/` sú zmazané, appka sa otvorí priamo | — |
 | `/onboarding` | checklist 1 doména → 2 kľúč → 3 allowlist → 4 testovací dry-run; kroky sa odomykajú postupne, koniec = dry-run, nie zápis | per-krok pending/done/error |
 | `/` dashboard | `KeyCard` (last4, uložené, odpočet, verify status), `AlertsBanner` (agregované `needs_key` + `missed`), `UnackedResults` (D17), `CampaignsMini`, `AllowlistGrid` (10 kariet s cenou a badge „podľa vlastného zápisu z DD.MM.") | loading / empty / ok / degraded |
 | `/produkty` | tabuľka allowlistu, pridanie/odobranie, „obnoviť z shopu", „označiť stav ako neznámy"; blokácia odobrania s vysvetlením | ok / blocked / not_found |
 | `/kampane` | tabuľka s filtrom podľa plnej sady stavov, farebné badge | ok / empty |
-| `/kampane/nova` | krok 1: výber produktov (len allowlist), percento (pole + čipy), okno (pickery + presety), výklad hraníc dňa; krok 2: `DryRunTable` (diff per produkt + orientačná cena + warnings) + `ConfirmPanel` (veta o nevratnosti, checkbox pri 1-dňovej zľave, prepínač eager write default ON, sudo heslo ak > 15 min) | draft → preview → confirming → writing → result |
+| `/kampane/nova` | krok 1: výber produktov (len allowlist), percento (pole + čipy), okno (pickery + presety), výklad hraníc dňa; krok 2: `DryRunTable` (diff per produkt + orientačná cena + warnings) + `ConfirmPanel` (veta o nevratnosti, checkbox pri 1-dňovej zľave, prepínač eager write default ON; sudo heslo zrušené 27. 8. 2026 — D100, potvrdenie zostáva) | draft → preview → confirming → writing → result |
 | `/kampane/[id]` | detail, `ItemsTable` (✓/✗/neistý, slovenská hláška + raw kód), „Zopakovať zlyhané", „Predĺžiť", „Zrušiť", `AuditTrail` | podľa stavu kampane |
 | `/audit` | filtre (produkt, dátum, typ, výsledok), tabuľka, detail drawer so `before/after` snapshotom a príznakom `priceMismatch` („rozhodoval si nad inou cenou") | ok / empty |
-| `/nastavenia` | doména (zmena vyžaduje heslo) + „Otestovať spojenie", kľúč (vloženie/rotácia), eager write default, odomknutie zápisov, **panic button** s potvrdením textom „KLUC UNIKOL" a runbookom | ok / sudo required / locked |
+| `/nastavenia` | doména (uloží sa až po úspešnom canary čítaní, D55; heslo zrušené 27. 8. 2026 — D99) + „Otestovať spojenie", kľúč (vloženie/rotácia), eager write default, odomknutie zápisov (zaškrtnuté potvrdenie), **panic button** s potvrdením textom „KLUC UNIKOL" a runbookom | ok / locked |
 
 ### Zdieľané komponenty
 

@@ -6,19 +6,19 @@
  *
  * Asymetria, ktorá je celým zmyslom K1 bodu 4:
  *
- *  | Zmena | Sudo | Audit |
- *  |---|---|---|
- *  | `pilot → plny` (UVOĽNENIE) | **áno** | `scope_mode_changed` |
- *  | zdvihnutie stropu v `plny` (UVOĽNENIE) | **áno** | `scope_mode_changed` |
- *  | `plny → pilot` (SPRÍSNENIE) | nie | `scope_mode_changed` |
- *  | zníženie stropu (SPRÍSNENIE) | nie | `scope_mode_changed` |
+ *  | Zmena | Zapíše sa do auditu ako |
+ *  |---|---|
+ *  | `pilot → plny` | UVOĽNENIE (`looseningScope: true`) |
+ *  | zdvihnutie stropu v `plny` | UVOĽNENIE (`looseningScope: true`) |
+ *  | `plny → pilot` | sprísnenie (`looseningScope: false`) |
+ *  | zníženie stropu | sprísnenie (`looseningScope: false`) |
  *
- * „Sprísnenie je vždy voľné, uvoľnenie nikdy." Preto route beží na
- * `auth: 'session'` a sudo si vyžiada SAMA — `defineRoute({ auth: 'sudo' })`
- * je statické a vyžadovalo by heslo aj na cestu späť do `pilot`, čiže by
- * v núdzi bránilo pribrzdiť appku.
+ * Do 27. 8. 2026 od tejto asymetrie záviselo, či sa vypýta heslo: uvoľnenie
+ * chcelo sudo, sprísnenie nikdy (aby sa appka dala v núdzi pribrzdiť aj bez
+ * hesla). Sudo zrušilo D100 a s ním padla aj tá brána — ROZLÍŠENIE ale ostalo,
+ * lebo z auditu sa musí dať prečítať, či niekto rozsah rozšíril alebo zúžil.
  *
- * Kde je to rozhodnutie napísané: `scopeChangeRequiresSudo()` v
+ * Kde je to rozhodnutie napísané: `scopeChangeIsLoosening()` v
  * `lib/repo/settings.repo.ts`. Tu sa NEVYHODNOCUJE druhýkrát — `GET
  * /api/settings` ohlasuje tú istú odpoveď dopredu a dve kópie pravidla by
  * znamenali, že obrazovka sľúbi jedno a route urobí druhé.
@@ -34,15 +34,15 @@
  */
 import { z } from 'zod';
 
-import type { AuditEventType, SessionClaims, UtcDate } from '@/contracts';
+import type { AuditEventType } from '@/contracts';
 
 import { appendAudit } from '@/lib/audit/write';
-import { requireSudo } from '@/lib/auth/sudo';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
+import { AppError } from '@/lib/http/errors';
 import {
   settingsRepo as defaultSettingsRepo,
   effectiveMaxProducts,
-  scopeChangeRequiresSudo,
+  scopeChangeIsLoosening,
   HARD_MAX_PRODUCTS,
   PILOT_MAX_PRODUCTS,
   type ScopeMode,
@@ -67,51 +67,64 @@ export const scopeModeBodySchema = z.object({
    * je strop vždy 10 (K1, tabuľka režimov) a uložená hodnota naň nemá vplyv.
    */
   maxProductsPerCampaign: z.number().int().min(1).max(HARD_MAX_PRODUCTS).optional(),
+  /**
+   * Potvrdenie UVOĽNENIA rozsahu (D106, 28. 8. 2026).
+   *
+   * PREČO NIE `z.literal(true)` ako pri doméne: tu potvrdenie závisí od stavu
+   * v DB, nie od tela. Sprísnenie (`plny → pilot`, zníženie stropu) musí
+   * zostať VOĽNÉ — je to presne ten prípad, keď človek appku brzdí a nemá
+   * čas na obradnosť; tú asymetriu drží celá appka od D79. Zod preto vidí len
+   * voliteľný boolean a rozhodnutie padá v handleri, keď je už známe
+   * `looseningScope`. Do 27. 8. 2026 túto bránu držalo sudo (D70).
+   */
+  confirmed: z.boolean().optional(),
 });
 
 export interface ScopeModeRouteDeps {
   settings?: Pick<SettingsRepoExt, 'readScope' | 'setScopeMode' | 'setMaxProductsPerCampaign'>;
   audit?: typeof appendAudit;
-  /** Testy si prinesú vlastnú kontrolu sudo okna; default je A4. */
-  requireSudo?: (claims: SessionClaims | null | undefined, now?: Date) => UtcDate;
-  now?: () => Date;
   routeDeps?: RouteDeps;
 }
 
 export function createScopeModeRoute(deps: ScopeModeRouteDeps = {}): NextRouteHandler {
   const settings = deps.settings ?? defaultSettingsRepo;
   const audit = deps.audit ?? appendAudit;
-  const sudoGate = deps.requireSudo ?? requireSudo;
-  const now = deps.now ?? ((): Date => new Date());
 
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: scopeModeBodySchema,
       rateLimit: { limit: 30, windowMs: 60_000, bucket: 'settings-scope-mode' },
       handler: async (ctx) => {
         const next: ScopeMode = ctx.body.mode;
 
         /* 1. Čo je teraz. `readScope()` je fail-closed: nečitateľná DB je
-         * `pilot` (K1 bod 1). Prepnutie z „neviem" do `plny` sa tým stáva
-         * uvoľnením a sudo si vypýta rovnako ako z `pilot` — správne. */
+         * `pilot` (K1 bod 1). Prepnutie z „neviem" do `plny` sa tým počíta
+         * ako uvoľnenie rovnako ako z `pilot` — správne. */
         const before = await settings.readScope();
 
-        /* 2. K1 bod 4 — sudo LEN pri uvoľnení. Kontrola je pred akýmkoľvek
-         * zápisom, takže bez platného okna sa nezmení ani strop.
-         *
-         * Rozhodnutie NEROBÍ táto route: robí ho `scopeChangeRequiresSudo()`
-         * v `settings.repo`, aby si tú istú otázku vedeli položiť aj
-         * Nastavenia (dopredu, `GET /api/settings`) a dostali tú istú odpoveď.
-         * Pokrýva tým aj zdvihnutie stropu v rámci `plny` — to je tiež
-         * rozšírenie rozsahu a rozšírenie sa bez hesla nedeje. */
-        const requiresSudo = scopeChangeRequiresSudo(before, {
+        /* 2. Bolo to uvoľnenie rozsahu, alebo sprísnenie? Rozhodnutie NEROBÍ
+         * táto route, ale `scopeChangeIsLoosening()` v `settings.repo` — tú
+         * istú otázku si kladie aj `GET /api/settings` dopredu a dve kópie
+         * pravidla by znamenali, že obrazovka sľúbi jedno a route urobí druhé. */
+        const looseningScope = scopeChangeIsLoosening(before, {
           mode: next,
           maxProductsPerCampaign: ctx.body.maxProductsPerCampaign,
         });
-        if (requiresSudo) {
-          sudoGate(ctx.claims, now());
+
+        /* 2b. UVOĽNENIE si žiada výslovné potvrdenie (D106, 28. 8. 2026).
+         *
+         * Fail-closed a PRED prvým zápisom: keď potvrdenie chýba, nesmie sa
+         * zmeniť ani režim, ani strop, a nesmie vzniknúť audit riadok o zmene,
+         * ktorá sa nekonala. Sprísnenie sem nikdy nedopadne — to je tá
+         * asymetria, pre ktorú `confirmed` nie je `z.literal(true)` v schéme. */
+        if (looseningScope && ctx.body.confirmed !== true) {
+          throw new AppError(
+            409,
+            'confirmation_required',
+            'Uvoľnenie rozsahu sa nespustilo: chýba výslovné potvrdenie (D106).',
+            { logAsError: false },
+          );
         }
 
         /* 3. Zmena režimu a (len v `plny`) stropu. */
@@ -125,7 +138,7 @@ export function createScopeModeRoute(deps: ScopeModeRouteDeps = {}): NextRouteHa
         /* 4. Audit so STARÝM aj NOVÝM stavom (K1 bod 4). */
         await audit({
           actor: 'user',
-          userId: ctx.claims.sub,
+          userId: ctx.actor.id,
           eventType: SCOPE_MODE_CHANGED_EVENT,
           ok: true,
           beforeSnapshot: {
@@ -139,14 +152,14 @@ export function createScopeModeRoute(deps: ScopeModeRouteDeps = {}): NextRouteHa
             maxProductsPerCampaign: after.maxProductsPerCampaign,
             effectiveMaxProducts: effectiveMaxProducts(after),
             failClosed: after.failClosed,
-            /* Aby sa z auditu dalo prečítať, či išlo o uvoľnenie (heslo) alebo
-             * o sprísnenie (bez hesla) — inak sa to o pol roka nedá rozlíšiť. */
-            requiredSudo: requiresSudo,
+            /* Uvoľnenie (rozšírenie) vs. sprísnenie — bez tohto poľa sa to
+             * z auditu o pol roka nedá rozlíšiť. */
+            looseningScope,
           },
           message:
             before.mode === after.mode
-              ? `Rozsah zostal „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov${requiresSudo ? ' (uvoľnenie potvrdené heslom)' : ''}.`
-              : `Rozsah zmenený z „${before.mode}" na „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov${requiresSudo ? ' (uvoľnenie potvrdené heslom)' : ''}.`,
+              ? `Rozsah zostal „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov${looseningScope ? ' (uvoľnenie rozsahu)' : ''}.`
+              : `Rozsah zmenený z „${before.mode}" na „${after.mode}"; strop na jednu zľavu je ${effectiveMaxProducts(after)} produktov${looseningScope ? ' (uvoľnenie rozsahu)' : ''}.`,
           ip: ctx.info.ip,
           userAgent: ctx.info.userAgent,
         });
@@ -163,8 +176,8 @@ export function createScopeModeRoute(deps: ScopeModeRouteDeps = {}): NextRouteHa
           hardMaxProducts: HARD_MAX_PRODUCTS,
           /** `true` = hodnoty sú fail-closed default, nie čítanie z DB (K1 bod 1). */
           scopeFailClosed: after.failClosed,
-          /** `true` = táto zmena bola uvoľnenie a bola potvrdená heslom. */
-          requiredSudo: requiresSudo,
+          /** `true` = táto zmena rozsah ROZŠÍRILA (nie zúžila). */
+          looseningScope,
         };
       },
     },

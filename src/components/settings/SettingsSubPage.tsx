@@ -40,7 +40,6 @@ import LockedFeatures from '@/components/settings/LockedFeatures';
 import PanicButton from '@/components/settings/PanicButton';
 import SafeguardsSection from '@/components/settings/SafeguardsSection';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
-import SignOut from '@/components/settings/SignOut';
 import WritesSection from '@/components/settings/WritesSection';
 import { SETTINGS_CSS } from '@/components/settings/styles';
 import {
@@ -50,7 +49,7 @@ import {
   type SettingsPageSlug,
 } from '@/components/settings/sub-pages';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
-import { describeActionFailure, type ActionFailure } from '@/lib/ui/first-run';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
   getCatalog,
   getKeyMeta,
@@ -226,7 +225,6 @@ function sections(page: SettingsPage, input: SectionInput) {
           <LockedFeatures productRead={input.writeKey?.productRead ?? null} />
           {many ? groupTitle(page.groups[1].title) : null}
           <SafeguardsSection settings={settings} onChanged={input.reload} />
-          <SignOut />
           <p className="dz-link" data-testid="danger-zone-link">
             Keby kľúč unikol, dá sa zmazať naraz s čakajúcimi zľavami —{' '}
             <Link href={subPagePath('cervena-zona')}>Červená zóna</Link>.

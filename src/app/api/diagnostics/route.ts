@@ -6,10 +6,13 @@
  * tajomstiev žijú v `@/lib/diagnostics/collect` — táto route je len zapojenie
  * skutočných zdrojov a `Content-Disposition`.
  *
- * `auth: 'session'` — nie `sudo`. Súbor neobsahuje tajomstvá (I1, viď whitelist
- * v collectore) a je to nástroj na riešenie poruchy; vyžadovať heslo navyše by
- * ho robilo nedostupným práve vtedy, keď je appka rozbitá. Zvonku sa naň aj tak
- * nedá dostať — appka beží len na `127.0.0.1` (I5) za basic auth.
+ * Route je od 27. 8. 2026 bez akejkoľvek brány — prihlásenie aj sudo zmizli
+ * (D99, D100) a Caddy `basic_auth` odstránilo D98. Nič sa tým nestratilo:
+ * súbor neobsahuje tajomstvá (I1, viď whitelist v collectore), je to čítanie
+ * (`GET`, teda ani origin check D72 sa ho netýka) a je to nástroj na riešenie
+ * poruchy — vypýtať si čokoľvek navyše by ho robilo nedostupným práve vtedy,
+ * keď je appka rozbitá. Zvonku sa naň aj tak nedá dostať: appka je publikovaná
+ * výhradne na `127.0.0.1` (I5).
  *
  * Zdroje sa čítajú NAPRIAMO z produkčných repozitárov. V tomto repe už raz
  * integračné testy s fake závislosťou zamaskovali, že produkčné zapojenie vôbec
@@ -169,7 +172,6 @@ export function createDiagnosticsRoute(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async () => {
         const now = clock();
         const file = await collectDiagnostics({

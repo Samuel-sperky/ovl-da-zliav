@@ -30,14 +30,13 @@ export function createTestConnectionRoute(deps: TestConnectionRouteDeps = {}): N
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       rateLimit: { limit: 30, windowMs: 60_000, bucket: 'settings-test-connection' },
       handler: async (ctx) => {
         const operationId = newRequestId();
         const result = await canary({ operationId });
         await audit({
           actor: 'user',
-          userId: ctx.claims.sub,
+          userId: ctx.actor.id,
           eventType: result.ok ? 'canary_ok' : 'canary_fail',
           ok: result.ok,
           operationId,

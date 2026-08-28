@@ -36,7 +36,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import type { ProductSalesDay, SalesSyncDay, SessionClaims } from '@/contracts';
+import type { ProductSalesDay, SalesSyncDay } from '@/contracts';
 import type { RouteDeps } from '@/lib/http/define-route';
 
 import SalesSection, {
@@ -209,34 +209,10 @@ describe('dve merania sa kreslia ako dve merania', () => {
 const NOW = new Date('2026-08-19T09:00:00.000Z');
 
 function sessionDeps(): RouteDeps {
-  const claims: SessionClaims = {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
   return {
     now: () => NOW,
     newRequestId: () => '01J000000000000000GRAFY01',
-    verifySession: async () => ({
-      claims,
-      refreshed: {
-        token: 'refreshed',
-        claims,
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 

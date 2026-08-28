@@ -47,7 +47,6 @@ export function createCatalogRefreshPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: bodySchema,
       handler: (ctx) =>
         withRouteErrors(async () => {
@@ -81,7 +80,7 @@ export function createCatalogRefreshPost(
               actor: 'user',
               eventType: 'catalog_refreshed',
               ok: false,
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
               operationId: shopCtx.operationId,
               message: clearance.status.known
                 ? `Katalóg sa neobnovil: dnešný rozpočet čítaní zo shopu nestačí (potrebných ${clearance.cost}, voľných ${clearance.status.remaining} z ${clearance.status.limit}). Shop sa nevolal.`
@@ -160,7 +159,7 @@ export function createCatalogRefreshPost(
             actor: 'user',
             eventType: 'catalog_refreshed',
             ok: staleCount === 0,
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
             operationId: shopCtx.operationId,
             message: `Katalóg obnovený (${items.length - staleCount}/${items.length} produktov, via=${via}).`,
           });

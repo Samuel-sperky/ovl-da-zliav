@@ -222,7 +222,6 @@ export function createReductionCheckRoute(deps: ReductionCheckRouteDeps = {}): N
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: checkQuerySchema,
       handler: async (ctx) => {
         const productIds = ctx.query.productIds

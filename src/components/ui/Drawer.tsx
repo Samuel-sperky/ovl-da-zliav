@@ -57,7 +57,8 @@ export function Drawer({ open, onClose, title, subtitle, footer, children, testI
     panelRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        // Vnorený dialóg (napr. sudo) si Escape spracoval sám — drawer ho ignoruje.
+        // Vnorený dialóg si Escape spracoval sám — drawer ho ignoruje. (Do
+        // 27. 8. 2026 tu ako príklad stálo sudo okno; D100 ho zrušila.)
         if (event.defaultPrevented) return;
         onCloseRef.current();
         return;

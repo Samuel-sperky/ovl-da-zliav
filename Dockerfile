@@ -40,12 +40,10 @@ COPY --from=build --chown=10050:10050 /app/scripts ./scripts
 # migrate.ts importuje `mariadb` — standalone trace ho obsahuje (src/db/pool.ts),
 # ale pre istotu skopírujeme driver explicitne.
 COPY --from=deps --chown=10050:10050 /app/node_modules/mariadb ./node_modules/mariadb
-# seed-admin.ts importuje `argon2` (natívny addon s musl prebuildom) — standalone
-# trace skriptov nepokrýva, preto explicitne aj s runtime závislosťami (§E krok 0b).
-COPY --from=deps --chown=10050:10050 /app/node_modules/argon2 ./node_modules/argon2
-COPY --from=deps --chown=10050:10050 /app/node_modules/@phc ./node_modules/@phc
-COPY --from=deps --chown=10050:10050 /app/node_modules/node-gyp-build ./node_modules/node-gyp-build
-COPY --from=deps --chown=10050:10050 /app/node_modules/node-addon-api ./node_modules/node-addon-api
+# `argon2` sa tu do 27. 8. 2026 kopíroval spolu s @phc, node-gyp-build a
+# node-addon-api kvôli `scripts/seed-admin.ts`. Skript aj závislosť zmizli
+# (D99, D104), takže ich `deps` stage už ani nenainštaluje a COPY by padol na
+# `failed to compute cache key`. Nevracaj ich — nič v obraze argon2 nepotrebuje.
 
 RUN chmod +x /app/scripts/entrypoint.sh
 

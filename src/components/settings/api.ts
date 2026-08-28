@@ -4,8 +4,11 @@
  * Aura Zľavy — klientske typy a volania nastavení (A16, §5).
  *
  * Kľúč sa z API nikdy nevracia — len `last4`, časy a odpočet (I1, D65).
- * Citlivé mutácie (`domain`, `key` PUT/DELETE, `unlock-writes`) sú `auth:'sudo'`;
- * pri `401 sudo_required` volajúci zobrazí `SudoPrompt` a akciu zopakuje.
+ *
+ * Do 27. 8. 2026 boli citlivé mutácie (`domain`, `key`, `unlock-writes`)
+ * `auth:'sudo'` a pri `401 sudo_required` sa vypýtalo heslo. Prihlásenie zmizlo
+ * (D99, D100). Potvrdenie NEZMIZLO tam, kde bolo jediné: panic button ďalej
+ * chce vypísanú frázu (`PANIC_CONFIRM_LITERAL`) a odomknutie zápisov `confirmed`.
  */
 import type { Envelope } from '@/components/campaigns/api';
 import { getJson, postJson } from '@/components/campaigns/api';
@@ -18,9 +21,6 @@ import type { BlockerWire, StatusPayload } from '@/lib/status/snapshot';
  * modul bez jediného serverového importu.
  */
 export type { BlockerWire, StatusPayload };
-
-/** Kód chyby, pri ktorom treba znova overiť heslo (D70, I3). */
-export const SUDO_REQUIRED_CODE = 'sudo_required';
 
 /** Presný literál potvrdenia panic buttonu (D67) — bez diakritiky. */
 export const PANIC_CONFIRM_LITERAL = 'KLUC UNIKOL';
@@ -227,14 +227,26 @@ export const getStatus = () => getJson<StatusPayload>('/api/status');
 export const getCatalog = () => getJson<{ catalog: CatalogView }>('/api/catalog/sync');
 
 /**
- * Prepnutie režimu rozsahu. Uvoľnenie (pilotný → plný) si server vypýta heslom;
- * sprísnenie späť je vždy voľné, aby sa dalo pribrzdiť aj v núdzi.
+ * Prepnutie režimu rozsahu. Uvoľnenie (pilotný → plný, aj zdvihnutie stropu)
+ * server ZAZNAMENÁ do auditu ako uvoľnenie (`looseningScope`) a od 28. 8. 2026
+ * si ho vypýta potvrdením (`confirmed: true`, D106) — bez neho vracia 409
+ * `confirmation_required` a rozsah zostane, kde bol. Sprísnenie späť je vždy
+ * voľné, aby sa dalo pribrzdiť aj v núdzi; preto je `confirmed` voliteľné
+ * a rozhodnutie padá na serveri, ktorý jediný vie, čo je uvoľnenie.
+ *
+ * Do 27. 8. 2026 si uvoľnenie vypýtalo heslo — heslá zmazalo D99, sudo bránu
+ * D100 a slovo v UI D105.
  */
-export const postScopeMode = (mode: ScopeModeValue, maxProductsPerCampaign?: number) =>
-  postJson<ScopeModeResult>(
-    '/api/settings/scope-mode',
-    maxProductsPerCampaign === undefined ? { mode } : { mode, maxProductsPerCampaign },
-  );
+export const postScopeMode = (
+  mode: ScopeModeValue,
+  maxProductsPerCampaign?: number,
+  confirmed?: boolean,
+) =>
+  postJson<ScopeModeResult>('/api/settings/scope-mode', {
+    mode,
+    ...(maxProductsPerCampaign === undefined ? {} : { maxProductsPerCampaign }),
+    ...(confirmed === undefined ? {} : { confirmed }),
+  });
 
 /**
  * Stav OBJEDNÁVKOVÉHO kľúča (`orders_read`, P2/P5). Tvar odpovede je rovnaký
@@ -242,11 +254,17 @@ export const postScopeMode = (mode: ScopeModeValue, maxProductsPerCampaign?: num
  */
 export const getOrdersKeyMeta = () => getJson<KeyMetaView>('/api/key?kind=orders_read');
 
-export const putDomain = (domain: string, password: string) =>
+/**
+ * Zmena adresy shopu. `confirmed` je POVINNÉ (D106, 28. 8. 2026): kto prepíše
+ * doménu, tomu zápisová cesta pošle dešifrovaný produkčný API kľúč na jeho
+ * adresu, a canary to nezastaví (číta bez kľúča). Preto tu nie je voliteľný
+ * parameter — kto zavolá `putDomain`, potvrdenie už má.
+ */
+export const putDomain = (domain: string, confirmed: true) =>
   sendJson<{ shopDomain: string; canary: { ok: boolean; total: number } }>(
     '/api/settings/domain',
     'PUT',
-    { domain, password },
+    { domain, confirmed },
   );
 
 export const testConnection = () => postJson<CanaryView>('/api/settings/test-connection');
@@ -255,11 +273,13 @@ export const testConnection = () => postJson<CanaryView>('/api/settings/test-con
    `eagerWriteDefault` nečíta žiadna cesta zápisu, takže obrazovka ju neponúka.
    Keď ju formulár novej zľavy začne čítať (D22), klient sa vráti sem. */
 
-/** Odhlásenie — session cookie ruší server, klient sa potom prekreslí. */
-export const logout = () => postJson<Record<string, never>>('/api/auth/logout');
-
-export const unlockWrites = (password: string) =>
-  postJson<{ writesLocked: false }>('/api/settings/unlock-writes', { password });
+/**
+ * Odomknutie zápisov. `confirmed: true` je jediné potvrdenie tejto akcie od
+ * zrušenia hesiel (D99) — server ho vyžaduje ako `z.literal(true)`, takže
+ * vynechanie skončí 400, nikdy odomknutím.
+ */
+export const unlockWrites = () =>
+  postJson<{ writesLocked: false }>('/api/settings/unlock-writes', { confirmed: true });
 
 export const putKey = (apiKey: string) =>
   sendJson<{ last4: string; expiresAt: string; verifyStatus: string }>('/api/key', 'PUT', {
@@ -277,9 +297,8 @@ export const putOrdersKey = (apiKey: string) =>
     { apiKey, kind: 'orders_read' },
   );
 
-export const panicWipeKey = (password: string) =>
+export const panicWipeKey = () =>
   sendJson<PanicResult>('/api/key', 'DELETE', {
-    password,
     confirm: PANIC_CONFIRM_LITERAL,
   });
 

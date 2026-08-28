@@ -51,7 +51,6 @@ export function createExecutePost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'sudo',
       body: bodySchema,
       params: idParamSchema,
       handler: (ctx) =>
@@ -74,7 +73,7 @@ export function createExecutePost(
               actor: 'user',
               eventType: 'campaign_lapsed',
               ok: false,
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
               campaignId: campaign.id,
               operationId: campaign.operationId,
               message: resolution.reason,
@@ -97,7 +96,7 @@ export function createExecutePost(
               from: effectiveFrom,
               to: campaign.dateTo,
             },
-            ctx.claims.sub,
+            ctx.actor.id,
           );
 
           /* 4. To isté potvrdenie, aké si prepočíta executor — PRED zápisom
@@ -123,7 +122,8 @@ export function createExecutePost(
                   : campaign.dateFromOriginal,
               confirmedAt: now,
               confirmPayloadHash: claims.payloadHash,
-              sudoAt: now,
+              // `NULL` — sudo zrušilo D100, čas by bol falošné tvrdenie.
+              sudoAt: null,
             },
             items,
           );
@@ -140,7 +140,8 @@ export function createExecutePost(
           await d.campaignsRepo.setStatus(campaign.id, campaign.status, {
             confirmedAt: now,
             confirmPayloadHash: claims.payloadHash,
-            sudoAt: now,
+            // `NULL` — sudo zrušilo D100, čas by bol falošné tvrdenie.
+            sudoAt: null,
             ...(resolution.action === 'shift_from'
               ? { dateFrom: resolution.from, dateFromOriginal: campaign.dateFromOriginal ?? resolution.originalFrom }
               : {}),
@@ -150,7 +151,7 @@ export function createExecutePost(
               actor: 'user',
               eventType: 'campaign_from_shifted',
               ok: true,
-              userId: ctx.claims.sub,
+              userId: ctx.actor.id,
               campaignId: campaign.id,
               operationId: campaign.operationId,
               message: `Začiatok zľavy posunutý z ${resolution.originalFrom} na ${resolution.from} (D25).`,
@@ -170,7 +171,7 @@ export function createExecutePost(
             actor: 'user',
             eventType: 'campaign_claimed',
             ok: true,
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
             campaignId: campaign.id,
             operationId: campaign.operationId,
             message: 'Manuálne dopálenie s novým potvrdením (D33b).',
@@ -179,7 +180,7 @@ export function createExecutePost(
           /* 8. Zápis — VÝHRADNE cez executor (§9). */
           const result = await makeExecutor(d).executeCampaign(campaign.id, {
             actor: 'user',
-            userId: ctx.claims.sub,
+            userId: ctx.actor.id,
           });
           return { status: result.status, items: result.items };
         }),

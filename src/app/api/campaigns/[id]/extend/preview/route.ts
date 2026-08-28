@@ -106,7 +106,6 @@ export function createExtendPreviewPost(
   return defineRoute(
     {
       method: 'POST',
-      auth: 'session',
       body: bodySchema,
       params: idParamSchema,
       handler: (ctx) =>
@@ -346,7 +345,7 @@ export function createExtendPreviewPost(
              * argumentom. */
             const tokens = d.previewTokens as PreviewTokenServiceV3;
             const issued = await tokens.issue({
-              sub: ctx.claims.sub,
+              sub: ctx.actor.id,
               kind: 'extend',
               productIds,
               percent: campaign.percent,

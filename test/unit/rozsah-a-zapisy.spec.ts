@@ -8,29 +8,30 @@
  *     dôvod, z ktorého sa dá postaviť ponuka „prepnúť do plného rozsahu".
  *  B. **Úplný obraz rozsahu z jedného čítania** — `GET /api/settings` vracia
  *     platný režim, efektívny strop, pilotný strop, tvrdý strop DB a to, či
- *     prepnutie vypýta heslo. Bez toho sa obrazovka musí domýšľať.
+ *     prepnutie rozsah uvoľňuje. Bez toho sa obrazovka musí domýšľať.
  *  C. **Cesta `pilot → plny` funguje celá vrátane auditu** — `scope_mode_changed`
  *     je riadny typ udalosti so slovenským popisom, nie neznámy reťazec.
  *  D. **Vypnuté zápisy sú VEDOMÉ nastavenie, nie tichý neúspech** — appka
  *     povie, že sa to z obrazovky prepnúť nedá, a kde to teda je.
- *  E. **Asymetria K1 bodu 4 sa nesmie oslabiť** — uvoľnenie chce heslo VŽDY
- *     (aj zdvihnutie stropu v rámci `plny`), sprísnenie NIKDY.
+ *  E. **Asymetria K1 bodu 4 sa nesmie oslabiť** — uvoľnením je VŽDY aj
+ *     zdvihnutie stropu v rámci `plny`, sprísnenie uvoľnením NIKDY. Do
+ *     27. 8. 2026 od toho záviselo sudo (D70); po D100 je to rozlíšenie pre
+ *     audit a pre dopredné ohlásenie na obrazovke.
  *
- * Bez DB a bez siete: repozitáre sú in-memory, session vrstva injektovaná cez
- * `RouteDeps`, env poistka cez `deps.writesEnabled`. Testuje sa správanie
- * a poradie, nie JWT podpis (ten vlastní A4).
+ * Bez DB a bez siete: repozitáre sú in-memory, lokálny actor (D102) injektovaný
+ * cez `RouteDeps`, env poistka cez `deps.writesEnabled`. Testuje sa správanie
+ * a poradie.
  *
  * Vlastník: A11 / V5.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { AuditInput, SessionClaims, SettingsRecord } from '@/contracts';
+import type { AuditInput, SettingsRecord } from '@/contracts';
 
 import { createSettingsRoute } from '@/app/api/settings/route';
 import { createScopeModeRoute } from '@/app/api/settings/scope-mode/route';
 import { createUnlockWritesRoute } from '@/app/api/settings/unlock-writes/route';
 import { AUDIT_EVENT_LABEL_SK, auditEventLabelSk, isAuditEventType } from '@/lib/audit/events';
-import { SudoRequiredError } from '@/lib/auth/sudo';
 import {
   GUARD_CODES,
   checkScope,
@@ -50,7 +51,7 @@ import { resetRateLimiter, type RouteDeps } from '@/lib/http/define-route';
 import {
   HARD_MAX_PRODUCTS,
   PILOT_MAX_PRODUCTS,
-  scopeChangeRequiresSudo,
+  scopeChangeIsLoosening,
   type ScopeMode,
   type ScopeSettings,
 } from '@/lib/repo/settings.repo';
@@ -62,37 +63,12 @@ const APP_ORIGIN = 'https://zlavy.local';
 const APP_HOST = 'zlavy.local';
 const NOW = new Date('2026-08-12T10:00:00.000Z');
 
-const claims: SessionClaims = {
-  sub: 7,
-  username: 'admin',
-  absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-  idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-  sudoUntil: new Date(NOW.getTime() + 10 * 60_000),
-};
-
-/** Falošná session vrstva — route nesmie na test siahnuť do DB ani do JWT. */
-function sessionRouteDeps(): RouteDeps {
+/** Lokálny actor — route nesmie na test siahnuť do DB (D102). */
+function actorRouteDeps(): RouteDeps {
   return {
     now: () => NOW,
     newRequestId: () => '01J0000000000000000TESTAB',
-    verifySession: async () => ({
-      claims,
-      refreshed: {
-        token: 'refreshed-token',
-        claims,
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed-token',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -136,49 +112,54 @@ beforeEach(() => {
 
 /* ════════ 1. Asymetria uvoľnenia a sprísnenia (K1 bod 4) — čistá funkcia ═══ */
 
-describe('scopeChangeRequiresSudo — uvoľnenie chce heslo, sprísnenie nikdy', () => {
-  it('`pilot → plny` je uvoľnenie a heslo si vypýta', () => {
-    expect(scopeChangeRequiresSudo(scope('pilot', 10_000), { mode: 'plny' })).toBe(true);
+describe('scopeChangeIsLoosening — čo je uvoľnenie a čo sprísnenie', () => {
+  it('`pilot → plny` je uvoľnenie', () => {
+    expect(scopeChangeIsLoosening(scope('pilot', 10_000), { mode: 'plny' })).toBe(true);
   });
 
-  it('`pilot → plny` chce heslo aj pri rovnakom čísle stropu', () => {
+  it('`pilot → plny` je uvoľnenie aj pri rovnakom čísle stropu', () => {
     // V `plny` sa prestáva vynucovať allowlist a nastupuje katalóg (K1 bod 2) —
     // mení sa, KTORÉ produkty prejdú, nie len koľko ich prejde.
     expect(
-      scopeChangeRequiresSudo(scope('pilot', 10), { mode: 'plny', maxProductsPerCampaign: 10 }),
+      scopeChangeIsLoosening(scope('pilot', 10), { mode: 'plny', maxProductsPerCampaign: 10 }),
     ).toBe(true);
   });
 
-  it('`plny → pilot` je sprísnenie a heslo NEPÝTA (poistka sa musí dať dotiahnuť)', () => {
-    expect(scopeChangeRequiresSudo(scope('plny', 10_000), { mode: 'pilot' })).toBe(false);
+  it('`plny → pilot` je sprísnenie, NIKDY uvoľnenie (poistka sa musí dať dotiahnuť)', () => {
+    expect(scopeChangeIsLoosening(scope('plny', 10_000), { mode: 'pilot' })).toBe(false);
   });
 
-  it('návrat do `pilot` nepýta heslo ANI pri uloženom strope pod desať', () => {
+  it('návrat do `pilot` nie je uvoľnenie ANI pri uloženom strope pod desať', () => {
     // Našiel review 12. 8.: pri `plny` so stropom 5 je efektívny strop 5,
     // v `pilot` je 10, takže porovnanie čísel spravilo z brzdy „uvoľnenie"
-    // a vypýtalo si heslo — presne vo chvíli, keď človek appku zastavuje.
+    // — presne vo chvíli, keď človek appku zastavuje.
     // `pilot` je pritom užší rozsah aj s vyšším číslom: vynucuje allowlist.
     for (const strop of [1, 5, 9, 10, 11, 10_000]) {
-      expect(scopeChangeRequiresSudo(scope('plny', strop), { mode: 'pilot' })).toBe(false);
+      expect(scopeChangeIsLoosening(scope('plny', strop), { mode: 'pilot' })).toBe(false);
     }
     // Aj vtedy, keď sa pri sprísnení pošle strop, ktorý by inak bol uvoľnením.
     expect(
-      scopeChangeRequiresSudo(scope('plny', 5), { mode: 'pilot', maxProductsPerCampaign: 10_000 }),
+      scopeChangeIsLoosening(scope('plny', 5), { mode: 'pilot', maxProductsPerCampaign: 10_000 }),
     ).toBe(false);
   });
 
-  it('zdvihnutie stropu v rámci `plny` je tiež uvoľnenie — heslo si vypýta', () => {
+  /*
+   * Zdvihnutie stropu je UVOĽNENIE, aj keď režim zostáva plny. Do 27. 8. 2026
+   * z toho vyplývalo „vypýta si heslo" (sudo, D70); po D100 už z toho nevyplýva
+   * nič okrem zápisu do auditu — ale samotné ROZLÍŠENIE musí zostať pravdivé,
+   * inak sa z histórie nedá prečítať, kto rozsah rozšíril.
+   */
+  it('zdvihnutie stropu v rámci `plny` je tiež uvoľnenie', () => {
     expect(
-      scopeChangeRequiresSudo(scope('plny', 8_000), {
+      scopeChangeIsLoosening(scope('plny', 8_000), {
         mode: 'plny',
         maxProductsPerCampaign: 10_000,
       }),
     ).toBe(true);
   });
-
-  it('zníženie stropu v rámci `plny` heslo nepýta', () => {
+  it('zníženie stropu v rámci `plny` nie je uvoľnenie', () => {
     expect(
-      scopeChangeRequiresSudo(scope('plny', 10_000), {
+      scopeChangeIsLoosening(scope('plny', 10_000), {
         mode: 'plny',
         maxProductsPerCampaign: 5_000,
       }),
@@ -187,7 +168,7 @@ describe('scopeChangeRequiresSudo — uvoľnenie chce heslo, sprísnenie nikdy',
 
   it('zmena stropu v `pilot` nie je uvoľnenie — tam sa uložený strop nepoužíva', () => {
     expect(
-      scopeChangeRequiresSudo(scope('pilot', 10), {
+      scopeChangeIsLoosening(scope('pilot', 10), {
         mode: 'pilot',
         maxProductsPerCampaign: 10_000,
       }),
@@ -195,7 +176,7 @@ describe('scopeChangeRequiresSudo — uvoľnenie chce heslo, sprísnenie nikdy',
   });
 
   it('fail-closed „neviem" → `plny` je uvoľnenie (K1 bod 1 sa nedá obísť výpadkom)', () => {
-    expect(scopeChangeRequiresSudo(scope('pilot', 10, true), { mode: 'plny' })).toBe(true);
+    expect(scopeChangeIsLoosening(scope('pilot', 10, true), { mode: 'plny' })).toBe(true);
   });
 });
 
@@ -244,36 +225,31 @@ function scopeWorld(initial: ScopeMode, initialCap = 10_000): ScopeWorld {
   };
 }
 
-/** Route so sudo oknom, ktoré vždy zlyhá — dokazuje, že sa NEPÝTA. */
-const refusingSudo = (): never => {
-  throw new SudoRequiredError();
-};
-
 describe('POST /api/settings/scope-mode — prepnutie rozsahu (K1 bod 4)', () => {
-  it('`pilot → plny` bez hesla neprejde a NIČ sa nezmení ani nezapíše do auditu', async () => {
-    const world = scopeWorld('pilot');
+  /*
+   * Test „`pilot → plny` bez hesla neprejde" tu stál do 27. 8. 2026 a meral
+   * sudo bránu (D70). Sudo zrušilo D100 a heslá D99, ale 28. 8. 2026 bránu
+   * OBNOVILO D106 — nie heslom, ale výslovným `confirmed: true`. Uvoľnenie
+   * rozsahu zdvihne strop z desiatok na tisíce produktov na jednu zľavu,
+   * a to nesmie byť jeden tichý POST.
+   *
+   * Strážia to tri testy nižšie, ktoré držia spolu ASYMETRIU (od D79):
+   *  - uvoľnenie BEZ potvrdenia → 409 a nezmení sa nič (fail-closed),
+   *  - uvoľnenie S potvrdením → prejde,
+   *  - sprísnenie bez potvrdenia → prejde ĎALEJ, lebo appku sa musí dať
+   *    pribrzdiť aj v núdzi, keď na obradnosť nie je čas.
+   * Plus to, čo z K1 bodu 4 pretrváva: rozdiel uvoľnenie/sprísnenie sa
+   * zapisuje do auditu ako `looseningScope`.
+   */
+
+  it('uvoľnenie BEZ potvrdenia je 409 a rozsah zostane `pilot` (D106)', async () => {
+    /* Uložený strop je zámerne INÝ než požadovaný (7 000 vs. 8 000 nižšie),
+       aby sa dalo dokázať, že `setMaxProductsPerCampaign()` sa nezavolala —
+       pri zhodných číslach by test prešel aj vtedy, keby sa strop prepísal. */
+    const world = scopeWorld('pilot', 7_000);
     const route = createScopeModeRoute({
       ...world.deps,
-      requireSudo: refusingSudo,
-      routeDeps: sessionRouteDeps(),
-    });
-
-    const res = await parse(
-      await route(makeRequest('POST', '/api/settings/scope-mode', { mode: 'plny' })),
-    );
-
-    expect(res.status).toBe(401);
-    expect(res.body.error?.code).toBe('sudo_required');
-    expect(world.mode).toBe('pilot');
-    expect(world.audit).toHaveLength(0);
-  });
-
-  it('`pilot → plny` s heslom prejde, zapíše audit a vráti celý obraz rozsahu', async () => {
-    const world = scopeWorld('pilot');
-    const route = createScopeModeRoute({
-      ...world.deps,
-      requireSudo: () => new Date(NOW.getTime() + 600_000),
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(
@@ -281,6 +257,32 @@ describe('POST /api/settings/scope-mode — prepnutie rozsahu (K1 bod 4)', () =>
         makeRequest('POST', '/api/settings/scope-mode', {
           mode: 'plny',
           maxProductsPerCampaign: 8_000,
+        }),
+      ),
+    );
+
+    expect(res.status).toBe(409);
+    expect(res.body.error?.code).toBe('confirmation_required');
+    /* Fail-closed PRED prvým zápisom: ani režim, ani strop, a žiadny audit
+       riadok o zmene, ktorá sa nekonala. */
+    expect(world.mode).toBe('pilot');
+    expect(world.cap).toBe(7_000);
+    expect(world.audit).toEqual([]);
+  });
+
+  it('`pilot → plny` prejde, zapíše audit a vráti celý obraz rozsahu', async () => {
+    const world = scopeWorld('pilot');
+    const route = createScopeModeRoute({
+      ...world.deps,
+      routeDeps: actorRouteDeps(),
+    });
+
+    const res = await parse(
+      await route(
+        makeRequest('POST', '/api/settings/scope-mode', {
+          mode: 'plny',
+          maxProductsPerCampaign: 8_000,
+          confirmed: true,
         }),
       ),
     );
@@ -292,7 +294,7 @@ describe('POST /api/settings/scope-mode — prepnutie rozsahu (K1 bod 4)', () =>
       pilotMaxProducts: number;
       hardMaxProducts: number;
       previousScopeMode: ScopeMode;
-      requiredSudo: boolean;
+      looseningScope: boolean;
       scopeFailClosed: boolean;
     }>(res);
     expect(data.scopeMode).toBe('plny');
@@ -300,7 +302,7 @@ describe('POST /api/settings/scope-mode — prepnutie rozsahu (K1 bod 4)', () =>
     expect(data.maxProducts).toBe(8_000);
     expect(data.pilotMaxProducts).toBe(PILOT_MAX_PRODUCTS);
     expect(data.hardMaxProducts).toBe(HARD_MAX_PRODUCTS);
-    expect(data.requiredSudo).toBe(true);
+    expect(data.looseningScope).toBe(true);
     expect(data.scopeFailClosed).toBe(false);
     expect(world.mode).toBe('plny');
     expect(world.cap).toBe(8_000);
@@ -310,22 +312,21 @@ describe('POST /api/settings/scope-mode — prepnutie rozsahu (K1 bod 4)', () =>
     const event = world.audit[0] as AuditInput;
     expect(event.eventType).toBe('scope_mode_changed');
     expect(event.ok).toBe(true);
-    expect(event.userId).toBe(claims.sub);
+    expect(event.userId).toBe(1);
     expect(event.beforeSnapshot).toMatchObject({ scopeMode: 'pilot', effectiveMaxProducts: 10 });
     expect(event.afterSnapshot).toMatchObject({
       scopeMode: 'plny',
       effectiveMaxProducts: 8_000,
-      requiredSudo: true,
+      looseningScope: true,
     });
     expect(event.message ?? '').toContain('plny');
   });
 
-  it('`plny → pilot` heslo NEPÝTA — sprísnenie je vždy voľné', async () => {
+  it('`plny → pilot` prejde a zapíše sa ako sprísnenie — je vždy voľné', async () => {
     const world = scopeWorld('plny');
     const route = createScopeModeRoute({
       ...world.deps,
-      requireSudo: refusingSudo,
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(
@@ -335,39 +336,23 @@ describe('POST /api/settings/scope-mode — prepnutie rozsahu (K1 bod 4)', () =>
     expect(res.status).toBe(200);
     expect(world.mode).toBe('pilot');
     expect(dataOf<{ maxProducts: number }>(res).maxProducts).toBe(PILOT_MAX_PRODUCTS);
-    expect(dataOf<{ requiredSudo: boolean }>(res).requiredSudo).toBe(false);
+    expect(dataOf<{ looseningScope: boolean }>(res).looseningScope).toBe(false);
     expect(world.audit).toHaveLength(1);
   });
 
-  it('zdvihnutie stropu v rámci `plny` bez hesla NEPREJDE a strop ostane', async () => {
-    const world = scopeWorld('plny', 8_000);
-    const route = createScopeModeRoute({
-      ...world.deps,
-      requireSudo: refusingSudo,
-      routeDeps: sessionRouteDeps(),
-    });
+  /*
+   * Route test „zdvihnutie stropu bez hesla NEPREJDE" tu bol do 27. 8. 2026 a
+   * meral sudo bránu (401 sudo_required). Sudo zrušilo D100. Uvoľnenie rozsahu
+   * teda prejde — a to je vyžiadaná zmena, nie regresia. Čo route ĎALEJ musí
+   * robiť a je strážené v testoch okolo: zapísať do auditu STARÝ aj NOVÝ stav
+   * a označiť, že šlo o uvoľnenie (looseningScope).
+   */
 
-    const res = await parse(
-      await route(
-        makeRequest('POST', '/api/settings/scope-mode', {
-          mode: 'plny',
-          maxProductsPerCampaign: 10_000,
-        }),
-      ),
-    );
-
-    expect(res.status).toBe(401);
-    expect(res.body.error?.code).toBe('sudo_required');
-    expect(world.cap).toBe(8_000);
-    expect(world.audit).toHaveLength(0);
-  });
-
-  it('zníženie stropu v rámci `plny` heslo nepýta a zapíše sa', async () => {
+  it('zníženie stropu v rámci `plny` prejde a zapíše sa ako sprísnenie', async () => {
     const world = scopeWorld('plny', 10_000);
     const route = createScopeModeRoute({
       ...world.deps,
-      requireSudo: refusingSudo,
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
 
     const res = await parse(
@@ -375,6 +360,7 @@ describe('POST /api/settings/scope-mode — prepnutie rozsahu (K1 bod 4)', () =>
         makeRequest('POST', '/api/settings/scope-mode', {
           mode: 'plny',
           maxProductsPerCampaign: 5_000,
+          confirmed: true,
         }),
       ),
     );
@@ -409,8 +395,8 @@ interface SettingsData {
   pilotMaxProducts: number;
   hardMaxProducts: number;
   scopeFailClosed: boolean;
-  scopeSwitchToFullRequiresSudo: boolean;
-  scopeSwitchToPilotRequiresSudo: boolean;
+  scopeSwitchToFullIsLoosening: boolean;
+  scopeSwitchToPilotIsLoosening: boolean;
   dailyWriteBudget: number;
   writesEnabled: boolean;
   writesLocked: boolean;
@@ -433,7 +419,7 @@ function settingsRoute(options: {
       },
     },
     writesEnabled: () => options.writesEnabled ?? false,
-    routeDeps: sessionRouteDeps(),
+    routeDeps: actorRouteDeps(),
   });
 }
 
@@ -456,18 +442,18 @@ describe('GET /api/settings — obraz rozsahu na jedno čítanie (B1, C2)', () =
     expect(data.scopeFailClosed).toBe(false);
   });
 
-  it('povie dopredu, že prepnutie do plného rozsahu vypýta heslo a späť nie', async () => {
+  it('povie dopredu, že prepnutie do plného rozsahu je uvoľnenie a späť nie', async () => {
     const data = await getSettings({ scope: scope('pilot', 10_000) });
-    expect(data.scopeSwitchToFullRequiresSudo).toBe(true);
-    expect(data.scopeSwitchToPilotRequiresSudo).toBe(false);
+    expect(data.scopeSwitchToFullIsLoosening).toBe(true);
+    expect(data.scopeSwitchToPilotIsLoosening).toBe(false);
   });
 
-  it('v plnom režime už prepnutie do plného rozsahu heslo nepýta', async () => {
+  it('v plnom režime už prepnutie do plného rozsahu nie je uvoľnenie', async () => {
     const data = await getSettings({ scope: scope('plny', 8_000) });
     expect(data.scopeMode).toBe('plny');
     expect(data.maxProducts).toBe(8_000);
-    expect(data.scopeSwitchToFullRequiresSudo).toBe(false);
-    expect(data.scopeSwitchToPilotRequiresSudo).toBe(false);
+    expect(data.scopeSwitchToFullIsLoosening).toBe(false);
+    expect(data.scopeSwitchToPilotIsLoosening).toBe(false);
   });
 
   it('nečitateľné nastavenia sa priznajú ako pilotný rozsah, nie ako plný (K1 bod 1)', async () => {
@@ -475,16 +461,17 @@ describe('GET /api/settings — obraz rozsahu na jedno čítanie (B1, C2)', () =
     expect(data.scopeMode).toBe('pilot');
     expect(data.maxProducts).toBe(PILOT_MAX_PRODUCTS);
     expect(data.scopeFailClosed).toBe(true);
-    expect(data.scopeSwitchToFullRequiresSudo).toBe(true);
+    expect(data.scopeSwitchToFullIsLoosening).toBe(true);
   });
 
-  it('nesie prekážku rozsahu slovami blockers.ts — aj s cestou a heslom', async () => {
+  it('nesie prekážku rozsahu slovami blockers.ts — aj s cestou a potvrdením', async () => {
     const data = await getSettings({ scope: scope('pilot', 10_000) });
     const cap = byId(data.blockers, 'scope_pilot_cap');
 
     expect(cap).toBeDefined();
     expect(cap?.area).toBe('rozsah');
-    expect(cap?.resolution).toBe('sudo');
+    // Kód prekážky sa 27. 8. 2026 prekrstil zo 'sudo' na 'potvrdenie' (D105).
+    expect(cap?.resolution).toBe('potvrdenie');
     expect(cap?.path).toBe('/nastavenia');
     // Veta musí niesť číslo, inak je to zase log.
     expect(cap?.what).toContain('10');
@@ -559,13 +546,11 @@ describe('POST /api/settings/unlock-writes — odomknutie nie je zapnutie (I12 v
     const memory = createMemorySettingsRepo({ writesLocked: true, writesLockedReason: 'runaway' });
     return createUnlockWritesRoute({
       settings: { get: memory.get, unlockWrites: memory.unlockWrites },
-      users: { getById: async () => ({ passwordHash: 'hash' }) },
-      verify: async () => true,
       audit: async (input: AuditInput) => {
         audit.push(input);
       },
       writesEnabled: () => writesEnabled,
-      routeDeps: sessionRouteDeps(),
+      routeDeps: actorRouteDeps(),
     });
   }
 
@@ -573,7 +558,7 @@ describe('POST /api/settings/unlock-writes — odomknutie nie je zapnutie (I12 v
     const audit: AuditInput[] = [];
     const res = await parse(
       await unlockRoute(false, audit)(
-        makeRequest('POST', '/api/settings/unlock-writes', { password: 'x' }),
+        makeRequest('POST', '/api/settings/unlock-writes', { confirmed: true }),
       ),
     );
 
@@ -589,7 +574,7 @@ describe('POST /api/settings/unlock-writes — odomknutie nie je zapnutie (I12 v
     const audit: AuditInput[] = [];
     const res = await parse(
       await unlockRoute(true, audit)(
-        makeRequest('POST', '/api/settings/unlock-writes', { password: 'x' }),
+        makeRequest('POST', '/api/settings/unlock-writes', { confirmed: true }),
       ),
     );
 
@@ -646,11 +631,16 @@ describe('checkScope — strop rozsahu odmietne strojovo, nie holým textom', ()
     expect(detail.pilotMaxProducts).toBe(PILOT_MAX_PRODUCTS);
     expect(detail.hardMaxProducts).toBe(HARD_MAX_PRODUCTS);
     expect(detail.failClosed).toBe(false);
-    // Zúženie výberu nie je jediná odpoveď — strop sa dá zdvihnúť, chce to heslo.
-    expect(detail.requiresSudoToRelease).toBe(true);
+    /*
+     * `requiresSudoToRelease: true` tu bolo do 27. 8. 2026 a znamenalo „strop sa
+     * dá zdvihnúť, ale chce to heslo". Po D100 by to bolo tvrdenie, ktoré route
+     * nedodrží — heslo si nevypýta —, tak pole zmizlo. Odpoveď „strop sa dá
+     * zdvihnúť" nesie ďalej `hardMaxProducts` a prekážka `scope_pilot_cap`.
+     */
+    expect(detail).not.toHaveProperty('requiresSudoToRelease');
   });
 
-  it('nesie prekážku `scope_pilot_cap`, ktorá vedie do Nastavení a pýta heslo', async () => {
+  it('nesie prekážku `scope_pilot_cap`, ktorá vedie do Nastavení a pýta potvrdenie', async () => {
     const result = await checkScope(ids(150), guardWorld(scope('pilot', 10_000), ids(150)));
 
     expect(result.ok).toBe(false);
@@ -660,7 +650,8 @@ describe('checkScope — strop rozsahu odmietne strojovo, nie holým textom', ()
 
     expect(cap).toBeDefined();
     expect(cap?.severity).toBe('blokuje');
-    expect(cap?.resolution).toBe('sudo');
+    // 'sudo' → 'potvrdenie' (D105, 27. 8. 2026).
+    expect(cap?.resolution).toBe('potvrdenie');
     expect(cap?.path).toBe('/nastavenia');
     // Veta musí obsahovať OBE čísla — strop aj veľkosť výberu (blockers.ts, bod 1).
     expect(cap?.what).toContain('10');
@@ -678,7 +669,7 @@ describe('checkScope — strop rozsahu odmietne strojovo, nie holým textom', ()
     expect(byId(detail.blockers, 'writes_disabled')).toBeUndefined();
   });
 
-  it('v plnom režime nad stropom sa už heslo nepýta — strop sa mení priamo', async () => {
+  it('v plnom režime nad stropom sa neponúka prepnutie — strop sa mení priamo', async () => {
     const result = await checkScope(ids(4), guardWorld(scope('plny', 3), ids(4)));
 
     expect(result.ok).toBe(false);

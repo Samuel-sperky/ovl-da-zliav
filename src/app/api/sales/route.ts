@@ -64,7 +64,6 @@ export function createSalesGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: querySchema,
       handler: async (ctx): Promise<SalesInsightsReport> => {
         // LAZY env — rovnaký dôvod ako `api/insights/_shared.ts`: eager čítanie

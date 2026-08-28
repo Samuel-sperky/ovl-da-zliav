@@ -98,8 +98,8 @@ export interface BlockerCard {
  * aj `locked` naraz, takže sa tri kanály nemôžu rozísť ani teoreticky.
  *
  *  - `cakanie`    → pokojná sivá. Nič sa nepokazilo, appka čaká na polnoc (K2).
- *  - `sam`, `sudo` → jantárová. Používateľ s tým vie pohnúť, len ešte nepohol;
- *    zámok pri `sudo` nesie ikona a slovo, nie farba.
+ *  - `sam`, `potvrdenie` → jantárová. Používateľ s tým vie pohnúť, len ešte
+ *    nepohol; zámok pri `potvrdenie` nesie ikona a slovo, nie farba.
  *  - `mimo_appky` → červená. Zápis je zastavený a z obrazovky sa s tým nedá
  *    urobiť nič; červená je v tejto appke vyhradená pre stratu dát a zastavený
  *    zápis a toto je presne ten druhý prípad.
@@ -109,7 +109,10 @@ export interface BlockerCard {
 export const RESOLUTION_TONE: Readonly<Record<BlockerResolution, StatusTone>> =
   lookChannel('tone');
 
-/** Ikona — druhý kanál popri farbe. `sudo` má zámok, lebo si pýta heslo. */
+/**
+ * Ikona — druhý kanál popri farbe. `potvrdenie` má zámok, lebo si vyžiada
+ * výslovné potvrdenie (do 27. 8. 2026 heslo — D105).
+ */
 export const RESOLUTION_ICON: Readonly<Record<BlockerResolution, IconName>> =
   lookChannel('icon');
 
@@ -399,7 +402,12 @@ function flag(source: Record<string, unknown>, key: string): boolean {
   return source[key] === true;
 }
 
-const BLOCKER_RESOLUTIONS: readonly BlockerResolution[] = ['sam', 'sudo', 'cakanie', 'mimo_appky'];
+const BLOCKER_RESOLUTIONS: readonly BlockerResolution[] = [
+  'sam',
+  'potvrdenie',
+  'cakanie',
+  'mimo_appky',
+];
 const BLOCKER_SEVERITIES: readonly BlockerSeverity[] = ['blokuje', 'obmedzuje', 'informuje'];
 
 /**
@@ -902,8 +910,6 @@ export interface RetryPlanView {
   readonly productIds: readonly number[];
   readonly items: RetryItemsView;
   readonly window: { readonly from: string; readonly to: string; readonly today: string };
-  /** Zaradenie opravnej zľavy si vypýta heslo. */
-  readonly requiresSudo: boolean;
 }
 
 /**
@@ -937,7 +943,6 @@ export function parseRetryPlan(raw: unknown): RetryPlanView | null {
   };
 
   const windowRaw = asRecord(root['window']);
-  const requiresRaw = asRecord(root['requires']);
 
   return {
     campaignId,
@@ -955,8 +960,6 @@ export function parseRetryPlan(raw: unknown): RetryPlanView | null {
       to: windowRaw === null ? '' : (text(windowRaw, 'to') ?? ''),
       today: windowRaw === null ? '' : (text(windowRaw, 'today') ?? ''),
     },
-    // Fail-closed aj tu: keď server nepovie inak, počítame s heslom.
-    requiresSudo: requiresRaw === null ? true : requiresRaw['sudo'] !== false,
   };
 }
 

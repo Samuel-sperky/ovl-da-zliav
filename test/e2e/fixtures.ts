@@ -7,9 +7,13 @@
  *                s čiastočným zlyhaním, audit záznam s `price_mismatch`),
  *  - `control` — klient control servera harnessu (`serve.ts`): scenáre mocku
  *                a jeho `recordedRequests`,
- *  - `login()` / `storeApiKey()` / `addAllowlist()` — kroky, ktoré takmer každý
- *    scenár potrebuje. Kľúč a allowlist idú **cez API appky**, nie do DB
+ *  - `storeApiKey()` / `addAllowlist()` — kroky, ktoré takmer každý scenár
+ *    potrebuje. Kľúč a allowlist idú **cez API appky**, nie do DB
  *    (kľúč je šifrovaný master keyom a e2e ho zámerne nikdy neobchádza, I1).
+ *
+ * 27. 8. 2026 (D99): `login()` odtiaľto ZMIZOL. Appka nemá prihlásenie ani
+ * `/login`, takže scenár ide priamo na cieľovú stránku a čaká na jej
+ * vykreslenie — nie na zmiznutie prihlasovacieho formulára.
  *
  * INVARIANT I6: v tomto súbore ani v žiadnom scenári nie je iná adresa než
  * `127.0.0.1`; appka má shop výhradne na mocku (`SHOP_BASE_URL_OVERRIDE`).
@@ -33,10 +37,14 @@ import { APP_BASE_URL, CONTROL_BASE_URL, E2E_CONFIG } from './config';
 export { expect };
 export { VALID_API_KEY };
 
-/** Prihlasovacie údaje e2e admina (syntetické, I1). */
+/**
+ * Lokálny actor e2e behu (D102). Po D99 to nie sú prihlasovacie údaje — heslo
+ * neexistuje a menom sa nikde neprihlasuje. Slúži len na dohľadanie riadku
+ * v `users`, na ktorý majú FK `campaigns.created_by` a `audit_log.user_id`
+ * (D101).
+ */
 export const ADMIN = {
   username: E2E_CONFIG.adminUsername,
-  password: E2E_CONFIG.adminPassword,
 } as const;
 
 /** Produkty z default katalógu mocku, ktoré scenáre používajú. */
@@ -239,7 +247,7 @@ function makeDb(): DbHelper {
           'eager_write_default = 1, writes_locked = 0, writes_locked_reason = NULL, ' +
           'writes_locked_at = NULL, onboarding_done_at = NULL, ' +
           // K1 — režim rozsahu sa MUSÍ vrátiť na `pilot`. Bez toho scenár, ktorý
-          // si rozsah uvoľnil (a je to sudo akcia, takže vzácna), nechá `plny`
+          // si rozsah uvoľnil (vzácny krok), nechá `plny`
           // ležať v DB a ďalším testom sa ticho vypne allowlist. Fail-closed
           // stav je východiskový aj medzi testami, nielen v produkcii.
           "scope_mode = 'pilot', max_products_per_campaign = 10000, " +
@@ -492,20 +500,12 @@ export async function api(
   });
 }
 
-/** Prihlásenie cez UI (`/login`) — po ňom platí sudo okno (D70). */
-export async function login(page: Page): Promise<void> {
-  await page.goto('/login');
-  await expect(page.getByTestId('login-page')).toBeVisible();
-  await page.getByTestId('login-username').fill(ADMIN.username);
-  await page.getByTestId('login-password').fill(ADMIN.password);
-  await page.getByTestId('login-submit').click();
-  await expect(page.getByTestId('login-page')).toBeHidden({ timeout: 15_000 });
-}
-
 /**
- * Uloží kľúč cez `PUT /api/key` v kontexte prihlásenej stránky (sudo okno platí
- * od loginu). Kľúč je syntetický `fake-shop-key-…` a appka ho overí sondou
- * proti mocku (I6).
+ * Uloží kľúč cez `PUT /api/key`. Kľúč je syntetický `fake-shop-key-…` a appka
+ * ho overí sondou proti mocku (I6).
+ *
+ * 27. 8. 2026 (D99/D100): mutácia už nepotrebuje session ani sudo okno.
+ * Chráni ju origin check (D72) — hlavičku `Origin` dopĺňa `api()` vyššie.
  */
 export async function storeApiKey(page: Page, apiKey: string = VALID_API_KEY): Promise<void> {
   const res = await api(page, 'PUT', '/api/key', { apiKey });
@@ -520,15 +520,13 @@ export async function addAllowlist(page: Page, productIds: readonly number[]): P
   }
 }
 
-/**
- * Vynúti sudo re-auth na strane klienta: `ConfirmPanel` porovnáva `sudoUntil`
- * s časom prehliadača, takže posun hodín v prehliadači zodpovedá „od poslednej
- * autentifikácie ubehlo viac než 15 minút" (D70). Serverové sudo okno zostáva
- * platné — testujeme UI cestu, nie obídenie autentifikácie.
+/*
+ * 27. 8. 2026 (D100): `expireClientSudo()` je zmazané. Posúvalo hodiny
+ * prehliadača, aby `ConfirmPanel` uvidel vypršané sudo okno — sudo zmizlo
+ * a `sudoUntil` v UI už neexistuje, takže helper nemal čo vynucovať. Dry-run
+ * a potvrdenie (I3) sú na sude nezávislé a strážia ich `write-flow.spec.ts`
+ * a `no-write-without-confirm.spec.ts`.
  */
-export async function expireClientSudo(page: Page): Promise<void> {
-  await page.clock.fastForward('20:00');
-}
 
 /* ════════════════════════════ 4. Fixtures ═════════════════════════════════ */
 

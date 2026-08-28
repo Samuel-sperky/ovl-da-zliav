@@ -41,7 +41,6 @@ export function createInsightsCampaignPerformanceGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       params: campaignIdParamSchema,
       handler: async (ctx) => {
         // LAZY env — eager čítanie na module scope by spustilo validáciu ENV

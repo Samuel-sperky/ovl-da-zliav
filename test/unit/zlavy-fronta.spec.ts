@@ -289,12 +289,12 @@ describe('D — vyčerpaný rozpočet blokuje, ale nie je to chyba (K2)', () => 
   it('čakanie je pokojné, riešiteľné je jantárové, mimo appky červené', () => {
     expect(RESOLUTION_TONE.cakanie).toBe('idle');
     expect(RESOLUTION_TONE.sam).toBe('attention');
-    expect(RESOLUTION_TONE.sudo).toBe('attention');
+    expect(RESOLUTION_TONE.potvrdenie).toBe('attention');
     expect(RESOLUTION_TONE.mimo_appky).toBe('critical');
   });
 
   it('každý spôsob riešenia má okrem farby aj glyf a slovo', () => {
-    const keys = ['sam', 'sudo', 'cakanie', 'mimo_appky'] as const;
+    const keys = ['sam', 'potvrdenie', 'cakanie', 'mimo_appky'] as const;
     for (const key of keys) {
       expect(RESOLUTION_ICON[key].length).toBeGreaterThan(0);
       expect(RESOLUTION_WORD[key].length).toBeGreaterThan(3);
@@ -421,12 +421,11 @@ describe('E — neisté a zlyhané sú dve čísla s dvoma ďalšími krokmi (D4
       productIds: [101, 102, 103],
       items: { total: 5000, retryable: 53, notWritten: 41, uncertain: 12, pending: 0, ok: 4700, skipped: 7 },
       window: { from: '2026-09-04', to: '2026-09-18', originalFrom: '2026-09-04', today: '2026-08-12' },
-      requires: { freshPreview: true, confirmation: true, sudo: true },
+      requires: { freshPreview: true, confirmation: true },
     });
     expect(plan?.items.notWritten).toBe(41);
     expect(plan?.items.uncertain).toBe(12);
     expect(plan?.possible).toBe(true);
-    expect(plan?.requiresSudo).toBe(true);
     expect(plan?.window.from).toBe('2026-09-04');
   });
 });
@@ -442,11 +441,13 @@ describe('F — zopakovanie si vždy vypýta čerstvé potvrdenie (I3, D16)', ()
     expect(plan?.possible).toBe(false);
   });
 
-  it('keď server nepovie inak, počíta sa s heslom', () => {
-    const plan = parseRetryPlan({ campaignId: 7, what: 'Nieco.', productIds: [1] });
-    expect(plan?.requiresSudo).toBe(true);
-  });
-
+  /*
+   * Test „keď server nepovie inak, počíta sa s heslom" tu stál do 27. 8. 2026.
+   * Model čítal `requires.sudo` fail-closed na `true`. Sudo zrušilo D100, pole
+   * zmizlo z drôtu — a model, ktorý by ho ďalej čítal, by fail-closed dopĺňal
+   * požiadavku, ktorú server nikdy nepošle. Čo z I3 na tomto mieste PRETRVÁVA:
+   * `possible` bez výslovného súhlasu servera zostáva `false` (test vyššie).
+   */
   it('nezmysel sa nevydá za plán', () => {
     expect(parseRetryPlan(null)).toBeNull();
     expect(parseRetryPlan({ campaignId: 7 })).toBeNull();
@@ -473,14 +474,16 @@ describe('G — pri narazení na strop sa ponúka prepnutie, nie odmietnutie (R4
     selection: { selectedCount: 150 },
   }).find((blocker) => blocker.id === 'scope_pilot_cap');
 
-  it('prekážka stropu je riešiteľná heslom a nesie obe čísla', () => {
+  it('prekážka stropu je riešiteľná potvrdením a nesie obe čísla', () => {
     expect(pilotCap).toBeDefined();
-    expect(pilotCap?.resolution).toBe('sudo');
+    // Do 27. 8. 2026 sa tento kód volal `sudo` a otváralo ho heslo; D105 ho
+    // prekrstilo na `potvrdenie`, lebo po D100 už žiadne heslo neexistuje.
+    expect(pilotCap?.resolution).toBe('potvrdenie');
     expect(pilotCap?.what).toContain('150');
     expect(pilotCap?.what).toContain('10');
   });
 
-  it('panel ukáže obe čísla, ponúkne prepnutie a upozorní na heslo', () => {
+  it('panel ukáže obe čísla, ponúkne prepnutie a upozorní na potvrdenie', () => {
     const html = renderToStaticMarkup(
       createElement(ScopeRelease, {
         wanted: 150,
@@ -504,7 +507,10 @@ describe('G — pri narazení na strop sa ponúka prepnutie, nie odmietnutie (R4
     expect(html).toContain('150');
     expect(html).toContain('140');
     expect(html).toContain('/nastavenia#rozsah');
-    expect(html).toContain('heslo');
+    expect(html).toContain('potvrdenie');
+    // Slovo „heslo" sa tu vrátiť nesmie — po D100 by sľubovalo bránu, ktorá
+    // neexistuje.
+    expect(html).not.toMatch(/heslo/i);
     // Odmietnutie bez cesty von je tu zakázané.
     expect(html).toContain('Prepnúť rozsah');
   });

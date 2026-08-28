@@ -36,7 +36,6 @@ export function createInsightsActivityGet(
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: querySchema,
       handler: async (ctx) => {
         const today = ctx.query.anchor ?? todayOf(d);

@@ -39,7 +39,7 @@
  *    popisuje („rieši sa mimo appky · Zapnúť ich môže len správca…").
  * 1c. **Tón, glyf aj slová prichádzajú z JEDINÉHO slovníka** (19. 8. 2026,
  *    `ui/blocker-look.ts`). Do tohto dátumu mala sekcia vlastnú tabuľku, kde
- *    bolo `mimo_appky` jantárové a `sudo` malo tlmený „tón" `lock`, kým tab
+ *    bolo `mimo_appky` jantárové a `potvrdenie` malo tlmený „tón" `lock`, kým tab
  *    Zľavy kreslil tú istú prekážku červeno a jantárovo. Slovník je odvtedy
  *    jeden a `SEVERITY_WORD` je v ňom preto, aby ho kreslil aj
  *    `campaigns/BlockerList.tsx` — oprava D6 platila dovtedy na jednej zo
@@ -74,7 +74,7 @@ export interface BlockersSectionProps {
 
 function Row({ row }: { row: BlockerRow }) {
   const look = resolutionLook(row.resolution);
-  // Zámok už slovo o spôsobe riešenia povie sám („Vyžiada si heslo — …"),
+  // Zámok už slovo o spôsobe riešenia povie sám („Vyžiada si potvrdenie — …"),
   // takže sa v tlmenom riadku pod ním neopakuje. Dve kópie tej istej vety
   // v jednom riadku sú šum, nie dôraz. `locked` je vlastnosť spôsobu riešenia,
   // nie tón — farba riadku ostáva jantárová ako pri `sam`.
@@ -92,7 +92,7 @@ function Row({ row }: { row: BlockerRow }) {
 
       <div className={styles.reasonBody}>
         <div className="lvl-2">
-          {locked ? <LockBadge label="Vyžiada si heslo" reason={row.what} /> : row.what}
+          {locked ? <LockBadge label="Vyžiada si potvrdenie" reason={row.what} /> : row.what}
         </div>
         <div className="lvl-3">
           {locked ? null : (

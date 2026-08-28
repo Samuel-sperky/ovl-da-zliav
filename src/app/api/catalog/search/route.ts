@@ -410,7 +410,6 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       query: searchQuerySchema,
       handler: async (ctx) => {
         const q = ctx.query;

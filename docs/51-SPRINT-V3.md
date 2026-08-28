@@ -143,9 +143,14 @@ produktov** (I3 na povrchu). Varovanie o kľúči podľa K6.
 Presmerovanie `/kampane/*` → `/zlavy/*`.
 
 ### V12 · Nastavenia, prihlásenie, mobil
-Vlastní: `src/app/nastavenia/**`, `src/app/login/**`,
+
+> **27. 8. 2026 (D99):** prihlásenie je zrušené — `src/app/login/**`
+> aj `prihlasenie.html` sú zmazané. Zvyšok tohto bodu (Nastavenia, onboarding,
+> mobil) platí ďalej.
+
+Vlastní: `src/app/nastavenia/**`, ~~`src/app/login/**`~~,
 `src/app/onboarding/**`, `src/components/settings/**`
-Podľa `nastavenia.html`, `prihlasenie.html`. Audit sa sem skladá ako
+Podľa `nastavenia.html` (~~`prihlasenie.html`~~, D99). Audit sa sem skladá ako
 „História a technický detail" (K9). Mobil podľa `m-*.html` — Prehľad,
 Produkty, Nová zľava, Schválenie.
 

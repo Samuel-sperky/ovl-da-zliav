@@ -27,7 +27,6 @@ import type {
   CampaignListFilter,
   Paged,
   SchedulerStateRecord,
-  SessionClaims,
   SettingsRecord,
 } from '@/contracts';
 
@@ -46,39 +45,11 @@ import type { ScopeSettings } from '@/lib/repo/settings.repo';
 const NOW = new Date('2026-08-12T09:00:00.000Z');
 const now = (): Date => NOW;
 
-function claims(): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: null,
-  };
-}
-
-/** Session vrstva bez JWT — testuje sa route, nie podpis (to vlastní A4). */
 function sessionDeps(): RouteDeps {
   return {
     now,
     newRequestId: () => '01J0000000000000000QUEUE01',
-    verifySession: async () => ({
-      claims: claims(),
-      refreshed: {
-        token: 'refreshed',
-        claims: claims(),
-        cookie: {
-          name: 'ovl_zliav_session' as const,
-          value: 'refreshed',
-          options: {
-            httpOnly: true as const,
-            secure: true as const,
-            sameSite: 'strict' as const,
-            path: '/',
-            maxAge: 1800,
-          },
-        },
-      },
-    }),
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -438,7 +409,8 @@ describe('GET /api/queue — prečo to stojí', () => {
     const cap = blockers.find((b) => b.id === 'scope_pilot_cap');
     expect(cap?.severity).toBe('blokuje');
     expect(String(cap?.what)).toContain('150');
-    expect(cap?.resolution).toBe('sudo');
+    // Kód prekážky sa 27. 8. 2026 prekrstil zo 'sudo' na 'potvrdenie' (D105).
+    expect(cap?.resolution).toBe('potvrdenie');
   });
 
   it('o katalógu sa NETVRDÍ nič — táto route ho nečíta', async () => {

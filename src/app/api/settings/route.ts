@@ -16,7 +16,8 @@
  * Používateľ nevedel, že strop desiatich produktov je len prepínač: appka mu
  * ticho odmietla väčšiu zľavu a nikdy nepovedala, že existuje `plny` režim so
  * stropom 10 000. Odpoveď preto nesie CELÝ obraz rozsahu — platný režim,
- * efektívny strop, pilotný strop, tvrdý strop DB a to, či prepnutie chce heslo
+ * efektívny strop, pilotný strop, tvrdý strop DB a to, či je prepnutie
+ * uvoľnením (do 27. 8. 2026 „či chce heslo" — D100/D105)
  * — a k tomu strojovo spracovateľné prekážky z `lib/status/blockers.ts`, aby
  * obrazovka nemusela skladať vlastné vety.
  *
@@ -27,8 +28,8 @@
  *
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
- *  1. **Vety sa tu nepíšu.** Prichádzajú z `blockers.ts`, rozhodnutie o hesle
- *     z `settings.repo.scopeChangeRequiresSudo()`. Kópia ktorejkoľvek z nich
+ *  1. **Vety sa tu nepíšu.** Prichádzajú z `blockers.ts`, rozhodnutie
+ *     o uvoľnení z `settings.repo.scopeChangeIsLoosening()`. Kópia ktorejkoľvek z nich
  *     by sa raz rozišla s tým, čo route `/api/settings/scope-mode` naozaj robí.
  *  2. **Do `blockers` idú len oblasti, ktoré tento endpoint naozaj prečítal**
  *     (`zapisy`, `rozsah`). Kľúč, rozpočet, katalóg ani čítania sem nepatria —
@@ -47,7 +48,7 @@ import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/d
 import {
   settingsRepo as defaultSettingsRepo,
   effectiveMaxProducts,
-  scopeChangeRequiresSudo,
+  scopeChangeIsLoosening,
   FAIL_CLOSED_SCOPE,
   HARD_MAX_PRODUCTS,
   PILOT_MAX_PRODUCTS,
@@ -97,7 +98,6 @@ export function createSettingsRoute(deps: SettingsRouteDeps = {}): NextRouteHand
   return defineRoute(
     {
       method: 'GET',
-      auth: 'session',
       handler: async () => {
         const record = await settings.get();
         const scope = await readScope();
@@ -120,19 +120,22 @@ export function createSettingsRoute(deps: SettingsRouteDeps = {}): NextRouteHand
           /** `true` = hodnoty sú fail-closed default, nie z DB (K1 bod 1). */
           scopeFailClosed: scope.failClosed,
           /**
-           * K1 bod 4 — či prepnutie do plného rozsahu vypýta heslo. Odpoveď
-           * pochádza z tej istej funkcie, ktorou sa heslo aj vynucuje.
+           * K1 bod 4 — či je prepnutie do plného rozsahu UVOĽNENÍM. Odpoveď
+           * pochádza z tej istej funkcie, ktorou sa to rozlíšenie aj zapisuje
+           * do auditu. Do 27. 8. 2026 od nej záviselo, či sa vypýta heslo;
+           * heslá zmazalo D99 a sudo D100, rozlíšenie zostalo.
            */
-          scopeSwitchToFullRequiresSudo: scopeChangeRequiresSudo(scope, { mode: 'plny' }),
+          scopeSwitchToFullIsLoosening: scopeChangeIsLoosening(scope, { mode: 'plny' }),
           /** Sprísnenie je vždy voľné (K1 bod 4) — a je to fakt, nie domnienka. */
-          scopeSwitchToPilotRequiresSudo: scopeChangeRequiresSudo(scope, { mode: 'pilot' }),
+          scopeSwitchToPilotIsLoosening: scopeChangeIsLoosening(scope, { mode: 'pilot' }),
           /* K2 — denný rozpočet zápisov (spotrebu vracia `/api/queue`). */
           dailyWriteBudget: scope.dailyWriteBudget,
           /* I13 — vedomé nastavenie mimo appky, nie tichý neúspech. */
           writesEnabled,
           /**
            * Prekážky oblastí `zapisy` a `rozsah` slovami `blockers.ts`:
-           * čo sa deje, čo s tým, kam v appke to vedie a či to chce heslo.
+           * čo sa deje, čo s tým, kam v appke to vedie a či to chce
+           * výslovné potvrdenie (do 27. 8. 2026 heslo — D105).
            */
           blockers: collectOperationBlockers({
             writes: { enabled: writesEnabled },

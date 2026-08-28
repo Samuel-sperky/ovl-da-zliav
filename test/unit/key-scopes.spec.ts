@@ -23,7 +23,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { Queryable, SessionClaims } from '@/contracts';
+import type { Queryable } from '@/contracts';
 
 import { resetRateLimiter, type RouteDeps } from '@/lib/http/define-route';
 import {
@@ -58,46 +58,10 @@ const FAKE_KEY = 'fake-shop-key-ABCD1234EFGH';
 const KEY_NAME = 'aura-zlavy-integracia';
 const KEY_OWNER = 'Jana Testovacia';
 
-function claims(): SessionClaims {
-  return {
-    sub: 7,
-    username: 'admin',
-    absoluteExpiresAt: new Date(NOW.getTime() + 8 * 3_600_000),
-    idleExpiresAt: new Date(NOW.getTime() + 30 * 60_000),
-    sudoUntil: new Date(NOW.getTime() + 10 * 60_000),
-  };
-}
-
 function routeDeps(): RouteDeps {
-  const sessionClaims = claims();
   return {
     now: () => NOW,
-    verifySession: async (token) => {
-      if (!token) {
-        const error = new Error('Session chýba alebo je neplatná.');
-        error.name = 'SessionError';
-        (error as Error & { code: string }).code = 'missing';
-        throw error;
-      }
-      return {
-        claims: sessionClaims,
-        refreshed: {
-          token: 'refreshed',
-          claims: sessionClaims,
-          cookie: {
-            name: 'ovl_zliav_session' as const,
-            value: 'refreshed',
-            options: {
-              httpOnly: true as const,
-              secure: true as const,
-              sameSite: 'strict' as const,
-              path: '/',
-              maxAge: 1800,
-            },
-          },
-        },
-      };
-    },
+    localActor: async () => ({ id: 1, username: 'samuel' }),
   };
 }
 
@@ -235,8 +199,6 @@ function baseDeps(overrides: Partial<KeyRouteDeps> = {}): KeyRouteDeps {
       list: async () => ({ data: [], page: 1, perPage: 0, total: 0 }),
       setStatus: async () => {},
     },
-    users: { getById: async () => ({ passwordHash: 'argon2-fake-hash' }) },
-    verify: async () => true,
     audit: async () => {},
     execute: async (campaignId) => ({
       campaignId,

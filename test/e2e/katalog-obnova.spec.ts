@@ -15,7 +15,7 @@
  *
  * Vlastník: V10.
  */
-import { expect, login, test } from './fixtures';
+import { expect, test } from './fixtures';
 
 test.describe('katalóg — obnova nad celým katalógom', () => {
   test('karta ani Prehľad netvrdia, že chýbajú stránky', async ({ page, db }) => {
@@ -47,8 +47,6 @@ test.describe('katalóg — obnova nad celým katalógom', () => {
     );
 
     try {
-      await login(page);
-
       /* 3. Produkty — karta stavu katalógu. */
       await page.goto('/produkty');
       await expect(page.getByTestId('catalog-status')).toBeVisible();

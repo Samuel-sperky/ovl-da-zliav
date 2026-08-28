@@ -360,8 +360,11 @@ describe('Rozsah zliav', () => {
 
   it('oba rozsahy stoja vedľa seba aj s tým, ako sa na ne prepína', () => {
     expect(pilot).toContain('data-testid="scope-modes"');
-    expect(pilot).toContain('sprísnenie je vždy voľné, heslo netreba');
-    expect(pilot).toContain('uvoľnenie si vypýta heslo');
+    // Do 27. 8. 2026 tu stálo „heslo"; D105 ho vymenilo za „potvrdenie",
+    // pretože po D100 žiadne heslo neexistuje. Asymetria ostala: sprísnenie je
+    // voľné, uvoľnenie si vypýta potvrdenie.
+    expect(pilot).toContain('sprísnenie je vždy voľné, potvrdenie netreba');
+    expect(pilot).toContain('uvoľnenie si vypýta potvrdenie');
     // Ktorý rozsah platí teraz, sa nesie slovom, nie len farbou riadku.
     expect(pilot).toContain('data-testid="scope-row-pilot"');
     expect(pilot).not.toContain('data-testid="scope-row-full"');

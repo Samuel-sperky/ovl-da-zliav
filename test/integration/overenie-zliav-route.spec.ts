@@ -47,7 +47,7 @@ import {
 } from '@/lib/shop/read-budget';
 
 import { startMockShopWithOverride, type RunningMockShop } from '../helpers/mock';
-import { makeRequest, parse, sessionRouteDeps } from './routes-harness';
+import { makeRequest, parse, actorRouteDeps } from './routes-harness';
 
 const NOW = new Date('2026-08-18T09:00:00.000Z');
 const now = (): Date => NOW;
@@ -101,7 +101,7 @@ function routeWith(scopes: readonly ShopScope[] | null) {
     ownWrites: async () => [ownWrite()],
     reads: budget,
     now,
-    routeDeps: sessionRouteDeps(),
+    routeDeps: actorRouteDeps(),
   });
 }
 

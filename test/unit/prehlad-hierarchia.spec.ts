@@ -179,7 +179,7 @@ function threeBlockers(): BlockerRow[] {
     blocker({
       id: 'scope_pilot_cap',
       severity: 'informuje',
-      resolution: 'sudo',
+      resolution: 'potvrdenie',
       what: 'V pilotnom režime prejde na jednu zľavu najviac 10 produktov.',
       nextStep: 'Prepnite rozsah na plný v Nastaveniach.',
       assumed: true,
@@ -340,8 +340,8 @@ describe('D6 — závažnosť prekážky sa dá prejsť očami po stĺpci', () =
 
     // Zámok už slovo o riešení povie sám — druhá kópia v tlmenom riadku by
     // bola tá istá veta dvakrát v jednom riadku.
-    expect(html).toContain('Vyžiada si heslo');
-    expect(count(html, /vyžiada si heslo/g)).toBe(0);
+    expect(html).toContain('Vyžiada si potvrdenie');
+    expect(count(html, /vyžiada si potvrdenie/g)).toBe(0);
   });
 
   it('priznaná domnienka a cesta ďalej zostali v riadku', () => {
