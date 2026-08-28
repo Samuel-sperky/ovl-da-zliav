@@ -284,7 +284,10 @@ export interface ExecuteOptions {
    * `write_uncertain`) mali `user_id = NULL` a nevedeli, kto ich spustil.
    * To bolo porušenie D102 aj I11 („nevieme" je horšie než odpoveď).
    *
-   * Pri `actor='scheduler'` je `null` v poriadku — dávku nespustil človek.
+   * Pri `actor='scheduler'` sa NEPOSIELA (dávku nespustil človek) a executor
+   * si od 28. 8. 2026 dosadí `campaigns.created_by`, teda toho, kto kampaň
+   * potvrdil — viď D108 v tele `executeCampaign()`. `user_id` tak odpovedá na
+   * „kto to autorizoval" a stĺpec `actor` oddelene na „kto to spustil".
    */
   userId?: number | null;
 }
@@ -645,7 +648,7 @@ export function createExecutor(deps: ExecutorDeps): {
      * `write_uncertain` — teda práve riadky dokladujúce zápis do PRODUKCIE —
      * mali `user_id = NULL`. Audit potom nevedel, kto zápis spustil (I11).
      */
-    const userId = opts.userId ?? null;
+    let userId = opts.userId ?? null;
 
     /* 1. Globálny mutex — druhá operácia sa odmietne, nečaká (D37, I12). */
     const held = await mutex.tryAcquire(`campaign:${campaignId}`);
@@ -658,6 +661,25 @@ export function createExecutor(deps: ExecutorDeps): {
 
     try {
       const { campaign, items } = await loadCampaign(campaignId);
+
+      /*
+       * D108 (28. 8. 2026) — schedulerový fire tiež musí povedať, KTO ten zápis
+       * autorizoval.
+       *
+       * Scheduler nedostane `opts.userId` (nespustil ho človek), takže do
+       * 28. 8. 2026 mali všetky auditné riadky dávkových zápisov
+       * `user_id = NULL` — a to sú riadky dokladujúce zápis do PRODUKČNÉHO
+       * eshopu. D102 pritom hovorí „každý zápis a každý audit riadok", a I11
+       * hovorí, že „nevieme" je horšie než odpoveď.
+       *
+       * Odpoveď nie je vymyslená: `campaigns.created_by` drží actora, ktorý
+       * kampaň vytvoril a POTVRDIL — teda toho, kto zápis autorizoval. Kto ho
+       * spustil, hovorí ODDELENE stĺpec `actor` (`scheduler` vs. `user`), takže
+       * sa tu nič nezastiera: dva stĺpce, dve rôzne otázky. Preto fallback až
+       * PO načítaní kampane a nikdy prepis explicitného `opts.userId`.
+       */
+      if (userId === null) userId = campaign.createdBy;
+
       const operationId = campaign.operationId;
       const opLog = log.child({ operationId, campaignId: campaign.id });
 

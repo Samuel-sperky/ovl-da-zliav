@@ -15,7 +15,7 @@ Značenie:
 - **R1–R10** — rámcové rozhodnutia z `00-KONTEXT-10-OTAZOK.md`
 - **D1–D100** — rozhodnutia z `01-DOTAZNIK-100-OTAZOK.md` / `02-ODPOVEDI-100-OTAZOK.md`
   (číslo D sa rovná číslu otázky, aby krížové odkazy fungovali)
-- **D98–D107 (27.–28. 8. 2026)** — rozhodnutia sprintu „bez prihlásenia" z
+- **D98–D108 (27.–28. 8. 2026)** — rozhodnutia sprintu „bez prihlásenia" z
   `KONTRAKT-BEZ-LOGINU-2026-08-27.md`; žijú v sekcii **F2**
 - **I1–I14** — invarianty (nadradené všetkému ostatnému)
 - **B1–B4** — backlog na maintainera shopu
@@ -24,7 +24,7 @@ Sloveso **MUSÍ / NESMIE** je normatívne. Kde je uvedený variant (napr. `38b`)
 ide o zvolenú možnosť z dotazníka.
 
 > **Kolízia čísel — čítaj pozorne (27. 8. 2026).** Sprint „bez prihlásenia" si
-> vzal čísla D98–D107, takže **D98, D99 a D100 existujú v tomto dokumente
+> vzal čísla D98–D108, takže **D98, D99 a D100 existujú v tomto dokumente
 > dvakrát**: v sekcii F pôvodné z dotazníka (kontajner hardening / CI / upgrade
 > runbook) a v sekcii F2 nové (Caddy `basic_auth` / app session / sudo). Kód
 > cituje obe sady — `src/lib/scheduler/pause.ts` píše „upgradom podľa D100"
@@ -192,7 +192,7 @@ ide o zvolenú možnosť z dotazníka.
 
 ---
 
-## F2. Sprint „bez prihlásenia" (D98–D107, 27.–28. 8. 2026)
+## F2. Sprint „bez prihlásenia" (D98–D108, 27.–28. 8. 2026)
 
 Zdroj: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` (dôvod, čo prihlásenie nechránilo,
 prijaté riziko a akceptačné kritériá K1–K8). Appka je jednoužívateľský lokálny
@@ -212,6 +212,7 @@ viď poznámku v úvode dokumentu.
 | D105 | Slovník prekážok (`src/lib/status/blockers.ts`) a UI texty prestávajú sľubovať heslo: prekážka `sudo` sa mení na `potvrdenie`. | Po D99/D100 žiadne heslo neexistuje a zámok, ktorý sa nemá čím otvoriť, je klamstvo v UI. Dôsledok D100. |
 | **D106** | **Uvoľňujúce mutácie v Nastaveniach dostávajú späť bránu — nie heslom, ale zaškrtávacím potvrdením.** `PUT /api/settings/domain` a `POST /api/settings/scope-mode` (len pri UVOĽNENÍ) žiadajú `confirmed: true`; `POST /api/settings/unlock-writes` ho už má z D99 a `DELETE /api/key` má vypísaný literál `KLUC UNIKOL`. Sprísnenie rozsahu zostáva VOĽNÉ. | Overenie sprintu ukázalo, že §3 kontraktu popisoval riziko UŽŠIE, než aké bolo: heslo v tele bolo pri týchto akciách JEDINÁ brána a jeho zmazaním sa z nich stal jeden tichý POST. Najdrahšia z nich je doména — kto ju prepíše, tomu zápisová cesta pošle **dešifrovaný produkčný API kľúč** v `X-Api-Key`, teda BEZ prístupu k `secrets/`; canary to nezastaví, číta bez kľúča. Samuel to rozhodol 28. 8. 2026 z troch ponúknutých variantov. Nie je to návrat prihlásenia (D99 platí): nič sa nepamätá a nič sa nezadáva, len raz zaškrtne. |
 | **D107** | Mŕtve prihlasovacie tajomstvá sa z disku **mažú**: `secrets/basic-auth.txt`, `secrets/app-admin.txt`, `secrets/Caddyfile.bak-2026-08-27`. | Po D98/D99 už nič nechránia. §3 obhajuje prijaté riziko vetou „kto vie čítať tento disk" — heslo, ktoré používateľ môže mať aj inde, tam nemá ležať bez dôvodu. Netrackované (I1), takže v gite sa nič nemení. Samuel potvrdil 28. 8. 2026. |
+| **D108** | Schedulerový fire dosadí do `audit_log.user_id` hodnotu `campaigns.created_by`, keď `opts.userId` nie je. Stĺpec `actor` (`scheduler`/`user`) zostáva nedotknutý. | D102 hovorí „každý audit riadok", ale scheduler `userId` neposiela (dávku nespustil človek), takže riadky dokladujúce DÁVKOVÝ zápis do produkcie mali `user_id = NULL` — teda „nevieme, kto to autorizoval" (I11). `created_by` drží actora, ktorý kampaň vytvoril a POTVRDIL. Dva stĺpce, dve otázky: `actor` = kto spustil, `user_id` = kto autorizoval. |
 
 **Čo sa zrušením prihlásenia stratilo** (povedané nahlas, kontrakt §3):
 ktorýkoľvek lokálny proces na tomto PC vie zapísať zľavy do produkčného eshopu

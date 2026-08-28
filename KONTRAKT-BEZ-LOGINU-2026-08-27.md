@@ -73,6 +73,7 @@ a spísať, čo ju drží po zrušení — nie iba tie, ktoré menuje invariant.
 | **D105** | Slovník prekážok (`src/lib/status/blockers.ts`) a UI texty prestávajú sľubovať heslo: prekážka `sudo` sa mení na `potvrdenie`. | Po D99/D100 žiadne heslo neexistuje a zámok, ktorý sa nemá čím otvoriť, je klamstvo v UI. Dôsledok D100. |
 | **D106** | **Uvoľňujúce mutácie v Nastaveniach dostávajú bránu späť — zaškrtávacím potvrdením, nie heslom.** `PUT /api/settings/domain` a `POST /api/settings/scope-mode` (len pri UVOĽNENÍ) žiadajú `confirmed: true`; `unlock-writes` ho má z D99, `DELETE /api/key` má literál `KLUC UNIKOL`. Sprísnenie rozsahu zostáva voľné. | §3 popisovalo riziko užšie, než aké bolo — viď §3 doplnenie. Voľba Samuela 28. 8. 2026 z troch variantov. Nie je to návrat prihlásenia (D99 platí): nič sa nepamätá, nič nezadáva, len raz zaškrtne. |
 | **D107** | Mŕtve prihlasovacie tajomstvá sa mažú z disku: `secrets/basic-auth.txt`, `secrets/app-admin.txt`, `secrets/Caddyfile.bak-2026-08-27`. | Po D98/D99 nechránia nič. §3 obhajuje riziko vetou „kto vie čítať tento disk" — heslo tam nemá ležať bez dôvodu. Netrackované (I1). Potvrdil Samuel 28. 8. 2026. |
+| **D108** | Schedulerový fire dosadí `campaigns.created_by` do `audit_log.user_id`, keď `opts.userId` chýba. `actor` zostáva `scheduler`. | Dávkové zápisy do produkcie mali anonymné auditné riadky. Uzatvára otvorený bod 3 z §7. |
 
 ## 5. Čo sa maže (zoznam je normatívny)
 
@@ -168,8 +169,10 @@ beží iný vitest.**
 2. **10 predexistujúcich pádov v `test/e2e`**, ktoré s prihlásením nesúvisia —
    zastarané očakávania voči rozdeleniu Nastavení na podstránky (commit
    `8eeb8eb`, 19. 8. 2026) a dátumovo závislé tvrdenia.
-3. **Audit riadky zo schedulera majú `user_id = NULL`** (`actor: 'scheduler'`).
-   Je to pravdivé tvrdenie — dávku nespustil človek — ale formulácia D102
-   („každý audit riadok") sa dá čítať aj inak. Patrí to kontraktu, nie úsudku.
+3. ~~Audit riadky zo schedulera majú `user_id = NULL`.~~ **ZAVRETÉ 28. 8. 2026
+   (D108)**: executor dosadí `campaigns.created_by`, teda actora, ktorý kampaň
+   potvrdil. `actor` ďalej hovorí `scheduler`, takže sa nezastiera, kto zápis
+   spustil. Strážené testom `lokalny-actor-zapisova-cesta.spec.ts`, mutačne
+   overeným (odstránenie fallbacku ho zčervená).
 4. **Dva staré `git worktree`** v `.claude/worktrees/` so zastaralými kópiami
    `docs/` a `README`; každý grep naprieč repom vracia staré fakty dvakrát.

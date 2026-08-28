@@ -378,6 +378,40 @@ describe.skipIf(!available)('K5 — lokálny actor na skutočnej zápisovej cest
     expect(rows.filter((row) => row.eventType === 'write_ok')).toHaveLength(PRODUCT_IDS.length);
   });
 
+  it('schedulerový fire BEZ userId sa pripíše autorovi kampane (D108)', async () => {
+    await seedExistingActor(1);
+    const actor = await resolveLocalActor();
+    const deps = resolveRoutesDeps();
+    const record = await insertConfirmedCampaign(deps, insertArgs(actor.id));
+
+    /*
+     * Scheduler `userId` NEPOSIELA — dávku nespustil človek. Do 28. 8. 2026
+     * tým každý auditný riadok dávkového zápisu skončil s `user_id = NULL`,
+     * a to sú práve riadky dokladujúce zápis do PRODUKČNÉHO eshopu. D108 dáva
+     * fallback na `campaigns.created_by`, teda na toho, kto kampaň POTVRDIL.
+     *
+     * Všimni si, čo sa NEZLIEVA: `actor` zostáva `scheduler` (kto to spustil),
+     * `user_id` je autor (kto to autorizoval). Dva stĺpce, dve otázky — keby
+     * test tvrdil len `user_id`, dal by sa splniť aj prepísaním `actor` na
+     * `user`, čo by bola lož o tom, kto zápis vyvolal.
+     */
+    const result = await realExecutor().executeCampaign(record.id, {
+      actor: 'scheduler',
+    });
+
+    expect(result.status).toBe('done');
+    expect(mock.state.writeRequests()).toHaveLength(PRODUCT_IDS.length);
+
+    const rows = await auditUserIds();
+    const anonymous = rows.filter((row) => row.userId === null);
+    expect(
+      anonymous.map((row) => row.eventType),
+      'schedulerový zápis nechal anonymné auditné riadky (D108, D102, I11)',
+    ).toEqual([]);
+    expect(rows.every((row) => row.userId === 1)).toBe(true);
+    expect(rows.map((row) => row.eventType)).toContain('write_ok');
+  });
+
   it('zlyhaný zápis sa pripíše rovnako — `write_failed` nesmie byť anonymný', async () => {
     await seedExistingActor(1);
     const actor = await resolveLocalActor();
