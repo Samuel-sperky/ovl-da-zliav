@@ -167,6 +167,8 @@ function katalogStranka(url: URL): CatalogSearchView {
       sold: { none: 96, low: 74, mid: 48, high: 22 },
       neverDiscounted: 132,
       discountedNow: 27,
+      shopDiscountedNow: 9,
+      enrichedRows: 41,
       soldWindowDays: 30,
     },
     catalogTotal: KATALOG_SPOLU,

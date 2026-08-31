@@ -55,8 +55,20 @@ function recordingConn(): { conn: Queryable; calls: Call[] } {
   };
 }
 
-/** Jeden `LIKE` nad názvom tak, ako ho skladá repozitár. */
-const NAME_LIKE = "c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\'";
+/** Jeden `LIKE` nad stĺpcom tak, ako ho skladá repozitár. */
+const like = (column: string): string => `${column} LIKE CONCAT('%', ?, '%') ESCAPE '\\\\'`;
+
+const NAME_LIKE = like('c.name');
+
+/**
+ * Jedno slovo = ZÁTVORKA nad názvom, kódom produktu a EAN-om (D116, migrácia
+ * 0014). `reference` a `ean13` sú vyplnené len pri obohatených riadkoch, takže
+ * `LIKE` na nich pri ostatných nesadne — a práve preto sú v `OR`, nie v `AND`.
+ */
+const WORD_SQL = `(${NAME_LIKE} OR ${like('c.reference')} OR ${like('c.ean13')})`;
+
+/** Koľko stĺpcov jedno slovo prehľadáva — toľko `?` naň aj ide. */
+const COLUMNS_PER_WORD = 3;
 
 const countLikes = (sql: string): number => sql.split(NAME_LIKE).length - 1;
 
@@ -71,8 +83,25 @@ const countCall = (calls: readonly Call[]): Call => {
  * Hodnoty, ktoré patria hľadanému textu. Pred nimi idú štyri parametre JOIN-ov
  * (okno predajnosti a dva dni pre „práve v zľave") a dva stavy v shope
  * (`ok`, `unknown`) — poradie je dané `buildWhere` a je súčasťou kontraktu SQL.
+ *
+ * `counts()` má pred tým všetkým ešte DVA parametre zo SELECT-u: hranice dňa
+ * pre stav zľavy v shope (D116). Preto sa dá predsadenie posunúť — poradie `?`
+ * je poradie v SQL, nie poradie významu.
  */
-const termValues = (call: Call): readonly unknown[] => call.values.slice(6);
+const termValues = (call: Call, prefix = 6): readonly unknown[] => call.values.slice(prefix);
+
+/** Predsadené parametre dotazu `counts()`: dve hranice dňa + štvorica + stavy. */
+const COUNTS_PREFIX = 8;
+
+/**
+ * SLOVÁ z hľadaného textu, každé RAZ. To isté slovo ide do dotazu
+ * `COLUMNS_PER_WORD`-krát (názov, kód, EAN), takže sa berie každé tretie;
+ * číselná vetva má pred nimi navyše `product_id` ako číslo a to sa vyfiltruje.
+ */
+const termWords = (call: Call, prefix = 6): readonly string[] =>
+  termValues(call, prefix)
+    .filter((value): value is string => typeof value === 'string')
+    .filter((_value, index) => index % COLUMNS_PER_WORD === 0);
 
 const search = async (query: string): Promise<Call[]> => {
   const { conn, calls } = recordingConn();
@@ -89,7 +118,7 @@ describe('hľadanie delí text na slová a spája ich cez AND', () => {
 
     expect(countLikes(call.sql)).toBe(2);
     // Nie fráza: v `WHERE` nesmie zostať zlepený text s medzerou.
-    expect(termValues(call)).toEqual(['naramok', 'zirkon']);
+    expect(termWords(call)).toEqual(['naramok', 'zirkon']);
     expect(call.values).not.toContain('naramok zirkon');
   });
 
@@ -98,28 +127,30 @@ describe('hľadanie delí text na slová a spája ich cez AND', () => {
     const druhe = countCall(await search('zirkon naramok'));
 
     expect(druhe.sql).toBe(prve.sql);
-    expect(termValues(druhe)).toEqual(['zirkon', 'naramok']);
+    expect(termWords(druhe)).toEqual(['zirkon', 'naramok']);
   });
 
   it('jedno slovo zostáva jedným `LIKE` — nič sa nezhoršilo', async () => {
     const call = countCall(await search('naramok'));
 
     expect(countLikes(call.sql)).toBe(1);
-    expect(termValues(call)).toEqual(['naramok']);
+    expect(termWords(call)).toEqual(['naramok']);
   });
 
   it('viacnásobné medzery, tabulátory a okraje nevyrobia prázdne slová', async () => {
     const call = countCall(await search('  strieborny \t\n naramok  '));
 
     expect(countLikes(call.sql)).toBe(2);
-    expect(termValues(call)).toEqual(['strieborny', 'naramok']);
+    expect(termWords(call)).toEqual(['strieborny', 'naramok']);
   });
 
   it('slová sa spájajú cez AND, nie cez OR — inak by „náramok zirkón" našlo aj samotné náramky', async () => {
     const call = countCall(await search('naramok zirkon'));
     const where = call.sql.slice(call.sql.indexOf(' WHERE '));
 
-    expect(where).toContain(`${NAME_LIKE} AND ${NAME_LIKE}`);
+    expect(where).toContain(`${WORD_SQL} AND ${WORD_SQL}`);
+    // `OR` je LEN v zátvorke jedného slova. Bez zátvorky by rozvalilo `AND`
+    // medzi slovami a „náramok zirkón" by našlo aj samotné náramky.
     expect(where).not.toContain(`${NAME_LIKE} OR ${NAME_LIKE}`);
   });
 
@@ -132,7 +163,7 @@ describe('hľadanie delí text na slová a spája ich cez AND', () => {
 
     expect(calls).toHaveLength(1);
     expect(countLikes(calls[0]?.sql ?? '')).toBe(2);
-    expect(termValues(calls[0] as Call)).toEqual(['naramok', 'zirkon']);
+    expect(termWords(calls[0] as Call, COUNTS_PREFIX)).toEqual(['naramok', 'zirkon']);
   });
 });
 
@@ -143,7 +174,7 @@ describe('počet slov je zastropovaný', () => {
     const call = countCall(await search('a b c d e f'));
 
     expect(countLikes(call.sql)).toBe(6);
-    expect(termValues(call)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(termWords(call)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
   });
 
   it('štyridsať slov sa oreže na šesť — `WHERE` so 40 `LIKE`-mi je full scan', async () => {
@@ -151,12 +182,12 @@ describe('počet slov je zastropovaný', () => {
     const call = countCall(await search(words.join(' ')));
 
     expect(countLikes(call.sql)).toBe(6);
-    expect(termValues(call)).toEqual(words.slice(0, 6));
+    expect(termWords(call)).toEqual(words.slice(0, 6));
   });
 
   it('dlhé slovo sa skráti na 191 znakov — `name` je VARCHAR(255)', async () => {
     const call = countCall(await search(`${'x'.repeat(300)} zirkon`));
-    const [prve, druhe] = termValues(call);
+    const [prve, druhe] = termWords(call);
 
     expect(prve).toBe('x'.repeat(191));
     expect(druhe).toBe('zirkon');
@@ -169,9 +200,12 @@ describe('celé číslo zostáva „ID alebo časť názvu"', () => {
   it('`12345` je `product_id = ?` ALEBO jeden `LIKE`, nikdy dva `LIKE`', async () => {
     const call = countCall(await search('12345'));
 
-    expect(call.sql).toContain(`(c.product_id = ? OR ${NAME_LIKE})`);
+    expect(call.sql).toContain(`(c.product_id = ? OR ${WORD_SQL.slice(1, -1)})`);
     expect(countLikes(call.sql)).toBe(1);
-    expect(termValues(call)).toEqual([12345, '12345']);
+    // Číslo ako ID, potom to isté číslo ako text do všetkých troch stĺpcov —
+    // `ean13` je celé číslo, takže bez tejto vetvy by sa nedal nájsť vôbec.
+    expect(termValues(call)[0]).toBe(12345);
+    expect(termWords(call)).toEqual(['12345']);
   });
 
   it('desaťciferné číslo už číslom nie je — ide slovom cez `LIKE`', async () => {
@@ -179,7 +213,7 @@ describe('celé číslo zostáva „ID alebo časť názvu"', () => {
 
     expect(call.sql).not.toContain('c.product_id = ?');
     expect(countLikes(call.sql)).toBe(1);
-    expect(termValues(call)).toEqual(['1234567890']);
+    expect(termWords(call)).toEqual(['1234567890']);
   });
 
   it('„4 mm" nie je číslo — sú to dve slová, a preto 1 269 zhôd namiesto 340', async () => {
@@ -187,7 +221,7 @@ describe('celé číslo zostáva „ID alebo časť názvu"', () => {
 
     expect(call.sql).not.toContain('c.product_id = ?');
     expect(countLikes(call.sql)).toBe(2);
-    expect(termValues(call)).toEqual(['4', 'mm']);
+    expect(termWords(call)).toEqual(['4', 'mm']);
   });
 });
 
@@ -197,7 +231,7 @@ describe('do SQL sa nedostane žiadna hodnota', () => {
   it('`%` a `_` sa escapujú v KAŽDOM slove zvlášť', async () => {
     const call = countCall(await search('100% zlava_teraz'));
 
-    expect(termValues(call)).toEqual(['100\\%', 'zlava\\_teraz']);
+    expect(termWords(call)).toEqual(['100\\%', 'zlava\\_teraz']);
   });
 
   it('pokus o injektáž ide celý ako parametre, nie do SQL', async () => {
@@ -239,6 +273,14 @@ describe('tvar odpovede a zamknuté filtre zostávajú', () => {
     ]);
     expect(result.total).toBe(0);
     expect(result.data).toEqual([]);
+    // I11 — hľadanie podľa kódu a EAN-u a filter „zľava v shope" platia LEN
+    // pre obohatené riadky a odpoveď to musí priznať. Zamknuté nie sú:
+    // aplikujú sa a vracajú pravdivé riadky, len nad časťou katalógu.
+    expect([...result.enrichedOnly].sort()).toEqual([
+      'ean13Search',
+      'referenceSearch',
+      'shopDiscounted',
+    ]);
   });
 
   it('fail-closed stavy v shope idú stále pred hľadaný text', async () => {

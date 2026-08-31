@@ -435,6 +435,7 @@ function searchResult(rows: CatalogSearchRow[], total = rows.length): CatalogSea
     soldFrom: '2026-07-21' as DateOnly,
     soldTo: TODAY,
     lockedFilters: [],
+    enrichedOnly: [],
   };
 }
 
@@ -444,10 +445,13 @@ function counts(cohort: number): CatalogCounts {
     sold: { none: 41_348 - cohort, low: cohort, mid: 0, high: 0 },
     neverDiscounted: 41_348,
     discountedNow: 0,
+    shopDiscountedNow: 0,
+    enrichedRows: 0,
     soldWindowDays: 30,
     soldFrom: '2026-07-21' as DateOnly,
     soldTo: TODAY,
     lockedFilters: [],
+    enrichedOnly: [],
   };
 }
 

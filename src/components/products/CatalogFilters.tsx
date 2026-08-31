@@ -29,6 +29,20 @@
  * schopnosť, ktorú appka celú nemá. Až API začne vedieť filtrovať podľa
  * skutočnej zľavy, tento riadok odtiaľto zmizne.
  *
+ * DVE SKUPINY O ZĽAVE, LEBO SÚ TO DVE RÔZNE VETY
+ * ──────────────────────────────────────────────
+ * „Zľavy podľa vlastných zápisov" hovorí, čo appka SAMA zapísala. „Zľava
+ * v shope" hovorí, čo o produkte povedal SHOP pri obohatení
+ * (`catalog_cache.reduction_*`, D116) — a to appka pozná LEN pri obohatených
+ * riadkoch. Preto má tá skupina pod políčkom napísané, z koľkých riadkov
+ * obohatených je: bez toho by zaškrtnuté políčko vydávalo dolnú hranicu za
+ * počet produktov v zľave (I11). Kým čísla nie sú (`counts=0`), veta sa
+ * nekreslí — nula by klamala tak isto.
+ *
+ * Riadok „Skutočná zľava v eshope" zostáva medzi zamknutými: filter nad
+ * obohatenými riadkami NIE JE stav zľavy celého katalógu a zliať to dvoje by
+ * bolo presne to tvrdenie, ktoré K8 zakazuje.
+ *
  * ZĽAVA JE VLASTNÝ ZÁPIS, NIE STAV ESHOPU
  * ───────────────────────────────────────
  * „Práve v zľave" a „nikdy nezlacnené" hovoria o tom, čo appka SAMA zapísala.
@@ -372,6 +386,30 @@ export function CatalogFilters({
           Nikdy nezlacnené
           <Count value={counts === null ? null : counts.neverDiscounted} />
         </label>
+      </div>
+
+      {/* Stav zľavy PODĽA SHOPU (D116) — vlastná skupina, nie tretie políčko
+          v skupine vyššie: tam by sa dve rôzne tvrdenia o tom istom produkte
+          čítali ako jedno. Poznámka pod políčkom priznáva, že appka pozná stav
+          shopu len pri obohatených riadkoch (I11). */}
+      <div className="fgroup">
+        <h3>Zľava v shope</h3>
+        <label className="fopt">
+          <input
+            className="cb"
+            type="checkbox"
+            checked={filter.shopDiscounted}
+            onChange={(event) => onChange({ shopDiscounted: event.target.checked, page: 1 })}
+            data-testid="filter-shop-discounted"
+          />
+          Zlacnené v shope
+          <Count value={counts === null ? null : counts.shopDiscountedNow} />
+        </label>
+        {counts === null ? null : (
+          <div className="lvl-3" style={{ marginTop: '6px' }} data-testid="filter-shop-discounted-scope">
+            {`Z ${formatCountSk(counts.enrichedRows)} obohatených produktov`}
+          </div>
+        )}
       </div>
 
       {/* Stav v eshope je fail-closed: predvolene sa neponúkajú kusy, ktoré

@@ -209,6 +209,13 @@ export interface CatalogCountsView {
   readonly sold: Readonly<Record<'none' | 'low' | 'mid' | 'high', number>>;
   readonly neverDiscounted: number;
   readonly discountedNow: number;
+  /**
+   * Koľko riadkov má zľavu PODĽA SHOPU (D116). Je to DOLNÁ HRANICA: neobohatené
+   * riadky sa doň nepočítajú, preto sa vedľa neho kreslí `enrichedRows`.
+   */
+  readonly shopDiscountedNow: number;
+  /** Z `total` tie, ktoré sú obohatené — koľkých sa stav shopu vôbec týka. */
+  readonly enrichedRows: number;
   readonly soldWindowDays: number;
 }
 
@@ -325,6 +332,8 @@ function parseCounts(raw: unknown): CatalogCountsView | null {
     sold,
     neverDiscounted: readCount(record, 'neverDiscounted') ?? 0,
     discountedNow: readCount(record, 'discountedNow') ?? 0,
+    shopDiscountedNow: readCount(record, 'shopDiscountedNow') ?? 0,
+    enrichedRows: readCount(record, 'enrichedRows') ?? 0,
     soldWindowDays: readCount(record, 'soldWindowDays') ?? 0,
   };
 }

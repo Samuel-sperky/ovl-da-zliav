@@ -661,6 +661,7 @@ function routeDepsFor(world: RouteWorld): {
     soldFrom: '2026-02-18',
     soldTo: '2026-08-17',
     lockedFilters: ['stock', 'category', 'metal', 'jewelryType', 'margin', 'turnover'],
+    enrichedOnly: ['referenceSearch', 'ean13Search', 'shopDiscounted'],
   });
 
   return {
@@ -677,10 +678,13 @@ function routeDepsFor(world: RouteWorld): {
           sold: { none: 0, low: 0, mid: 0, high: 0 },
           neverDiscounted: 0,
           discountedNow: 0,
+          shopDiscountedNow: 0,
+          enrichedRows: 0,
           soldWindowDays: 180,
           soldFrom: '2026-02-18',
           soldTo: '2026-08-17',
           lockedFilters: [],
+          enrichedOnly: [],
         }),
         totalRows: async () => 2_900,
         lastFetchedAt: async () => new Date('2026-08-16T03:00:00.000Z'),

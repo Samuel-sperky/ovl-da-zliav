@@ -10,8 +10,9 @@
  *
  *  1. **Mená parametrov sú tie isté ako v API.** `q`, `soldWindowDays`,
  *     `soldBuckets`, `priceFrom`, `priceTo`, `neverDiscounted`,
- *     `currentlyDiscounted`, `page`, `perPage`. Jeden slovník pre adresu
- *     obrazovky, pre volanie API aj pre odovzdanie do novej zľavy — takže
+ *     `currentlyDiscounted`, `shopDiscounted`, `page`, `perPage`. Jeden slovník
+ *     pre adresu obrazovky, pre volanie API aj pre odovzdanie do novej zľavy —
+ *     takže
  *     `/produkty?soldWindowDays=180&soldBuckets=none` funguje ako odkaz
  *     z Prehľadu a ten istý reťazec sa dá poslať ďalej.
  *  2. **Zamknuté filtre tu NEEXISTUJÚ.** Kategória, kov, typ šperku, marža,
@@ -137,6 +138,13 @@ export interface CatalogFilterState {
   /** Podľa VLASTNÝCH zápisov appky, nie podľa stavu shopu (I11). */
   readonly currentlyDiscounted: boolean;
   readonly neverDiscounted: boolean;
+  /**
+   * Podľa STAVU V SHOPE (`catalog_cache.reduction_*` z obohatenia, D116) — teda
+   * druhá veta než `currentlyDiscounted`. Platí LEN pre obohatené riadky:
+   * o neobohatenom produkte appka stav shopu nepozná, a preto sa nevráti.
+   * Koľko riadkov je obohatených, hovorí `counts.enrichedRows`.
+   */
+  readonly shopDiscounted: boolean;
   /** Čo eshop o produkte povedal pri poslednom načítaní (kontrakt produktov A3). */
   readonly shopPresence: ShopPresence;
   /** Poradie riadkov. Nie je to podmienka otázky — pozri hlavičku modulu. */
@@ -153,6 +161,7 @@ export const DEFAULT_CATALOG_FILTER: CatalogFilterState = {
   priceTo: '',
   currentlyDiscounted: false,
   neverDiscounted: false,
+  shopDiscounted: false,
   shopPresence: 'known',
   /** Kontrakt UI, bod 19: najdrahšie prvé. */
   sort: 'price_desc',
@@ -240,6 +249,9 @@ export function catalogSearchParams(
 
   if (filter.currentlyDiscounted) params.set('currentlyDiscounted', '1');
   if (filter.neverDiscounted) params.set('neverDiscounted', '1');
+  // Meno je to isté ako v API (bod 1 v hlavičke) a zámerne INÉ než
+  // `currentlyDiscounted` — sú to dve rôzne tvrdenia o tom istom produkte.
+  if (filter.shopDiscounted) params.set('shopDiscounted', '1');
 
   // Predvolená možnosť sa NEPOSIELA: je to presne to, čo repozitár urobí sám,
   // a prázdny parameter drží adresy krátke a staršie uložené filtre platné.
@@ -319,6 +331,7 @@ export function parseCatalogFilter(params: RawParams): CatalogFilterState {
     priceTo: first(params, 'priceTo') ?? '',
     currentlyDiscounted: flag(params, 'currentlyDiscounted'),
     neverDiscounted: flag(params, 'neverDiscounted'),
+    shopDiscounted: flag(params, 'shopDiscounted'),
     shopPresence: parseShopPresence(first(params, 'shopStatus') ?? ''),
     sort: isCatalogSort(sort) ? sort : DEFAULT_CATALOG_FILTER.sort,
     page: Number.isInteger(page) && page >= 1 ? page : 1,

@@ -327,6 +327,23 @@ export type LockedCatalogFilter =
   | 'margin'
   | 'turnover';
 
+/**
+ * Čo appka vie LEN o OBOHATENÝCH riadkoch zrkadla (`enriched_at IS NOT NULL`).
+ *
+ * Je to tretí stav medzi „vieme" a `LockedCatalogFilter` („nemáme dáta vôbec"):
+ * filter sa APLIKUJE a vráti pravdivé riadky, ale nad ČASŤOU katalógu. Zamlčať
+ * to by znamenalo vydávať neobohatený produkt za produkt bez zľavy a produkt
+ * bez referencie za neexistujúci (I11) — presne tá tichá nula, ktorú K8 zakazuje.
+ * Koľko riadkov je obohatených, hovorí `CatalogCounts.enrichedRows`.
+ */
+export type EnrichedOnlyFeature = 'referenceSearch' | 'ean13Search' | 'shopDiscounted';
+
+export const ENRICHED_ONLY_FEATURES: readonly EnrichedOnlyFeature[] = [
+  'referenceSearch',
+  'ean13Search',
+  'shopDiscounted',
+];
+
 export interface CatalogSearchFilter {
   /** Text: časť názvu, alebo presné ID (keď je vstup celé číslo). */
   query?: string;
@@ -341,6 +358,15 @@ export interface CatalogSearchFilter {
   neverDiscounted?: boolean;
   /** Len produkty, ktoré sú podľa VLASTNÉHO zápisu dnes v okne zľavy (I11). */
   currentlyDiscounted?: boolean;
+  /**
+   * Len produkty, na ktorých podľa SHOPU beží zľava v deň `today` (D116).
+   *
+   * Zdroj je `catalog_cache.reduction_*` z obohatenia, NIE `campaign_items` —
+   * `currentlyDiscounted` hovorí o vlastných zápisoch appky a tieto dva filtre
+   * sa dajú kombinovať (napr. „shop zlacnil, my nie"). Neobohatený produkt sa
+   * NEVRÁTI: o ňom appka stav shopu nepozná (`ENRICHED_ONLY_FEATURES`).
+   */
+  shopDiscounted?: boolean;
   /** Stavy v shope. Default `['ok','unknown']` — `not_found` von (K1 bod 2). */
   shopStatus?: CatalogShopStatus[];
   /** Konkrétne produkty (napr. hromadný výber z UI). */
@@ -359,6 +385,8 @@ export interface CatalogSearchResult extends Paged<CatalogSearchRow> {
   soldTo: DateOnly;
   /** Filtre, ktoré sa NEAPLIKOVALI, lebo na ne nie sú dáta (K8). */
   lockedFilters: LockedCatalogFilter[];
+  /** Čo platí len pre obohatené riadky — aplikované, ale nad časťou katalógu (I11). */
+  enrichedOnly: EnrichedOnlyFeature[];
 }
 
 /** Čísla do bočného panela (K7). Jeden dotaz, nie šesť. */
@@ -367,10 +395,20 @@ export interface CatalogCounts {
   sold: Record<SoldBucket, number>;
   neverDiscounted: number;
   discountedNow: number;
+  /**
+   * Koľko riadkov má PODĽA SHOPU dnes bežiacu zľavu (D116) — z obohatenia, nie
+   * z vlastných zápisov. Je to DOLNÁ HRANICA: neobohatené riadky sa nepočítajú,
+   * a preto sa vedľa toho vracia `enrichedRows`.
+   */
+  shopDiscountedNow: number;
+  /** Z `total` tie, ktoré sú obohatené (`enriched_at IS NOT NULL`). */
+  enrichedRows: number;
   soldWindowDays: number;
   soldFrom: DateOnly;
   soldTo: DateOnly;
   lockedFilters: LockedCatalogFilter[];
+  /** Viď `CatalogSearchResult.enrichedOnly`. */
+  enrichedOnly: EnrichedOnlyFeature[];
 }
 
 /**
@@ -676,6 +714,52 @@ const MAX_SEARCH_WORDS = 6;
 
 /** Najdlhšie slovo, ktoré má zmysel hľadať — `name` je `VARCHAR(255)`. */
 const MAX_SEARCH_WORD_LENGTH = 191;
+
+/**
+ * Stĺpce, v ktorých hľadá `?query=` (D116).
+ *
+ * `name` má KAŽDÝ riadok zrkadla. `reference` a `ean13` pribudli migráciou 0014
+ * a sú vyplnené LEN pri OBOHATENÝCH produktoch (`enriched_at IS NOT NULL`) —
+ * pri ostatných sú `NULL`, na ktoré `LIKE` nikdy nesadne. Hľadanie podľa kódu
+ * teda funguje, ale NIE nad celým katalógom, a to sa musí priznať na povrchu
+ * (I11): `search()` aj `counts()` vracajú `enrichedOnly`.
+ *
+ * Prečo `OR` nad tromi stĺpcami a nie `CONCAT_WS(...) LIKE ?`: zlepený stĺpec
+ * by našiel aj zhodu, ktorá vznikla až spojením dvoch polí, a v `EXPLAIN` by
+ * zmizlo, v čom sa naozaj hľadá. Rýchlosť to nemení — `LIKE '%x%'` je full scan
+ * tak či tak (85 ms nad 41 220 riadkami, viď hlavička).
+ */
+const SEARCH_LIKE_COLUMNS = ['c.name', 'c.reference', 'c.ean13'] as const;
+
+/** `?` na KAŽDÝ stĺpec — jedno slovo sa preto pushuje `SEARCH_LIKE_COLUMNS.length`-krát. */
+const SEARCH_LIKE_SQL = SEARCH_LIKE_COLUMNS.map(
+  (column) => `${column} LIKE CONCAT('%', ?, '%') ESCAPE '\\\\'`,
+).join(' OR ');
+
+/**
+ * Stav zľavy PODĽA SHOPU v deň, na ktorý sa pýtame (D116, migrácia 0014).
+ *
+ * NIE JE to `JOIN_OWN_DISCOUNTS`: ten hovorí „posledný VLASTNÝ zápis appky"
+ * (I11), toto hovorí „takto to videl shop v čase `enriched_at`". Dve rôzne vety,
+ * dva rôzne filtre, a zliať sa nesmú.
+ *
+ * Neobohatený riadok má všetky tri stĺpce `NULL`, takže sem NESPADNE — je to
+ * fail-closed „nevieme", nie „nie je v zľave". Preto `shopDiscounted`
+ * v `ENRICHED_ONLY_FEATURES`.
+ *
+ * Hranice sú CELÝ deň (`00:00:00` až `23:59:59`), lebo stĺpce sú `DATETIME`, ale
+ * pýtame sa dňom (D31): zľava končiaca dnes o 12:00 dnes ešte bežala.
+ * `reduction_percent > 0` zámerne — nula percent nie je zľava.
+ */
+const SQL_SHOP_DISCOUNT_ACTIVE =
+  '(c.reduction_percent IS NOT NULL AND c.reduction_percent > 0 ' +
+  'AND (c.reduction_from IS NULL OR c.reduction_from <= ?) ' +
+  'AND (c.reduction_to IS NULL OR c.reduction_to >= ?))';
+
+/** Hranice dňa pre `SQL_SHOP_DISCOUNT_ACTIVE` — v tomto poradí, ako `?`. */
+function shopDiscountDayValues(day: DateOnly): [string, string] {
+  return [`${day} 23:59:59`, `${day} 00:00:00`];
+}
 
 /**
  * Veľkosť stránky, s ktorou sa počíta, kým pokrok neexistuje. Zhoda
@@ -1648,7 +1732,11 @@ interface WhereParts {
  * Zloží `WHERE` časť. Každá hodnota ide ako `?` — do SQL sa neinterpoluje nič
  * okrem počtu placeholderov a konštantných fragmentov z tohto súboru.
  */
-function buildWhere(filter: CatalogSearchFilter, includeFacets: boolean): WhereParts {
+function buildWhere(
+  filter: CatalogSearchFilter,
+  includeFacets: boolean,
+  day: DateOnly,
+): WhereParts {
   const where: string[] = [];
   const values: unknown[] = [];
 
@@ -1671,9 +1759,14 @@ function buildWhere(filter: CatalogSearchFilter, includeFacets: boolean): WhereP
   const term = (filter.query ?? '').trim();
   if (term.length > 0) {
     if (/^\d{1,9}$/.test(term)) {
-      // Celé číslo je buď ID, alebo časť názvu — hľadáme oboje.
-      where.push("(c.product_id = ? OR c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\')");
-      values.push(Number(term), escapeLike(term));
+      /*
+       * Celé číslo je buď ID, alebo text v názve, referencii či EAN-e — hľadáme
+       * všetko. `ean13` je celé číslo, takže bez tejto vetvy by sa dal nájsť len
+       * omylom (ako „slovo"), a to len pri obohatených produktoch (I11).
+       */
+      where.push(`(c.product_id = ? OR ${SEARCH_LIKE_SQL})`);
+      values.push(Number(term));
+      for (const _column of SEARCH_LIKE_COLUMNS) values.push(escapeLike(term));
     } else {
       /*
        * KAŽDÉ SLOVO MÁ VLASTNÝ `LIKE`, SPOJENÉ CEZ `AND`.
@@ -1687,8 +1780,11 @@ function buildWhere(filter: CatalogSearchFilter, includeFacets: boolean): WhereP
        * `utf8mb4_unicode_ci` skladá `á` a `a` sama.
        */
       for (const word of searchWords(term)) {
-        where.push("c.name LIKE CONCAT('%', ?, '%') ESCAPE '\\\\'");
-        values.push(escapeLike(word));
+        // Jedno slovo = jedna ZÁTVORKA nad `name`/`reference`/`ean13` spojená
+        // cez `OR`. Zátvorka je nutná: bez nej by `OR` rozvalilo `AND` medzi
+        // slovami a „naramok zirkon" by našlo aj samotné náramky.
+        where.push(`(${SEARCH_LIKE_SQL})`);
+        for (const _column of SEARCH_LIKE_COLUMNS) values.push(escapeLike(word));
       }
     }
   }
@@ -1714,6 +1810,12 @@ function buildWhere(filter: CatalogSearchFilter, includeFacets: boolean): WhereP
     }
     if (filter.currentlyDiscounted === true) {
       where.push('COALESCE(d.now_on, 0) = 1');
+    }
+    if (filter.shopDiscounted === true) {
+      // Stav SHOPU z obohatenia (D116) — nie vlastné zápisy. Neobohatený riadok
+      // sem nespadne, a to je fail-closed „nevieme", nie „nie je v zľave" (I11).
+      where.push(SQL_SHOP_DISCOUNT_ACTIVE);
+      values.push(...shopDiscountDayValues(day));
     }
   }
 
@@ -1951,7 +2053,7 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
       // Poradie parametrov MUSÍ zodpovedať poradiu JOIN-ov v `FROM`.
       const joinValues = [window.from, window.to, window.to, window.to];
       const from = `FROM catalog_cache c ${JOIN_SALES}${JOIN_OWN_DISCOUNTS}`;
-      const where = buildWhere(filter, true);
+      const where = buildWhere(filter, true, window.to);
 
       const countRows = await run<Array<{ total: number | bigint }>>(
         conn,
@@ -1983,6 +2085,7 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         soldFrom: window.from,
         soldTo: window.to,
         lockedFilters: [...LOCKED_FILTERS],
+        enrichedOnly: [...ENRICHED_ONLY_FEATURES],
       };
     },
 
@@ -1996,7 +2099,13 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
       const window = resolveWindow(filter);
       const joinValues = [window.from, window.to, window.to, window.to];
       const from = `FROM catalog_cache c ${JOIN_SALES}${JOIN_OWN_DISCOUNTS}`;
-      const where = buildWhere(filter, false);
+      const where = buildWhere(filter, false, window.to);
+      /*
+       * Hranice dňa pre stav zľavy V SHOPE. Sú v SELECT-e, takže ich parametre
+       * idú PRVÉ — pred parametrami JOIN-ov a `WHERE`. Poradie `?` je poradie
+       * v SQL, nie poradie významu.
+       */
+      const selectValues = shopDiscountDayValues(window.to);
 
       const sql =
         'SELECT COUNT(*) AS total, ' +
@@ -2005,10 +2114,16 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         'SUM(CASE WHEN COALESCE(s.units, 0) BETWEEN 3 AND 9 THEN 1 ELSE 0 END) AS sold_mid, ' +
         'SUM(CASE WHEN COALESCE(s.units, 0) >= 10 THEN 1 ELSE 0 END) AS sold_high, ' +
         'SUM(CASE WHEN d.product_id IS NULL THEN 1 ELSE 0 END) AS never_discounted, ' +
-        'SUM(CASE WHEN COALESCE(d.now_on, 0) = 1 THEN 1 ELSE 0 END) AS discounted_now ' +
+        'SUM(CASE WHEN COALESCE(d.now_on, 0) = 1 THEN 1 ELSE 0 END) AS discounted_now, ' +
+        // D116 — dve čísla o obohatení: koľko riadkov má zľavu PODĽA SHOPU a
+        // koľko ich je vôbec obohatených. Prvé bez druhého je dolná hranica
+        // vydávaná za počet (I11).
+        `SUM(CASE WHEN ${SQL_SHOP_DISCOUNT_ACTIVE} THEN 1 ELSE 0 END) AS shop_discounted_now, ` +
+        'SUM(CASE WHEN c.enriched_at IS NULL THEN 0 ELSE 1 END) AS enriched_rows ' +
         `${from}${where.sql}`;
 
       const rows = await run<Array<Record<string, number | bigint | null>>>(conn, sql, [
+        ...selectValues,
         ...joinValues,
         ...where.values,
       ]);
@@ -2025,10 +2140,13 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         },
         neverDiscounted: num('never_discounted'),
         discountedNow: num('discounted_now'),
+        shopDiscountedNow: num('shop_discounted_now'),
+        enrichedRows: num('enriched_rows'),
         soldWindowDays: window.windowDays,
         soldFrom: window.from,
         soldTo: window.to,
         lockedFilters: [...LOCKED_FILTERS],
+        enrichedOnly: [...ENRICHED_ONLY_FEATURES],
       };
     },
 
