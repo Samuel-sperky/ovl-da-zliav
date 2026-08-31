@@ -23,6 +23,9 @@
  *    nezrýchlia a rozbijú poradie chýb.
  *  - **K2** — `nextPending()` je vstup fronty: zoberie ďalších N položiek
  *    podľa `position`, nie celú kampaň do pamäte.
+ *  - **K6** (V4, D116) — čítacie dotazy pripájajú `LEFT JOIN`-om REFERENCIU
+ *    zo zrkadla katalógu. Do `campaign_items` sa nekopíruje nič; podrobne pri
+ *    `CATALOG_JOIN`. Zápisová sada (`listForWrite()`) pripojenie NEMÁ.
  *  - **K2** — `listForWrite()` je sada pre ZÁPIS: tie isté riadky ako
  *    `listByCampaign()`, ale bez `sent_payload` a `raw_response`. Executor tie
  *    dva stĺpce nikdy nečíta a hash potvrdenia (K4) potrebuje celú sadu, takže
@@ -63,31 +66,93 @@ export const MAX_ITEMS_PER_CAMPAIGN = 10_000;
  * Stĺpce položky BEZ dvoch najťažších — `sent_payload` a `raw_response`.
  * Viď `listForWrite()`: kto ich nečíta, nemá si ich čím ťahať.
  */
-const COLUMNS_FOR_WRITE =
-  'id, campaign_id, product_id, percent, position, status, attempt_count, name_at_write, ' +
-  'price_at_preview, price_at_write, price_mismatch, has_attributes, ' +
-  'reduction_unverifiable, request_id, http_status, error_code, error_message, ' +
-  'started_at, finished_at';
+const ITEM_COLUMNS_FOR_WRITE: readonly string[] = [
+  'id',
+  'campaign_id',
+  'product_id',
+  'percent',
+  'position',
+  'status',
+  'attempt_count',
+  'name_at_write',
+  'price_at_preview',
+  'price_at_write',
+  'price_mismatch',
+  'has_attributes',
+  'reduction_unverifiable',
+  'request_id',
+  'http_status',
+  'error_code',
+  'error_message',
+  'started_at',
+  'finished_at',
+];
 
-/** Celý riadok. Jeden zdroj pravdy so `COLUMNS_FOR_WRITE`, aby sa nerozišli. */
-const COLUMNS = `${COLUMNS_FOR_WRITE}, sent_payload, raw_response`;
+/** Celý riadok. Jeden zdroj pravdy s `ITEM_COLUMNS_FOR_WRITE`, aby sa nerozišli. */
+const ITEM_COLUMNS: readonly string[] = [
+  ...ITEM_COLUMNS_FOR_WRITE,
+  'sent_payload',
+  'raw_response',
+];
 
-const SQL_LIST =
-  `SELECT ${COLUMNS} FROM campaign_items WHERE campaign_id = ? ORDER BY position ASC`;
+/**
+ * `i.id, i.campaign_id, …` — kvalifikácia aliasom nie je kozmetika: po pripojení
+ * zrkadla katalógu (nižšie) je `product_id` v dotaze dvakrát a nekvalifikovaný
+ * názov by bol dvojznačný.
+ */
+const qualified = (columns: readonly string[], alias: string): string =>
+  columns.map((column) => `${alias}.${column}`).join(', ');
 
-/** K2: celá sada pre zápis, ale bez blobov (`listForWrite()`). */
+const COLUMNS_FOR_WRITE = ITEM_COLUMNS_FOR_WRITE.join(', ');
+
+/*
+ * REFERENCIA SA DOPĹŇA PRI ZOBRAZENÍ (D116 / K6, invariant I11).
+ *
+ * `campaign_items` nesie `product_id` a `name_at_write`, teda to, čo appka
+ * videla v čase zápisu. Referencia je pole zo `getFull` a žije VÝHRADNE
+ * v zrkadle katalógu — do položky sa nekopíruje, inak by mala dva zdroje pravdy
+ * a po obohatení produktu by tabuľka ukazovala starú hodnotu.
+ *
+ * `LEFT JOIN` je ZÁMER: položka smie ukazovať na produkt, ktorý v zrkadle nie je
+ * (zmizol z katalógu), a taká položka sa z tabuľky NESMIE stratiť — `INNER JOIN`
+ * by ju ticho zahodil. Referencia je vtedy `NULL` = „nevieme" (I11), rovnako ako
+ * pri produkte, ktorý ešte NIE JE obohatený (D118). Prázdny reťazec sa nevyrába;
+ * pomlčku skladá až obrazovka (`productLabel()`).
+ *
+ * VÝKON: `catalog_cache.product_id` je PRIMARY KEY, takže pripojenie je lookup
+ * po kľúči (`eq_ref`) — stránkovanie (`listPage()`) sa tým nemení a 41 348
+ * riadkov zrkadla sa neprechádza.
+ */
+const CATALOG_JOIN = ' LEFT JOIN catalog_cache c ON c.product_id = i.product_id';
+
+/** Doplnené pole. `AS` menuje presne to, čo číta klient (`reference`). */
+const CATALOG_COLUMNS = ', c.reference AS reference';
+
+/** Položky + referencia — jediný zdroj pravdy pre ČÍTACIE dotazy. */
+const SELECT_ENRICHED =
+  `SELECT ${qualified(ITEM_COLUMNS, 'i')}${CATALOG_COLUMNS} ` +
+  `FROM campaign_items i${CATALOG_JOIN}`;
+
+const SQL_LIST = `${SELECT_ENRICHED} WHERE i.campaign_id = ? ORDER BY i.position ASC`;
+
+/**
+ * K2: celá sada pre zápis, ale bez blobov (`listForWrite()`).
+ *
+ * Zrkadlo katalógu sa tu ZÁMERNE NEPRIPÁJA: referenciu potrebuje obrazovka, nie
+ * executor, a hash potvrdenia (K4, I3) sa počíta nad TOUTO sadou — pridané pole
+ * by ho zmenilo bez toho, aby sa o zľave čokoľvek zmenilo.
+ */
 const SQL_LIST_FOR_WRITE =
   `SELECT ${COLUMNS_FOR_WRITE} FROM campaign_items WHERE campaign_id = ? ` +
   'ORDER BY position ASC';
 
 const SQL_LIST_PAGE =
-  `SELECT ${COLUMNS} FROM campaign_items WHERE campaign_id = ? ` +
-  'ORDER BY position ASC LIMIT ? OFFSET ?';
+  `${SELECT_ENRICHED} WHERE i.campaign_id = ? ` + 'ORDER BY i.position ASC LIMIT ? OFFSET ?';
 
 /** K2: ďalších N položiek fronty. `position` je deterministické poradie (I10). */
 const SQL_NEXT_PENDING =
-  `SELECT ${COLUMNS} FROM campaign_items WHERE campaign_id = ? AND status = 'pending' ` +
-  'ORDER BY position ASC LIMIT ?';
+  `${SELECT_ENRICHED} WHERE i.campaign_id = ? AND i.status = 'pending' ` +
+  'ORDER BY i.position ASC LIMIT ?';
 
 const SQL_COUNT = 'SELECT COUNT(*) AS total FROM campaign_items WHERE campaign_id = ?';
 
@@ -124,14 +189,29 @@ const SQL_MARK_REMAINING =
 export interface CampaignItemRecordV3 extends CampaignItemRecord {
   /** Percento rozhodnuté pri POTVRDENÍ, nie pri zápise (K3, I9: 1–30). */
   percent: DiscountPercent;
+  /**
+   * D116 / K6 — referencia produktu doplnená zo zrkadla katalógu PRI ČÍTANÍ.
+   *
+   * `null` = appka ju nepozná (produkt nie je obohatený podľa D118, alebo
+   * v zrkadle vôbec nie je). NIKDY neznamená „produkt referenciu nemá" (I11).
+   * Nie je to stĺpec `campaign_items` — do položky sa nekopíruje.
+   */
+  reference: string | null;
 }
 
 /**
  * Položka bez dvoch blobov — návrat `listForWrite()`. `sentPayload`
  * a `rawResponse` tu nechýbajú omylom: keby tu boli s hodnotou `null`,
  * volajúci by nevedel, či je stĺpec prázdny, alebo len nenačítaný.
+ *
+ * Z toho istého dôvodu tu NIE JE ani `reference` (K6): zápisová sada zrkadlo
+ * katalógu nepripája, a `null` by tvrdilo „produkt nie je obohatený" namiesto
+ * „referenciu sme nečítali" (I11).
  */
-export type CampaignItemWriteRow = Omit<CampaignItemRecordV3, 'sentPayload' | 'rawResponse'>;
+export type CampaignItemWriteRow = Omit<
+  CampaignItemRecordV3,
+  'sentPayload' | 'rawResponse' | 'reference'
+>;
 
 /** Vstup `createMany()` — `percent` je povinný, DB ho nemá ako doplniť (K3). */
 export interface NewCampaignItem {
@@ -200,6 +280,12 @@ interface ItemRow {
 /** Riadok bez blobov — presne to, čo vracia `SQL_LIST_FOR_WRITE`. */
 type WriteItemRow = Omit<ItemRow, 'sent_payload' | 'raw_response'>;
 
+/**
+ * Riadok s doplnenou referenciou — presne to, čo vracia `SELECT_ENRICHED`.
+ * `reference` NIE JE stĺpec `campaign_items`, preto je mimo `ItemRow`.
+ */
+type EnrichedItemRow = ItemRow & { reference: string | null };
+
 const toDate = (value: Date | string): Date => (value instanceof Date ? value : new Date(value));
 const toDateOrNull = (value: Date | string | null): Date | null =>
   value == null ? null : toDate(value);
@@ -239,12 +325,22 @@ function mapWriteRow(row: WriteItemRow): CampaignItemWriteRow {
   };
 }
 
-function mapRow(row: ItemRow): CampaignItemRecordV3 {
+function mapRow(row: EnrichedItemRow): CampaignItemRecordV3 {
   return {
     ...mapWriteRow(row),
     sentPayload: parseJsonColumn(row.sent_payload),
     rawResponse: parseJsonColumn(row.raw_response),
+    /* Prázdny reťazec ani pomlčka sa tu NEVYRÁBAJÚ — `null` je „nevieme" (I11)
+       a vetu z neho skladá až obrazovka. */
+    reference: nonEmptyOrNull(row.reference),
   };
+}
+
+/** `null`, `undefined` aj `'   '` znamenajú to isté: nevieme (I11). */
+function nonEmptyOrNull(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed === '' ? null : trimmed;
 }
 
 const isValidId = (id: number): boolean => Number.isInteger(id) && id > 0;
@@ -360,7 +456,7 @@ export function createCampaignItemsRepo(deps: CampaignItemsRepoDeps = {}): Campa
     sql: string,
     values: unknown[],
   ): Promise<CampaignItemRecordV3[]> => {
-    const rows = await run<ItemRow[]>(conn, sql, values);
+    const rows = await run<EnrichedItemRow[]>(conn, sql, values);
     return (Array.isArray(rows) ? rows : []).map(mapRow);
   };
 

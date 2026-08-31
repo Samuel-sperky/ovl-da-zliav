@@ -10,19 +10,27 @@
  * a shop by ich po prekročení zabanoval (predvolene na 10 minút), pravdepodobne
  * uprostred noci, keď to nikto nevidí. Počítadlo je preto JEDNO a žije tu.
  *
- * DVE DRÁHY, KTORÉ SA NESMÚ ZLIAŤ
+ * TRI DRÁHY, KTORÉ SA NESMÚ ZLIAŤ
  * -------------------------------
  * Shop rozpočtuje inak podľa toho, či volanie nesie kľúč
  * (`docs/api/sperky-api-v4.md`, čísla v `@/lib/shop/rate-limits`):
  *
- *  - `anon`   — čítania BEZ kľúča (katalóg, D48/I1): 30/min a 300/UTC deň,
- *               rozpočtované na **zdrojovú IP**, teda spoločne so všetkým
- *               ostatným, čo z tohto počítača na shop chodí,
- *  - `orders` — čítania S objednávkovým kľúčom (predajnosť): 20/min a 200/UTC
- *               deň, rozpočtované **na kľúč**.
+ *  - `anon`         — čítania BEZ kľúča (katalóg, D48/I1): 30/min a 300/UTC deň,
+ *                     rozpočtované na **zdrojovú IP**, teda spoločne so všetkým
+ *                     ostatným, čo z tohto počítača na shop chodí,
+ *  - `orders`       — čítania S objednávkovým kľúčom (predajnosť): 20/min
+ *                     a 200/UTC deň, rozpočtované **na kľúč**,
+ *  - `product_read` — čítania `getFull` so zápisovým kľúčom v scope
+ *                     `product:read` (obohacovanie katalógu D118, overenie
+ *                     zľavy v shope): tiež 20/min a 200/UTC deň **na kľúč**,
+ *                     ale na INÝ kľúč než `orders`.
  *
  * Zliať ich do jedného čísla by znamenalo, že jedna dráha vyčerpá strop tej
- * druhej — preto je `lane` súčasťou kľúča počítadla, nie detail.
+ * druhej — preto je `lane` súčasťou kľúča počítadla, nie detail. `orders`
+ * a `product_read` majú rovnaké ČÍSLO a napriek tomu sú to dve dráhy: shop
+ * účtuje na kľúč a sú to dva rôzne kľúče (`orders_read` vs. `shop_write`).
+ * Do 31. 8. 2026 sa obohacovanie aj `reduction-check` účtovali do `anon`,
+ * takže si brali strop katalógovej synchronizácie, ktorá beží dni.
  *
  * ČO SEM NEPATRÍ
  * --------------
@@ -67,7 +75,7 @@ import {
 /* ═══════════════════════════ 1. Dráhy a stropy ════════════════════════════ */
 
 /** Rozpočtová vetva shopu. Viac o rozdiele v doc-bloku vyššie. */
-export type ReadLane = 'anon' | 'orders';
+export type ReadLane = 'anon' | 'orders' | 'product_read';
 
 /** Zóna, v ktorej sa počíta rozpočtový deň — strop resetuje SHOP o polnoci UTC. */
 export const READ_BUDGET_TIME_ZONE = 'UTC';
@@ -76,6 +84,16 @@ export interface ReadLaneLimits {
   readonly perMinute: number;
   readonly perUtcDay: number;
 }
+
+/**
+ * Strop vetvy S KĽÚČOM, spočítaný RAZ pre obe kľúčové dráhy (`orders`
+ * a `product_read`). Číslo je rovnaké, počítadlá NIE — zdieľaná je aritmetika,
+ * nie spotreba (viď doc-blok vyššie).
+ */
+const KEYED_LANE_LIMITS: ReadLaneLimits = {
+  perMinute: Math.floor(SHOP_KEYED_LIMIT.perMinute * RATE_SAFETY_FACTOR),
+  perUtcDay: Math.floor(SHOP_KEYED_LIMIT.perUtcDay * RATE_SAFETY_FACTOR),
+};
 
 /**
  * Stropy po dráhach — vždy už po odrátaní rezervy `RATE_SAFETY_FACTOR`.
@@ -87,10 +105,8 @@ export const READ_LANE_LIMITS: Readonly<Record<ReadLane, ReadLaneLimits>> = {
     perMinute: ANON_READS_PER_MINUTE,
     perUtcDay: ANON_READS_PER_UTC_DAY,
   },
-  orders: {
-    perMinute: Math.floor(SHOP_KEYED_LIMIT.perMinute * RATE_SAFETY_FACTOR),
-    perUtcDay: Math.floor(SHOP_KEYED_LIMIT.perUtcDay * RATE_SAFETY_FACTOR),
-  },
+  orders: KEYED_LANE_LIMITS,
+  product_read: KEYED_LANE_LIMITS,
 };
 
 /** Okno minútového stropu. Je klzavé a jeho začiatok appka nepozná. */

@@ -354,3 +354,209 @@ export function calmNumbers(rows: readonly CampaignRow[], today: string): CalmNu
   }
   return { live, ready, discounted };
 }
+
+/* ══════════════ 4. Okno prepínača Prehľadu (V4, kontrakt §2) ══════════════ */
+
+/**
+ * Tri okná, nič medzi nimi. Zhodujú sa s `WINDOW_DAYS_ALLOWED` v
+ * `src/app/api/insights/_shared.ts` — server iné okno odmietne, takže tu nie je
+ * čo „pre istotu" pridávať; hodnota mimo zoznamu by skončila chybou dotazu.
+ */
+export const OVERVIEW_WINDOWS = [7, 30, 90] as const;
+
+export type OverviewWindow = (typeof OVERVIEW_WINDOWS)[number];
+
+/** Predvolené okno prvej strany (kontrakt V4 §2: 30 dní). */
+export const DEFAULT_OVERVIEW_WINDOW: OverviewWindow = 30;
+
+/** Je to okno, ktoré server pozná? Fail-closed: čokoľvek iné je `false`. */
+export function isOverviewWindow(value: number): value is OverviewWindow {
+  return (OVERVIEW_WINDOWS as readonly number[]).includes(value);
+}
+
+/* ═════════════ 5. Top a flop rebríček (V4, D113 + D116 + I11) ═════════════ */
+
+/**
+ * Jeden riadok rebríčka po prečítaní odpovede.
+ *
+ * `units` je zámerne `number` a nie `number | null`: riadok BEZ nameraného
+ * predaja do rebríčka nepatrí a `rankRows()` ho zahodí ešte pred vytvorením
+ * tohto typu. Kto sem pridá `null`, musí najprv odpovedať na otázku, čo taký
+ * riadok v rebríčku predaja robí.
+ */
+export interface RankRow {
+  productId: number;
+  /** D116 — kód produktu. `null` = zrkadlo ho nemá (pomlčka + id na povrchu). */
+  reference: string | null;
+  name: string | null;
+  /** Predané kusy za okno. VŽDY ≥ 1. */
+  units: number;
+  /** Podľa VLASTNÝCH zápisov je produkt dnes v okne zľavy (I11). */
+  discountedNow: boolean;
+  /** Marža v % z obohatenia. `null` = neobohatené, teda „nevieme" (D118). */
+  marginPercent: number | null;
+  /** Sklad z obohatenia. `0` je platná nula, `null` je „nevieme". */
+  qty: number | null;
+  /** `false` = produkt sa nikdy neobohatil, takže marža a sklad sú „nevieme". */
+  enriched: boolean;
+}
+
+/**
+ * Riadky rebríčka z odpovede servera.
+ *
+ * PREČO SA TU FILTRUJE, KEĎ TO ROBÍ AJ SERVER. Route `top-products` do rebríčka
+ * nulu nepustí a hovorí to aj strojovo (`excludes.zeroSales`). Tento filter je
+ * druhá brána a nie je zbytočná: obrazovka dostáva JSON, ktorého tvar typ
+ * nechráni, a jediné, čo medzi „0 predaných" a „produkt bez dát" rozhoduje na
+ * povrchu, je práve tento riadok kódu. Keby sa raz zmenil server, chyba by sa
+ * neprejavila výnimkou, ale desiatimi nulami na dne flopu — teda tvrdením, že
+ * tie produkty sú najhoršie predávané, hoci o nich appka nevie nič (I11).
+ *
+ * `units` sa preto musí prečítať ako KONEČNÉ ČÍSLO VÄČŠIE NEŽ NULA. `null`,
+ * chýbajúce pole, `NaN` aj `0` vypadnú a je to to isté rozhodnutie: appka
+ * o predaji toho produktu nemá meranie, tak ho do poradia nedáva.
+ */
+export function rankRows(raw: unknown): RankRow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RankRow[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const row = entry as Record<string, unknown>;
+    const productId = row.productId;
+    const units = row.units;
+    if (typeof productId !== 'number' || !Number.isFinite(productId)) continue;
+    // Nula ani „nevieme" do rebríčka predaja nevstupuje — viď hlavička.
+    if (typeof units !== 'number' || !Number.isFinite(units) || units <= 0) continue;
+    out.push({
+      productId,
+      reference: typeof row.reference === 'string' && row.reference.trim() !== '' ? row.reference : null,
+      name: typeof row.name === 'string' && row.name.trim() !== '' ? row.name : null,
+      units: Math.trunc(units),
+      discountedNow: row.discountedNow === true,
+      marginPercent:
+        typeof row.marginPercent === 'number' && Number.isFinite(row.marginPercent)
+          ? row.marginPercent
+          : null,
+      qty: typeof row.qty === 'number' && Number.isFinite(row.qty) ? Math.trunc(row.qty) : null,
+      enriched: row.enriched === true,
+    });
+  }
+  return out;
+}
+
+/* ═════════════ 6. Karta bežiacich zliav (V4, kontrakt §2 bod 6) ═══════════ */
+
+/**
+ * Najbližší PLÁNOVANÝ zápis. `fireAt` je čas, kedy sa fronta chystá zapisovať —
+ * nie začiatok okna zľavy; tie dva sa pri režime „zapisuje sa dopredu" líšia.
+ */
+export interface NextFire {
+  campaignId: number;
+  name: string;
+  percent: number;
+  /** ISO čas zo servera. Formátuje ho povrch, nie tento modul. */
+  fireAt: string;
+}
+
+/** Okno zľavy s časom zápisu — presne to, čo vracia `/api/insights/timeline`. */
+export interface FireWindowInput {
+  id: number;
+  name: string;
+  percent: number;
+  fireAt: string | null;
+}
+
+/**
+ * Najbližší plánovaný zápis z okien na osi.
+ *
+ * Porovnáva sa ISO reťazcami, nie `Date` — `fireAt` prichádza zo servera v
+ * jednom formáte a lexikografické porovnanie ISO časov je to isté ako číselné,
+ * bez rizika, že sa niekde stratí zóna. Minulý čas sa preskočí: „najbližší
+ * plánovaný" nie je zápis, ktorý sa mal stať včera.
+ *
+ * `null` znamená „nič naplánované NEVIDÍME" — a povrch to tak musí povedať.
+ * Nie je to „nič naplánované nie je": os pokrýva len okno prepínača.
+ */
+export function nextPlannedFire(
+  windows: readonly FireWindowInput[],
+  nowIso: string,
+): NextFire | null {
+  let best: NextFire | null = null;
+  for (const window of windows) {
+    const fireAt = window.fireAt;
+    if (fireAt === null || typeof fireAt !== 'string' || fireAt === '') continue;
+    if (fireAt < nowIso) continue;
+    if (best === null || fireAt < best.fireAt) {
+      best = { campaignId: window.id, name: window.name, percent: window.percent, fireAt };
+    }
+  }
+  return best;
+}
+
+/**
+ * Posledný deň, v ktorom appka naozaj niečo zapisovala.
+ *
+ * Počty sú `number | null`, lebo `null` je jediný spôsob, ako povedať „toto
+ * pole sme neprečítali". Karta ho MUSÍ uniesť: „0 sa nepodarilo" o produkčnom
+ * zápise sa smie napísať len z nuly, ktorá naozaj prišla zo servera (I11).
+ */
+export interface LastWrite {
+  day: string;
+  ok: number | null;
+  failed: number | null;
+  uncertain: number | null;
+  skipped: number | null;
+}
+
+/** Jeden deň zápisovej aktivity z `/api/insights/activity`. */
+export interface WriteActivityDayInput {
+  day: string;
+  ok: number | null;
+  failed: number | null;
+  uncertain: number | null;
+  skipped: number | null;
+}
+
+/**
+ * POSLEDNÝ VÝSLEDOK ZÁPISU — najnovší deň, ktorý má aspoň jednu položku.
+ *
+ * Deň so samými nulami sa preskočí zámerne: `writeActivity` vracia riadok pre
+ * každý deň obdobia, takže „posledný deň" je takmer vždy dnešok a jeho nuly by
+ * na karte vyzerali ako „naposledy sa nezapísalo nič" — čo je tvrdenie o zápise,
+ * hoci je to len tvrdenie o kalendári.
+ *
+ * `null` = v obdobiach, ktoré appka prečítala, nie ani jeden zápis.
+ *
+ * PRESKOČIŤ DEŇ SMIE LEN ZMERANÁ NULA (31. 8. 2026). Deň sa vynechá iba vtedy,
+ * keď sú všetky štyri počty prečítané a všetky sú nulové. Keď appka jeden
+ * z nich nepozná (`null`), nemá z čoho tvrdiť „v tento deň sa nezapisovalo" —
+ * deň zostáva kandidátom a medzeru prizná karta. Opačné poradie by nečitateľnú
+ * odpoveď premenilo na tichý „nezapisovalo sa nič".
+ */
+export function lastWriteResult(days: readonly WriteActivityDayInput[]): LastWrite | null {
+  let best: LastWrite | null = null;
+  for (const row of days) {
+    if (typeof row.day !== 'string' || row.day === '') continue;
+    let measuredTotal = 0;
+    let unknownFields = 0;
+    for (const value of [row.ok, row.failed, row.uncertain, row.skipped]) {
+      if (value === null || !Number.isFinite(value)) {
+        unknownFields += 1;
+        continue;
+      }
+      measuredTotal += value;
+    }
+    // Všetky štyri zmerané a všetky nulové → v tento deň sa naozaj nezapisovalo.
+    if (unknownFields === 0 && measuredTotal <= 0) continue;
+    if (best === null || row.day > best.day) {
+      best = {
+        day: row.day,
+        ok: row.ok,
+        failed: row.failed,
+        uncertain: row.uncertain,
+        skipped: row.skipped,
+      };
+    }
+  }
+  return best;
+}

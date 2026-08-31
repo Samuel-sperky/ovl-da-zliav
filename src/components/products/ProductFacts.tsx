@@ -57,9 +57,14 @@ import {
   ABSENCE_ICON,
   ABSENCE_TITLE,
   ABSENCE_WORD,
+  KPI_GAP_ICON,
+  KPI_GAP_TITLE,
+  KPI_GAP_WORD,
   type AbsenceKind,
   type CodeLineView,
   type Field,
+  type KpiField,
+  type KpiGapKind,
 } from '@/components/products/product-extras';
 
 /** Pomlčka. Jedna na celý súbor — dva rôzne znaky by sa na oko nelíšili. */
@@ -97,6 +102,45 @@ export function FieldValue<T>({
   render: (value: T) => ReactNode;
 }) {
   if (!field.known) return <AbsenceValue why={field.why} />;
+  return <>{render(field.value)}</>;
+}
+
+/* ═══════════ Prázdna čítacej vrstvy KPI (V4, D114/D118) ═══════════════════
+ *
+ * TEN ISTÝ TVAR, INÝ SLOVNÍK — a to je zámer.
+ *
+ * KPI z obohatenia majú vlastné dôvody chýbania (`KpiGapKind`
+ * v `product-extras.ts`): „produkt nie je obohatený" nie je to isté ako „eshop
+ * to nevedie" a ani jedno nie je to isté ako „dni chýbajú". Keby sa mapovali na
+ * tri prázdna verejnej cesty, zliali by sa práve tie dva, ktoré I11 rozlišovať
+ * káže — preto je tu druhá dvojica komponentov a nie prepočet na `AbsenceKind`.
+ *
+ * VYZERAJÚ ROVNAKO: pomlčka, značka, slovo, `title`. Rozdiel je len v tom, čo
+ * to slovo hovorí. Používateľ sa nemá učiť dva jazyky prázdna.
+ */
+
+/** Prázdno KPI so slovom a značkou. Nikdy holá pomlčka, nikdy nula. */
+export function KpiAbsence({ gap, style }: { gap: KpiGapKind; style?: CSSProperties }) {
+  return (
+    <span
+      style={{ color: 'var(--dim)', fontWeight: 500, ...style }}
+      title={KPI_GAP_TITLE[gap]}
+      data-kpi-gap={gap}
+    >
+      {DASH} <Icon name={KPI_GAP_ICON[gap]} size={0.8} /> {KPI_GAP_WORD[gap]}
+    </span>
+  );
+}
+
+/** Hodnota KPI, alebo to správne prázdno. `0` je hodnota, nie prázdno. */
+export function KpiValueText<T>({
+  field,
+  render,
+}: {
+  field: KpiField<T>;
+  render: (value: T) => ReactNode;
+}) {
+  if (!field.known) return <KpiAbsence gap={field.gap} />;
   return <>{render(field.value)}</>;
 }
 

@@ -31,7 +31,7 @@
  *
  * Vlastník: D4 (doťahovanie detailov).
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type {
   DateOnly,
@@ -58,7 +58,7 @@ import {
   type ProductDetailsDeps,
   type ProductDetailsResult,
 } from '@/lib/catalog/product-details';
-import type { RouteDeps } from '@/lib/http/define-route';
+import { resetRateLimiter, type RouteDeps } from '@/lib/http/define-route';
 import {
   catalogDetailFromRecord,
   emptyCatalogDetail,
@@ -89,8 +89,27 @@ const NOW = new Date('2026-08-17T09:00:00.000Z');
 const now = (): Date => NOW;
 const TODAY = '2026-08-17' as DateOnly;
 
+/*
+ * `POST /api/catalog/details` má od 31. 8. 2026 minútový strop na IP a čas je
+ * v testoch zamrznutý, takže bez tohto by okno nikdy neuplynulo a siedmy dopyt
+ * v súbore by skončil na 429. Limiter je zámerne bez perzistencie.
+ */
+beforeEach(() => {
+  resetRateLimiter();
+});
+
 function memoryBudget(store: ReadBudgetStore = createMemoryReadBudgetStore()): ReadBudget {
   return createReadBudget({ store, lane: 'anon', now });
+}
+
+/**
+ * Počítadlo dráhy `product_read` — kvóta ZÁPISOVÉHO kľúča, do ktorej sa od
+ * 31. 8. 2026 účtuje cesta `getFull`. Je to iná dráha než anonymná (`memoryBudget`)
+ * a preto aj iné počítadlo; zliať ich by znamenalo, že doťahovanie detailov si
+ * berie strop katalógovej synchronizácie.
+ */
+function keyedBudget(store: ReadBudgetStore = createMemoryReadBudgetStore()): ReadBudget {
+  return createReadBudget({ store, lane: 'product_read', now });
 }
 
 /** Počítadlo, ktoré sa nedá prečítať — „nevieme, koľko dnes odišlo" (I11). */
@@ -680,6 +699,7 @@ describe('`get` verzus `getFull`', () => {
       shop,
       catalog: mirror.catalog,
       apiKey: fakeApiKey(['product:read']),
+      productReads: keyedBudget(),
       now,
     });
 
@@ -727,6 +747,7 @@ describe('`get` verzus `getFull`', () => {
       shop,
       catalog: mirror.catalog,
       apiKey: fakeApiKey(['product:read']),
+      productReads: keyedBudget(),
       now,
     });
 
@@ -768,6 +789,7 @@ describe('`get` verzus `getFull`', () => {
       shop,
       catalog: mirror.catalog,
       apiKey: fakeApiKey(['product:read']),
+      productReads: keyedBudget(),
       now,
     });
 
@@ -880,6 +902,7 @@ describe('doťahovanie zrkadlo nenapĺňa, len obohacuje', () => {
       shop,
       catalog: mirror.catalog,
       apiKey: fakeApiKey(['product:read']),
+      productReads: keyedBudget(),
       now,
     });
 
@@ -949,6 +972,8 @@ interface DetailsWorld {
   readonly shop: ProductDetailsDeps['shop'];
   readonly scopes: readonly ShopScope[] | null;
   readonly force?: boolean;
+  /** Počítadlo dráhy `product_read`; default je čerstvé pamäťové. */
+  readonly keyedReads?: ReadBudget;
 }
 
 async function callDetails(
@@ -959,6 +984,9 @@ async function callDetails(
     catalogRepo: world.mirror.catalog as unknown as CatalogDetailsDeps['catalogRepo'],
     apiKeyRepo: fakeApiKey(world.scopes) as unknown as CatalogDetailsDeps['apiKeyRepo'],
     shopClient: world.shop,
+    // Dráha `product_read` — bez nej by cesta `getFull` fail-closed nepustila
+    // ani jedno volanie (neúčtované čítanie na zápisovom kľúči).
+    productReads: world.keyedReads ?? keyedBudget(),
   };
   const response = await createCatalogDetailsPost(overrides, sessionDeps())(
     new Request('https://zlavy.local/api/catalog/details', {

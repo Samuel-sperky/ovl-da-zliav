@@ -4,6 +4,13 @@
  * Stránkovaný, filtrovateľný zoznam audit logu. Čisto čítacie — `audit_log`
  * je append-only a jediná cesta zápisu je `appendAudit()` (I4).
  *
+ * D116 / K6: každý riadok nesie aj `reference` a `productName` — pomenovanie
+ * produktu, ktoré `auditRepo.list()` pripája `LEFT JOIN`-om zo zrkadla katalógu
+ * PRI ČÍTANÍ (v audite sa nič neprepisuje). `null` v nich znamená „appka to
+ * nevie" (I11), nie „produkt referenciu nemá"; pomlčku skladá až obrazovka.
+ * Odpoveď repozitára ide von celá, takže sa polia nemajú kde stratiť — ale keď
+ * tu niekto niekedy začne skladať vlastný objekt, musí ich uviesť.
+ *
  * Vlastník: A12.
  */
 import { z } from 'zod';

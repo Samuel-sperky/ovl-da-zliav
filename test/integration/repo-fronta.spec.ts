@@ -339,12 +339,24 @@ describe.skipIf(!available)('repozitáre V3 — fronta, pásma, katalóg (V4)', 
 
       // Blob stĺpce v DB naozaj SÚ (inak by test dokazoval prázdnu tabuľku)
       // a všetko ostatné je v ľahkom riadku znak po znaku rovnaké.
-      const { sentPayload, rawResponse, ...expected } = full[0]!;
+      //
+      // `reference` je z porovnania vyňatá spolu s blobmi, a z toho istého
+      // dôvodu (D116 / K6): ČÍTACIE dotazy ju pripájajú `LEFT JOIN`-om zo
+      // zrkadla katalógu, zápisová sada zrkadlo NEPRIPÁJA — hash potvrdenia
+      // (K4, I3) sa nesmie zmeniť tým, že na povrch niečo pribudlo. Že tam
+      // naozaj nie je, sa tvrdí explicitne o tri riadky nižšie; plné pokrytie
+      // doplnenej referencie drží `referencia-server-join.spec.ts`.
+      const { sentPayload, rawResponse, reference, ...expected } = full[0]!;
       expect(sentPayload).toEqual({ id: 43_001, reduction: 25 });
       expect(rawResponse).toEqual({ success: true });
+      // Produkt 43 001 v zrkadle katalógu nie je — `null` = nevieme (I11).
+      expect(reference).toBeNull();
       expect(lean[0]).toEqual(expected);
       expect(Object.keys(lean[0]!)).not.toContain('sentPayload');
       expect(Object.keys(lean[0]!)).not.toContain('rawResponse');
+      expect(Object.keys(lean[0]!)).not.toContain('reference');
+      // Čítacia sada ju naopak MUSÍ mať (aj keď je `null`).
+      expect(Object.keys(full[0]!)).toContain('reference');
 
       // A hlavne: nejde o zahodenie po ceste — DB tie dva stĺpce neposlala.
       const rawKeys = await withMigrationConn(async (conn) => {

@@ -92,6 +92,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { BlockerRules } from '@/components/campaigns/BlockerList';
+import DiscountPresets from '@/components/campaigns/DiscountPresets';
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import NewDiscountStart from '@/components/campaigns/NewDiscountStart';
 import ScopeRelease from '@/components/campaigns/ScopeRelease';
@@ -109,6 +110,7 @@ import {
 import {
   DEFAULT_TIER_PERCENT,
   buildTiers,
+  discountWriteRequest,
   averagePrice as averagePriceOf,
   discountedPriceOf,
   estimateFinishDay,
@@ -123,6 +125,7 @@ import {
   type SoldBucketKey,
   type TierPlan,
 } from '@/components/campaigns/discounts-model';
+import { prefillNoteText } from '@/components/campaigns/presets-model';
 import {
   createDiscount,
   fetchQueue,
@@ -148,12 +151,13 @@ import {
   type CatalogFilterState,
 } from '@/components/products/catalog-filter';
 import SoldCoverageNote from '@/components/products/SoldCoverageNote';
-import { useSoldCoverage } from '@/components/products/sold-coverage';
+import { soldUnitsViaCoverage, useSoldCoverage } from '@/components/products/sold-coverage';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
 import { collectOperationBlockers } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { statusSnapshotFromPayload } from '@/lib/status/snapshot';
 import { formatDateSk, formatEur } from '@/lib/ui/format';
+import { productLabel } from '@/lib/ui/product-label';
 import { formatCountSk, guardSentence, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ konštanty ════════════════════════════════════ */
@@ -185,6 +189,22 @@ export interface NewDiscountInitial {
    * Keď je zadané, appka si okno UŽ NEPOSÚVA sama (má prednosť človek, K5).
    */
   readonly window: { readonly from: string; readonly to: string | null } | null;
+  /**
+   * Percentá pásiem z presetu alebo zo zopakovanej zľavy (D112). Prázdny objekt
+   * = formulár si necháva svoje predvolené. Percento pásma, ktoré v adrese
+   * nebolo, sa NEDOPOČÍTAVA z ostatných.
+   */
+  readonly percents?: Readonly<Partial<Record<SoldBucketKey, number>>>;
+  /** Dĺžka okna v dňoch z presetu; `null` = predvolená dĺžka appky. */
+  readonly windowDays?: number | null;
+  /**
+   * Odkiaľ sú polia predplnené — LEN na vetu pre človeka. Na zápis to nemá
+   * žiadny vplyv: preset ani zopakovanie neobchádzajú dry-run a potvrdenie (I3).
+   */
+  readonly prefillFrom?: {
+    readonly kind: 'preset' | 'campaign';
+    readonly label: string;
+  } | null;
 }
 
 type Busy = 'idle' | 'loading' | 'previewing' | 'creating';
@@ -234,15 +254,29 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const soldCoverage = useSoldCoverage();
 
   const [name, setName] = useState('');
+  /*
+   * Predvolené percentá, PREKRYTÉ tým, čo prišlo z presetu alebo zo zopakovanej
+   * zľavy (D112). Preset predplní len pásma, ktoré naozaj nesie — zvyšok
+   * zostáva na predvolených hodnotách appky a nič sa nedopočítava.
+   */
   const [percents, setPercents] = useState<Record<SoldBucketKey, number>>({
     ...DEFAULT_TIER_PERCENT,
+    ...(initial.percents ?? {}),
   });
+  /**
+   * Dĺžka okna, ktorú appka použije pri SVOJOM návrhu štartu. Z presetu je to
+   * jeho `durationDays`, inak predvolené 14 dní (D12).
+   */
+  const windowLength =
+    initial.windowDays !== null && initial.windowDays !== undefined
+      ? initial.windowDays
+      : DEFAULT_WINDOW_DAYS;
   const [from, setFrom] = useState(initial.window?.from ?? '');
-  // Návrh nadväznosti pozná len začiatok — dĺžku doplní predvolená appky.
+  // Návrh nadväznosti pozná len začiatok — dĺžku doplní preset alebo predvolená.
   const [to, setTo] = useState(
     initial.window === null
       ? ''
-      : (initial.window.to ?? addDays(initial.window.from, DEFAULT_WINDOW_DAYS - 1)),
+      : (initial.window.to ?? addDays(initial.window.from, windowLength - 1)),
   );
   // Okno z adresy sa počíta ako „človek si ho už zvolil" — návrh appky ho
   // potom neprepíše (K5).
@@ -350,6 +384,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       data: readonly {
         productId: number;
         name: string | null;
+        reference?: string | null;
         price: string | null;
         unitsSold: number;
         discountedNow: boolean;
@@ -367,6 +402,11 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         collected.push({
           productId: row.productId,
           name: row.name,
+          // D116 — referencia sa NESIE ďalej, aj keď ju katalóg zatiaľ nemusí
+          // poslať; chýbajúca hodnota je „nevieme", nie prázdny kód.
+          ...(row.reference === undefined || row.reference === null
+            ? {}
+            : { reference: row.reference }),
           price: row.price,
           unitsSold: row.unitsSold,
           discountedNow: row.discountedNow,
@@ -466,9 +506,26 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
   /* ── 3. Pásma, vzorka, priemerná cena ────────────────────────────────── */
 
-  const tiers: TierPlan[] = useMemo(
-    () => (rows === null ? [] : buildTiers(rows, filter.soldWindowDays, percents)),
+  /*
+   * D121 (28. 8. 2026) — pásma sa skladajú LEN z produktov, ktorých predaj
+   * appka naozaj zmerala. Produkt s neznámym predajom sa do pásma nezaradí
+   * (predtým spadol do vedra `none`, teda −30 %) a do kampane sa NEDOSTANE;
+   * priznáme ho počtom nižšie.
+   */
+  const partition = useMemo(
+    () =>
+      rows === null
+        ? { tiers: [] as TierPlan[], unknownProductIds: [] as readonly number[] }
+        : buildTiers(rows, filter.soldWindowDays, percents),
     [rows, filter.soldWindowDays, percents],
+  );
+  const tiers: TierPlan[] = partition.tiers;
+  /** Produkty, ktoré sa do zľavy nedostanú, lebo ich predaj nepoznáme (D121). */
+  const skippedUnknown = partition.unknownProductIds;
+  /** Len tie produkty, ktoré pásmo naozaj dostali — toto ide do kampane. */
+  const tieredProductIds = useMemo(
+    () => tiers.flatMap((tier) => [...tier.productIds]),
+    [tiers],
   );
   const itemsCount = rows === null ? 0 : rows.length;
   const sample = useMemo(() => spreadSample(rows ?? [], tiers, 6), [rows, tiers]);
@@ -532,8 +589,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     const start = proposedStart ?? todayLogical();
     if (start === from) return;
     setFrom(start);
-    setTo(addDays(start, DEFAULT_WINDOW_DAYS - 1));
-  }, [proposedStart, windowTouched, from]);
+    setTo(addDays(start, windowLength - 1));
+  }, [proposedStart, windowTouched, from, windowLength]);
 
   const windowDays = safeWindowDays(from, to);
 
@@ -606,18 +663,18 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     if (percentError !== undefined || windowError !== null) return;
     setBusy('previewing');
     setError(null);
+    /*
+     * D121 — produkty a pásma skladá JEDNA funkcia, aby sa nemali ako rozísť.
+     * Do 28. 8. 2026 tu stáli dva nezávislé výrazy (`rows.map(…)` a pásma),
+     * takže produkt s neznámym predajom šiel do kampane bez platného percenta
+     * — a mutácia toho riadku nechala 93 testov zelených. Podrobne v docbloku
+     * `discountWriteRequest()`.
+     */
     const res = await previewDiscount({
-      productIds: rows.map((row) => row.productId),
-      percent: headlinePercent(tiers),
+      ...discountWriteRequest(partition),
       from,
       to,
       kind: 'new',
-      tiers: tiers.map((tier) => ({
-        ord: tier.ord,
-        label: `${tier.letter} · ${tier.label}`,
-        percent: tier.percent,
-        productIds: tier.productIds,
-      })),
       ...(from === to ? { oneDayAcknowledged: true } : {}),
     });
     setBusy('idle');
@@ -631,7 +688,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     setPreviewSig(signature);
     setPreviewAt(new Date().toISOString());
     setError(null);
-  }, [rows, tiers, percentError, windowError, from, to, signature]);
+  }, [rows, tiers, tieredProductIds, percentError, windowError, from, to, signature]);
 
   const blockedReason = queueBlockedReason({
     itemsCount,
@@ -682,10 +739,23 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
   const lockedChips = ['kategória', 'kov', 'typ šperku', 'marža', 'obrátkovosť'];
 
+  /** Veta o predplnení z presetu / zo zopakovanej zľavy; `null` = nič také. */
+  const prefillNote = prefillNoteText(initial.prefillFrom ?? null);
+
   /** Prázdne zrkadlo katalógu — z neho sa počet vyhovujúcich NEDÁ prečítať. */
   const catalogEmpty = catalogTotal === 0;
   /** Z koľkých sa vyberá. Neznáme je pomlčka, nikdy nula (kontrakt UI, bod 5). */
   const matchingUnknown = matching === null || (source === 'filter' && catalogEmpty);
+
+  /*
+   * Predané kusy vo vzorke — TOU ISTOU bránou ako tabuľka Produktov a bočný
+   * panel (`sold-coverage.ts`), aby o tej istej medzere nehovorili tri
+   * obrazovky tri rôzne veci. Vysvetlivka nad tabuľkou (`SoldCoverageNote`)
+   * zostáva; toto je to isté priznanie NA RIADKU, kde sa podľa čísla vyberá
+   * pásmo.
+   */
+  const soldCell = (units: number | null) =>
+    soldUnitsViaCoverage(units, filter.soldWindowDays, soldCoverage);
   const emptySelection = rows !== null && itemsCount === 0 && busy !== 'loading';
 
   return (
@@ -705,6 +775,17 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
           Zrušiť
         </Link>
       </div>
+
+      {/*
+       * Odkiaľ sú predplnené polia (D112). Veta hovorí OBE veci: čím sú
+       * vyplnené a že sa tým NIČ nezapísalo — preset ani zopakovanie zľavy
+       * neobchádzajú skúšku naprázdno a potvrdenie (I3).
+       */}
+      {prefillNote === null ? null : (
+        <div className="lvl-3" data-testid="prefill-note">
+          {prefillNote}
+        </div>
+      )}
 
       <div className={styles.nz}>
         {/* ── ĽAVÝ STĹPEC ─────────────────────────────────────────────── */}
@@ -826,12 +907,26 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               />
             </div>
 
-            {skipped === 0 && notInCatalog === 0 ? null : (
+            {skipped === 0 && notInCatalog === 0 && skippedUnknown.length === 0 ? null : (
               <div className="prog-meta">
                 {skipped === 0 ? null : (
                   <span className="flag neutral" data-testid="skipped-discounted">
                     <FlagMark tone="neutral" />
                     {formatCountSk(skipped)} už má zľavu podľa vlastných zápisov — vynechané
+                  </span>
+                )}
+                {/*
+                  D121 (28. 8. 2026) — produkt, ktorého predaj appka NEPOZNÁ, sa
+                  do pásma nezaradí a do zľavy nepôjde. Bez tohto riadku by
+                  zmizol ticho: počet v dominante by nesedel s výberom a človek
+                  by nevedel, prečo. Do 28. 8. 2026 taký produkt spadol do pásma
+                  „0 predaných", teda −30 %.
+                */}
+                {skippedUnknown.length === 0 ? null : (
+                  <span className="flag neutral" data-testid="skipped-unknown-sold">
+                    <FlagMark tone="neutral" />
+                    {formatCountSk(skippedUnknown.length)} má neznámy predaj — pásmo sa im
+                    určiť nedá, zľavu nedostanú
                   </span>
                 )}
                 {notInCatalog === 0 ? null : (
@@ -1042,14 +1137,36 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                       {sample.map((row) => {
                         const tier = tierOfProduct.get(row.productId);
                         const newPrice = discountedPriceOf(row.price, tier?.percent ?? 0);
+                        const label = productLabel({
+                          productId: row.productId,
+                          reference: row.reference ?? null,
+                          name: row.name,
+                        });
                         return (
                           <tr key={row.productId}>
-                            <td className="name">{row.name ?? 'bez názvu'}</td>
+                            {/* D116 — na povrchu „referencia · názov"; `#id`
+                                zostáva v `title`, teda v technickom detaile. */}
+                            <td className="name" title={label.technical}>
+                              {label.text}
+                            </td>
                             <td className="n" data-l="Cena">
                               {formatEur(row.price)}
                             </td>
-                            <td className="n" data-l="Predané">
-                              {formatCountSk(row.unitsSold)}
+                            {/*
+                              I11 — číslo z `catalog/search` bránu pokrytia
+                              nemá, takže sa vypisuje cez `soldUnitsViaCoverage()`:
+                              pri neúplnom pokrytí `≥ N`, pri nule pomlčka
+                              s dôvodom v `title`. Nula tu totiž rozhoduje
+                              o PÁSME (0 predaných → najhlbšia zľava), takže
+                              „nevieme" vydané za nulu je cesta k −30 % na
+                              tisícoch kusov (31. 8. 2026).
+                            */}
+                            <td
+                              className="n"
+                              data-l="Predané"
+                              title={soldCell(row.unitsSold).title ?? undefined}
+                            >
+                              {soldCell(row.unitsSold).text}
                             </td>
                             <td className="n" data-l="Pásmo">
                               {tier === undefined ? '—' : `${tier.letter} · ${tier.percent} %`}
@@ -1072,6 +1189,22 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               </>
             </section>
           )}
+
+          {/*
+           * PRESETY (D112, K7) — pod rozklikom, teda mimo počtu sekcií (P5).
+           * Panel vie dve veci: predplniť formulár z uloženého presetu
+           * a ULOŽIŤ aktuálne nastavenie ako nový preset. Ani jedna z nich nie
+           * je zápis do shopu — zaradiť do fronty sa dá výhradne cez skúšku
+           * naprázdno a potvrdenie v pravom stĺpci (I3).
+           */}
+          <DiscountPresets
+            draft={
+              tiers.length === 0
+                ? null
+                : { filter, tiers, windowDays: windowDays > 0 ? windowDays : windowLength }
+            }
+            testId="new-discount-presets"
+          />
         </div>
 
         {/* ── PRAVÝ STĹPEC ────────────────────────────────────────────── */}
@@ -1103,7 +1236,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                 from={from}
                 onUseProposal={() => {
                   if (proposedStart === null) return;
-                  const length = windowDays > 0 ? windowDays : DEFAULT_WINDOW_DAYS;
+                  const length = windowDays > 0 ? windowDays : windowLength;
                   setWindowTouched(true);
                   setFrom(proposedStart);
                   setTo(addDays(proposedStart, length - 1));

@@ -782,3 +782,279 @@ export function parseCatalogPrices(raw: unknown): CatalogPricesView | null {
 export async function catalogPrices(signal?: AbortSignal): Promise<Result<CatalogPricesView>> {
   return shaped(await readBody('/api/insights/catalog-prices', signal), parseCatalogPrices);
 }
+
+/* ═════════ 8. KPI riadkov (kontrakt V4 D114, D117–D119; I11) ══════════════ */
+
+/**
+ * KPI JEDNEJ STRÁNKY TABUĽKY, JEDNÝM DOTAZOM.
+ *
+ * `GET /api/insights/product-kpi?ids=…` vráti pre až sto ID naraz to, čo D114
+ * menuje: predané kusy za krátke a dlhé okno, obrátkovosť, posledný predaj,
+ * cenu, aktívnu zľavu podľa SHOPU a maržu. Jeden dotaz na stránku — nie sto
+ * dotazov po jednom; to by pri stránkovaní po 100 bolo N+1, ktoré kontrakt V4
+ * výslovne zakazuje.
+ *
+ * TRI STAVY KAŽDÉHO ČÍSLA SEM PRICHÁDZAJÚ HOTOVÉ (I11)
+ * ────────────────────────────────────────────────────
+ * `KpiValueView.gap` nesie DÔVOD, prečo hodnota nie je: `not_enriched`
+ * (`getFull` sa na produkt nikdy nepýtalo — D118), `shop_has_none` (pýtalo sa a
+ * shop o poli nič nevie), `days_missing` (okno nie je stiahnuté — D119),
+ * `not_computable` (pomer, ktorého menovateľ je nula). Klient ich NEZLIEVA do
+ * nuly ani do prázdna: hodnota a dôvod idú spolu až do bunky
+ * (`sold-coverage.ts`), pretože z holého `null` sa `?? 0` spraví v jednom
+ * riadku kódu.
+ *
+ * NEZNÁMY DÔVOD SA NEPREPOSIELA
+ * ─────────────────────────────
+ * `gap` je uzavretý zoznam. Kód, ktorý appka nepozná, spadne na `null` a
+ * hodnota zostane `null` — bunka teda povie „nevieme" bez dôvodu, nikdy nie
+ * číslo. Fail-closed je tu jediná bezpečná strana: vymyslený dôvod by z medzery
+ * urobil vetu, ktorú nikto nemeral.
+ */
+export const KPI_GAPS = [
+  'not_enriched',
+  'shop_has_none',
+  'days_missing',
+  'not_computable',
+] as const;
+
+export type KpiGapCode = (typeof KPI_GAPS)[number];
+
+/** Jedno KPI: hodnota, alebo dôvod, prečo ju nemáme. */
+export interface KpiValueView<T> {
+  readonly value: T | null;
+  readonly gap: KpiGapCode | null;
+}
+
+/** Stav zľavy PODĽA SHOPU (nie podľa našich zápisov — sú to dve rôzne vety). */
+export const KPI_DISCOUNT_STATES = ['running', 'scheduled', 'ended', 'none', 'unknown'] as const;
+
+export type KpiDiscountStateCode = (typeof KPI_DISCOUNT_STATES)[number];
+
+export interface KpiDiscountView {
+  readonly state: KpiDiscountStateCode;
+  /** % zľavy, ktorá v posudzovaný deň NAOZAJ beží. Mimo `running` vždy prázdne. */
+  readonly activePercent: KpiValueView<number>;
+  readonly from: string | null;
+  readonly to: string | null;
+  /** Kedy sa stav zmeral (`enriched_at`); `null` = produkt nie je obohatený. */
+  readonly measuredAt: string | null;
+}
+
+/** Predané kusy za okno a to, koľko dní okna appka NEMÁ (D119). */
+export interface KpiWindowUnitsView {
+  readonly windowDays: number;
+  readonly completeDays: number;
+  readonly unknownDays: number;
+  readonly units: KpiValueView<number>;
+  /** `true` ⇔ `units.value` je len DOLNÁ HRANICA. */
+  readonly lowerBound: boolean;
+}
+
+/** Čím je značka „bez predaja" DOKÁZANÁ. Bez dôkazu značka nevzniká (D119). */
+export const KPI_NO_SALE_PROOFS = ['shop_never_ordered', 'no_sale_in_covered_days'] as const;
+
+export type KpiNoSaleProofCode = (typeof KPI_NO_SALE_PROOFS)[number];
+
+export interface KpiNoSaleView {
+  readonly mark: boolean;
+  /** `null` ⇔ značka nevzniká. NEOBOHATENÝ PRODUKT NIE JE MŔTVY PRODUKT. */
+  readonly proof: KpiNoSaleProofCode | null;
+}
+
+export interface ProductKpiRowView {
+  readonly productId: number;
+  /** `true` = zrkadlo katalógu tento produkt vôbec nemá. */
+  readonly missing: boolean;
+  readonly reference: KpiValueView<string>;
+  readonly supplier: KpiValueView<string>;
+  readonly priceWithVat: KpiValueView<number>;
+  /** Marža v EUR TAK, AKO JU POSLAL SHOP. Nikdy dopočítaná (D117). */
+  readonly margin: KpiValueView<number>;
+  /** Marža v % TAK, AKO JU POSLAL SHOP. Nikdy dopočítaná (D117). */
+  readonly marginPercent: KpiValueView<number>;
+  readonly discount: KpiDiscountView;
+  readonly stock: KpiValueView<number>;
+  /** Celkovo predané za celú históriu (`qty_in_orders`, D119). */
+  readonly soldTotal: KpiValueView<number>;
+  readonly lastSaleAt: KpiValueView<string>;
+  readonly daysSinceLastSale: KpiValueView<number>;
+  /** Koľkokrát sa AKTUÁLNA zásoba už predala. NIE je to účtovná obrátkovosť. */
+  readonly soldPerStock: KpiValueView<number>;
+  readonly units30: KpiWindowUnitsView;
+  readonly units90: KpiWindowUnitsView;
+  readonly noSale: KpiNoSaleView;
+  /** `null` = produkt NIE JE obohatený (I11). */
+  readonly enrichedAt: string | null;
+}
+
+export interface ProductKpiPageView {
+  readonly today: string | null;
+  /** Dĺžky okien tak, ako ich POVEDALA odpoveď — nie ako ich chcela obrazovka. */
+  readonly shortWindowDays: number;
+  readonly longWindowDays: number;
+  readonly byId: ReadonlyMap<number, ProductKpiRowView>;
+}
+
+/**
+ * Strop route (`MAX_KPI_IDS`). Je tu druhýkrát zámerne: keby klient poslal
+ * dlhší zoznam, route by odpovedala 400 a CELÁ stránka by ostala bez KPI.
+ * `PER_PAGE_CHOICES` je preto zhora zarovnané na toto číslo.
+ */
+export const KPI_IDS_PER_REQUEST = 100;
+
+function parseKpiNumber(source: unknown): KpiValueView<number> {
+  const record = asRecord(source);
+  if (record === null) return { value: null, gap: null };
+  return { value: readNumber(record, 'value'), gap: readCode(record, 'gap', KPI_GAPS) };
+}
+
+function parseKpiText(source: unknown): KpiValueView<string> {
+  const record = asRecord(source);
+  if (record === null) return { value: null, gap: null };
+  return { value: readText(record, 'value'), gap: readCode(record, 'gap', KPI_GAPS) };
+}
+
+/**
+ * Okno predajov. Nečitateľné okno je MEDZERA, nie plné pokrytie: `unknownDays`
+ * padá na celú dĺžku okna, takže bunka povie „nevieme", nie nulu.
+ */
+function parseKpiWindow(source: unknown, fallbackDays: number): KpiWindowUnitsView {
+  const record = asRecord(source);
+  if (record === null) {
+    return {
+      windowDays: fallbackDays,
+      completeDays: 0,
+      unknownDays: fallbackDays,
+      units: { value: null, gap: 'days_missing' },
+      lowerBound: false,
+    };
+  }
+  const unknownDays = readCount(record, 'unknownDays');
+  return {
+    windowDays: readCount(record, 'windowDays') ?? fallbackDays,
+    completeDays: readCount(record, 'completeDays') ?? 0,
+    unknownDays: unknownDays ?? fallbackDays,
+    units: parseKpiNumber(record['units']),
+    lowerBound: readFlag(record, 'lowerBound') || (unknownDays !== null && unknownDays > 0),
+  };
+}
+
+function parseKpiDiscount(source: unknown): KpiDiscountView {
+  const record = asRecord(source);
+  if (record === null) {
+    return {
+      state: 'unknown',
+      activePercent: { value: null, gap: null },
+      from: null,
+      to: null,
+      measuredAt: null,
+    };
+  }
+  return {
+    // Neznámy stav je `unknown`, teda „nevieme" — nikdy „žiadna zľava nebeží".
+    state: readCode(record, 'state', KPI_DISCOUNT_STATES) ?? 'unknown',
+    activePercent: parseKpiNumber(record['activePercent']),
+    from: readText(record, 'from'),
+    to: readText(record, 'to'),
+    measuredAt: readText(record, 'measuredAt'),
+  };
+}
+
+/**
+ * Značka „bez predaja". `mark` bez `proof` sa zahodí: značka je tvrdenie o tom,
+ * že sa produkt nepredáva, a bez dôkazu ho appka povedať nesmie (D119).
+ */
+function parseKpiNoSale(source: unknown): KpiNoSaleView {
+  const record = asRecord(source);
+  if (record === null) return { mark: false, proof: null };
+  const proof = readCode(record, 'proof', KPI_NO_SALE_PROOFS);
+  const mark = readFlag(record, 'mark');
+  if (!mark || proof === null) return { mark: false, proof: null };
+  return { mark: true, proof };
+}
+
+function parseProductKpiRow(raw: unknown): ProductKpiRowView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const productId = readCount(record, 'productId');
+  // Bez ID sa riadok nedá pripojiť k produktu — pripojiť ho „nejako" by
+  // znamenalo napísať cudzie čísla do cudzieho riadku.
+  if (productId === null) return null;
+  return {
+    productId,
+    missing: readFlag(record, 'missing'),
+    reference: parseKpiText(record['reference']),
+    supplier: parseKpiText(record['supplier']),
+    priceWithVat: parseKpiNumber(record['priceWithVat']),
+    margin: parseKpiNumber(record['margin']),
+    marginPercent: parseKpiNumber(record['marginPercent']),
+    discount: parseKpiDiscount(record['discount']),
+    stock: parseKpiNumber(record['stock']),
+    soldTotal: parseKpiNumber(record['soldTotal']),
+    lastSaleAt: parseKpiText(record['lastSaleAt']),
+    daysSinceLastSale: parseKpiNumber(record['daysSinceLastSale']),
+    soldPerStock: parseKpiNumber(record['soldPerStock']),
+    units30: parseKpiWindow(record['units30'], 30),
+    units90: parseKpiWindow(record['units90'], 90),
+    noSale: parseKpiNoSale(record['noSale']),
+    enrichedAt: readText(record, 'enrichedAt'),
+  };
+}
+
+export function parseProductKpiPage(raw: unknown): ProductKpiPageView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const rowsRaw = record['rows'];
+  // Odpoveď bez poľa riadkov je NEČITATEĽNÁ, nie prázdna stránka. Prázdna mapa
+  // by znamenala „o žiadnom produkte nič nevieme", a to je tvrdenie.
+  if (!Array.isArray(rowsRaw)) return null;
+  const byId = new Map<number, ProductKpiRowView>();
+  for (const entry of rowsRaw) {
+    const row = parseProductKpiRow(entry);
+    if (row === null) continue;
+    byId.set(row.productId, row);
+  }
+  const window30 = asRecord(record['window30']);
+  const window90 = asRecord(record['window90']);
+  return {
+    today: readText(record, 'today'),
+    shortWindowDays: window30 === null ? 30 : (readCount(window30, 'windowDays') ?? 30),
+    longWindowDays: window90 === null ? 90 : (readCount(window90, 'windowDays') ?? 90),
+    byId,
+  };
+}
+
+/**
+ * KPI pre práve zobrazenú stránku. Čisto čítacie — `/api/insights/*` nesiaha na
+ * shop (K8), takže volanie nemíňa ani rozpočet čítaní, ani kvótu kľúča.
+ *
+ * Dlhší zoznam než `KPI_IDS_PER_REQUEST` sa NEODREŽE. Odrezaná stránka by
+ * vyzerala presne ako stránka, o ktorej appka nič nevie, a tie dve veci sa
+ * rozlíšiť musia.
+ */
+export async function fetchProductKpis(
+  productIds: readonly number[],
+  signal?: AbortSignal,
+): Promise<Result<ProductKpiPageView>> {
+  if (productIds.length === 0) {
+    return {
+      ok: true,
+      data: { today: null, shortWindowDays: 30, longWindowDays: 90, byId: new Map() },
+    };
+  }
+  if (productIds.length > KPI_IDS_PER_REQUEST) {
+    return {
+      ok: false,
+      error: {
+        code: 'kpi_page_too_large',
+        message: `KPI sa dajú načítať pre najviac ${KPI_IDS_PER_REQUEST} riadkov na jeden dotaz.`,
+      },
+    };
+  }
+  const params = new URLSearchParams({ ids: productIds.join(',') });
+  return shaped(
+    await readBody(`/api/insights/product-kpi?${params.toString()}`, signal),
+    parseProductKpiPage,
+  );
+}

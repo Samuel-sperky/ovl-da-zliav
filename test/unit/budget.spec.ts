@@ -95,6 +95,65 @@ describe('spentToday / remainingToday (K2)', () => {
   });
 });
 
+describe('jeden kľúč, jedna kvóta — čítania míňajú strop zápisov (31. 8. 2026)', () => {
+  const now = () => new Date('2026-08-10T09:00:00.000Z');
+
+  /**
+   * Nález I3: `shop_write` má scope `product:read` aj `product:edit` a shop
+   * účtuje ~200 volaní/UTC deň NA KĽÚČ. Od D118 na ňom beží obohacovanie
+   * katalógu (dráha `product_read`, 160/deň), o ktorom rozpočet zápisov
+   * nevedel — takže hlásil „ostáva 200" v deň, keď kľúč mal minutých 160,
+   * fronta sa rozbehla a shop ju uprostred kampane odmietol (429).
+   */
+  it('minuté čítania sa od stropu odpočítajú', async () => {
+    const status = await remainingToday({
+      counter: counterOf({ '2026-08-10': 20 }),
+      dailyBudget: 200,
+      keyedReads: { status: async () => ({ used: 160, known: true }) },
+      now,
+    });
+    expect(status.spent).toBe(20);
+    expect(status.keyedReadsToday).toBe(160);
+    expect(status.remaining).toBe(20);
+    expect(status.exhausted).toBe(false);
+  });
+
+  it('čítania samé môžu rozpočet vyčerpať — a je to informácia, nie chyba', async () => {
+    const status = await remainingToday({
+      counter: counterOf({ '2026-08-10': 40 }),
+      dailyBudget: 200,
+      keyedReads: { status: async () => ({ used: 160, known: true }) },
+      now,
+    });
+    expect(status.remaining).toBe(0);
+    expect(status.exhausted).toBe(true);
+  });
+
+  it('nečitateľné počítadlo čítaní je fail-closed, nie nula', async () => {
+    // `ReadBudget.status()` pri nečitateľnom počítadle vracia `known: false`
+    // a `used = strop dráhy`. Rozpočet to preberie tak, ako to prišlo —
+    // domnienku si tu nevyrába, ale ani ju neprepisuje na nulu.
+    const status = await remainingToday({
+      counter: counterOf({ '2026-08-10': 0 }),
+      dailyBudget: 200,
+      keyedReads: { status: async () => ({ used: 160, known: false }) },
+      now,
+    });
+    expect(status.remaining).toBe(40);
+  });
+
+  it('`keyedReads: null` znamená „nesledujem" — nie „nič sa neminulo naslepo"', async () => {
+    const status = await remainingToday({
+      counter: counterOf({ '2026-08-10': 10 }),
+      dailyBudget: 200,
+      keyedReads: null,
+      now,
+    });
+    expect(status.remaining).toBe(190);
+    expect(status.keyedReadsToday).toBe(0);
+  });
+});
+
 describe('resolveDailyBudget — fail-closed výška rozpočtu (K1 bod 1, K2)', () => {
   it('bez zdroja platí kontraktový default 200', async () => {
     expect(await resolveDailyBudget()).toBe(DEFAULT_DAILY_WRITE_BUDGET);

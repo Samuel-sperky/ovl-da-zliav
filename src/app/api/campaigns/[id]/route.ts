@@ -8,6 +8,12 @@
  * „len súhrn + zlyhané a podozrivé" (odpoveď 56), nie 8 000 riadkov — a 8 000
  * riadkov v jednej JSON odpovedi by aj tak nikto neprečítal.
  *
+ * D116 / K6: položky nesú aj `reference` — pripája ju `campaignItemsRepo`
+ * (`listPage()`/`listByCampaign()`) `LEFT JOIN`-om zo zrkadla katalógu pri
+ * ČÍTANÍ; do `campaign_items` sa nekopíruje nič. `null` = „appka referenciu
+ * nepozná" (I11), nikdy „produkt ju nemá". Položky idú do odpovede tak, ako
+ * prišli z repozitára — kto ich tu začne prepisovať, musí pole ponechať.
+ *
  * Vlastník: V8.
  */
 import { z } from 'zod';

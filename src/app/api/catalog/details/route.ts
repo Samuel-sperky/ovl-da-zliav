@@ -44,8 +44,10 @@ import {
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 import { apiKeyRepo as defaultApiKeyRepo } from '@/lib/repo/api-key.repo';
 import { catalogRepo as defaultCatalogRepo } from '@/lib/repo/catalog.repo';
+import { productReadBudget } from '@/lib/repo/read-budget.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import { createShopClientFromSettings } from '@/lib/shop/client';
+import type { ReadBudget } from '@/lib/shop/read-budget';
 
 import { withRouteErrors } from '../../campaigns/_shared';
 
@@ -65,6 +67,12 @@ export interface CatalogDetailsDeps {
   readonly apiKeyRepo?: typeof defaultApiKeyRepo;
   readonly settingsRepo?: typeof defaultSettingsRepo;
   readonly shopClient?: Parameters<typeof fillProductDetails>[1]['shop'];
+  /**
+   * Počítadlo dráhy `product_read` — cesta `getFull` sa bez neho nespustí
+   * (31. 8. 2026). Produkčne zdieľaný `productReadBudget`; vlastné počítadlo si
+   * tu nikto nezakladá (A4).
+   */
+  readonly productReads?: Pick<ReadBudget, 'reserve' | 'status'>;
 }
 
 export function createCatalogDetailsPost(
@@ -76,11 +84,25 @@ export function createCatalogDetailsPost(
   const settings = overrides.settingsRepo ?? defaultSettingsRepo;
   const shop =
     overrides.shopClient ?? createShopClientFromSettings({ get: () => settings.get() });
+  const productReads = overrides.productReads ?? productReadBudget;
 
   return defineRoute(
     {
       method: 'POST',
       body: bodySchema,
+      /*
+       * STROP NA IP (31. 8. 2026).
+       *
+       * Cesta `getFull` míňa kvótu ZÁPISOVÉHO kľúča — desať čítaní na jedno
+       * kliknutie — a odteraz sa účtuje do dráhy `product_read`, teda do toho
+       * istého čísla, ktoré znižuje rozpočet zápisov. Origin check (D72) tu
+       * platí (je to POST), takže cudzia stránka sa sem nedostane; strop je
+       * proti opakovanému kliknutiu a proti zaseknutému UI, nie proti útoku.
+       *
+       * 6/min pri strope 100 ID na dopyt je stále dvojnásobok toho, čo minútová
+       * kvóta dráhy vôbec pustí (16 čítaní), takže človeka nezastaví.
+       */
+      rateLimit: { limit: 6, windowMs: 60_000 },
       handler: (ctx) =>
         withRouteErrors(async () => {
           const productIds = [...new Set(ctx.body.productIds)].sort((a, b) => a - b);
@@ -89,6 +111,7 @@ export function createCatalogDetailsPost(
             shop,
             catalog,
             apiKey,
+            productReads,
             ...(ctx.body.force === true ? { force: true } : {}),
           });
 
@@ -110,6 +133,11 @@ export function createCatalogDetailsPost(
             notFilledReason: result.notFilledReason,
             readsUsed: result.readsUsed,
             reads: result.reads,
+            // Dve kvóty, dve čísla: anonymná na IP a kľúčová dráha
+            // `product_read`. Zliať ich do jedného „koľko to stálo" by
+            // znamenalo, že sa ani nedá povedať, ktorý strop je na hrane.
+            keyedReadsUsed: result.keyedReadsUsed,
+            keyedReads: result.keyedReads,
             at: result.at,
             error: result.error,
             rows: productIds.map((id) => rows.get(id) ?? null),

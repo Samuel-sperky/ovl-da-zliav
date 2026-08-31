@@ -52,6 +52,42 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
   Obrátkovosť sú viditeľne zamknuté so štítkom „čaká na dáta zo shopu" —
   nie skryté a nie predstierané (K8, backlog B5/B6/B8).
 
+## Čo pridala V4 (28.–31. 8. 2026)
+
+- **Prehľad ukazuje predaje**: prepínač okna, denná tržba **eshopu** (súčet
+  `total_paid`, tabuľka `shop_revenue_daily`), top/flop produkty a stavový pás.
+  Tržba je len eshopová — per produkt sú to výhradne kusy, pretože ceny položiek
+  objednávky API nevracia (D117). Rozdeliť `total_paid` medzi položky by bolo
+  vymyslené číslo, a preto to appka nerobí.
+- **KPI produktov** z obohateného katalógu (`getFull`, jeden request na produkt):
+  referencia, cena, marža € aj %, sklad, celkovo predané, posledný predaj,
+  dodávateľ, kategórie. Marža sa **nepočíta** — shop ju dáva hotovú.
+  Obohacovanie je prioritizované a na dopyt (`src/lib/engine/catalog-enrich.ts`,
+  D118): otvorený produkt sa dotiahne hneď, na pozadí ide dávka do ~150/deň
+  v poradí povolený zoznam → produkty v kampaniach → zvyšok.
+- **Presety zliav** (D112): pomenovaný filter + pásma + trvanie, spustenie na
+  klik — ale **vždy** nanovo cez skúšku naprázdno a potvrdenie. Preset nie je
+  výnimka z I3.
+- **„ref · názov" namiesto `product_id`** tam, kde sa produkt pomenúva
+  (`src/lib/ui/product-label.ts`, D116). Chýbajúca referencia je pomlčka.
+
+### Čo appka NEVIE — povedané nahlas
+
+- **API shopu je zabanované na našej IP.** Vracia `{"error":"ip_banned"}` na
+  všetko, aj na verejné čítanie katalógu bez kľúča (zmerané 28. 8. 2026, predtým
+  24. 8. — `docs/60`). Kým to trvá: **obohacovanie stojí** (dávka sa zastaví
+  s dôvodom `ip_banned` a žiadny produkt neoznačí ako obohatený) a **KPI
+  neobohatených produktov sú prázdne — pomlčka**, nie nula a nie odhad.
+  Odblokovanie je akcia mimo appky (`docs/60` → správca shopu).
+- **Celý katalóg sa obohatiť nedá.** Kvóta kľúča je ~20/min a ~200/deň, katalóg
+  má 41 348 produktov → plošné `getFull` by trvalo ~207 dní. Batch to nerieši:
+  25 položiek = 25 hitov a `getFull` medzi batchovateľnými akciami nie je.
+- **Predajové okná 30/90 d ukazujú len dni, ktoré sú naozaj stiahnuté** a
+  medzeru priznávajú (D119). Číslo bez plného pokrytia je dolná hranica, nie
+  fakt; kde chýba všetko, je pomlčka.
+- Zoznam vedome vynechaných vecí (mobil, notifikácie, CSV export, druhý
+  používateľ…) je v `KONTRAKT-V4-2026-08-28.md` §3.
+
 ## Stack
 
 Node 22 · Next.js 16 (App Router, standalone) · React 19 · TypeScript ·
@@ -113,7 +149,9 @@ npm run dev              # vývoj (zápisy vynútene vypnuté, I13)
 npm run typecheck        # tsc --noEmit
 npm run lint             # eslint .
 npm run build            # next build (standalone)
-npm run test             # vitest (unit + integračné, mock shop) — 3216 testov
+npm run test             # vitest (unit + integračné, mock shop). Počet testov tu
+                         # zámerne nie je — starnul rýchlejšie než README; aktuálny
+                         # je vo výstupe behu.
                          # Bez bežiacej MariaDB `pretest` skončí s 1 a k vitestu
                          # sa vôbec nedostane (`scripts/require-test-db.ts`).
                          # Ticho preskočiť 15 integračných súborov sa teda už
@@ -164,6 +202,9 @@ rozbehnúť).
 - `docs/10-KONTRAKT.md` — rozhodnutia R1–R10, D1–D100, D98–D105 z 27. 8. 2026
   (čísla D98–D100 sú obsadené dvakrát, kolízia je opísaná v úvode dokumentu)
   a **INVARIANTY I1–I14**
+- `KONTRAKT-V4-2026-08-28.md` — **kontrakt V4** (D108–D120, akceptačné kritériá
+  K1–K11): predaje na Prehľade, KPI produktov, presety. §2b je revízia po sonde
+  API — zmerané fakty o kvóte, bane a o tom, čo API nevracia
 - `docs/50-KONTRAKT-V3.md` — **kontrakt V3 (K1–K12)**: fronta, denný rozpočet,
   režim rozsahu, pásma. Mení `10-KONTRAKT.md` v menovaných bodoch
 - `docs/40-ODPOVEDE-V3.md` — 100 odpovedí, zdroj pravdy pre správanie V3

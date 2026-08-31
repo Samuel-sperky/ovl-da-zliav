@@ -7,10 +7,15 @@
  * ── Čo appka o predaji naozaj vie ─────────────────────────────────────────────
  *
  * Vlastné tabuľky súčtov nesú **kusy predané na produkt a deň**. Zaplatená suma
- * patrí objednávke, nie položke, takže appka NEVIE povedať tržbu v eurách a
- * nesmie ju dopočítať z ceny — cena v čase objednávky mohla byť iná, doprava a
- * zľavové kupóny do nej nepatria. Sekcia preto pracuje s kusmi a hovorí to
- * nahlas. Vymyslené euro na prístrojovej doske je horšie než priznaná medzera.
+ * patrí objednávke, nie položke, takže appka NEVIE povedať tržbu v eurách ZA
+ * PRODUKT a nesmie ju dopočítať z ceny — cena v čase objednávky mohla byť iná,
+ * doprava a zľavové kupóny do nej nepatria. Sekcia preto pracuje s kusmi a
+ * hovorí to nahlas. Vymyslené euro na prístrojovej doske je horšie než priznaná
+ * medzera.
+ *
+ * Od 28. 8. 2026 (D117) k tomu pribudlo jedno jediné euro, ktoré appka mať
+ * SMIE: denný súčet `total_paid` za CELÝ ESHOP. Počíta ho §5 tohto modulu a je
+ * zámerne oddelené od kusov — dôvod je tam napísaný.
  *
  * ── Čo je meraný fakt a čo odhad (P7) ─────────────────────────────────────────
  *
@@ -22,6 +27,7 @@
  * Vlastník: V9.
  */
 import type { SalesDay, SalesSnapshot } from '@/components/dashboard/api';
+import { NEVIEME } from '@/lib/ui/product-label';
 
 /* ═════════════════════════════ 1. Tri čísla ═══════════════════════════════ */
 
@@ -235,6 +241,27 @@ export interface ChartGeometry {
   spanDays: number;
   /** Koľko dní osi má naozaj číslo. Toľko a nie viac graf meria. */
   measuredDays: number;
+  /**
+   * Mierka osi — aby sa na ňu dalo PRILOŽIŤ okno zľavy bez druhého výpočtu.
+   *
+   * Existuje presne preto, že podfarbené okná zliav (V4, D113) musia sedieť na
+   * tú istú os ako body. Keby si ich prevod z dňa na `x` počítal komponent sám,
+   * vznikla by druhá mierka — a graf by mal krivku podľa kalendára a pásy
+   * podľa poradia, čo by nikto neuvidel.
+   *
+   * `byDate: false` znamená, že rad obsahuje nečitateľný deň a celá os je
+   * poradová. Vtedy sa okná NEKRESLIA vôbec: pás priložený na poradovú os
+   * tvrdí o dátume niečo, čo nikto nezmeral.
+   */
+  axis: {
+    firstDay: string;
+    lastDay: string;
+    byDate: boolean;
+    /** Poradové číslo prvého dňa osi; `null` pri poradovej mierke. */
+    firstNumber: number | null;
+    /** Koľko jednotiek `viewBox` zaberá jeden kalendárny deň. */
+    perDay: number;
+  };
   /** Body pre nitkový kríž — jeden na KAŽDÝ deň osi, aj na nemeraný. */
   hover: Array<{
     day: string;
@@ -556,6 +583,212 @@ export function chartGeometry(days: readonly SeriesDay[], today: string): ChartG
     gaps,
     spanDays: placed.spanDays,
     measuredDays: all.length,
+    axis: {
+      firstDay: (days[0] as SeriesDay).day,
+      lastDay: (days[days.length - 1] as SeriesDay).day,
+      byDate: placed.byDate,
+      firstNumber: placed.firstNumber,
+      perDay: placed.perDay,
+    },
     hover,
   };
+}
+
+/* ═══════════════ 4. Okná zliav pod krivkou (V4, D113) ═════════════════════ */
+
+/**
+ * Okno zľavy tak, ako ho vracia `GET /api/insights/timeline`.
+ *
+ * Sú to VLASTNÉ zápisy appky, nie stav eshopu (I11): hovorí to, že sme na tie
+ * dni zľavu zapísali, nie že ju zákazník v tie dni naozaj videl. Text nad
+ * grafom to musí povedať; tento modul len počíta súradnice.
+ */
+export interface DiscountWindowInput {
+  id: number;
+  name: string;
+  percent: number;
+  dateFrom: string;
+  dateTo: string;
+}
+
+/** Podfarbený pás pod krivkou. Súradnice sú v mierke `CHART`, nie v pixeloch. */
+export interface DiscountBand {
+  id: number;
+  name: string;
+  percent: number;
+  /** Prvý a posledný deň pásu PO orezaní na os. */
+  fromDay: string;
+  toDay: string;
+  /** Koľko dní osi pás pokrýva. */
+  days: number;
+  x1: number;
+  x2: number;
+  /** `true` = zľava začala PRED osou; pás je odrezaný na jej ľavej hrane. */
+  clippedStart: boolean;
+  /** `true` = zľava pokračuje ZA osou. */
+  clippedEnd: boolean;
+}
+
+/**
+ * Okná zliav priložené na os grafu predaja.
+ *
+ * Prečo je to funkcia a nie pole v odpovedi servera: server nevie, aká os
+ * nakoniec vznikne. Os pokrýva prvý až posledný deň, o ktorom má appka záznam
+ * (viď bod 6 v hlavičke tohto modulu), takže hranice pásu môžu byť inde než
+ * hranice okna prepínača.
+ *
+ * TRI VECI, KTORÉ SA TU DAJÚ TICHO POKAZIŤ
+ *
+ *  1. **Poradová os.** Pri nečitateľnom dni je mierka poradová a dátum na ňu
+ *     priložiť NEMOŽNO. Vracia sa prázdne pole — graf potom nekreslí nič a
+ *     netvrdí nič.
+ *  2. **Okno mimo osi.** Zľava, ktorá skončila pred prvým dňom osi (alebo
+ *     začne po poslednom), pás nedostane. Prilepiť ju na hranu by z nej
+ *     spravilo zľavu, ktorá v okne bežala.
+ *  3. **Orezanie bez priznania.** Zľava, ktorá os presahuje, pás dostane —
+ *     ale s `clippedStart`/`clippedEnd`, aby povrch mohol povedať, že
+ *     pokračuje mimo rámu. Bez toho vyzerá krátka zľava ako dlhá a naopak.
+ *
+ * Hranice sa počítajú na ±0,5 dňa, presne ako pásma neznáma: pás patrí CELÝM
+ * dňom, nie bodom v ich stredoch.
+ */
+export function discountBands(
+  geometry: Pick<ChartGeometry, 'axis'>,
+  windows: readonly DiscountWindowInput[],
+): DiscountBand[] {
+  const axis = geometry.axis;
+  if (!axis.byDate || axis.firstNumber === null) return [];
+
+  const first = axis.firstNumber;
+  const lastNumber = dayNumber(axis.lastDay);
+  if (lastNumber === null) return [];
+
+  const xAt = (value: number): number =>
+    Math.min(
+      CHART.right,
+      Math.max(CHART.left, round1(CHART.left + (value - first) * axis.perDay)),
+    );
+
+  const out: DiscountBand[] = [];
+  for (const window of windows) {
+    const from = dayNumber(window.dateFrom);
+    const to = dayNumber(window.dateTo);
+    // Nečitateľný alebo obrátený dátum pás nedostane — hádať sa tu nedá.
+    if (from === null || to === null || to < from) continue;
+    if (to < first || from > lastNumber) continue;
+
+    const start = Math.max(from, first);
+    const end = Math.min(to, lastNumber);
+    out.push({
+      id: window.id,
+      name: window.name,
+      percent: window.percent,
+      fromDay: dayFromNumber(start),
+      toDay: dayFromNumber(end),
+      days: end - start + 1,
+      x1: xAt(start - 0.5),
+      x2: xAt(end + 0.5),
+      clippedStart: from < first,
+      clippedEnd: to > lastNumber,
+    });
+  }
+  return out;
+}
+
+/* ═════════ 5. Denná tržba ESHOPU (V4, D117) — nie tržba za produkt ════════ */
+
+/**
+ * ČO JE TOTO ČÍSLO A ČO NIE JE.
+ *
+ * Hlavička tohto modulu hovorí, že appka tržbu v eurách nepozná. Od sondy
+ * 28. 8. 2026 (D117) to platí PRESNE V TEJTO PODOBE: ceny položiek objednávky
+ * API nevracia, takže tržba per produkt naozaj neexistuje a dopočítať sa
+ * NESMIE. Existuje ale denný súčet `total_paid` za CELÝ ESHOP — a to je jediné
+ * euro, ktoré appka smie vypísať.
+ *
+ * Preto je táto sekcia oddelená od kusov a preto sa jej riadky nikdy nedelia
+ * počtom kusov: `total_paid` nesie poštovné, kupóny a zľavy, takže „cena za
+ * kus" z neho je vymyslené číslo (I11).
+ */
+export type RevenueDayState = 'measured' | 'lower_bound' | 'unknown';
+
+/** Jeden deň okna pripravený na vykreslenie. Chýbajúci deň NIE JE nula. */
+export interface RevenueDayView {
+  day: string;
+  /**
+   * Suma ako string z odpovede (`DECIMAL`), nikdy float. `null` = deň nemáme
+   * a jeho tržbu NEPOZNÁME.
+   */
+  amount: string | null;
+  state: RevenueDayState;
+  /** Hotový text: `≈` pri dolnej hranici, pomlčka pri „nevieme" (P7). */
+  text: string;
+  /** Koľko objednávok je v súčte. `null` = deň nemáme. */
+  ordersCount: number | null;
+}
+
+/** Jeden deň tak, ako prichádza z `GET /api/insights/revenue-daily`. */
+export interface RevenueRowInput {
+  day: string;
+  totalPaidSum: string;
+  /**
+   * Počet objednávok v súčte. `null` = pole sa v odpovedi nedalo prečítať;
+   * nula by tvrdila „ani jedna objednávka", čo je tvrdenie o eshope (I11).
+   */
+  ordersCount: number | null;
+  /** `false` = súčet dňa je DOLNÁ HRANICA, nie celý deň. */
+  dayComplete: boolean;
+}
+
+/**
+ * Dni okna → riadky pre povrch. Jeden riadok na KAŽDÝ deň okna, aj na ten,
+ * ktorý v odpovedi nie je.
+ *
+ * TU SA ROZHODUJE, ČI ROZBEHNUTÝ DEŇ VYZERÁ AKO PREPAD. `dayComplete: false`
+ * znamená, že sťahovanie zoznamu objednávok sa nedočítalo — súčet je teda
+ * dolná hranica a NESMIE sa postaviť vedľa dočítaných dní ako rovnocenné
+ * číslo. Dostane `state: 'lower_bound'` a značku `≈`; deň bez riadku dostane
+ * pomlčku, nie nulu.
+ *
+ * `windowDays` je zoznam dní okna v kalendárnom poradí — zostavuje ho volajúci
+ * z `window.from`/`window.to`, aby sa tu nemuseli sčítavať milisekundy (letný
+ * čas by pri tom raz do roka posunul deň).
+ */
+export function revenueDays(
+  windowDays: readonly string[],
+  rows: readonly RevenueRowInput[],
+): RevenueDayView[] {
+  const byDay = new Map<string, RevenueRowInput>();
+  for (const row of rows) byDay.set(row.day, row);
+
+  return windowDays.map((day) => {
+    const row = byDay.get(day);
+    if (row === undefined) {
+      return { day, amount: null, state: 'unknown' as const, text: NEVIEME, ordersCount: null };
+    }
+    const complete = row.dayComplete === true;
+    return {
+      day,
+      amount: row.totalPaidSum,
+      state: complete ? ('measured' as const) : ('lower_bound' as const),
+      text: complete ? row.totalPaidSum : `≈ ${row.totalPaidSum}`,
+      ordersCount: row.ordersCount,
+    };
+  });
+}
+
+/**
+ * Kalendárne dni okna od `from` po `to` vrátane.
+ *
+ * Deň sa posúva cez poradové číslo dňa, nie pripočítavaním 86 400 000 ms —
+ * v týždni prechodu na letný čas by ten druhý spôsob jeden deň preskočil.
+ * Prázdny výsledok znamená nečitateľné hranice, teda „nevieme", nie nula dní.
+ */
+export function windowDayList(from: string, to: string, max = MAX_AXIS_DAYS): string[] {
+  const a = dayNumber(from);
+  const b = dayNumber(to);
+  if (a === null || b === null || b < a || b - a + 1 > max) return [];
+  const out: string[] = [];
+  for (let n = a; n <= b; n += 1) out.push(dayFromNumber(n));
+  return out;
 }

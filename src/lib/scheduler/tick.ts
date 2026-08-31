@@ -14,6 +14,8 @@
  *   6. reminders 48/24/2 h (D26) + pripomienka o kľúči vs. fronte (K6),
  *   7. synchronizácia katalógu (K7) — ČÍTANIE, mimo zápisového rozpočtu, ako
  *      posledná: zápisy majú prednosť pred syncom,
+ *   7b. dávka OBOHACOVANIA katalógu (KONTRAKT V4 §2b, D118 bod 2) — tiež
+ *      ČÍTANIE, a to až po katalógu: bez zrkadla katalógu nie je čo obohacovať,
  *   8. heartbeat koniec (`scheduler_state`, D87).
  *
  * Tick je chránený in-process flagom (jeden tick naraz) a KAŽDÁ výnimka sa
@@ -40,6 +42,7 @@ import { DEFAULT_MIDNIGHT_FREEZE_SECONDS, LOGIC_TIME_ZONE } from '@/lib/domain/d
 
 import type { CatalogRunReport } from './catalog-runner';
 import { processDue, type ExecuteCampaignFn } from './due';
+import type { EnrichRunReport } from './enrich-runner';
 import { detectMissed, MISSED_GRACE_MINUTES } from './missed';
 import {
   assessDowntimeOnce,
@@ -109,6 +112,14 @@ export interface TickResultV3 extends TickResult {
   queueSkipped: QueueSkipReason | null;
   /** Výsledok synchronizácie katalógu (K7); `null` = v tomto ticku nebežala. */
   catalog: CatalogRunReport | null;
+  /**
+   * Výsledok dávky obohacovania (D118 bod 2); `null` = v tomto ticku nebežala.
+   *
+   * `null` NIE JE „nič sa neobohatilo" — to hovorí `enrich.batch.enriched`.
+   * Rozdiel je celý zmysel I11: „nebežalo" a „bežalo a nič nenašlo" sú dve
+   * rôzne vety a zliať ich znamená klamať stavovým pásom.
+   */
+  enrich: EnrichRunReport | null;
 }
 
 export interface TickDeps {
@@ -136,6 +147,20 @@ export interface TickDeps {
    * (testy ticku); produkčný boot ju zapája vždy.
    */
   catalogSync: ((opts: { now: UtcDate; queueBusy: boolean }) => Promise<CatalogRunReport>) | null;
+  /**
+   * Dávka obohacovania katalógu (D118 bod 2). `null` = v tomto procese sa
+   * neobohacuje (testy ticku); produkčný boot ju zapája vždy.
+   *
+   * `queueBusy` aj `catalogBusy` sú tu preto, že obohacovanie je NAJNIŽŠIA
+   * priorita v ticku: ustúpi zápisom aj katalógovému prechodu.
+   */
+  enrich:
+    | ((opts: {
+        now: UtcDate;
+        queueBusy: boolean;
+        catalogBusy: boolean;
+      }) => Promise<EnrichRunReport>)
+    | null;
   log: Logger;
   clock?: Clock;
   /** D85 — SIGTERM: fronta sa medzi kampaňami zastaví. */
@@ -186,6 +211,7 @@ export function createTicker(deps: TickDeps): Ticker {
         queuePaused: false,
         queueSkipped: null,
         catalog: null,
+        enrich: null,
         error: null,
       };
 
@@ -330,6 +356,28 @@ export function createTicker(deps: TickDeps): Ticker {
           } catch (catalogError) {
             deps.log.error('catalog_sync_tick_error', {
               error: catalogError instanceof Error ? catalogError.message : String(catalogError),
+            });
+          }
+        }
+
+        // 7b. Obohacovanie katalógu (D118 bod 2). Posledný krok a najnižšia
+        //     priorita: ustupuje zápisom aj katalógovému prechodu, a keď práve
+        //     v tomto ticku katalóg naozaj čítal (`ran`), obohacovanie sa
+        //     preskočí — dva čítacie behy za sebou by tick natiahli nad jeho
+        //     vlastný interval. Vlastný try/catch má z toho istého dôvodu ako
+        //     katalóg: zlyhanie podkladu nesmie prepísať `last_error` o zľavách.
+        if (deps.enrich !== null) {
+          try {
+            result.enrich = await deps.enrich({
+              now: clock.now(),
+              queueBusy: result.queueProcessed > 0 || result.fired > 0,
+              // Explicitne `!== null`, nie `?.` — Turbopack tu už raz zahodil
+              // guard, ktorý vyhodnotil ako compile-time falsy.
+              catalogBusy: result.catalog !== null && result.catalog.outcome === 'ran',
+            });
+          } catch (enrichError) {
+            deps.log.error('catalog_enrich_tick_error', {
+              error: enrichError instanceof Error ? enrichError.message : String(enrichError),
             });
           }
         }

@@ -6,6 +6,9 @@
  *  - `POST` (session): pridanie produktu; 11. produkt je odmietnutý 409
  *    (`allowlist_full`, I2 — strop drží repozitár + DB CHECK).
  *
+ * KAŽDÁ mutácia povoleného zoznamu končí tichým prepočtom poradia obohacovania
+ * (D118) — bez neho by nový produkt dostal prioritu 1 až pri najbližšej dávke.
+ *
  * Vlastník: A12.
  */
 import { z } from 'zod';
@@ -13,6 +16,7 @@ import { z } from 'zod';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 
 import {
+  refreshEnrichPriorityQuietly,
   resolveRoutesDeps,
   withRouteErrors,
   type RoutesDeps,
@@ -96,6 +100,9 @@ export function createAllowlistPost(
             productId: record.productId,
             message: `Produkt ${record.productId} pridaný do allowlistu (slot ${record.slot}).`,
           });
+          // D118 — až po zápise a audite, a ticho: front sa preusporiada,
+          // pridanie produktu na tom nestojí (viď helper).
+          await refreshEnrichPriorityQuietly(d, ctx.log);
           return { productId: record.productId, slot: record.slot };
         }),
     },

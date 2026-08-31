@@ -1432,6 +1432,61 @@ export interface ProductKpiPage {
   readonly rows: ProductKpiRow[];
 }
 
+/* ════════ 13c. Presety zliav (KONTRAKT-V4-2026-08-28: D112, K7) ══════════ */
+
+/**
+ * Pásmo presetu — tvar, aký prijíma `POST /api/campaigns` (`tiers[]`), bez
+ * `itemsCount`.
+ *
+ * `itemsCount` tu ZÁMERNE nie je: koľko produktov padne do pásma sa vie až pri
+ * dry-rune nad aktuálnym katalógom, takže uložené číslo by bolo výmysel (I11).
+ * `rule` má rovnakú úlohu ako v `campaign_tiers` — je LEN na zobrazenie a
+ * zopakovanie filtra, pri zápise sa nevyhodnocuje (K3).
+ */
+export interface DiscountPresetTier {
+  /** Poradie pásma, 1..n. V rámci presetu unikátne. */
+  readonly ord: number;
+  /** Ľudský popis pásma, napr. „0 predaných za 360 dní". */
+  readonly label: string;
+  readonly percent: DiscountPercent;
+  readonly rule?: unknown;
+}
+
+/**
+ * Pomenovaná kombinácia filtra, pásiem a dĺžky okna (D112) — jeden riadok
+ * `discount_presets` (migrácia 0015).
+ *
+ * Preset PREDPLNÍ formulár novej zľavy a tým to preň končí. **Nie je to druhá
+ * cesta k zápisu:** spustenie presetu prejde tým istým dry-runom a tým istým
+ * potvrdením ako každá zľava (I3, K7).
+ */
+export interface DiscountPreset {
+  readonly id: number;
+  /** Meno od človeka. Unikátne — duplicitné sa odmietne, nie prepíše. */
+  readonly name: string;
+  /** Query string filtra bez stránkovania a triedenia (`catalogFilterKey()`). */
+  readonly filterQuery: string;
+  readonly tiers: readonly DiscountPresetTier[];
+  /** Inkluzívna dĺžka okna v dňoch (`to = from + dĺžka − 1`), 1–90 (I9, D29). */
+  readonly durationDays: number;
+  readonly createdAt: UtcDate;
+  /** `null` = ešte nepoužitý. NIE je to „použitý v epoche" (I11). */
+  readonly lastUsedAt: UtcDate | null;
+}
+
+/** Vstup pre založenie presetu. Časy si dopĺňa DB, nie volajúci. */
+export type NewDiscountPreset = Pick<
+  DiscountPreset,
+  'name' | 'filterQuery' | 'tiers' | 'durationDays'
+>;
+
+/**
+ * Čo sa dá na presete zmeniť. Zmena je VÝSLOVNÁ operácia — ukladanie pod
+ * obsadeným menom preset neprepíše (na rozdiel od uložených filtrov
+ * v prehliadači, ktoré nič nezapisujú do eshopu).
+ */
+export type DiscountPresetPatch = Partial<NewDiscountPreset>;
+
 /* ═══════════════════════ 14. Health (§5, D87, D91) ═══════════════════════ */
 
 /** `/api/health` — NIKDY neobsahuje `last4` ani nič citlivé (I1). */

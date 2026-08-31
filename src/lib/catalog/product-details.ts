@@ -62,11 +62,20 @@
  *  5. **Keď rozpočet nestačí, appka to POVIE a nedoplní.** Nikdy sa nevráti
  *     staré číslo ako nové — nedoplnený riadok zostáva `not_fetched`.
  *
- * `getFull` míňa rozpočet NA KĽÚČ, nie anonymný na IP — do `shop_read_budget`
- * sa teda neúčtuje (rovnako ako `resolveProductCodes()`). Zato ukrojí z tej
- * istej kvóty, z ktorej zapisuje fronta bežiaca týždne, a naviac sa cez
- * `/api/batch` fanúť nedá (opt-in majú len `products/get` a `order/get`).
- * Preto má vlastný, oveľa nižší strop `DETAIL_FULL_MAX`.
+ * `getFull` míňa rozpočet NA KĽÚČ, nie anonymný na IP. Do 31. 8. 2026 sa preto
+ * neúčtoval NIKDE — a keď v ten istý deň začal rozpočet zápisov odpočítavať
+ * čítania dráhy `product_read`, stal sa z neho JEDINÝ veľký spotrebiteľ kvóty
+ * kľúča, ktorý o sebe nikomu nedal vedieť: desať `getFull` na jedno kliknutie,
+ * neúčtované, a fronta si aj tak myslela, že má celý strop. Odteraz sa účtuje
+ * do dráhy `product_read` (`deps.productReads`) — do TOHO ISTÉHO počítadla ako
+ * obohacovanie a overenie zľavy, lebo je to ten istý kľúč. Anonymné počítadlo
+ * (`readsUsed`, `reads`) zostáva anonymné; kľúčové má vlastné polia
+ * (`keyedReadsUsed`, `keyedReads`), aby sa dve rôzne kvóty nezliali do jedného
+ * čísla.
+ *
+ * Naviac sa `getFull` cez `/api/batch` fanúť nedá (opt-in majú len
+ * `products/get` a `order/get`), preto má vlastný, oveľa nižší strop
+ * `DETAIL_FULL_MAX`.
  *
  * ČO SA V TOMTO MODULE NESMIE POKAZIŤ
  * -----------------------------------
@@ -91,7 +100,7 @@ import { BATCH_MAX_ITEMS, type ShopClientV5 } from '@/lib/shop/client';
 import { newOperationId } from '@/lib/shop/correlation';
 import { isShopError, isShopRequestError } from '@/lib/shop/errors';
 import { MIN_ANON_READ_PAUSE_MS } from '@/lib/shop/rate-limits';
-import type { ReadBudgetStatus } from '@/lib/shop/read-budget';
+import type { ReadBudget, ReadBudgetStatus } from '@/lib/shop/read-budget';
 
 /* ═══════════════════════════ 1. Stropy a ceny ═════════════════════════════ */
 
@@ -207,6 +216,17 @@ export interface ProductDetailsResult {
   readonly readsUsed: number;
   /** Stav anonymného rozpočtu PO doplnení. `null` = nedá sa prečítať (I11). */
   readonly reads: ReadBudgetStatus | null;
+  /**
+   * Koľko čítaní na ZÁPISOVOM kľúči (dráha `product_read`) doplnenie minulo.
+   * Cesta `get` mieňa anonymnú kvótu, takže tu je `0` — a to je meraná nula,
+   * nie „nevieme".
+   */
+  readonly keyedReadsUsed: number;
+  /**
+   * Stav dráhy `product_read` PO doplnení. `null` = cesta `get` sa jej ani
+   * nedotkla, alebo sa počítadlo nedalo prečítať (rozlíši to `outcome`).
+   */
+  readonly keyedReads: ReadBudgetStatus | null;
   /** Kedy sa dopĺňalo. Konkrétny čas, nikdy „pred chvíľou". */
   readonly at: UtcDate;
   /** KÓD chyby (I1). `null` = nič nespadlo. */
@@ -235,6 +255,17 @@ export interface ProductDetailsDeps {
    * tabuľky nie je dôvod ho spúšťať.
    */
   readonly apiKey: Pick<ApiKeyRepository, 'loadForUse' | 'recallScopes'>;
+  /**
+   * Počítadlo dráhy `product_read` — jediná cesta, ktorou sa smie zaplatiť za
+   * `getFull` (31. 8. 2026). Produkčne `productReadBudget`; dosadzuje ho route,
+   * aby tento modul zostal bez importu repozitára.
+   *
+   * `undefined` znamená „nemám čím účtovať" a cesta `getFull` sa vtedy NESPUSTÍ
+   * (`budget_unknown`). Je to zámerne fail-closed: neúčtované čítanie na
+   * zápisovom kľúči je presne tá chyba, ktorú toto pole zavrelo. Verejná cesta
+   * `get` toto pole nepotrebuje — tá platí anonymnou kvótou.
+   */
+  readonly productReads?: Pick<ReadBudget, 'reserve' | 'status'>;
   readonly logger?: Logger;
   readonly now?: () => UtcDate;
   readonly operationId?: Ulid;
@@ -325,6 +356,8 @@ export async function fillProductDetails(
     notFilledReason: 'none',
     readsUsed: 0,
     reads: null,
+    keyedReadsUsed: 0,
+    keyedReads: null,
     at: now(),
     error: null,
     ...patch,
@@ -608,16 +641,20 @@ interface FullFillInput extends FillInput {
  * zápis, ktorý práve beží.
  *
  * Anonymné počítadlo sa tu ZÁMERNE nerezervuje: volanie ide s kľúčom a shop
- * rozpočtuje volania s kľúčom na kľúč, nie na IP. Účtovať ich do
- * `shop_read_budget` by ukradlo strop synchronizácii katalógu za volania,
- * ktoré ju vôbec neminuli.
+ * rozpočtuje volania s kľúčom na kľúč, nie na IP. Účtovať ich do anonymnej
+ * dráhy by ukradlo strop synchronizácii katalógu za volania, ktoré ju vôbec
+ * neminuli. Účtujú sa preto do dráhy `product_read` (`deps.productReads`) —
+ * na kľúč, tam, kde ich vidí aj rozpočet zápisov.
+ *
+ * Poradie brán je zámerne toto: kľúč (lokálne dešifrovanie) → denný strop
+ * dráhy → minútový strop dráhy → `getFull` po jednom s rezerváciou PRED
+ * každým volaním. Request, ktorý skončil na 429, sa do stropu shopu počíta
+ * rovnako ako úspešný, takže rezervovať až po odpovedi nemá cenu.
  */
 async function fillViaGetFull(input: FullFillInput): Promise<ProductDetailsResult> {
   const { deps, ctx, now, report } = input;
   const log = deps.logger;
   const alreadyDetailed = input.alreadyDetailed;
-  const planned = input.pending.slice(0, DETAIL_FULL_MAX);
-  const overLimit = input.pending.slice(DETAIL_FULL_MAX);
 
   let key: SecretRef | null;
   try {
@@ -640,14 +677,91 @@ async function fillViaGetFull(input: FullFillInput): Promise<ProductDetailsResul
     });
   }
 
+  /* ── rozpočet dráhy `product_read` — bez neho sa `getFull` NEVOLÁ ──────── */
+
+  const keyed = deps.productReads;
+  if (keyed === undefined) {
+    // Fail-closed: neúčtované čítanie na zápisovom kľúči je presne tá chyba,
+    // pre ktorú toto pole vzniklo. Radšej nedoplniť než platiť naslepo.
+    log?.warn('detail_fill_keyed_budget_missing', {});
+    return report('budget_unknown', {
+      alreadyDetailed,
+      notFilled: input.pending,
+      notFilledReason: 'budget_unknown',
+    });
+  }
+
+  let keyedStatus: ReadBudgetStatus;
+  try {
+    keyedStatus = await keyed.status();
+  } catch (cause) {
+    log?.warn('detail_fill_keyed_budget_unreadable', { error: errorCode(cause) });
+    return report('budget_unknown', {
+      alreadyDetailed,
+      notFilled: input.pending,
+      notFilledReason: 'budget_unknown',
+      error: errorCode(cause),
+    });
+  }
+
+  // Neznáme počítadlo NIE JE minutý rozpočet (I11).
+  if (!keyedStatus.known) {
+    return report('budget_unknown', {
+      alreadyDetailed,
+      notFilled: input.pending,
+      notFilledReason: 'budget_unknown',
+      keyedReads: keyedStatus,
+    });
+  }
+  if (keyedStatus.exhausted) {
+    return report('budget_day', {
+      alreadyDetailed,
+      notFilled: input.pending,
+      notFilledReason: 'budget_day',
+      keyedReads: keyedStatus,
+    });
+  }
+
+  const minuteRoom = Math.max(0, keyedStatus.minuteLimit - keyedStatus.usedThisMinute);
+  if (minuteRoom < 1) {
+    return report('budget_minute', {
+      alreadyDetailed,
+      notFilled: input.pending,
+      notFilledReason: 'budget_minute',
+      keyedReads: keyedStatus,
+    });
+  }
+
+  /*
+   * Vlastný strop cesty a minúta dráhy sa NEZLIEVAJÚ: „nezmestilo sa to do
+   * jedného doplnenia" (`limit`) a „minúta kľúča je plná" (`budget_minute`)
+   * sú dva rôzne dôvody s dvoma rôznymi ďalšími krokmi.
+   */
+  const cap = Math.min(DETAIL_FULL_MAX, minuteRoom);
+  const planned = input.pending.slice(0, cap);
+  const overLimit = input.pending.slice(cap);
+
   const filled: number[] = [];
   const notInShop: number[] = [];
   const notFilled: number[] = [...overLimit];
-  let stop: DetailFillStop = overLimit.length > 0 ? 'limit' : 'none';
+  let stop: DetailFillStop =
+    overLimit.length === 0 ? 'none' : cap < DETAIL_FULL_MAX ? 'budget_minute' : 'limit';
   let error: string | null = null;
+  let keyedReadsUsed = 0;
 
   for (let index = 0; index < planned.length; index += 1) {
     const productId = planned[index] as number;
+
+    // Rezervuje sa PRED volaním — neúspešný request míňa kvótu kľúča rovnako.
+    const slot = await keyed.reserve(1);
+    keyedStatus = slot.status;
+    if (slot.granted < 1) {
+      stop = keyedStatus.known ? 'budget_day' : 'budget_unknown';
+      notFilled.unshift(...planned.slice(index));
+      break;
+    }
+    keyedReadsUsed += slot.granted;
+
     try {
       const full = await deps.shop.getProductFull(productId, key, ctx);
       await deps.catalog.upsertMany([
@@ -695,8 +809,26 @@ async function fillViaGetFull(input: FullFillInput): Promise<ProductDetailsResul
     notFilledReason: notFilled.length === 0 ? 'none' : stop === 'none' ? 'limit' : stop,
     readsUsed: 0,
     reads: await safeBudget(deps, null),
+    keyedReadsUsed,
+    keyedReads: await safeKeyedBudget(keyed, keyedStatus),
     error,
   });
+}
+
+/**
+ * Stav dráhy `product_read` po behu. Rovnaké pravidlo ako pri anonymnej:
+ * nečitateľné počítadlo nezhodí výsledok, za ktorý sa už zaplatilo — vráti sa
+ * POSLEDNÝ ZNÁMY stav.
+ */
+async function safeKeyedBudget(
+  keyed: Pick<ReadBudget, 'status'>,
+  fallback: ReadBudgetStatus,
+): Promise<ReadBudgetStatus> {
+  try {
+    return await keyed.status();
+  } catch {
+    return fallback;
+  }
 }
 
 /**

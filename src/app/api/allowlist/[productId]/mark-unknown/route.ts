@@ -4,12 +4,20 @@
  * Ručné priznanie „stav v shope nepoznáme": nastaví `shop_status='unknown'`.
  * Nič netvrdí o skutočnom stave zľavy (I11) a na shop sa nesiaha.
  *
+ * Prepočet poradia obohacovania (D118) sa volá aj tu, hoci `shop_status`
+ * dnešnú prioritu NEMENÍ (`SQL_ENRICH_PRIORITY_ALLOWLIST` sa pozerá výhradne
+ * na `removed_at IS NULL`) — je to teda dnes prakticky prázdny prepočet. Drží sa
+ * tu preto, že pravidlo „každá mutácia povoleného zoznamu končí prepočtom" má
+ * strážcu v teste; keby sa výnimka pre túto jednu cestu napísala, nestrážil by
+ * ju nikto a prvá zmena kritérií priority by ju ticho minula.
+ *
  * Vlastník: A12.
  */
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 
 import {
   productIdParamSchema,
+  refreshEnrichPriorityQuietly,
   resolveRoutesDeps,
   withRouteErrors,
   type RoutesDeps,
@@ -39,6 +47,8 @@ export function createMarkUnknownPost(
             productId: ctx.params.productId,
             message: `Stav produktu ${ctx.params.productId} označený ako neznámy (D38).`,
           });
+          // D118 — až po zápise a audite, a ticho (viď helper aj docblock).
+          await refreshEnrichPriorityQuietly(d, ctx.log);
           return { shopStatus: 'unknown' as const };
         }),
     },

@@ -17,6 +17,7 @@ import { formatDateTimeSk } from '@/lib/ui/format';
 import {
   AUDIT_ACTOR_LABELS,
   auditEventLabel,
+  auditProductLabel,
   type AuditRow,
 } from '@/components/audit/api';
 
@@ -65,11 +66,28 @@ export function AuditTable({ rows, onSelect }: AuditTableProps) {
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
+        {rows.map((row) => {
+          /*
+           * D116 — o KTORÝ PRODUKT ide, sa na povrchu hovorí „referencia ·
+           * názov", nie číslom. Doplnenie prichádza JOIN-om pri čítaní; audit
+           * sa neprepisuje (I4). Keď appka nepozná ani referenciu, ani názov,
+           * riadok o produkte na povrchu MLČÍ — `productId` zostáva
+           * v rozkliku Technický detail, kam ho D116 sťahuje.
+           */
+          const label = auditProductLabel(row);
+          return (
           <tr key={row.id} className={row.ok === false ? 'muted' : undefined}>
             <td data-l="Kedy">{formatDateTimeSk(row.ts)}</td>
             <td className="name" data-l="Čo sa stalo">
               {auditRowText(row)}
+              {label === null ? null : (
+                <div className="lvl-3" data-testid={`audit-product-${row.id}`}>
+                  {label.text}
+                  {label.referenceUnknown ? (
+                    <span className="lvl-3"> · kód produktu zatiaľ nevieme</span>
+                  ) : null}
+                </div>
+              )}
               {showsFailureFlag(row) ? (
                 <div className="flag">
                   <FlagMark />
@@ -84,7 +102,8 @@ export function AuditTable({ rows, onSelect }: AuditTableProps) {
               </Button>
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );

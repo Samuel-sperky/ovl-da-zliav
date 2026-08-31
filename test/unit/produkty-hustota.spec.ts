@@ -341,11 +341,17 @@ describe('D10 — tabuľka znesie 41 220 riadkov a 117-znakový názov', () => {
   it('mriežka stĺpcov je pevná, aby sa čísla medzi stránkami nehýbali', () => {
     expect(html).toContain('table-layout:fixed');
     expect(html).toContain('<colgroup>');
-    expect(kolkokrat(html, '<col') - kolkokrat(html, '<colgroup')).toBe(5);
+    /* Desať, nie päť: kontrakt V4 D114 (31. 8. 2026) pridal KPI stĺpce
+       (predané 30 d, predané 90 d, predané / sklad, posledný predaj,
+       zľava v shope, marža). Mriežka musí zostať PEVNÁ aj pri desiatich — o to
+       v tomto teste ide, nie o ich počet. */
+    expect(kolkokrat(html, '<col') - kolkokrat(html, '<colgroup')).toBe(10);
   });
 
-  it('celý názov je v `title`, aj keď sa orezal', () => {
-    expect(html).toContain(`title="${NAJDLHSI_NAZOV}"`);
+  it('celý názov je v `title`, aj keď sa orezal — a s ním technické `id` (D116)', () => {
+    /* Od D116 nesie `title` pomenovanie AJ `#id`: identifikátor patrí do
+       technického detailu, ale musí byť dosiahnuteľný bez otvorenia panela. */
+    expect(html).toContain(`title="${NAJDLHSI_NAZOV} · #18342"`);
   });
 
   it('názov orezáva výpustkou a na úzkej obrazovke sa zalomí — `white-space` DEDÍ', () => {
@@ -384,13 +390,20 @@ describe('D10 — tabuľka znesie 41 220 riadkov a 117-znakový názov', () => {
     expect(kratke).toContain('strana 1 z 3');
   });
 
-  it('dávka 200 riadkov je na výber a je to strop, ktorý API pustí', () => {
-    expect(PER_PAGE_CHOICES).toEqual([50, 100, 200]);
-    expect(DEFAULT_CATALOG_FILTER.perPage).toBe(50);
+  it('dávka je najviac 100 riadkov — strop KPI na jeden dotaz (V4 D114)', () => {
+    /* D10 tu malo aj 200. Kontrakt V4 to vzal späť: riadok nesie KPI
+       z `/api/insights/product-kpi`, kde je strop `MAX_KPI_IDS = 100` na
+       dotaz. Dávka 200 by znamenala dva dotazy na stránku (N+1 v malom),
+       alebo stránku s polovicou prázdnych KPI — a prázdna bunka na tejto
+       obrazovke znamená „o produkte nevieme", nie „stránka je veľká". */
+    expect(PER_PAGE_CHOICES).toEqual([50, 100]);
+    expect(DEFAULT_CATALOG_FILTER.perPage).toBe(100);
   });
 
-  it('predvolené poradie zostáva najdrahšie prvé (kontrakt UI, bod 19)', () => {
-    expect(DEFAULT_CATALOG_FILTER.sort).toBe('price_desc');
+  it('predvolené poradie je najhoršie ležiaky prvé (V4 §5 K4)', () => {
+    /* Do 31. 8. 2026 najdrahšie prvé (kontrakt UI bod 19). Obrazovka hľadá
+       kusy na zlacnenie a najdrahší produkt na tú otázku neodpovedá. */
+    expect(DEFAULT_CATALOG_FILTER.sort).toBe('sold_asc');
   });
 });
 

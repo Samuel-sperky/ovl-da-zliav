@@ -79,7 +79,9 @@ import { sigClass } from '@/components/dashboard/live-status-model';
 import type { CalmNumbers, QueueProgress } from '@/components/dashboard/overview-model';
 import type { CheckMark, Verdict } from '@/components/dashboard/overview-verdict';
 import Note from '@/components/ui/Note';
-import { SigMark } from '@/components/ui/StatusMark';
+import { SigMark, ToneSigMark } from '@/components/ui/StatusMark';
+import { toneSigClass } from '@/components/ui/blocker-look';
+import { enrichNote, type EnrichStatePayload } from '@/lib/catalog/enrich-view';
 import { formatDateSk } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -97,6 +99,15 @@ export interface StatusSectionProps {
   calm: CalmNumbers | null;
   /** Veta o tom, čo sa nedalo prečítať; `null` = prečítalo sa všetko. */
   gap: string | null;
+  /**
+   * Stav DÁVKY obohacovania (`GET /api/catalog/enrich`).
+   *
+   * `null` = odpoveď sa nedala prečítať; `undefined` = obrazovka o dávku
+   * nežiadala. Sú to dve rôzne veci a riadok ich rozlišuje: pri `undefined`
+   * mlčí, pri `null` prizná, že stav nevie. Do 31. 8. 2026 tu nebolo nič a
+   * dávka mohla stáť tri týždne bez toho, aby to appka povedala.
+   */
+  enrich?: EnrichStatePayload | null;
   /** Prekreslenie po akcii, ktorá zmenila stav fronty. */
   onChanged: () => void;
 }
@@ -221,6 +232,42 @@ function ResumeQueue({ onChanged }: { onChanged: () => void }) {
       </button>
       {note === null ? null : <div className={styles.actionNote}>{note}</div>}
     </>
+  );
+}
+
+/**
+ * Kam vedie riadok o dávke. Sekcia „Obohacovanie katalógu" žije na podstránke
+ * „Čo smie robiť a koľko toho smie" — dávka míňa denný ČÍTACÍ rozpočet, takže
+ * stojí hneď pod rozpočtami a nie vo vlastnom kúte appky.
+ */
+const ENRICH_PATH = '/nastavenia/co-smie#obohacovanie';
+
+/**
+ * DÁVKA OBOHACOVANIA V STAVOVOM PÁSE (D118 bod 2, D120).
+ *
+ * Do 31. 8. 2026 tu nebolo NIČ a `catalog_enrich_state` nečítal žiadny
+ * komponent ani endpoint: dávka mohla stáť tri týždne s `pause_reason =
+ * 'ip_banned'` a človek to zistil jedine `SELECT`-om do databázy.
+ *
+ * Riadok je ZÁMERNE len chip so stavom a odkazom — celá veta (čo sa deje a čo
+ * s tým) stojí v sekcii Nastavení, aby dôvod nebol napísaný dvakrát. Výnimka je
+ * jedna a je dole: keď pauzu nevylieči čakanie, ale len akcia človeka, veta
+ * musí byť VIDNO tu, inak sa o nej človek nedozvie, kým sám nezaklikne.
+ *
+ * Farba je najviac `attention` (`.sig warn`) — nikdy červená. Neobohatený
+ * katalóg je priebeh: ~150 produktov za deň pri 41 348 produktoch je vec
+ * mesiacov a poplach z toho robiť nemá zmysel (červená patrí strate dát
+ * a zastavenému zápisu).
+ */
+function EnrichChip({ payload }: { payload: EnrichStatePayload | null }) {
+  const note = enrichNote(payload);
+  return (
+    <Link className={styles.checkLink} href={ENRICH_PATH}>
+      <span className={toneSigClass(note.tone)} data-check="enrich" data-testid="overview-enrich">
+        <ToneSigMark tone={note.tone} />
+        {note.label}
+      </span>
+    </Link>
   );
 }
 
@@ -401,12 +448,19 @@ export function StatusSection({
   budget,
   calm,
   gap,
+  enrich,
   onChanged,
 }: StatusSectionProps) {
   const empty = progress.mode === 'empty';
   const paused = progress.mode === 'paused';
   const running = progress.mode === 'running' || paused;
   const detailHref = progress.campaignId === null ? '/zlavy' : `/zlavy/${progress.campaignId}`;
+  // Veta o dávke sa skladá RAZ. `null` = dávka na človeka nečaká, takže tu
+  // o nej stačí chip v páse kontrol.
+  const stuck =
+    enrich !== undefined && enrich !== null && enrich.state?.waitsForHuman === true
+      ? enrichNote(enrich)
+      : null;
 
   return (
     <section className="sec" data-testid="overview-status" data-verdict={verdict.kind}>
@@ -500,7 +554,25 @@ export function StatusSection({
             </Link>
           );
         })}
+        {/* `undefined` = obrazovka o dávku nežiadala, takže sa o nej ani
+            nehovorí. `null` je iná veta („nevieme") a tú chip povie. */}
+        {enrich === undefined ? null : <EnrichChip payload={enrich} />}
       </div>
+
+      {/*
+        Pauza, ktorú NEVYLIEČI ČAKANIE, sa nesmie schovať pod odkaz: pri
+        odmietnutej adrese ani pri chýbajúcom kľúči sa dávka sama nerozbehne,
+        takže kým to človek neurobí, stojí — a presne toto sa tri týždne dialo
+        neviditeľne. Ostatné dôvody (rozpočet, pribrzdenie, spadnutý pokus)
+        prejdú samy a chip o nich stačí.
+      */}
+      {stuck === null ? null : (
+        <div className={styles.gapNote}>
+          <Note variant="warn" testId="overview-enrich-stuck">
+            {stuck.what} {stuck.nextStep}
+          </Note>
+        </div>
+      )}
 
       {gap === null ? null : (
         <div className={styles.gapNote}>

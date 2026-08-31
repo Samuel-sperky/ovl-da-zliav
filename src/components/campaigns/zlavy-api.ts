@@ -122,6 +122,12 @@ export interface DiscountItemView {
   readonly status: string;
   readonly percent?: number;
   readonly nameAtWrite: string | null;
+  /**
+   * Kód produktu doplnený k položke pri ZOBRAZENÍ (D116). Voliteľné pole:
+   * chýbajúca hodnota aj `null` znamenajú „appka referenciu nepozná" (produkt
+   * nie je obohatený, D118) — nikdy „produkt referenciu nemá".
+   */
+  readonly reference?: string | null;
   readonly priceAtPreview: string | null;
   readonly priceAtWrite: string | null;
   readonly priceMismatch: boolean;
@@ -238,6 +244,13 @@ export interface CreateResult {
 export interface CatalogRowView {
   readonly productId: number;
   readonly name: string | null;
+  /**
+   * Kód produktu z obohatenia `getFull` (D116). `null` = produkt NIE JE
+   * obohatený, teda „nevieme" — nie „shop ho nevedie" (D118, I11). Pole je
+   * voliteľné zámerne: `/api/catalog/search` ho zatiaľ neposiela pri každom
+   * riadku a `productLabel()` si s chýbajúcou referenciou poradí.
+   */
+  readonly reference?: string | null;
   readonly price: string | null;
   readonly unitsSold: number;
   readonly everDiscounted: boolean;
@@ -421,6 +434,7 @@ function parseDiscountItem(raw: unknown): DiscountItemView | null {
   const productId = readCount(record, 'productId');
   if (id === null || productId === null) return null;
   const percent = readCount(record, 'percent');
+  const reference = readText(record, 'reference');
   return {
     id,
     productId,
@@ -428,6 +442,7 @@ function parseDiscountItem(raw: unknown): DiscountItemView | null {
     status: readText(record, 'status') ?? '',
     ...(percent === null ? {} : { percent }),
     nameAtWrite: readText(record, 'nameAtWrite'),
+    ...(reference === null ? {} : { reference }),
     priceAtPreview: readText(record, 'priceAtPreview'),
     priceAtWrite: readText(record, 'priceAtWrite'),
     priceMismatch: readFlag(record, 'priceMismatch'),
@@ -490,9 +505,12 @@ function parseCatalogRow(raw: unknown): CatalogRowView | null {
   if (record === null) return null;
   const productId = readCount(record, 'productId');
   if (productId === null) return null;
+  const reference = readText(record, 'reference');
   return {
     productId,
     name: readText(record, 'name'),
+    // Chýbajúce pole a `null` sú tu to isté: „appka referenciu nepozná".
+    ...(reference === null ? {} : { reference }),
     price: readText(record, 'price'),
     unitsSold: readCount(record, 'unitsSold') ?? 0,
     everDiscounted: readFlag(record, 'everDiscounted'),

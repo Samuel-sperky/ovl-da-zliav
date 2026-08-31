@@ -47,9 +47,25 @@ export type SoldBucketKey = 'none' | 'low' | 'mid' | 'high';
 
 export const SOLD_BUCKET_ORDER: readonly SoldBucketKey[] = ['none', 'low', 'mid', 'high'];
 
-/** Do ktorého vedra spadne meraný počet predaných kusov. */
-export function soldBucketOf(unitsSold: number): SoldBucketKey {
-  const units = Number.isFinite(unitsSold) ? Math.max(0, Math.trunc(unitsSold)) : 0;
+/**
+ * Do ktorého vedra spadne MERANÝ počet predaných kusov.
+ *
+ * `null` na vstupe aj na výstupe znamená „nevieme" (D121, 28. 8. 2026).
+ * Do 28. 8. 2026 bral tento typ `number` a `null` sa doň nedal vyjadriť, takže
+ * neznámy predaj prišiel ako nula, spadol do vedra `none` a dostal
+ * `DEFAULT_TIER_PERCENT.none`, teda **30 %** — najhlbšiu zľavu v appke. Kým je
+ * obohacovanie pozastavené (D118, ~207 dní na celý katalóg), vyzerá tak väčšina
+ * katalógu, takže by tisíce produktov dostali 30 % na základe čísla, ktoré
+ * appka nikdy nezmerala. Zľava je nevratná (I7), takže je to fail-closed:
+ * neznámy predaj sa do pásma NEZARADÍ.
+ *
+ * MERANÁ nula je iná vec a vedro `none` si drží: „za okno sa nepredal ani
+ * jeden kus" je odpoveď, „nevieme" nie je.
+ */
+export function soldBucketOf(unitsSold: number | null): SoldBucketKey | null {
+  if (unitsSold === null) return null;
+  if (!Number.isFinite(unitsSold)) return null;
+  const units = Math.max(0, Math.trunc(unitsSold));
   if (units === 0) return 'none';
   if (units <= 2) return 'low';
   if (units <= 9) return 'mid';
@@ -83,8 +99,20 @@ export function tierRuleSentence(bucket: SoldBucketKey, windowDays: number): str
 export interface SelectableRow {
   readonly productId: number;
   readonly name: string | null;
+  /**
+   * Kód produktu z obohatenia (D116). Chýbajúce pole aj `null` znamenajú
+   * „appka referenciu nepozná" (produkt nie je obohatený, D118) — pomenovanie
+   * skladá `productLabel()`, nie táto štruktúra.
+   */
+  readonly reference?: string | null;
   readonly price: string | null;
-  readonly unitsSold: number;
+  /**
+   * Predané kusy za okno. **`null` = appka to NEVIE** (produkt nie je obohatený,
+   * D118, alebo okno nemá stiahnuté dni) — nie „nula predaných" (D121,
+   * 28. 8. 2026). Do 28. 8. 2026 tu stálo `number` a „nevieme" sa nedalo
+   * vyjadriť, takže sa z neho stala nula a z nuly 30 % zľava.
+   */
+  readonly unitsSold: number | null;
   /** I11 — podľa VLASTNÝCH zápisov appky, nie podľa stavu shopu. */
   readonly discountedNow: boolean;
 }
@@ -101,17 +129,43 @@ export interface TierPlan {
 }
 
 /**
+ * Výsledok rozdelenia do pásiem (D121).
+ *
+ * Návratový typ je ZÁMERNE dvojica a nie `TierPlan[]`: neznáme predaje musí
+ * volajúci prevziať vedome. Keby `buildTiers()` vracalo len pásma, dali by sa
+ * preskočené produkty prehliadnuť — a to je presne ten druh ticha, ktorý sa
+ * v tejto appke už raz dostal do produkcie. Typecheck je dôkaz úplnosti.
+ */
+export interface TierPartition {
+  readonly tiers: TierPlan[];
+  /**
+   * Produkty, ktorých predaj appka NEPOZNÁ. Do žiadneho pásma nepatria a do
+   * kampane sa NESMÚ dostať; obrazovka ich má priznať ako „nevieme,
+   * preskočené" s počtom (D121).
+   */
+  readonly unknownProductIds: readonly number[];
+}
+
+/**
  * Rozdelí vybrané riadky do pásiem podľa predajnosti. Prázdne pásmo sa
  * NEVYTVORÍ — pásmo bez produktov je len riadok, ktorý klame o rozsahu.
+ *
+ * Riadky s neznámym predajom idú do `unknownProductIds`, nie do vedra `none`
+ * (D121 — dôvod v `soldBucketOf()`).
  */
 export function buildTiers(
   rows: readonly SelectableRow[],
   windowDays: number,
   percents: Readonly<Partial<Record<SoldBucketKey, number>>> = {},
-): TierPlan[] {
+): TierPartition {
   const groups = new Map<SoldBucketKey, number[]>();
+  const unknownProductIds: number[] = [];
   for (const row of rows) {
     const bucket = soldBucketOf(row.unitsSold);
+    if (bucket === null) {
+      unknownProductIds.push(row.productId);
+      continue;
+    }
     const ids = groups.get(bucket);
     if (ids === undefined) groups.set(bucket, [row.productId]);
     else ids.push(row.productId);
@@ -131,7 +185,58 @@ export function buildTiers(
       productIds: ids,
     });
   }
-  return plans;
+  return { tiers: plans, unknownProductIds };
+}
+
+/** Pásmo v tvare, aký prijíma `POST /api/campaigns/preview` aj `POST /api/campaigns`. */
+export interface TierWire {
+  readonly ord: number;
+  readonly label: string;
+  readonly percent: number;
+  readonly productIds: readonly number[];
+}
+
+/** Telo zápisu zľavy — produkty a pásma, ktoré sa NEMÔŽU rozísť. */
+export interface DiscountWriteRequest {
+  readonly productIds: readonly number[];
+  readonly percent: number;
+  readonly tiers: readonly TierWire[];
+}
+
+/**
+ * Zloží zoznam produktov a pásma pre zápis Z JEDNÉHO ZDROJA (D121, 28. 8. 2026).
+ *
+ * PREČO TO NIE JE DVA VÝRAZY NA MIESTE VOLANIA
+ * --------------------------------------------
+ * Do 28. 8. 2026 obrazovka posielala `productIds: rows.map(…)` a `tiers`
+ * postavené z pásiem — dva nezávislé výrazy o tej istej veci. Produkt
+ * s neznámym predajom tak v pásmach nebol, ale v `productIds` áno, takže do
+ * kampane šiel bez platného percenta.
+ *
+ * Horšie než chyba samotná bolo, že ju NEZACHYTIL ani jeden test: mutácia
+ * (vrátenie `rows.map(…)`) nechala 93 tvrdení zelených. Model bol otestovaný,
+ * ZAPOJENIE nie — tá istá trieda diery, akú v tomto sprinte odkrylo mutačné
+ * overenie presetov (grep nad priečinkom A nepovie nič o diere v priečinku B).
+ *
+ * Odpoveď nie je ďalší test, ale to, že sa nesprávna odpoveď NEDÁ VYJADRIŤ:
+ * `productIds` sa tu odvodzuje z tých istých pásiem, aké idú do `tiers`, takže
+ * sa nemajú ako rozísť. Kto to zmení, musí zmeniť túto funkciu — a tú test
+ * kryje priamo, vrátane invariantu „`productIds` == zjednotenie pásiem".
+ */
+export function discountWriteRequest(partition: TierPartition): DiscountWriteRequest {
+  const tiers: TierWire[] = partition.tiers.map((tier) => ({
+    ord: tier.ord,
+    label: `${tier.letter} · ${tier.label}`,
+    percent: tier.percent,
+    productIds: tier.productIds,
+  }));
+  return {
+    /* Zjednotenie pásiem — NIE pôvodné riadky výberu. Produkty s neznámym
+       predajom sú v `partition.unknownProductIds` a sem sa nedostanú (D121). */
+    productIds: tiers.flatMap((tier) => [...tier.productIds]),
+    percent: headlinePercent(partition.tiers),
+    tiers,
+  };
 }
 
 /** I9 / D11 — percento je celé číslo 1–30. Vracia hlášku alebo `null`. */

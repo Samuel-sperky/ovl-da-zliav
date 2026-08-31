@@ -12,6 +12,11 @@
  * Časy: `ts` je v DB v UTC (§2, D31); filtre `from`/`to` sú kalendárne dni,
  * ktoré sa prekladajú na polootvorený interval `[from 00:00, to+1 den 00:00)`.
  *
+ * D116 / K6 (28. 8. 2026): čítacie dotazy pripájajú k auditnému riadku
+ * REFERENCIU a NÁZOV produktu zo zrkadla katalógu. Deje sa to `LEFT JOIN`-om
+ * pri ZOBRAZENÍ — v `audit_log` sa nič neprepisuje, I4 platí naďalej bez
+ * výnimky. Podrobne pri `CATALOG_JOIN` nižšie.
+ *
  * Vlastník: A2.
  */
 import type {
@@ -33,9 +38,59 @@ const DEFAULT_PER_PAGE = 50;
 const MAX_PER_PAGE = 200;
 
 /** Zoznam stĺpcov — explicitne, aby zmena schémy nikdy netiekla do UI nečakane. */
-const COLUMNS = `id, ts, actor, user_id, event_type, ok, campaign_id, campaign_item_id,
-   product_id, operation_id, request_id, http_status, before_snapshot, after_snapshot,
-   message, ip, user_agent`;
+const AUDIT_COLUMNS: readonly string[] = [
+  'id',
+  'ts',
+  'actor',
+  'user_id',
+  'event_type',
+  'ok',
+  'campaign_id',
+  'campaign_item_id',
+  'product_id',
+  'operation_id',
+  'request_id',
+  'http_status',
+  'before_snapshot',
+  'after_snapshot',
+  'message',
+  'ip',
+  'user_agent',
+];
+
+/*
+ * Stĺpce auditu KVALIFIKOVANÉ aliasom `a`. Kvalifikácia nie je kozmetika:
+ * `product_id` má aj `catalog_cache`, takže po pripojení zrkadla (nižšie) by
+ * nekvalifikovaný názov bol dvojznačný a dotaz by padol.
+ */
+const COLUMNS = AUDIT_COLUMNS.map((column) => `a.${column}`).join(', ');
+
+/*
+ * POMENOVANIE PRODUKTU SA DOPĹŇA PRI ZOBRAZENÍ, NIE PREPISOM HISTÓRIE
+ * (D116 / K6, invariant I4).
+ *
+ * `audit_log` je append-only a jeho riadky nesú `product_id` — slepé číslo,
+ * podľa ktorého človek produkt v sklade ani v eshope nenájde. Referencia
+ * a názov sa preto pripájajú zo zrkadla katalógu AŽ PRI ČÍTANÍ; v auditnom
+ * riadku sa nikdy nič nemení (I4 tu platí bez výnimky).
+ *
+ * `LEFT JOIN` je ZÁMER, nie zjemnenie. Audit smie ukazovať na produkt, ktorý
+ * v zrkadle už nie je (zmizol z katalógu) — taký riadok sa z histórie NESMIE
+ * stratiť, pretože história je dôkazný záznam. `INNER JOIN` by ho ticho
+ * zahodil. Referencia je vtedy `NULL`, teda „nevieme" (I11), a rovnaké `NULL`
+ * vráti aj produkt, ktorý ešte NIE JE obohatený (D118) — obrazovka z oboch
+ * urobí pomlčku a `#id` ponechá viditeľné.
+ *
+ * VÝKON: `catalog_cache.product_id` je PRIMARY KEY, takže pripojenie je lookup
+ * po kľúči (`eq_ref`), nie prechod 41 348 riadkov. Stránkovanie sa tým nemení.
+ */
+const CATALOG_JOIN = ' LEFT JOIN catalog_cache c ON c.product_id = a.product_id';
+
+/** Doplnené polia. `AS` menuje presne to, čo číta klient (`reference`). */
+const CATALOG_COLUMNS = ', c.reference AS reference, c.name AS product_name';
+
+/** Audit + pomenovanie produktu — jediný zdroj pravdy pre čítacie dotazy. */
+const SELECT_ENRICHED = `SELECT ${COLUMNS}${CATALOG_COLUMNS} FROM audit_log a${CATALOG_JOIN}`;
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -58,6 +113,19 @@ function toStringOrNull(value: unknown): string | null {
   return String(value);
 }
 
+/**
+ * `null`, `undefined` aj `'   '` znamenajú to isté: nevieme (I11).
+ *
+ * Platí pre doplnené pomenovanie produktu. Prázdny reťazec zo zrkadla by na
+ * povrchu vyzeral ako referencia, ktorú produkt „má" — a `productLabel()` by
+ * ju musel trimovať zaň. Server hovorí `null` a obrazovka z toho spraví pomlčku.
+ */
+function nonEmptyOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 function toDate(value: unknown): Date {
   if (value instanceof Date) return value;
   return new Date(String(value));
@@ -78,7 +146,24 @@ function parseJsonColumn(value: unknown): unknown {
   }
 }
 
-function mapRow(row: DbRow): AuditRecord {
+/**
+ * Auditný riadok doplnený pomenovaním produktu zo zrkadla katalógu (D116, K6).
+ *
+ * Je to NADSTAVBA nad `AuditRecord` z kontraktu — obe polia sú iba PRIDANÉ,
+ * takže typ zostáva podtypom `AuditRecord` a starí volajúci sa nelámu.
+ *
+ * `null` v oboch znamená „appka to nevie" (I11): produkt buď nie je obohatený
+ * (D118), alebo v zrkadle katalógu vôbec nie je. NIKDY neznamená „produkt
+ * referenciu nemá" — takú vetu appka o shope povedať nemôže.
+ */
+export interface AuditRecordWithProduct extends AuditRecord {
+  /** Referencia produktu zo zrkadla, alebo `null` = nevieme. */
+  reference: string | null;
+  /** Názov produktu zo zrkadla, alebo `null` = nevieme. */
+  productName: string | null;
+}
+
+function mapRow(row: DbRow): AuditRecordWithProduct {
   return {
     id: toNumberOrNull(row.id) ?? 0,
     ts: toDate(row.ts),
@@ -97,6 +182,10 @@ function mapRow(row: DbRow): AuditRecord {
     message: toStringOrNull(row.message),
     ip: toStringOrNull(row.ip),
     userAgent: toStringOrNull(row.user_agent),
+    /* Doplnenie z pripojeného zrkadla. Prázdny reťazec sa NEVYRÁBA — pomlčku
+       skladá až obrazovka (`productLabel()`), tu zostáva `null` ako „nevieme". */
+    reference: nonEmptyOrNull(row.reference),
+    productName: nonEmptyOrNull(row.product_name),
   };
 }
 
@@ -131,33 +220,40 @@ async function run<T>(conn: Queryable | undefined, sql: string, values: unknown[
   return poolQuery<T>(sql, values);
 }
 
-/** Skladanie `WHERE` z filtrov — všetko parametrizované, nikdy interpolované. */
+/**
+ * Skladanie `WHERE` z filtrov — všetko parametrizované, nikdy interpolované.
+ *
+ * Podmienky sú kvalifikované aliasom `a` (audit), aby filtre nikdy nezasiahli
+ * pripojené zrkadlo katalógu: `product_id` majú obe tabuľky a nekvalifikovaný
+ * názov by bol dvojznačný. Filtruje sa VÝHRADNE podľa auditu — pripojenie je
+ * len doplnenie pomenovania, nie zúženie histórie.
+ */
 function buildWhere(filter: AuditFilter): { sql: string; values: unknown[] } {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
   if (filter.productId !== undefined) {
-    conditions.push('product_id = ?');
+    conditions.push('a.product_id = ?');
     values.push(Math.trunc(filter.productId));
   }
   if (filter.campaignId !== undefined) {
-    conditions.push('campaign_id = ?');
+    conditions.push('a.campaign_id = ?');
     values.push(Math.trunc(filter.campaignId));
   }
   if (filter.eventType !== undefined && filter.eventType.length > 0) {
-    conditions.push('event_type = ?');
+    conditions.push('a.event_type = ?');
     values.push(filter.eventType);
   }
   if (filter.ok !== undefined) {
-    conditions.push('ok = ?');
+    conditions.push('a.ok = ?');
     values.push(filter.ok ? 1 : 0);
   }
   if (filter.from !== undefined && DATE_ONLY_RE.test(filter.from)) {
-    conditions.push('ts >= ?');
+    conditions.push('a.ts >= ?');
     values.push(dayStart(filter.from));
   }
   if (filter.to !== undefined && DATE_ONLY_RE.test(filter.to)) {
-    conditions.push('ts < ?');
+    conditions.push('a.ts < ?');
     values.push(nextDayStart(filter.to));
   }
 
@@ -170,14 +266,19 @@ function buildWhere(filter: AuditFilter): { sql: string; values: unknown[] } {
 /* ═══════════════════════════ Čítacie operácie ═════════════════════════════ */
 
 /** Stránkovaný výpis pre `/api/audit` (D18). Najnovšie riadky ako prvé. */
-export async function list(filter: AuditFilter, conn?: Queryable): Promise<Paged<AuditRecord>> {
+export async function list(
+  filter: AuditFilter,
+  conn?: Queryable,
+): Promise<Paged<AuditRecordWithProduct>> {
   const page = clampPage(filter.page);
   const perPage = clampPerPage(filter.perPage);
   const where = buildWhere(filter);
 
+  /* Počítanie ide BEZ pripojenia zrkadla — `LEFT JOIN` po PRIMARY KEY nemôže
+     počet riadkov zmeniť, takže by to bola len práca zadarmo. */
   const countRows = await run<Array<{ total: unknown }>>(
     conn,
-    `SELECT COUNT(*) AS total FROM audit_log${where.sql}`,
+    `SELECT COUNT(*) AS total FROM audit_log a${where.sql}`,
     where.values,
   );
   const total = toNumberOrNull(countRows[0]?.total) ?? 0;
@@ -188,7 +289,7 @@ export async function list(filter: AuditFilter, conn?: Queryable): Promise<Paged
       ? []
       : await run<DbRow[]>(
           conn,
-          `SELECT ${COLUMNS} FROM audit_log${where.sql} ORDER BY id DESC LIMIT ? OFFSET ?`,
+          `${SELECT_ENRICHED}${where.sql} ORDER BY a.id DESC LIMIT ? OFFSET ?`,
           [...where.values, perPage, offset],
         );
 
@@ -196,8 +297,11 @@ export async function list(filter: AuditFilter, conn?: Queryable): Promise<Paged
 }
 
 /** Plný záznam pre `/api/audit/[id]` vrátane snapshotov (D18, D39c). */
-export async function getById(id: number, conn?: Queryable): Promise<AuditRecord | null> {
-  const rows = await run<DbRow[]>(conn, `SELECT ${COLUMNS} FROM audit_log WHERE id = ? LIMIT 1`, [
+export async function getById(
+  id: number,
+  conn?: Queryable,
+): Promise<AuditRecordWithProduct | null> {
+  const rows = await run<DbRow[]>(conn, `${SELECT_ENRICHED} WHERE a.id = ? LIMIT 1`, [
     Math.trunc(id),
   ]);
   const row = rows[0];
@@ -276,11 +380,11 @@ export async function listByCampaign(
   campaignId: number,
   limit = 500,
   conn?: Queryable,
-): Promise<AuditRecord[]> {
+): Promise<AuditRecordWithProduct[]> {
   const capped = Math.min(Math.max(Math.trunc(limit), 1), 2000);
   const rows = await run<DbRow[]>(
     conn,
-    `SELECT ${COLUMNS} FROM audit_log WHERE campaign_id = ? ORDER BY id ASC LIMIT ?`,
+    `${SELECT_ENRICHED} WHERE a.campaign_id = ? ORDER BY a.id ASC LIMIT ?`,
     [Math.trunc(campaignId), capped],
   );
   return rows.map(mapRow);
@@ -290,10 +394,10 @@ export async function listByCampaign(
 export async function findLatestByEvent(
   eventType: string,
   conn?: Queryable,
-): Promise<AuditRecord | null> {
+): Promise<AuditRecordWithProduct | null> {
   const rows = await run<DbRow[]>(
     conn,
-    `SELECT ${COLUMNS} FROM audit_log WHERE event_type = ? ORDER BY id DESC LIMIT 1`,
+    `${SELECT_ENRICHED} WHERE a.event_type = ? ORDER BY a.id DESC LIMIT 1`,
     [eventType],
   );
   const row = rows[0];

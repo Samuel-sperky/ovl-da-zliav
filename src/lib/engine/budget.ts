@@ -4,10 +4,23 @@
  * Zápis prestal byť akcia a stal sa frontou, ktorá beží týždne. Shop dovolí
  * **200 zápisov na UTC deň** a 20/min; z toho plynie všetko ostatné:
  *
- *  - **Spotreba sa počíta VÝHRADNE z auditu** — počet `write_attempt` za
- *    aktuálny UTC deň. Žiadny paralelný počítadlový stĺpec, ktorý by sa mohol
+ *  - **Spotreba ZÁPISOV sa počíta VÝHRADNE z auditu** — počet `write_attempt` za
+ *    aktuálny UTC deň. Od 31. 8. 2026 sa od stropu odpočítavajú aj ČÍTANIA na
+ *    tom istom kľúči (dráha `product_read`: obohacovanie D118 a
+ *    `reduction-check`) — nie sú to zápisy, ale míňajú tú istú kvótu 200/deň,
+ *    a bez toho rozpočet povolil dávku, ktorú shop uprostred odmietol (429).
+ *    Zdroj čítaní je počítadlo `shop_read_budget`, nie druhá kópia auditu. Žiadny paralelný počítadlový stĺpec, ktorý by sa mohol
  *    rozísť s realitou (K2). `audit_log` je append-only (I4), takže sa
  *    počítadlo nedá ani obísť, ani vynulovať.
+ *  - **Čítania sa odpočítavajú LEN NAD REZERVOU** `WRITE_QUOTA_RESERVE`
+ *    (31. 8. 2026, ten istý deň, večer). Prvá verzia odpočítania brala čítania
+ *    z celého stropu, takže vyčerpaná čítacia dráha znížila rozpočet zápisov
+ *    z 200 na 40 — a pri `daily_write_budget` na úrovni rezervy alebo pod ňou
+ *    (napr. fail-closed 1) až na NULU. Čítanie tým vedelo appke odobrať
+ *    schopnosť zapísať zľavu; `GET /api/catalog/reduction-check` je pritom
+ *    cesta bez brány pôvodu (GET), takže to dokázala aj cudzia stránka
+ *    otvorená v tom istom prehliadači. Rezerva je slice kvóty, na ktorý sa
+ *    čítacia dráha ANI PRI PLNOM VYČERPANÍ nedostane.
  *  - **`write_attempt`, nie `write_ok`.** Rozpočet míňa POKUS, nie úspech —
  *    request odišiel do shopu bez ohľadu na to, čo sa vrátilo. (Runaway strop
  *    naopak počíta `write_ok`/`write_uncertain`, lebo tam ide o to, koľko
@@ -41,7 +54,9 @@ import type { DateOnly, Queryable, UtcDate } from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
 import { addDays, todayInZone } from '@/lib/domain/dates';
+import { productReadBudget } from '@/lib/repo/read-budget.repo';
 import { SHOP_KEYED_LIMIT, nextUtcDayReset } from '@/lib/shop/rate-limits';
+import { READ_LANE_LIMITS } from '@/lib/shop/read-budget';
 
 /* ═══════════════════════════ konštanty (K2) ═══════════════════════════════ */
 
@@ -67,10 +82,39 @@ export const DEFAULT_DAILY_WRITE_BUDGET = SHOP_KEYED_LIMIT.perUtcDay;
 
 /**
  * Fail-closed rozpočet: „neviem" znamená 1 zápis na deň. Fronta sa tým
- * nezastaví (pokračuje ďalší deň), ale ani sa nerozbehne nad databázou,
- * o ktorej práve nič nevieme (K1 bod 1, zhodné s `FAIL_CLOSED_SCOPE` vo V4).
+ * SPOMALÍ na 1 zápis za UTC deň, nezastaví sa — a to platí aj vtedy, keď je
+ * čítacia dráha `product_read` úplne vyčerpaná: čítania sa odpočítavajú len
+ * nad `WRITE_QUOTA_RESERVE`, a pri rozpočte 1 je rezerva celá tá jednotka.
+ * (K1 bod 1, zhodné s `FAIL_CLOSED_SCOPE` vo V4.)
+ *
+ * Do 31. 8. 2026 to bola NEPRAVDA: odpočítanie čítaní z celého stropu spravilo
+ * z fail-closed spomalenia fail-closed ZASTAVENIE (`remaining = max(0, 1 - 0 -
+ * 160) = 0`, `checkDailyBudget()` odmietol celú frontu). Stráži to test
+ * `test/unit/rozpocet-rezerva-zapisov.spec.ts`.
  */
 export const FAIL_CLOSED_DAILY_BUDGET = 1;
+
+/**
+ * REZERVA ZÁPISOV — slice dennej kvóty kľúča, na ktorý čítania NEDOSAHUJÚ.
+ *
+ * Číslo je ODVODENÉ, nie zvolené: je to presne tá časť kvóty kľúča, ktorú
+ * čítacia dráha `product_read` nedokáže minúť ani pri plnom vyčerpaní
+ * (200 − 160 = 40). Preto sa ním nič nepreplní — `spent + čítania + zvyšok`
+ * nikdy neprekročí strop shopu (dôkaz je v teste rezervy).
+ *
+ * Čo z toho plynie:
+ *  - vyčerpaná čítacia dráha zníži rozpočet zápisov najviac na rezervu,
+ *    NIKDY na nulu — cudzí GET teda appke nevie odobrať schopnosť zapísať,
+ *  - pri rozpočte nastavenom NA alebo POD rezervu (vrátane fail-closed 1)
+ *    čítania neodpočítavajú vôbec: celý taký rozpočet je rezerva.
+ *
+ * Rezerva na strane ČÍTANÍ (`ENRICH_QUOTA_RESERVE`) je iná vec a chráni sondy
+ * vnútri čítacej dráhy; táto chráni zápisy pred čítaniami.
+ */
+export const WRITE_QUOTA_RESERVE = Math.max(
+  0,
+  MAX_DAILY_WRITE_BUDGET - READ_LANE_LIMITS.product_read.perUtcDay,
+);
 
 /**
  * K2 — runaway strop je `daily_write_budget` + 20 %. Pri 200/deň by pôvodných
@@ -114,6 +158,38 @@ export function runawayLimitFor(
 ): number {
   const budget = clampBudget(dailyBudget, DEFAULT_DAILY_WRITE_BUDGET);
   return Math.max(floor, Math.ceil(budget * RUNAWAY_HEADROOM_RATIO));
+}
+
+/* ══════════════ rezerva zápisov: čítania nesmú vyhladovať zápisy ══════════ */
+
+/**
+ * Koľko z rozpočtu `dailyBudget` je vyhradené VÝHRADNE zápisom.
+ *
+ * Pri rozpočte nižšom než `WRITE_QUOTA_RESERVE` je rezervou celý rozpočet —
+ * inak by malý ručne nastavený rozpočet (1…39) mohli čítania stlačiť na nulu,
+ * teda presne tá chyba, pred ktorou rezerva stojí.
+ */
+export function writeReserveFor(dailyBudget: number): number {
+  const budget = clampBudget(dailyBudget, DEFAULT_DAILY_WRITE_BUDGET);
+  return Math.min(budget, WRITE_QUOTA_RESERVE);
+}
+
+/**
+ * Koľko z dnešných ČÍTANÍ na tom istom kľúči sa smie odpočítať od rozpočtu
+ * zápisov. Odpočítava sa len tá časť, ktorá sa zmestí NAD rezervu:
+ *
+ *   `charged = min(čítania, rozpočet − rezerva)`
+ *
+ * Zvyšok čítaní sa nezahodí ako nepravda — shop ho naozaj videl — ale zápisom
+ * ho účtovať nemôžeme, lebo by z rezervy nezostalo nič. Presnosť tu prehráva
+ * s tým, že cudzie čítanie nesmie appke odobrať schopnosť zapísať zľavu; strop
+ * shopu sa tým aj tak neprekročí, lebo rezerva je odvodená ako `200 − 160`.
+ */
+export function chargeableKeyedReads(dailyBudget: number, keyedReads: number): number {
+  const budget = clampBudget(dailyBudget, DEFAULT_DAILY_WRITE_BUDGET);
+  const reads = Number.isFinite(keyedReads) ? Math.max(0, Math.trunc(keyedReads)) : 0;
+  const shared = Math.max(0, budget - writeReserveFor(budget));
+  return Math.min(reads, shared);
 }
 
 /* ═══════════════════ odkiaľ sa berie výška rozpočtu ═══════════════════════ */
@@ -243,15 +319,53 @@ export interface BudgetStatus {
   budget: number;
   /** Koľko `write_attempt` už dnes odišlo. */
   spent: number;
+  /**
+   * Koľko ČÍTANÍ s tým istým kľúčom (`product:read`, dráha `product_read`) sa
+   * dnes už minulo. Odpočítava sa z rovnakého stropu ako zápisy — je to jedna
+   * kvóta jedného kľúča (31. 8. 2026). `undefined` = volajúci čítania nesleduje.
+   */
+  keyedReadsToday?: number;
+  /**
+   * Koľko z `keyedReadsToday` sa naozaj odpočítalo od rozpočtu — teda tá časť,
+   * ktorá sa zmestila nad rezervu. Rozdiel proti `keyedReadsToday` je presne
+   * to, čo rezerva zápisom zachránila; bez tohto čísla by sa nedalo povedať,
+   * prečo zvyšok nesedí s odčítaním „strop − zápisy − čítania".
+   */
+  keyedReadsCharged?: number;
+  /**
+   * Koľko z `budget` je vyhradené zápisom (`writeReserveFor()`).
+   * `undefined` = volajúci si podsúva vlastný `BudgetSource` a rezervu
+   * nepočíta (testy engine) — nie „rezerva je nula".
+   */
+  writeReserve?: number;
   /** Koľko sa dnes ešte zmestí. Nikdy záporné. */
   remaining: number;
   /** `remaining === 0`. Informácia, nie chyba (K2, odpoveď 59). */
   exhausted: boolean;
 }
 
+/**
+ * Počítadlo ČÍTANÍ na zápisovom kľúči (dráha `product_read`). Tvar je zámerne
+ * najmenší možný — `ReadBudget` z `lib/shop/read-budget.ts` ho spĺňa, takže sa
+ * dá podsunúť priamo `productReadBudget`, a engine nezávisí na jeho type.
+ *
+ * `known: false` znamená „počítadlo sa nedalo prečítať"; `used` je vtedy už
+ * fail-closed domnienka (celý strop dráhy), takže sa nič nedopočítava tu.
+ */
+export interface KeyedReadUsage {
+  status(): Promise<{ readonly used: number; readonly known: boolean }>;
+}
+
 export interface BudgetDeps {
   /** Default: `SELECT` nad `audit_log`. */
   counter?: WriteAttemptCounter;
+  /**
+   * Počítadlo čítaní na TOM ISTOM kľúči. `null` = zámerne sa neodpočítavajú
+   * (testy engine bez DB). Nezadané: produkčne `productReadBudget`, ale len
+   * keď si volajúci nepodsúva ani vlastné počítadlo zápisov — kto si podsúva
+   * audit, podsúva si aj čítania.
+   */
+  keyedReads?: KeyedReadUsage | null;
   /** Default: nič — potom platí `DEFAULT_DAILY_WRITE_BUDGET`. */
   settingsRepo?: DailyBudgetSource;
   /** Tvrdý override výšky rozpočtu (flags, testy). */
@@ -301,6 +415,31 @@ async function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
 export function createBudget(deps: BudgetDeps = {}): BudgetSource {
   const counter = deps.counter ?? auditWriteAttemptCounter;
   const now = deps.now ?? ((): Date => new Date());
+  /*
+   * JEDEN KĽÚČ, JEDNA KVÓTA (31. 8. 2026).
+   *
+   * `shop_write` má scope `product:read` aj `product:edit` a shop účtuje 200
+   * volaní/UTC deň NA KĽÚČ. Od D118 na ňom beží obohacovanie katalógu (dráha
+   * `product_read`, strop 160/deň) — takže rozpočet zápisov, ktorý počíta len
+   * `write_attempt` z auditu, hlásil „ostáva 200" v deň, keď kľúč mal reálne
+   * minutých 160. Fronta sa rozbehla, shop odpovedal 429 a kampaň sa dopísala
+   * spolovice. Čítania sa preto z toho istého stropu ODPOČÍTAVAJÚ.
+   *
+   * PREDNOSŤ ZÁPISOV NIE JE V PORADÍ, JE V REZERVE. Dávka sa pýta výhradne
+   * čítacej dráhy a poradie je čisto časové — kto príde skôr, ten číta alebo
+   * zapisuje. Jediná prednosť, ktorú zápisy naozaj majú, je
+   * `WRITE_QUOTA_RESERVE`: `min(rozpočet, 40)` volaní, ktoré čítania
+   * odpočítať NEMÔŽU. Do 31. 8. 2026 tu stála veta „zápisy majú prednosť pred
+   * obohacovaním" a v kóde jej neodpovedalo nič; teraz jej odpovedá rezerva
+   * a nič viac. Rezerva na strane čítaní (`ENRICH_QUOTA_RESERVE`) je iná vec —
+   * tá chráni sondy vnútri čítacej dráhy.
+   */
+  const keyedReads =
+    deps.keyedReads !== undefined
+      ? deps.keyedReads
+      : deps.counter === undefined
+        ? productReadBudget
+        : null;
 
   // Aj injektované počítadlo môže vrátiť nečíslo. „Neviem" sa ani tu neprekladá
   // na nulu — hodí sa rovnaká chyba ako pri zaseknutom čítaní.
@@ -321,8 +460,30 @@ export function createBudget(deps: BudgetDeps = {}): BudgetSource {
         BUDGET_READ_TIMEOUT_MS,
       );
       const used = await withDeadline(spent(), BUDGET_READ_TIMEOUT_MS);
-      const remaining = Math.max(0, budget - used);
-      return { day, budget, spent: used, remaining, exhausted: remaining === 0 };
+      /*
+       * `status()` sám nehodí: nečitateľné počítadlo vracia `known: false` a
+       * `used = strop dráhy`, teda fail-closed domnienku „čítania sú minuté".
+       * Radšej menej zápisov dnes než 429 uprostred dávky v produkcii.
+       */
+      const reads =
+        keyedReads === null
+          ? { used: 0, known: true }
+          : await withDeadline(keyedReads.status(), BUDGET_READ_TIMEOUT_MS);
+      const keyedReadsToday = Math.max(0, Math.trunc(reads.used));
+      // Rezerva: čítania sa odpočítavajú LEN nad ňou. Bez toho by vyčerpaná
+      // čítacia dráha (aj cudzím GETom) zobrala appke schopnosť zapísať.
+      const charged = chargeableKeyedReads(budget, keyedReadsToday);
+      const remaining = Math.max(0, budget - used - charged);
+      return {
+        day,
+        budget,
+        spent: used,
+        keyedReadsToday,
+        keyedReadsCharged: charged,
+        writeReserve: writeReserveFor(budget),
+        remaining,
+        exhausted: remaining === 0,
+      };
     },
   };
 }

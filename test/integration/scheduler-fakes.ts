@@ -417,6 +417,13 @@ export function makeWorld(options: WorldOptions = {}): World {
             return { outcome: queueBusy ? 'writes_first' : 'too_soon', sync: null };
           }
         : options.catalogSync,
+    /*
+     * Obohacovanie (D118 bod 2) v tomto svete NEBEŽÍ a nebude: fake dávky by
+     * dokazoval len sám seba. Produkčné zapojenie kroku má vlastný dôkaz —
+     * `test/integration/scheduler-obohacovanie.spec.ts` beží s krokom
+     * z `scheduler/boot.ts` a proti skutočnému mocku.
+     */
+    enrich: null,
     log: createLogger({ module: 'scheduler-test' }),
     clock,
     config: {

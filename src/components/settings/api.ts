@@ -12,7 +12,15 @@
  */
 import type { Envelope } from '@/components/campaigns/api';
 import { getJson, postJson } from '@/components/campaigns/api';
+import type { EnrichStatePayload } from '@/lib/catalog/enrich-view';
 import type { BlockerWire, StatusPayload } from '@/lib/status/snapshot';
+
+/**
+ * Stav dávky obohacovania má typy tam, kde má aj svoje slovenské vety
+ * (`lib/catalog/enrich-view.ts`) — je to čistý modul bez servera, takže sa dá
+ * doniesť do prehliadača rovnako ako `lib/status/snapshot.ts`.
+ */
+export type { EnrichStatePayload };
 
 /**
  * Prekážky a celý obraz stavu appky sa NEODVODZUJÚ tu — prichádzajú hotové
@@ -225,6 +233,20 @@ export const getStatus = () => getJson<StatusPayload>('/api/status');
  * neodošle ani jeden dotaz; načítanie katalógu spúšťa iná obrazovka.
  */
 export const getCatalog = () => getJson<{ catalog: CatalogView }>('/api/catalog/sync');
+
+/**
+ * Stav DÁVKY obohacovania (`GET /api/catalog/enrich`) — pokrok, dnešný diel
+ * a hlavne DÔVOD PAUZY.
+ *
+ * Je to iná vec než `getCatalog()`: ten hovorí o zoznamovom prechode
+ * (`catalog_sync_state`, anonymná dráha rozpočtu), tento o dávke, ktorá dopĺňa
+ * polia z `getFull` (`catalog_enrich_state`, dráha `product_read`). Do
+ * 31. 8. 2026 nečítal `catalog_enrich_state` NIKTO, takže dávka mohla stáť
+ * tri týždne s odmietnutou adresou a appka o tom mlčala (D118 bod 2, D120).
+ *
+ * `GET` nič nespúšťa a na eshop neodošle ani jeden dotaz (K8).
+ */
+export const getEnrichState = () => getJson<EnrichStatePayload>('/api/catalog/enrich');
 
 /**
  * Prepnutie režimu rozsahu. Uvoľnenie (pilotný → plný, aj zdvihnutie stropu)

@@ -97,7 +97,9 @@ import Link from 'next/link';
 import { useCallback, useState, type ReactNode } from 'react';
 
 import { StandPanel } from '@/components/campaigns/BlockerList';
+import DiscountPresets from '@/components/campaigns/DiscountPresets';
 import DiscountState from '@/components/campaigns/DiscountState';
+import DiscountTimeline from '@/components/campaigns/DiscountTimeline';
 import styles from '@/components/campaigns/zlavy.module.css';
 import {
   featureDiscounts,
@@ -739,6 +741,22 @@ export function DiscountsList({ selectedId = null, detail = null }: DiscountsLis
           </div>
         </div>
       )}
+
+      {/*
+       * DVA ROZKLIKY POD OBRAZOVKOU (V4, 31. 8. 2026) — teda mimo počtu sekcií
+       * (P5) a pod dominantou (P1):
+       *
+       *  · PRESETY (D112) — pomenované kombinácie filtra, pásiem a dĺžky okna.
+       *    Klik na preset je ODKAZ na formulár novej zľavy; zľava sa aj z neho
+       *    zapíše až po skúške naprázdno a po potvrdení (I3, K7).
+       *  · OKNÁ ZLIAV V ČASE (graf G1) — `/api/insights/timeline`. Rebrík
+       *    hovorí, ktoré zľavy existujú; os hovorí, kedy sa prekrývajú.
+       *
+       * Kreslia sa aj na prázdnej obrazovke: preset môže existovať skôr než
+       * prvá zľava a os to vie priznať vetou.
+       */}
+      <DiscountPresets />
+      <DiscountTimeline />
     </div>
   );
 }

@@ -234,6 +234,42 @@ describe('D49 — not_found blokuje len daný produkt', () => {
   });
 });
 
+describe('429 uprostred dávky — kvóta, nie chybné položky (31. 8. 2026)', () => {
+  /**
+   * Nález I3: `rate_limited` NEMAL v executore vlastnú vetvu, takže spadol do
+   * všeobecnej — položka `failed` a cyklus pokračoval ďalej. Dôvodom 429 je
+   * pritom vyčerpaná kvóta KĽÚČA (a tú appka od D118 míňa aj čítaním —
+   * obohacovanie beží na tom istom `shop_write`), takže ďalšia položka dostane
+   * to isté 429 a kampaň sa v PRODUKČNOM eshope dopíše spolovice: časť zliav
+   * zapísaná, zvyšok `failed`, a nikde nie je napísané, že to bola kvóta.
+   *
+   * Správne chovanie je to isté ako pri vyčerpanom rozpočte: zastaviť, zvyšok
+   * NEoznačiť ako chybu a kampaň vrátiť do fronty s dôvodom.
+   */
+  it('429 zastaví dávku, zvyšok zostane pending a kampaň ide do queued', async () => {
+    const { executor, apiKeyRepo, world, audit } = makeWorld({ productIds: [201, 202, 203] });
+    // Druhý ZÁPIS (produkt 202) dostane 429 vo všetkých pokusoch retry politiky.
+    mock.state.failNth(2, 'rate_limited', { target: 'write', times: 4, retryAfterSeconds: 1 });
+
+    const result = await executor.executeCampaign(1);
+
+    expect(result.status).toBe('queued');
+    expect(world.campaignsRepo.campaigns.get(1)?.statusReason).toBe('shop_rate_limited');
+    // Kľúč sa NEDOTKLO — 429 nie je výrok o kľúči (X1).
+    expect(apiKeyRepo.wipedWith).toEqual([]);
+    expect(apiKeyRepo.plaintext).not.toBeNull();
+
+    const items = await world.campaignItemsRepo.listByCampaign(1);
+    // Tretia položka NIE JE chyba — čaká, kým kvóta nabehne.
+    expect(items.map((i) => i.status)).toEqual(['ok', 'failed', 'pending']);
+    expect(items[1]?.errorMessage).toContain('kvótu');
+    // A na shop po 429 už nič neodišlo.
+    const writtenIds = mock.state.writeRequests().map((r) => r.body.id);
+    expect(writtenIds).not.toContain('203');
+    expect(audit.byEvent('campaign_finished')).toHaveLength(0);
+  });
+});
+
 describe('D51/D52 — 401/403 uprostred dávky', () => {
   it('401 wipne kľúč, zvyšok je interrupted a kampaň prejde do needs_key', async () => {
     const { executor, world, apiKeyRepo, audit } = makeWorld({ productIds: [201, 202, 203] });

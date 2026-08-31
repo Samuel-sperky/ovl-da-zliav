@@ -7,7 +7,16 @@
  * - Heslo sa číta zo súboru (`DB_PASSWORD_FILE`) — v produkcii je to jediná
  *   povolená cesta (D89, I1). Plaintext hesla sa nikdy neloguje.
  * - Retry pripájania podľa D91 (DB kontajner môže nabiehať dlhšie).
- * - `timezone: 'Z'` — všetky `DATETIME` sú v DB v UTC (D31, §2).
+ * - `timezone: 'Z'` — POZOR, NEZNAMENÁ to, že v stĺpci sú UTC hodiny. Merané
+ *   28. 8. 2026 (vlna 1 sprintu V4): round-trip cez tento pool je presný
+ *   (`Date` → `DATETIME` → `Date` dá tú istú chvíľu), ale hodnota uložená
+ *   v stĺpci nesie LOKÁLNE hodiny procesu, nie UTC. Predchádzajúca veta tu
+ *   tvrdila „všetky `DATETIME` sú v DB v UTC" a podľa nej by niekto napísal
+ *   dotaz porovnávajúci DB hodnoty s `UTC_TIMESTAMP()` alebo s UTC reťazcom —
+ *   a ten by mlčky vracal zlé riadky. Porovnávaj preto vždy cez `Date` z tohto
+ *   poolu, nie surové stĺpce s UTC. Chovanie sa ZÁMERNE nemení: prepnutie
+ *   `timezone` by prepísalo význam všetkých už uložených dátumov.
+ *   Konverzia do `Europe/Bratislava` naďalej patrí do `domain/dates.ts` a UI (D31).
  * - `decimalAsNumber: false` — `DECIMAL(10,2)` prichádza ako string, aby sa
  *   s peniazmi nikdy nepočítalo vo float (§2).
  */
@@ -45,7 +54,8 @@ export function getPool(): Pool {
     user: env.DB_USER,
     password: resolveAppPassword(),
     connectionLimit: env.DB_CONNECTION_LIMIT,
-    // UTC v DB, konverzia do Europe/Bratislava len v domain/dates.ts a v UI (D31).
+    // NEMENIŤ: v stĺpci sú lokálne hodiny procesu, round-trip je presný
+    // (merané 28. 8. 2026) — viď docblock vyššie.
     timezone: 'Z',
     decimalAsNumber: false,
     bigIntAsNumber: true,

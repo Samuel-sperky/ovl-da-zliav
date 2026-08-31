@@ -95,3 +95,25 @@ export const ordersReadBudget: ReadBudget = createReadBudget({
   store: readBudgetStore,
   lane: 'orders',
 });
+
+/**
+ * ZDIEĽANÉ počítadlo čítaní `getFull` so ZÁPISOVÝM kľúčom v scope
+ * `product:read` — obohacovanie katalógu (D118) a overenie zľavy v shope
+ * (`/api/catalog/reduction-check`).
+ *
+ * Prečo to NIE JE `anonReadBudget` (stav do 31. 8. 2026): `getFull` je čítanie
+ * S KĽÚČOM, takže shop ho účtuje NA KĽÚČ (~200/UTC deň), kým `anon` je strop
+ * NA IP, z ktorého žije dvojdňová synchronizácia katalógu. Účtovaním do `anon`
+ * si obohacovanie bralo cudzí strop: konzervatívne voči banu, ale katalóg tým
+ * dostával menej, než mu patrí — a naopak, obohacovanie sa zastavilo na 240
+ * namiesto 160, čo je práve to číslo, ktoré shop sleduje.
+ *
+ * Prečo to NIE JE `ordersReadBudget`, hoci má rovnaké čísla: je to INÝ KĽÚČ
+ * (`shop_write` vs. `orders_read`) a shop účtuje na kľúč. Jedno počítadlo pre
+ * obe by znamenalo, že predajnosť a obohacovanie si navzájom kradnú strop,
+ * ktorý v skutočnosti nezdieľajú.
+ */
+export const productReadBudget: ReadBudget = createReadBudget({
+  store: readBudgetStore,
+  lane: 'product_read',
+});

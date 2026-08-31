@@ -472,6 +472,12 @@ export async function checkRunawayAndMaybeLock(deps: GuardsDeps = {}): Promise<G
  * K2 — denný rozpočet. Spotreba sa počíta VÝHRADNE z auditu (`write_attempt`
  * za UTC deň), nikdy z počítadlového stĺpca.
  *
+ * ČÍTANIA na tom istom kľúči rozpočet znižujú, ale nikdy nie pod
+ * `WRITE_QUOTA_RESERVE` (`budget.ts`) — inak by vyčerpaná čítacia dráha
+ * (`product_read`, dosiahnuteľná aj cudzím GETom na `/api/catalog/reduction-check`)
+ * odmietla celú frontu. Táto brána preto NIKDY nevráti „vyčerpané" len kvôli
+ * čítaniam; `status.exhausted` znamená, že rozpočet minuli ZÁPISY.
+ *
  * ZÁMERNE nie je v `runPreWriteGuards()`: vyčerpaný rozpočet nie je odmietnutie
  * zápisu, je to informácia, že sa pokračuje zajtra. Volajúci (executor) z toho
  * robí `queued`, nie `failed`.

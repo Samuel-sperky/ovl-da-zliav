@@ -151,12 +151,14 @@ describe('V15 — dohľadanie v eshope', () => {
 /* ═════════════════════════ C. Poradie riadkov ═════════════════════════════ */
 
 describe('V15 — triedenie', () => {
-  it('predvolené je najdrahšie prvé a tabuľka ho posiela explicitne (bod 19)', () => {
+  it('predvolené sú najhoršie ležiaky prvé a tabuľka ich posiela explicitne (V4 §5 K4)', () => {
     // Repozitár má vlastný default `name`, takže bez tohto parametra by
     // obrazovka ukazovala iné poradie, než má napísané v hlavičke stĺpca.
-    expect(DEFAULT_CATALOG_FILTER.sort).toBe('price_desc');
+    // Do 31. 8. 2026 tu bolo `price_desc` (kontrakt UI bod 19); kontrakt V4
+    // otvára obrazovku na tom, čo sa nepredáva, nie na tom, čo je najdrahšie.
+    expect(DEFAULT_CATALOG_FILTER.sort).toBe('sold_asc');
     expect(catalogSearchQuery(DEFAULT_CATALOG_FILTER, { sorting: true })).toContain(
-      'sort=price_desc',
+      'sort=sold_asc',
     );
     // Ten istý reťazec bez výslovnej žiadosti poradie NENESIE — inde v appke
     // znamená otázku, nie pohľad.
@@ -175,7 +177,8 @@ describe('V15 — triedenie', () => {
   });
 
   it('neznáme poradie v adrese spadne na predvolené, nikdy na výnimku', () => {
-    expect(parseCatalogFilter({ sort: 'podla_naladi' }).sort).toBe('price_desc');
+    expect(parseCatalogFilter({ sort: 'podla_naladi' }).sort).toBe('sold_asc');
+    expect(parseCatalogFilter({ sort: 'price_desc' }).sort).toBe('price_desc');
     expect(parseCatalogFilter({ sort: 'sold_asc' }).sort).toBe('sold_asc');
     expect(parseCatalogFilterQuery('sort=name').sort).toBe('name');
   });

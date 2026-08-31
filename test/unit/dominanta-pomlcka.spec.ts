@@ -39,6 +39,7 @@ import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import ProductDetailPanel, { SoldDominant } from '@/components/products/ProductDetailPanel';
 import { buildTiers, type SelectableRow } from '@/components/campaigns/discounts-model';
 import type { CatalogRowView } from '@/components/products/catalog-api';
+import { soldUnitsViaCoverage } from '@/components/products/sold-coverage';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
@@ -75,7 +76,21 @@ const panel = (row: CatalogRowView = ROW): string =>
  * `renderToStaticMarkup` efekty nespúšťa. Práve preto tam defekt prežil.
  */
 const dominant = (sold: number | null): string =>
-  renderToStaticMarkup(createElement(SoldDominant, { sold, windowDays: 30 }));
+  renderToStaticMarkup(
+    createElement(SoldDominant, {
+      /*
+       * Bunku vyrába `soldUnitsViaCoverage()` — pri PLNOM pokrytí okna, aby sa
+       * v tomto súbore meral rez a znak, nie priznanie medzery (to má vlastný
+       * test v `produkty-kpi-bunky.spec.ts`). Bez pokrytia by nula bola
+       * pomlčka a testy nižšie by merali inú vetu, než na akú boli napísané.
+       */
+      cell: soldUnitsViaCoverage(sold, 30, {
+        asked: true,
+        coverage: { syncEnabled: true, daysCovered: 30, from: '2026-07-21', to: '2026-08-19' },
+      }),
+      windowDays: 30,
+    }),
+  );
 
 const SELECTION: SelectableRow[] = [
   { productId: 18342, name: 'Strieborné náušnice Lumen', price: '34.90', unitsSold: 0, discountedNow: false },
@@ -83,7 +98,7 @@ const SELECTION: SelectableRow[] = [
 
 const CONFIRM_PROPS = {
   itemsCount: 8000,
-  tiers: buildTiers(SELECTION, 180),
+  tiers: buildTiers(SELECTION, 180).tiers,
   averagePrice: 46.2,
   typed: '',
   onTyped: () => {},

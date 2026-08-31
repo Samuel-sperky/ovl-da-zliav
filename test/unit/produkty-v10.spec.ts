@@ -117,7 +117,8 @@ describe('V10 — filter katalógu prežije cestu cez adresu', () => {
       soldBuckets: 'zzz',
     });
     expect(parsed.soldWindowDays).toBe(30);
-    expect(parsed.perPage).toBe(50);
+    // Predvolená dávka je od kontraktu V4 §5 K4 sto riadkov (strop KPI).
+    expect(parsed.perPage).toBe(100);
     expect(parsed.page).toBe(1);
     expect(parsed.soldBuckets).toEqual([]);
   });

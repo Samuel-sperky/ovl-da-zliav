@@ -29,23 +29,42 @@
  *    tá má šesť pevných stĺpcov a na polovici monitora by tlačila obrazovku do
  *    vodorovného skrolu (kontrakt UI, bod 12).
  *
- * Vlastník: V9.
+ * ČO PRIBUDLO 28. 8. 2026 (V4, kontrakt §2 bod 6)
+ * -----------------------------------------------
+ * Dva fakty pod stĺpcami: **najbližší plánovaný zápis** a **posledný výsledok
+ * zápisu**. Obidva odpovedajú na otázku, ktorú „čo beží" nezodpovedá — či appka
+ * do shopu naozaj píše. Zľava môže pokojne „bežať" a fronta pritom stáť.
+ *
+ * Nie sú to vety o príčine (P8): je tam čas a sú tam počty, záver si robí
+ * človek. A `null` v oboch znamená „NEVIDÍME nič", nie „nič nie je" —
+ * najbližší zápis sa hľadá len v okne prepínača a aktivita len v prečítaných
+ * dňoch.
+ *
+ * Vlastník: V9; dva fakty pod stĺpcami V4.
  */
 import Link from 'next/link';
 
 import StateLine from '@/components/dashboard/StateLine';
 import styles from '@/components/dashboard/overview.module.css';
 import type { InsightRow } from '@/components/dashboard/api';
-import type { LiveCampaign } from '@/components/dashboard/overview-model';
+import type { LastWrite, LiveCampaign, NextFire } from '@/components/dashboard/overview-model';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
-import { formatDateSk } from '@/lib/ui/format';
+import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
+import { NEVIEME } from '@/lib/ui/product-label';
 
 export interface CampaignsSectionProps {
   /** Bežiace a pripravené zľavy; `null` = nepodarilo sa načítať. */
   campaigns: LiveCampaign[] | null;
   /** Zistenia zo servera; `null` = nepodarilo sa načítať. */
   insights: InsightRow[] | null;
+  /**
+   * Najbližší plánovaný zápis v okne prepínača. `null` = žiadny NEVIDÍME;
+   * `undefined` = obrazovka o to nežiadala a riadok sa nekreslí vôbec.
+   */
+  nextFire?: NextFire | null;
+  /** Posledný deň, v ktorom appka naozaj niečo zapisovala. `null` = žiadny. */
+  lastWrite?: LastWrite | null;
 }
 
 /** Koľko riadkov sa do stĺpca zmestí, kým sekcia neprerastie obrazovku (P4). */
@@ -138,7 +157,90 @@ function InsightLine({ row }: { row: InsightRow }) {
   );
 }
 
-export function CampaignsSection({ campaigns, insights }: CampaignsSectionProps) {
+/**
+ * Chvost riadku o poslednom zápise — po jednom údaji za každý zmeraný počet.
+ *
+ * TROJSTAVOVOSŤ JE TU CELÝ ZMYSEL (I11, 31. 8. 2026). Každý zo štyroch počtov
+ * môže byť HODNOTA, alebo `null`, čo znamená „appka to pole neprečítala".
+ * Kým bol nečitateľný počet nula, karta o produkčných zápisoch tvrdila
+ * „0 sa nepodarilo" tichým vynechaním údaja — a to je poloprávda, ktorá
+ * vyzerá lepšie než skutočnosť. Neprečítaný počet sa preto PÍŠE, nie vynecháva;
+ * vynechať sa smie len zmeraná nula.
+ *
+ * `null` znamená, že sa nedal prečítať ANI JEDEN zo štyroch počtov — vtedy sa
+ * o výsledku nedá povedať nič a priznanie patrí do hlavičky riadku, nie za bodku.
+ */
+function writeTail(lastWrite: LastWrite): string[] | null {
+  const { ok, failed, uncertain, skipped } = lastWrite;
+  if (ok === null && failed === null && uncertain === null && skipped === null) return null;
+
+  const tail: string[] = [];
+  tail.push(ok === null ? 'nevieme, koľko sa zlacnilo' : `${formatCountSk(ok)} zlacnených`);
+  if (failed === null) tail.push('nevieme, koľko sa nepodarilo');
+  else if (failed > 0) tail.push(`${formatCountSk(failed)} sa nepodarilo`);
+  if (uncertain === null) tail.push('nevieme, pri koľkých je zápis neistý');
+  else if (uncertain > 0) tail.push(`${formatCountSk(uncertain)} nevieme, či sa zapísalo`);
+  if (skipped === null) tail.push('nevieme, koľko sa preskočilo');
+  else if (skipped > 0) tail.push(`${formatCountSk(skipped)} preskočených`);
+  return tail;
+}
+
+/**
+ * Dva fakty o ZÁPISE pod stĺpcami zliav.
+ *
+ * Prečo je posledný výsledok zápisu na Prehľade a nie len v Histórii: „zľava
+ * beží" je tvrdenie o okne dátumov, nie o tom, že sa niečo zapísalo. Bez tohto
+ * riadku sa tie dve veci na prístrojovej doske nedali rozlíšiť.
+ *
+ * Nepodarené a neisté položky sú v tom istom riadku ako úspešné a NIE pod
+ * rozklikom: „zapísalo sa 240" bez „12 sa nepodarilo" je poloprávda, ktorá
+ * vyzerá lepšie než skutočnosť.
+ */
+function WriteFacts({
+  nextFire,
+  lastWrite,
+}: {
+  nextFire: NextFire | null | undefined;
+  lastWrite: LastWrite | null | undefined;
+}) {
+  if (nextFire === undefined && lastWrite === undefined) return null;
+
+  const parts: string[] = [];
+
+  if (nextFire !== undefined) {
+    parts.push(
+      nextFire === null
+        ? `Najbližší plánovaný zápis ${NEVIEME} — v tomto okne žiadny nevidíme`
+        : `Najbližší plánovaný zápis ${formatDateTimeSk(nextFire.fireAt)} · ${nextFire.name} (−${nextFire.percent} %)`,
+    );
+  }
+
+  if (lastWrite !== undefined) {
+    if (lastWrite === null) {
+      parts.push('Posledný zápis do shopu — v prečítaných dňoch ani jeden');
+    } else {
+      const tail = writeTail(lastWrite);
+      parts.push(
+        tail === null
+          ? `Posledný zápis ${NEVIEME} — najnovší deň (${formatDateSk(lastWrite.day)}) sa nepodarilo prečítať`
+          : `Posledný zápis ${formatDateSk(lastWrite.day)} · ${tail.join(' · ')}`,
+      );
+    }
+  }
+
+  return (
+    <div className="fresh" data-testid="campaigns-write-facts">
+      {parts.join(' — ')}
+    </div>
+  );
+}
+
+export function CampaignsSection({
+  campaigns,
+  insights,
+  nextFire,
+  lastWrite,
+}: CampaignsSectionProps) {
   // Prázdne pole znamená „appka nemá ani jednu zľavu"; `null` znamená „zoznam
   // sa nepodarilo prečítať". Sú to dve rôzne veci a nesmú splynúť.
   const firstRun = campaigns !== null && campaigns.length === 0;
@@ -205,6 +307,8 @@ export function CampaignsSection({ campaigns, insights }: CampaignsSectionProps)
           */}
         </div>
       </div>
+
+      <WriteFacts nextFire={nextFire} lastWrite={lastWrite} />
     </section>
   );
 }

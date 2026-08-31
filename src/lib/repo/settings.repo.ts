@@ -65,9 +65,15 @@ export interface ScopeSettings {
 
 /**
  * Fail-closed default (K1 bod 1). `pilot` + strop 10 je najprísnejší možný
- * stav. `dailyWriteBudget` je pri neznalosti 1: fronta sa tým nezastaví
- * (pokračuje ďalší deň), ale ani sa nerozbehne na plné obrátky nad DB,
- * o ktorej práve nič nevieme.
+ * stav. `dailyWriteBudget` je pri neznalosti 1: fronta sa tým SPOMALÍ na jeden
+ * zápis za UTC deň a nezastaví sa (pokračuje ďalší deň), ale ani sa nerozbehne
+ * na plné obrátky nad DB, o ktorej práve nič nevieme.
+ *
+ * To „nezastaví sa" drží `WRITE_QUOTA_RESERVE` v `lib/engine/budget.ts`:
+ * čítania na tom istom kľúči sa odpočítavajú len NAD rezervou, a pri rozpočte 1
+ * je rezerva celá tá jednotka. Do 31. 8. 2026 to bola nepravda — čítania sa
+ * odpočítavali z celého stropu, takže vyčerpaná čítacia dráha spravila z tejto
+ * jednotky nulu a fronta sa zastavila úplne.
  */
 export const FAIL_CLOSED_SCOPE: ScopeSettings = {
   mode: 'pilot',

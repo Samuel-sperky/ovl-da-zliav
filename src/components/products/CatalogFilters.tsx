@@ -350,6 +350,15 @@ export function CatalogFilters({
           sľubovala stav eshopu — appka ho nepozná a políčka ho nefiltrujú. */}
       <div className="fgroup">
         <h3>Zľavy podľa vlastných zápisov</h3>
+        {/* Odkedy má tabuľka aj stĺpec „Zľava v shope" (V4 D114), musí byť
+            povedané, ktorá z tých dvoch viet sa dá filtrovať. Podľa shopu to
+            nejde a nemá ísť: jeho odpoveď appka pozná len pri OBOHATENÝCH
+            produktoch, takže taký filter by sa pýtal na zlomok katalógu
+            a vydával ho za celok (I11). */}
+        <p className="lvl-3" data-testid="filter-discount-source-note">
+          Filtruje sa podľa toho, čo zapísala appka. Čo o zľave hovorí shop, je
+          v stĺpci „Zľava v shope“ — a len pri obohatených produktoch.
+        </p>
         <label className="fopt">
           <input
             className="cb"

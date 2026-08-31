@@ -7,6 +7,8 @@
  *
  *   - `GET  /api/products`                 — paginácia `data/page/per_page/total`
  *   - `GET  /api/products/get?id=`         — `{ok:true,…}` / `{ok:false,errors:['not found']}`
+ *   - `GET  /api/products/getFull?id=`     — back-office polia v obálke
+ *                                            `{ok:true,result:{…}}` a kľúčom
  *   - `POST /api/products/setReduction`    — auth + scope + validácie, `{ok:true,id}`
  *   - `POST /api/batch`                    — max 25, positional `results`,
  *                                            `batch_not_allowed`, `invalid_item`
@@ -23,6 +25,12 @@
  * Čo mock ZÁMERNE nevracia: aktuálnu zľavu. Reálny shop ju nevracia (backlog B1)
  * a keby ju vracal mock, testy by potvrdzovali neexistujúcu schopnosť (I11).
  * `state.getProduct(id).lastReduction` je dostupný len testu, nie appke.
+ *
+ * VÝNIMKA (28. 8. 2026): `getFull` zľavu vracia, lebo presne to je jeho dôvod
+ * existencie v API v5 (bod B1) a `productFullSchema` tie tri kľúče VYŽADUJE
+ * (nullable). Nezľahčuje to I11 — keď zľava nebeží, mock pošle `null`, a to je
+ * meraný fakt „zľava nie je", nie zliate s „nevieme". Verejné `get` a zoznam
+ * zľavu naďalej nevracajú.
  *
  * Vlastník: A6.
  */
@@ -50,6 +58,7 @@ const MAX_BODY_BYTES = 1_000_000;
 export const MOCK_PATHS = {
   productList: '/api/products',
   productGet: '/api/products/get',
+  productGetFull: '/api/products/getFull',
   setReduction: '/api/products/setReduction',
   batch: '/api/batch',
 } as const;
@@ -262,6 +271,84 @@ function handleProductGet(input: HandlerInput): MockResponse {
 }
 
 /**
+ * Back-office polia `getFull` odvodené z mock produktu.
+ *
+ * `MockProduct` (v `state.ts`, ktorý táto úloha needituje) nesie len `id`,
+ * `name`, `price` a `has_attributes`, takže ostatné polia mock POČÍTA — vždy
+ * rovnako pre to isté `id`, aby boli asserty stabilné. Nie sú to „skutočné"
+ * hodnoty shopu, ale ich TVAR aj typová tolerancia sú verné: peniaze idú ako
+ * string (PHP serializuje `DECIMAL` občas takto), počty ako číslo, `active`
+ * ako `1`.
+ *
+ * **Maržu mock nepočíta ako appka** — dáva ju hotovú, presne ako reálny shop:
+ * appka ju z ceny a nákupu dopočítavať NESMIE.
+ */
+function productFullBody(product: MockProduct): Record<string, unknown> {
+  const purchase = product.price * 0.4;
+  const margin = product.price - purchase;
+  const reduction = product.lastReduction ?? null;
+
+  return {
+    ...productDetailBody(product),
+    // Stav zľavy — jediné miesto, kde ho mock priznáva (bod B1). `null` = zľava
+    // nebeží; je to MERANÝ fakt, nie „nevieme" (I11).
+    reduction_percent: reduction === null ? null : reduction.reduction,
+    reduction_from: reduction === null ? null : reduction.from,
+    reduction_to: reduction === null ? null : reduction.to,
+
+    reference: `REF-${product.id}`,
+    ean13: String(8_590_000_000_000 + product.id),
+    purchase_price: purchase.toFixed(2),
+    margin: margin.toFixed(2),
+    margin_percent: ((margin / product.price) * 100).toFixed(2),
+    sell_price: product.price.toFixed(2),
+    sell_price_with_vat: (product.price * 1.2).toFixed(2),
+    active: 1,
+    date_add: '2026-01-15 09:30:00',
+    last_time_in_order: '2026-08-20 14:05:00',
+    qty: 10 + (product.id % 7),
+    qty_in_orders: product.id % 5,
+    supplier: 'Mock Supplier s.r.o.',
+    categories: [2, 11],
+  };
+}
+
+/**
+ * `GET /api/products/getFull?id=` — prvé ČÍTANIE, ktoré nesie kľúč (v5, A1).
+ *
+ * Poradie kontrol je ako pri zápise: identita → scope → validácia → existencia.
+ * Úspech ide v obálke `{ok:true,result:{…}}`, teda v tom tvare, ktorý
+ * `unwrapShopResult()` rozbaľuje — dovtedy bol krytý len unit testom nad
+ * telom, nie skutočným HTTP.
+ *
+ * SCOPE: `MockScope` v `state.ts` (iná úloha, needitujem) `product:read` ešte
+ * nepozná, takže mock berie ako čítajúci každý kľúč, ktorý má `product:read`
+ * ALEBO `product:edit`. Vetva `403 forbidden` je tým naďalej dosiahnuteľná —
+ * kľúčom, ktorý má len `orders:read`.
+ *
+ * `ip_banned` a `429` + `Retry-After` sem NEPÍŠEM znova: `decideFailure()` ich
+ * na čítacej ceste už rozhoduje pred routovaním, takže test si ich zapne cez
+ * `state.ipBanned({ reads: true })` a `state.rateLimit(n)` a dopadnú aj na
+ * `getFull`. Duplicitná vetva v handleri by len umožnila, aby sa obe rozišli.
+ */
+function handleProductGetFull(input: HandlerInput): MockResponse {
+  const { state, apiKey } = input;
+  if (!state.isKnownKey(apiKey)) return transport(401, 'unauthorized');
+
+  const scopes: readonly string[] = state.scopesOf(apiKey) ?? [];
+  const canRead = scopes.includes('product:read') || scopes.includes('product:edit');
+  if (!canRead) return transport(403, 'forbidden');
+
+  const id = toNumber(input.query.id ?? input.body.id);
+  if (id === null || !Number.isInteger(id)) return failure(400, ['no id']);
+
+  const product = state.getProduct(id);
+  if (product === undefined) return failure(404, ['not found']);
+
+  return { status: 200, body: { ok: true, result: productFullBody(product) } };
+}
+
+/**
  * `POST /api/products/setReduction` — jediný zápisový endpoint, ktorý appka volá.
  * Poradie kontrol kopíruje shop: identita → scope → validácia → existencia.
  */
@@ -393,6 +480,10 @@ function route(input: HandlerInput): { response: MockResponse; batchItems?: Reco
     if (action === 'get') {
       if (method !== 'GET') return { response: transport(405, 'method_not_allowed') };
       return { response: handleProductGet(input) };
+    }
+    if (action === 'getFull') {
+      if (method !== 'GET') return { response: transport(405, 'method_not_allowed') };
+      return { response: handleProductGetFull(input) };
     }
     if (action === 'setReduction') {
       if (method !== 'POST') return { response: transport(405, 'method_not_allowed') };

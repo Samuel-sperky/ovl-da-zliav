@@ -417,9 +417,143 @@
 @media (max-width: 1100px) {
   .top,
   .mid,
-  .salesGrid {
+  .salesGrid,
+  .rankGrid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ═══════════ V4: stavový PÁS, okná zliav v grafe, top a flop ════════════ */
+
+/*
+ * STAVOVÝ PÁS (V4, kontrakt §2 bod 1).
+ *
+ * Do 28. 8. 2026 bral stav appky vrchnú tretinu obrazovky aj vtedy, keď bolo
+ * všetko v poriadku — a otázka „čo sa predáva" sa tým odsunula pod ohyb. Pás je
+ * jeden riadok: značka, slovo verdiktu, tri fakty a rozklik. Prekážky pod ním
+ * NIE SÚ pod rozklikom; bez kľúča je všetko ostatné na obrazovke dekorácia.
+ */
+.band {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.bandFacts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* Rozklik je `<details>` — bez JS a bez stavu, ktorý by sa dal rozísť. */
+.bandFold > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 0;
+}
+
+.bandFold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.bandBody {
+  margin-top: 12px;
+}
+
+/* ───────────────────────── Okná zliav pod krivkou ───────────────────────── */
+
+/*
+ * Podfarbené okno zľavy. `--sel` je tlmený výberový odtieň, ktorý existuje
+ * v oboch témach; značková zlatá ani stavová škála sem NESMÚ — okno zľavy nie
+ * je stav dát a nemá právo si vziať farbu, ktorá stav kóduje.
+ */
+.discountBand {
+  fill: var(--sel);
+}
+
+.discountEdge {
+  stroke: var(--line2);
+  stroke-width: 1;
+  fill: none;
+}
+
+.discountLabel {
+  fill: var(--dim);
+  font-size: 9px;
+}
+
+/* ─────────────────────────── Top a flop rebríček ────────────────────────── */
+
+/*
+ * Dva stĺpce vedľa seba. NIE tabuľka — Prehľad tabuľku produktov nikdy
+ * neukazuje (architektúra §1) a stráži to test `prehlad.spec.ts`. Zoznam
+ * desiatich riadkov je zistenie, tabuľka je nástroj a ten patrí do Produktov.
+ */
+.rankGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 24px;
+  align-items: start;
+}
+
+.rankCol {
+  min-width: 0;
+}
+
+.rankList {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rankRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rankRow:last-child {
+  border-bottom: 0;
+}
+
+.rankName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pomlčka „nevieme" pri neobohatenom produkte — tlmená, nikdy červená. */
+.rankNote {
+  grid-column: 1 / -1;
+  color: var(--dim);
+  font-size: var(--ovl-fs-micro);
+}
+
+/* ────────────────────── Denná tržba eshopu (D117) ───────────────────────── */
+
+/*
+ * Tržba stojí VEDĽA kusov, nie pod nimi, a nesie vlastnú menovku rozsahu.
+ * Bez nej sa suma prečíta ako obrat produktu alebo zľavy — a to je presne to
+ * číslo, ktoré API nedáva a appka si ho nesmie vymyslieť.
+ */
+.revenueRow {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  align-items: baseline;
 }
 
 /*

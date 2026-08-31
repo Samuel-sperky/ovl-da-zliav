@@ -144,7 +144,14 @@ describe('detail produktu — všetky údaje aj s pôvodom', () => {
 
   it('okno predajnosti sa dá prepnúť priamo v paneli', () => {
     const html = renderPanel(ROW);
-    expect(html).toContain('predaných za posledných');
+    /*
+     * Popisok znie „koľko sa PREDALO…", nie „PREDANÝCH…", a je to zámer
+     * (31. 8. 2026): riadok má `unitsSold: 0` a pokrytie objednávok sa v tomto
+     * renderi ešte nezistilo, takže nula je pomlčka, nie meraný fakt (I11,
+     * `soldDominantCell()`). Vetu s číslom meria `produkty-kpi-bunky.spec.ts`.
+     */
+    expect(html).toContain('predalo za posledných 30 dní');
+    expect(html).toContain('data-testid="detail-units-sold"');
     // Päť okien z kontraktu (30/60/90/180/360), nie jedno napevno.
     for (const days of [30, 60, 90, 180, 360]) {
       expect(html, `chýba okno ${days}`).toContain(`detail-window-${days}`);

@@ -48,6 +48,13 @@ export const DATA_TABLES: readonly string[] = [
   'api_key',
   'login_attempts',
   'users',
+  /*
+   * Počítadlo čítaní (0013). Od 31. 8. 2026 ho číta AJ rozpočet zápisov
+   * (`engine/budget.ts` — jeden kľúč, jedna kvóta), takže zvyšok po inom
+   * súbore by menil `remaining` v testoch, ktoré o čítaniach nič netvrdia.
+   * Preto sa čistí ako ostatné dátové tabuľky.
+   */
+  'shop_read_budget',
 ];
 
 export const SINGLETON_TABLES: readonly string[] = ['settings', 'scheduler_state'];

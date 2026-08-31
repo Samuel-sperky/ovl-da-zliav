@@ -51,6 +51,23 @@ export function variantStockTotal(variants: readonly ProductVariantView[]): numb
   return variants.reduce((sum, variant) => sum + (variant.quantity ?? 0), 0);
 }
 
+/**
+ * Prečo súčet chýba, keď varianty SÚ — a je to iná veta než „shop to nevedie".
+ *
+ * Pomlčka nad zoznamom, v ktorom väčšina variantov sklad povedala, sa čítá ako
+ * chyba. Pravda je konkrétnejšia a dá sa povedať číslom: koľko variantov sklad
+ * nepovedalo. Sčítať len tie známe sa NESMIE — nižšie číslo vydávané za celok
+ * je horšie než priznaná pomlčka (bod 3 hlavičky) a rovnako to rieši čítacia
+ * vrstva (`variantStock` v `lib/repo/catalog.repo.ts` vracia `missing`).
+ *
+ * `null` = súčet je celok, takže niet čo vysvetľovať.
+ */
+export function variantStockNote(variants: readonly ProductVariantView[]): string | null {
+  const silent = variants.filter((variant) => variant.quantity === null).length;
+  if (silent === 0) return null;
+  return `${silent} z ${variants.length} ${pluralSk(variants.length, 'variantu', 'variantov', 'variantov')} sklad nepovedalo, takže súčet by nebol súčet.`;
+}
+
 /** Hodnota variantu ako číslica alebo kód — vždy v číslicovom reze. */
 function Num({ text }: { text: string }) {
   return <b className="num">{text}</b>;
@@ -118,6 +135,7 @@ export function ProductVariants({ extra }: ProductVariantsProps) {
   }
 
   const total = variantStockTotal(variants);
+  const note = variantStockNote(variants);
   return (
     <div data-testid="detail-variants">
       <ul className="varlist">
@@ -133,6 +151,11 @@ export function ProductVariants({ extra }: ProductVariantsProps) {
           render={(value) => <b className="num">{stockText(value)}</b>}
         />
       </div>
+      {note === null ? null : (
+        <div className="lvl-3" data-testid="detail-variant-stock-note">
+          {note}
+        </div>
+      )}
     </div>
   );
 }

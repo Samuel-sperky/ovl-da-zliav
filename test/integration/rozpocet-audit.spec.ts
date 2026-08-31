@@ -20,8 +20,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { closePool } from '@/db/pool';
 import { appendAudit } from '@/lib/audit/write';
 import { addDays } from '@/lib/domain/dates';
-import { auditWriteAttemptCounter, budgetDay, createBudget } from '@/lib/engine/budget';
+import {
+  WRITE_QUOTA_RESERVE,
+  auditWriteAttemptCounter,
+  budgetDay,
+  createBudget,
+} from '@/lib/engine/budget';
+import { checkDailyBudget } from '@/lib/engine/guards';
+import { productReadBudget } from '@/lib/repo/read-budget.repo';
 import { settingsRepo } from '@/lib/repo/settings.repo';
+import { READ_LANE_LIMITS } from '@/lib/shop/read-budget';
 
 import { dbAvailable, setupTestDb, truncateAll, withMigrationConn } from '../helpers/db';
 
@@ -97,6 +105,65 @@ describe.skipIf(!available)('K2 — spotreba rozpočtu zo skutočného audit_log
       remaining: 197,
       exhausted: false,
     });
+  });
+
+  /**
+   * I3 (31. 8. 2026) — ČÍTANIA NA TOM ISTOM KĽÚČI. `shop_write` má scope
+   * `product:read` aj `product:edit` a shop účtuje kvótu na kľúč, takže
+   * obohacovanie katalógu (dráha `product_read`, D118) míňa strop zápisov.
+   * Toto je PRODUKČNÉ zapojenie: `createBudget({ settingsRepo })` bez
+   * podsúvaného počítadla — presne tak, ako ho stavia `campaigns/_shared.ts`,
+   * `queue/route.ts`, `status/route.ts` aj `scheduler/boot.ts`.
+   */
+  it('čítania na tom istom kľúči znížia zvyšok zápisov (produkčné zapojenie)', async () => {
+    for (const productId of [601, 602]) {
+      await appendAudit({ actor: 'scheduler', eventType: 'write_attempt', productId });
+    }
+    const reserved = await productReadBudget.reserve(10);
+    expect(reserved.granted).toBe(10);
+
+    const status = await createBudget({ settingsRepo }).remainingToday();
+    expect(status.spent).toBe(2);
+    expect(status.keyedReadsToday).toBe(10);
+    expect(status.remaining).toBe(188);
+  });
+
+  /**
+   * NÁLEZ 1 z review V4 (31. 8. 2026) — a je to PRODUKČNÉ zapojenie, nie fake.
+   *
+   * Prvá verzia odpočítania brala čítania z celého stropu, takže vyčerpaná
+   * dráha `product_read` (dosiahnuteľná aj cudzím GETom na
+   * `/api/catalog/reduction-check`, ktorý bránu pôvodu mať nemôže) znížila
+   * rozpočet zápisov z 200 na 40 — a pri nízkom `daily_write_budget` až na
+   * nulu, teda na odmietnutie celej fronty. `WRITE_QUOTA_RESERVE` je tá časť
+   * kvóty, na ktorú čítania nedosiahnu.
+   */
+  it('vyčerpaná čítacia dráha NEZASTAVÍ zápisy — zostane rezerva', async () => {
+    const lane = READ_LANE_LIMITS.product_read.perUtcDay;
+    const reserved = await productReadBudget.reserve(lane);
+    expect(reserved.granted).toBe(lane);
+    expect((await productReadBudget.status()).exhausted).toBe(true);
+
+    const status = await createBudget({ settingsRepo }).remainingToday();
+    expect(status.keyedReadsToday).toBe(lane);
+    expect(status.writeReserve).toBe(WRITE_QUOTA_RESERVE);
+    expect(status.remaining).toBe(WRITE_QUOTA_RESERVE);
+    expect(status.exhausted).toBe(false);
+
+    // A brána fronty ju preto NEODMIETNE (`checkDailyBudget` číta `exhausted`).
+    const guard = await checkDailyBudget({ settingsRepo });
+    expect(guard.ok).toBe(true);
+  });
+
+  it('pri `daily_write_budget = 1` sa fronta spomalí, nezastaví (produkčné zapojenie)', async () => {
+    await settingsRepo.setDailyWriteBudget(1);
+    await productReadBudget.reserve(READ_LANE_LIMITS.product_read.perUtcDay);
+
+    const status = await createBudget({ settingsRepo }).remainingToday();
+    expect(status.budget).toBe(1);
+    expect(status.keyedReadsCharged).toBe(0);
+    expect(status.remaining).toBe(1);
+    expect(status.exhausted).toBe(false);
   });
 
   it('rozpočet znížený v nastaveniach sa prejaví hneď (K2 — konfigurovateľný nadol)', async () => {

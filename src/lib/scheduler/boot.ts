@@ -34,6 +34,7 @@ import { auditRepo } from '@/lib/repo/audit.repo';
 import { campaignItemsRepo } from '@/lib/repo/campaign-items.repo';
 import { campaignsRepoV3 } from '@/lib/repo/campaigns.repo';
 import { catalogRepo } from '@/lib/repo/catalog.repo';
+import { productReadBudget } from '@/lib/repo/read-budget.repo';
 import { schedulerStateRepo } from '@/lib/repo/scheduler-state.repo';
 import { settingsRepo } from '@/lib/repo/settings.repo';
 import { createShopClientFromSettings } from '@/lib/shop/client';
@@ -47,8 +48,14 @@ import {
   type CatalogRunReport,
 } from './catalog-runner';
 import type { ExecuteCampaignFn } from './due';
+import {
+  runEnrichBatchIfDue,
+  ENRICH_LOCK_NAME,
+  type EnrichRunnerDeps,
+  type EnrichRunReport,
+} from './enrich-runner';
 import type { ExecuteQueuedCampaignFn } from './queue';
-import { createTicker, type Ticker } from './tick';
+import { createTicker, type Ticker, type TickDeps } from './tick';
 
 const log = logger.child({ module: 'scheduler' });
 
@@ -130,9 +137,79 @@ export function syncCatalogNow(): Promise<CatalogRunReport> {
   return runCatalogSyncNow(catalogRunnerDeps());
 }
 
-function buildTicker(): Ticker {
+/**
+ * D118 bod 2 — závislosti DÁVKY OBOHACOVANIA nad produkčným klientom,
+ * `catalog_cache` a ZÁPISOVÝM kľúčom shopu.
+ *
+ * Prečo je to tu a nie v `enrich-runner.ts`: to isté pravidlo ako pri katalógu —
+ * runner nesmie závisieť na poole, aby jeho unit testy bežali bez DB, a jedno
+ * miesto wiringu je aj jedno miesto, kde sa dá pokaziť.
+ *
+ * Kľúč je `apiKeyRepo`, teda ten istý zápisový kľúč shopu, ktorým sa píšu zľavy:
+ * `getFull` chce scope `product:read` a ten má práve on. Objednávkový kľúč sa do
+ * tejto cesty nesmie dostať (I8' bod 4) a nedostane — táto funkcia oň nikdy
+ * nežiada a scan zdrojov to vynucuje.
+ *
+ * Rozpočet je `productReadBudget` (dráha `product_read`), nie `anon`: `getFull`
+ * je čítanie S KĽÚČOM a shop ho účtuje na kľúč. Je to to isté počítadlo, aké
+ * používa `POST /api/catalog/enrich`, takže dávka a obohatenie na dopyt sa
+ * navzájom vidia — inak by rezerva `ENRICH_QUOTA_RESERVE` nič nechránila.
+ *
+ * ENV sa čítajú VO FUNKCII (na module scope by to lámalo `next build`).
+ */
+function enrichRunnerDeps(overrides: Partial<EnrichRunnerDeps> = {}): EnrichRunnerDeps {
+  return {
+    // Čítacia časť klienta — zápis zľavy sa cez tento typ nedá zavolať.
+    shop: createShopClientFromSettings(settingsRepo),
+    apiKey: apiKeyRepo,
+    catalog: catalogRepo,
+    reads: productReadBudget,
+    // Druhá vrstva súbežnosti; `running` v runneri chráni len TENTO module graf.
+    lock: () => tryAcquireLock(ENRICH_LOCK_NAME, 0),
+    logger: log,
+    ...overrides,
+  };
+}
+
+/**
+ * Krok ticku pre obohacovanie. Je to factory, nie funkcia, len preto, aby si
+ * test mohol podsunúť LISTY dávky (kľúč, spánok) bez toho, aby prepisoval sám
+ * krok — ten musí zostať produkčný, inak by test dokazoval fake.
+ */
+function createEnrichStep(
+  overrides: Partial<EnrichRunnerDeps> = {},
+): (opts: { now: Date; queueBusy: boolean; catalogBusy: boolean }) => Promise<EnrichRunReport> {
+  return (opts) => runEnrichBatchIfDue(enrichRunnerDeps(overrides), opts);
+}
+
+/**
+ * Čo si testy smú podsunúť namiesto produkčného zapojenia.
+ *
+ * Zámerne dve oddelené polia, nie jedno `Partial<TickDeps>`: krok obohacovania
+ * musí ostať PRODUKČNÝ aj v teste, ktorý ho spúšťa (inak by test dokazoval
+ * vlastný fake — presne nález E1). Test preto prepisuje len LISTY vnútri dávky
+ * (`enrich`), nikdy samotný krok.
+ */
+export interface SchedulerWiringOverrides {
+  /** Susedia ticku (kampane, fronta, katalóg) — pre testy zapojenia. */
+  readonly tick?: Partial<TickDeps>;
+  /**
+   * Listy dávky obohacovania. Dve veci sa v testoch z produkcie vziať NEDAJÚ:
+   * kľúč (bez master key sa nedá dešifrovať) a skutočná pauza 3 750 ms medzi
+   * čítaniami. Oboje má engine ako vstup práve preto.
+   */
+  readonly enrich?: Partial<EnrichRunnerDeps>;
+}
+
+/**
+ * Závislosti ticku PRESNE TAK, ako ich zapája produkcia. `buildTicker()` z nich
+ * skladá ticker a nič k nim nepridáva, takže test, ktorý si ich vyžiada, testuje
+ * ten istý objekt, aký beží v `instrumentation` — nie svoju rekonštrukciu.
+ */
+export function schedulerTickDeps(overrides: SchedulerWiringOverrides = {}): TickDeps {
   const shop = createShopClientFromSettings(settingsRepo);
-  return createTicker({
+  const enrichOverrides = overrides.enrich ?? {};
+  return {
     campaigns: campaignsRepoV3,
     items: campaignItemsRepo,
     apiKey: apiKeyRepo,
@@ -146,6 +223,14 @@ function buildTicker(): Ticker {
     // K2 — výška rozpočtu zo `settings`, spotreba z auditu za UTC deň.
     budget: createBudget({ settingsRepo }),
     catalogSync: catalogSyncStep,
+    /*
+     * D118 bod 2 — dávka obohacovania. Bez tohto riadku by `runEnrichBatch()`
+     * mala nula volajúcich a celé obohacovanie by existovalo len ako kód, ktorý
+     * prejde testami a v produkcii sa nikdy nespustí (nález E1 v inej podobe).
+     * `enrichOverrides` sú výhradne listy dávky (kľúč, spánok) — samotný krok
+     * je vždy tento produkčný.
+     */
+    enrich: createEnrichStep(enrichOverrides),
     isStopping: isGracefulStopRequested,
     log,
     config: {
@@ -153,7 +238,12 @@ function buildTicker(): Ticker {
       timeZone: env.LOGIC_TIMEZONE,
       midnightFreezeSeconds: env.MIDNIGHT_FREEZE_SECONDS,
     },
-  });
+    ...overrides.tick,
+  };
+}
+
+function buildTicker(): Ticker {
+  return createTicker(schedulerTickDeps());
 }
 
 export function startScheduler(): void {

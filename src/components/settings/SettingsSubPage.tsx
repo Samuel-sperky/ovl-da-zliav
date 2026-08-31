@@ -34,6 +34,7 @@ import AuditPanel from '@/components/audit/AuditPanel';
 import BudgetSection from '@/components/settings/BudgetSection';
 import DiagnosticsSection from '@/components/settings/DiagnosticsSection';
 import DomainForm from '@/components/settings/DomainForm';
+import EnrichSection from '@/components/settings/EnrichSection';
 import FeatureIndex from '@/components/settings/FeatureIndex';
 import KeysSection from '@/components/settings/KeysSection';
 import LockedFeatures from '@/components/settings/LockedFeatures';
@@ -52,12 +53,14 @@ import ActionFailurePanel from '@/components/ui/ActionFailure';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
   getCatalog,
+  getEnrichState,
   getKeyMeta,
   getOrdersKeyMeta,
   getQueue,
   getSettings,
   getStatus,
   type CatalogView,
+  type EnrichStatePayload,
   type KeyMetaView,
   type QueueView,
   type SettingsView,
@@ -92,6 +95,7 @@ export function SettingsSubPage({ slug }: SettingsSubPageProps) {
   const [queue, setQueue] = useState<QueueView | null>(null);
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [catalog, setCatalog] = useState<CatalogView | null>(null);
+  const [enrich, setEnrich] = useState<EnrichStatePayload | null>(null);
   const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [ready, setReady] = useState(needs.length === 0);
 
@@ -112,10 +116,23 @@ export function SettingsSubPage({ slug }: SettingsSubPageProps) {
       setOrdersKey(o.ok ? o.data : null);
     }
     if (needs.includes('queue')) {
-      const [q, st, c] = await Promise.all([getQueue(), getStatus(), getCatalog()]);
+      /*
+       * Štvrté volanie je stav DÁVKY obohacovania. Je tu vedome: do 31. 8. 2026
+       * `catalog_enrich_state` nečítal žiadny endpoint ani komponent, takže dávka
+       * mohla stáť tri týždne s odmietnutou adresou a Nastavenia o tom mlčali.
+       * Cena sú tri dotazy po indexe a ani jedno volanie eshopu (K8).
+       */
+      const [q, st, c, e] = await Promise.all([
+        getQueue(),
+        getStatus(),
+        getCatalog(),
+        getEnrichState(),
+      ]);
       setQueue(q.ok ? q.data : null);
       setStatus(st.ok ? st.data : null);
       setCatalog(c.ok ? c.data.catalog : null);
+      // Neúspech NIE JE prázdny stav: `null` znamená „nevieme" a sekcia to povie.
+      setEnrich(e.ok ? e.data : null);
     }
     setReady(true);
   }, [needs]);
@@ -140,6 +157,7 @@ export function SettingsSubPage({ slug }: SettingsSubPageProps) {
       queue,
       status,
       catalog,
+      enrich,
       reload: () => void load(),
     });
   };
@@ -167,6 +185,7 @@ interface SectionInput {
   queue: QueueView | null;
   status: StatusPayload | null;
   catalog: CatalogView | null;
+  enrich: EnrichStatePayload | null;
   reload: () => void;
 }
 
@@ -211,6 +230,10 @@ function sections(page: SettingsPage, input: SectionInput) {
           <WritesSection status={input.status} settings={settings} />
           {many ? groupTitle(page.groups[1].title) : null}
           <BudgetSection settings={settings} queue={input.queue} catalog={input.catalog} />
+          {/* Dávka obohacovania míňa denný ČÍTACÍ rozpočet, takže patrí pod
+              rozpočty — a hlavne: je to jediné miesto v appke, kde sa dá
+              prečítať, PREČO dávka stojí (D118 bod 2, D120). */}
+          <EnrichSection enrich={input.enrich} />
         </>
       );
 

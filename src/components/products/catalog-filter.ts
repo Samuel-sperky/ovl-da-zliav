@@ -24,7 +24,8 @@
  *
  * Triedenie je poradie, nie podmienka
  * ───────────────────────────────────
- * `sort` je súčasťou stavu (predvolene NAJDRAHŠIE PRVÉ — kontrakt UI, bod 19),
+ * `sort` je súčasťou stavu (predvolene NAJHORŠIE LEŽIAKY PRVÉ — kontrakt V4
+ * §5 K4; do 31. 8. 2026 najdrahšie prvé, kontrakt UI bod 19),
  * ale do query stringu sa dostane LEN na vyžiadanie (`sorting: true`), a to
  * z jediného miesta: z volaní tabuľky Produktov. Dôvod je, že ten istý reťazec
  * slúži aj ako kľúč filtra a ako odkaz do novej zľavy — tam znamená OTÁZKU,
@@ -48,16 +49,23 @@ export const SOLD_WINDOWS = [30, 60, 90, 180, 360] as const;
 export type SoldWindow = (typeof SOLD_WINDOWS)[number];
 
 /**
- * Stránkovanie po 50, 100 alebo 200 riadkoch (architektúra §1; tretia možnosť
- * pribudla 19. 8. 2026 s D10).
+ * Stránkovanie po 50 alebo 100 riadkoch (architektúra §1; D10 pridalo 200,
+ * kontrakt V4 §5 K4 ho 31. 8. 2026 zobral späť — pozri nižšie).
  *
- * Dôvod je zmeraný, nie odhadnutý: katalóg má 41 220 riadkov, čo je po 50
- * riadkoch 825 strán a po 200 riadkoch 207. Strop 200 nie je vec vkusu — je to
- * `max(200)` z `GET /api/catalog/search`, väčšiu dávku by route odmietla.
- * Predvolených zostáva 50: tabuľka skroluje vo vlastnom ráme (P4) a 200 je
- * voľba pre toho, kto vyberá hromadne, nie pre toho, kto obrazovku otvoril.
+ * Dôvod je zmeraný, nie odhadnutý: katalóg má 41 348 riadkov, čo je po 50
+ * riadkoch 827 strán a po 100 riadkoch 414.
+ *
+ * PREČO 200 ZMIZLO
+ * ────────────────
+ * Riadok tabuľky už nie je len názov a cena — nesie KPI z
+ * `GET /api/insights/product-kpi` (D114) a tá route má strop `MAX_KPI_IDS = 100`
+ * na jeden dotaz. Dávka 200 by teda znamenala buď DVA dotazy na stránku, alebo
+ * stránku, kde je polovica KPI stĺpcov prázdna. Prvé je N+1 v malom (a kontrakt
+ * V4 ho výslovne zakazuje), druhé je horšie: prázdna bunka na obrazovke
+ * neznamená „stránka je príliš veľká", znamená „o produkte nevieme".
+ * Voľba 200 sa preto neponúka a `perPage` nemá ako prekročiť strop KPI.
  */
-export const PER_PAGE_CHOICES = [50, 100, 200] as const;
+export const PER_PAGE_CHOICES = [50, 100] as const;
 
 export type PerPage = (typeof PER_PAGE_CHOICES)[number];
 
@@ -154,10 +162,25 @@ export const DEFAULT_CATALOG_FILTER: CatalogFilterState = {
   currentlyDiscounted: false,
   neverDiscounted: false,
   shopPresence: 'known',
-  /** Kontrakt UI, bod 19: najdrahšie prvé. */
-  sort: 'price_desc',
+  /**
+   * NAJHORŠIE LEŽIAKY PRVÉ (kontrakt V4 §5 K4, 31. 8. 2026).
+   *
+   * Do V4 tu bolo `price_desc` („najdrahšie prvé", kontrakt UI bod 19). Tabuľka
+   * Produktov je nástroj na hľadanie kusov, ktoré treba zlacniť, a najdrahší
+   * produkt na tú otázku neodpovedá — najmenej predávaný áno. Bod 19 tým
+   * NEZANIKÁ ako preferencia stĺpca ceny (prvý klik na cenu je stále
+   * najdrahšie prvé), mení sa len to, s čím sa obrazovka otvára.
+   *
+   * POZOR, ČO TOTO PORADIE VIE A ČO NIE: triedi ho SQL nad `units_sold` z
+   * `catalog/search`, teda nad súčtom, ktorý nemá bránu `status='complete'` —
+   * nedočítaný deň sa v ňom počíta ako deň s nulou. Je to teda poradie, nie
+   * tvrdenie o číslach, a preto sa ten súčet NIKDY nezobrazuje (zobrazené kusy
+   * sú z KPI, kde brána je). Hlavička stĺpca to hovorí nahlas.
+   */
+  sort: 'sold_asc',
   page: 1,
-  perPage: 50,
+  /** Kontrakt V4 §5 K4: „stránkovanie po 100" — a strop KPI je presne 100. */
+  perPage: 100,
 };
 
 /* ═══════════════════════════ 2. Rozpoznávanie ═════════════════════════════ */

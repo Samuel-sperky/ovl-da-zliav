@@ -23,6 +23,7 @@ import type {
   CampaignRecord,
   CampaignStatus,
   CatalogCacheRecord,
+  DateOnly,
   MoneyString,
   Paged,
   LocalActor,
@@ -151,6 +152,14 @@ export interface RoutesWorld {
    * repozitár nad MariaDB, ktorá v týchto testoch neexistuje.
    */
   readBudget: ReadBudget;
+  /**
+   * D118 — čím route volala prepočet poradia obohacovania. Jeden záznam na
+   * volanie: `today` musí byť deň v ZÓNE LOGIKY a `conn` musí byť `undefined`
+   * (prepočet nesmie visieť na transakcii mutácie).
+   */
+  enrichPriorityCalls: Array<{ today: DateOnly | undefined; conn: unknown }>;
+  /** Nastaví chybu, ktorú prepočet hodí. Mutácia MUSÍ prejsť aj tak. */
+  failEnrichPriority(error: Error | null): void;
   /** Koľko dotazov na posledné vlastné zápisy route spravila (I11, N+1). */
   lastOwnWriteCalls: { single: number; batch: number };
   seedCampaign(
@@ -302,6 +311,19 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
   const readBudgetGate = {
     reserveShopReads: (count = 1) => readBudget.reserve(count),
     shopReadBudget: () => readBudget.status(),
+  };
+
+  /* D118 — prepočet poradia obohacovania v pamäti. Bez neho by
+   * `resolveRoutesDeps()` spadol na produkčný `catalogRepo` nad MariaDB a route
+   * by v teste ticho prepisovala `enrich_priority` v skutočnom zrkadle. */
+  const enrichPriorityCalls: Array<{ today: DateOnly | undefined; conn: unknown }> = [];
+  let enrichPriorityError: Error | null = null;
+  const enrichPriority = {
+    async refreshEnrichPriority(o: { today?: DateOnly; conn?: unknown } = {}) {
+      enrichPriorityCalls.push({ today: o.today, conn: o.conn });
+      if (enrichPriorityError !== null) throw enrichPriorityError;
+      return { allowlist: 0, campaigns: 0, demoted: 0 };
+    },
   };
 
   /** I11 — koľkokrát sa route pýtala na posledný vlastný zápis a akým tvarom. */
@@ -626,6 +648,7 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     allowlistRepo,
     catalogRepo,
     readBudget: readBudgetGate,
+    enrichPriority,
     auditRepo,
     settingsRepo,
     apiKeyRepo,
@@ -687,6 +710,10 @@ export function makeRoutesWorld(opts: RoutesWorldOptions): RoutesWorld {
     apiKeyRepo,
     previewTokens,
     readBudget,
+    enrichPriorityCalls,
+    failEnrichPriority(error: Error | null) {
+      enrichPriorityError = error;
+    },
     lastOwnWriteCalls,
     seedCampaign(campaign, seedItems) {
       const record: CampaignRecord = { ...campaign, id: nextCampaignId };

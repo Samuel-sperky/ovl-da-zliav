@@ -5,6 +5,11 @@
  * prešli redakciou pri zápise aj pri serializácii odpovede, I1) + derivovaný
  * príznak `priceMismatch` — „rozhodoval si nad inou cenou" (D39c).
  *
+ * D116 / K6: `reference` a `productName` prichádzajú z `auditRepo.getById()`,
+ * ktorý ich pripája `LEFT JOIN`-om zo zrkadla katalógu (audit sa neprepisuje).
+ * Spread `...record` ich posiela ďalej; keby sa tu odpoveď niekedy skladala
+ * po poliach, MUSIA v nej zostať — `null` je „nevieme" (I11).
+ *
  * Vlastník: A12.
  */
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';

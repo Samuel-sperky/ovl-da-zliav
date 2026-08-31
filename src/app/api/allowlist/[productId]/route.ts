@@ -5,6 +5,9 @@
  * kampaň v stave `scheduled`/`needs_key`/`missed` (alebo práve `running`) —
  * 409 `campaign_planned` (D40). Fail-closed: pri pochybnosti sa neodoberá.
  *
+ * Po úspešnom odobraní sa TICHO prepočíta poradie obohacovania (D118) — inak by
+ * front navždy vozil dopredu produkt, ktorý už v povolenom zozname nie je.
+ *
  * Vlastník: A12.
  */
 import type { CampaignStatus } from '@/contracts';
@@ -14,6 +17,7 @@ import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/d
 
 import {
   productIdParamSchema,
+  refreshEnrichPriorityQuietly,
   resolveRoutesDeps,
   withRouteErrors,
   type RoutesDeps,
@@ -65,6 +69,9 @@ export function createAllowlistDelete(
             productId: ctx.params.productId,
             message: `Produkt ${ctx.params.productId} odobraný z allowlistu.`,
           });
+          // D118 — až po zápise a audite, a ticho (viď helper): odobranie
+          // produktu nesmie padnúť na tom, že sa nedal preusporiadať front.
+          await refreshEnrichPriorityQuietly(d, ctx.log);
           return { removed: true as const };
         }),
     },

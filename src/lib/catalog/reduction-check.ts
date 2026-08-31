@@ -33,9 +33,9 @@
  *     Rezervácia chodí cez `ReadBudget` z `@/lib/shop/read-budget` — vlastné
  *     počítadlo by znamenalo dve čísla, ktoré si navzájom kradnú strop.
  *     POZOR: `getFull` je čítanie S KĽÚČOM, takže shop ho účtuje NA KĽÚČ, nie na
- *     IP. Správna dráha preň je vlastná (`product`), tá dnes v `ReadLane`
- *     neexistuje a založiť ju je zmena v cudzom súbore — volajúci preto dráhu
- *     vyberá sám a tento modul o nej nevie ani slovo.
+ *     IP. Vlastná dráha preň je `product_read` (od 31. 8. 2026; predtým sa to
+ *     účtovalo do `anon`, teda do stropu NA IP) — volajúci ju vyberá sám
+ *     a tento modul o nej nevie ani slovo.
  *  4. **Neznáme počítadlo NIE JE minutý rozpočet.** `known: false` znamená
  *     „nevieme, koľko dnes odišlo"; nečítať je správne, ale tvrdiť „rozpočet je
  *     minutý" by bolo číslo, ktoré appka nepozná. Dva rôzne výsledky (I11).
@@ -108,6 +108,35 @@ export const REDUCTION_CHECK_MAX = 10;
  */
 export const OWN_WRITES_LOOKBACK = 10;
 
+/**
+ * Aký podiel DENNEJ čítacej dráhy smie minúť overenie zľavy.
+ *
+ * `GET /api/catalog/reduction-check` je čítanie, takže bránu pôvodu (D72, len
+ * mutácie) mať nemôže, a appka nemá prihlásenie (D98–D100). Cudzia stránka
+ * otvorená v tom istom prehliadači teda dokáže na túto cestu posielať GETy —
+ * a keďže od 31. 8. 2026 účtuje do dráhy `product_read` (kvóta ZÁPISOVÉHO
+ * kľúča), vyčerpala by dennú dráhu (160) za pár minút a vzala by obohacovaniu
+ * všetko, čo mu patrí.
+ *
+ * Strop preto NIE JE len minútový: overenie sa zastaví, keď dráha ako celok
+ * prekročí tento podiel. Polovica je vedomé rozdelenie — obohacovaniu katalógu
+ * (behu, ktorý trvá dni a nikto ho nespúšťa z prehliadača) zostane vždy aspoň
+ * druhá polovica, bez ohľadu na to, koľko GETov niekto pošle. Zápisy chráni
+ * `WRITE_QUOTA_RESERVE` na druhej strane (`lib/engine/budget.ts`).
+ */
+export const REDUCTION_CHECK_LANE_SHARE = 0.5;
+
+/**
+ * Koľko čítaní dráhy smie overenie minúť za UTC deň — počíta sa zo stropu,
+ * ktorý ohlásil samotný rozpočet (`ReadBudgetStatus.limit`), nie z ručne
+ * opísaného čísla. Aspoň jedno: overenie jedného produktu musí ísť aj vtedy,
+ * keď je dráha smiešne malá.
+ */
+export function reductionCheckDailyCeiling(laneLimit: number): number {
+  const limit = Number.isFinite(laneLimit) ? Math.max(0, Math.trunc(laneLimit)) : 0;
+  return Math.max(1, Math.floor(limit * REDUCTION_CHECK_LANE_SHARE));
+}
+
 /* ═══════════════════════════ 2. Tvar výsledku ═════════════════════════════ */
 
 /**
@@ -133,6 +162,13 @@ export type ReductionCheckOutcome =
   | 'budget_day'
   /** Minútový strop je na hrane; o chvíľu to pôjde. */
   | 'budget_minute'
+  /**
+   * Denný PODIEL dráhy vyhradený overeniu je minutý (meraný fakt). Dráha ako
+   * celok ešte miesto má — zvyšok patrí obohacovaniu katalógu, ktoré sa z
+   * prehliadača nespúšťa. Nie je to `budget_day`: tvrdiť „rozpočet je minutý",
+   * keď v dráhe zostáva 80 čítaní, by bolo číslo, ktoré appka nepozná (I11).
+   */
+  | 'budget_shared'
   /** Počítadlo čítaní sa nedá prečítať. */
   | 'budget_unknown'
   /** Čítanie spadlo a beh sa zastavil; to, čo sa stihlo, ostáva v riadkoch. */
@@ -266,7 +302,8 @@ async function safeOwn(productId: number, deps: ReductionCheckDeps): Promise<Own
  *   1. strop a duplicity (zadarmo),
  *   2. oprávnenie z pamäte `whoami` (zadarmo, bez siete),
  *   3. kľúč (lokálne dešifrovanie),
- *   4. rozpočet — denný aj minútový (jeden dotaz do vlastnej DB),
+ *   4. rozpočet — denný, minútový aj denný PODIEL dráhy vyhradený overeniu
+ *      (`reductionCheckDailyCeiling()`); jeden dotaz do vlastnej DB,
  *   5. vlastné zápisy (vlastná DB),
  *   6. `getFull` po jednom, sekvenčne (jediná platená časť).
  *
@@ -376,9 +413,21 @@ export async function checkReductionsInShop(
    */
   const minuteRoom = Math.max(0, budget.minuteLimit - budget.usedThisMinute);
   if (minuteRoom < 1) return report('budget_minute', await unreadRows(), { reads: budget });
-  const fetchCap = Math.min(planned.length, minuteRoom);
-  /** Prečo sa plán skrátil — vlastný strop overenia, alebo minúta shopu. */
-  const capReason: 'none' | 'budget_minute' = fetchCap < planned.length ? 'budget_minute' : 'none';
+
+  /*
+   * DENNÝ PODIEL DRÁHY (31. 8. 2026). Nad `reductionCheckDailyCeiling()` sa
+   * overenie nedostane ani po tisíc GEToch — zvyšok dráhy patrí obohacovaniu.
+   * Je to jediná brzda, ktorá funguje aj po minútach: minútový strop cudziemu
+   * GETu nebráni prísť znova o minútu neskôr.
+   */
+  const dailyCeiling = reductionCheckDailyCeiling(budget.limit);
+  const shareRoom = Math.max(0, dailyCeiling - budget.used);
+  if (shareRoom < 1) return report('budget_shared', await unreadRows(), { reads: budget });
+
+  const fetchCap = Math.min(planned.length, minuteRoom, shareRoom);
+  /** Prečo sa plán skrátil — minúta shopu, alebo denný podiel dráhy. */
+  const capReason: 'none' | 'budget_minute' | 'budget_shared' =
+    fetchCap === planned.length ? 'none' : shareRoom <= minuteRoom ? 'budget_shared' : 'budget_minute';
 
   /* ── 5.+6. vlastné zápisy a `getFull` po jednom ─────────────────────────── */
 
@@ -387,7 +436,13 @@ export async function checkReductionsInShop(
   /** Koľko volaní na eshop sa naozaj poslalo — strop sa počíta z toho, nie z riadkov. */
   let attempted = 0;
   let lastBudget: ReadBudgetStatus = budget;
-  let stopped: 'none' | 'budget_day' | 'budget_unknown' | 'budget_minute' | 'failed' = 'none';
+  let stopped:
+    | 'none'
+    | 'budget_day'
+    | 'budget_unknown'
+    | 'budget_minute'
+    | 'budget_shared'
+    | 'failed' = 'none';
   let error: string | null = null;
 
   for (const productId of planned) {
@@ -396,8 +451,8 @@ export async function checkReductionsInShop(
     // Vlastná DB mlčí, beh už stojí, alebo sa minúta shopu naplnila: riadok
     // vznikne aj tak, len s priznaným „nevieme". Nikdy sa nevynechá (bod 1).
     if (own.state === 'unknown' || stopped !== 'none' || attempted >= fetchCap) {
-      if (stopped === 'none' && attempted >= fetchCap && capReason === 'budget_minute') {
-        stopped = 'budget_minute';
+      if (stopped === 'none' && attempted >= fetchCap && capReason !== 'none') {
+        stopped = capReason;
       }
       rows.push({
         productId,

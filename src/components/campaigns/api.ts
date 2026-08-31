@@ -306,6 +306,23 @@ export async function postJson<T>(url: string, body?: unknown): Promise<Envelope
   }
 }
 
+/**
+ * `DELETE` s tou istou obálkou ako `postJson`.
+ *
+ * Prečo tu a nie vo vlastnom module: `parse()` je jediné miesto, kde sa obálka
+ * appky číta, a druhá kópia tých istých piatich riadkov by sa o mesiac rozišla
+ * s prvou (rovnaká úvaha ako pri `dashboard/json.ts`). Telo sa NEPOSIELA —
+ * mazanie identifikuje výhradne adresa.
+ */
+export async function delJson<T>(url: string): Promise<Envelope<T>> {
+  try {
+    const res = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
+    return await parse<T>(res);
+  } catch {
+    return { ok: false, error: { code: 'network', message: 'Server neodpovedá. Skús znova.' } };
+  }
+}
+
 /* ── lokálna validácia (I9) — VŽDY pred odoslaním na server ────────────── */
 
 export const PERCENT_MIN = 1;

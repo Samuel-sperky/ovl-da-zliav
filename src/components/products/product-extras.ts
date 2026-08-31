@@ -79,7 +79,10 @@
  *
  * Vlastník: E2 (povrch), vlna „kód a EAN" 20. 8. 2026.
  */
-import { pluralSk } from '@/lib/ui/vocabulary';
+import type { KpiGap, SalesDayCoverage } from '@/contracts';
+
+import { formatDateSk, formatEur } from '@/lib/ui/format';
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═════════════════ 1. Tri „prázdna", jeden slovník ════════════════════════ */
 
@@ -333,9 +336,22 @@ export function stockField(
   if (extra === undefined) return absent('pending');
   const product = extra.keyed?.stockQuantity ?? null;
   if (product !== null) return known(product);
-  const counted = extra.variants.filter((v) => v.quantity !== null);
-  if (counted.length > 0) {
-    return known(counted.reduce((sum, v) => sum + (v.quantity ?? 0), 0));
+  /*
+   * SÚČET JE CELOK, ALEBO NIČ (28. 8. 2026).
+   *
+   * Do tohto dňa sa tu sčítali varianty, ktoré sklad POVEDALI, a tie, ktoré ho
+   * nepovedali, sa ticho zahodili — jeden variant s neznámym množstvom teda
+   * vyrobil číslo NIŽŠIE než skutočnosť a vydával ho za celok. To je presne
+   * chyba, ktorú I11 zakazuje: nižšie číslo vyzerá ako meranie a nikto ho
+   * neodhalí.
+   *
+   * Čítacia vrstva to rieši rovnako a bola tu prvá: `variantStock` v
+   * `lib/repo/catalog.repo.ts` vracia pri hocijakom neznámom variante
+   * `missing('shop_has_none')`, nie súčet. To isté pravidlo má na povrchu
+   * `variantStockTotal()` v `ProductVariants.tsx`.
+   */
+  if (extra.variants.length > 0 && extra.variants.every((v) => v.quantity !== null)) {
+    return known(extra.variants.reduce((sum, v) => sum + (v.quantity ?? 0), 0));
   }
   if (!hasAttributes && extra.keyed === null) return absent('locked');
   return absent('none');
@@ -525,4 +541,702 @@ export async function fetchProductExtras(
     }
     return { ok: false, error: OFFLINE };
   }
+}
+
+/* ═════════════════ 8. KPI, obohatenie na dopyt a uplift (V4) ══════════════
+ *
+ * DRUHÁ POLOVICA TOHTO MODULU — a je zámerne oddelená od prvej.
+ *
+ * Sekcie 1–7 hovoria o `products/get` a o troch prázdnach, ktoré z neho plynú
+ * (`AbsenceKind`). Od 28. 8. 2026 (KONTRAKT-V4 §2b) má panel druhý zdroj:
+ * obohatenie `getFull` uložené v `catalog_cache` a čítané cez
+ * `/api/insights/product-kpi`, `/api/insights/product/[productId]`
+ * a `POST /api/catalog/enrich`.
+ *
+ * PREČO TO NEPOUŽÍVA `AbsenceKind`
+ * ────────────────────────────────
+ * `AbsenceKind` má tri stavy a všetky tri hovoria o oprávnení a o doťahovaní
+ * verejnej cesty. Čítacia vrstva KPI má INÉ prázdna (`KpiGap` v `@/contracts`)
+ * a rozdiel medzi nimi je presne to, čo I11 chrániť káže:
+ *
+ *   `not_enriched`   — `getFull` sa na produkt NIKDY nepýtalo. Kvóta je ~200
+ *                      čítaní na deň a katalóg má 41 348 produktov (~207 dní),
+ *                      takže je to NORMÁLNY stav väčšiny riadkov (D118).
+ *   `shop_has_none`  — pýtalo sa a shop o tom poli nič nevie.
+ *   `days_missing`   — okno predajov nie je celé stiahnuté, takže súčet by bol
+ *                      nanajvýš dolná hranica (D119).
+ *   `not_computable` — obe ingrediencie poznáme, ale pomer hodnotu nemá.
+ *
+ * Zliať `not_enriched` a `days_missing` do jednej pomlčky by zahodilo rozdiel
+ * medzi „o produkte nevieme nič" a „o TOMTO OKNE nevieme": prvé sa spraví
+ * jedným čítaním, druhé len sťahovaním predajov. A zliať ktorékoľvek z nich do
+ * NULY je chyba, ktorá sa v tomto repe už raz dostala do produkcie (pozri
+ * `KpiGap` v `@/contracts`).
+ *
+ * Preto je tu DRUHÝ slovník — `KpiGapKind` — a nie štvrtý stav v prvom.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * ───────────────────────
+ *  a. **Nič sa nedopočítava.** Marža, percentá, uplift ani rozdiel sa tu
+ *     NERÁTAJÚ; berú sa tak, ako prišli (D114: shop dáva maržu hotovú).
+ *  b. **Uplift, ktorý sa spočítať nedá, nedostane číslo.** `upliftView()` má
+ *     v neúspešnej vetve tvar, ktorý čísla porovnania NEOBSAHUJE — nie „číslo
+ *     s výhradou". 26. 8. 2026 (commit `d00e081`) sa v tomto repe dve okná
+ *     PRED zľavou vydávali za výkon zľavy; endpoint to už rieši a povrch to
+ *     nesmie zakryť.
+ *  c. **`ip_banned` nie je porucha appky.** Od 28. 8. 2026 shop odmieta našu
+ *     adresu na všetko (KONTRAKT-V4 §2b), takže „nedotiahlo sa" je BEŽNÁ cesta
+ *     a hovorí sa vetou, nie chybovým hlásením.
+ *
+ * Vlastník: vlna V4-DETAIL (bočný panel, D115).
+ */
+
+/* ───────── 8a. Prázdna čítacej vrstvy KPI ─────────────────────────────── */
+
+/**
+ * Prečo KPI nemá hodnotu. Štyri dôvody sú `KpiGap` zo servera, dva pribudli
+ * na povrchu, lebo server ich povedať nemá odkiaľ:
+ *
+ *  · `not_loaded` — odpoveď zatiaľ neprišla (panel sa práve otvoril). Bez
+ *    tohto stavu by nedotiahnuté KPI vyzeralo ako `not_enriched`, teda ako
+ *    tvrdenie o produkte namiesto tvrdenia o nás.
+ *  · `unreadable` — pole v odpovedi je v tvare, ktorý sa prečítať nedá.
+ *    NIE JE to „shop to nevie": je to priznanie, že sa rozišli tvary.
+ */
+export type KpiGapKind = KpiGap | 'not_loaded' | 'unreadable';
+
+/** Hodnota KPI, alebo dôvod, prečo tam nie je. Tretia možnosť neexistuje. */
+export type KpiField<T> =
+  | { readonly known: true; readonly value: T }
+  | { readonly known: false; readonly gap: KpiGapKind };
+
+export const kpiKnown = <T>(value: T): KpiField<T> => ({ known: true, value });
+export const kpiMissing = <T>(gap: KpiGapKind): KpiField<T> => ({ known: false, gap });
+
+/**
+ * Slovo pre každé prázdno. Povinné — je to jediný kanál, ktorý prejde cez
+ * farbosleposť aj cez čítačku obrazovky (pozri hlavičku `ProductFacts.tsx`).
+ */
+export const KPI_GAP_WORD: Readonly<Record<KpiGapKind, string>> = {
+  not_enriched: 'produkt nie je obohatený',
+  shop_has_none: 'eshop to nevedie',
+  days_missing: 'dni chýbajú',
+  not_computable: 'nedá sa spočítať',
+  not_loaded: 'zatiaľ nenačítané',
+  unreadable: 'nečitateľná odpoveď',
+};
+
+/** Celá veta do `title` — to, čo sa do riadku nezmestí. */
+export const KPI_GAP_TITLE: Readonly<Record<KpiGapKind, string>> = {
+  not_enriched:
+    'Appka si tento produkt z eshopu ešte nevypýtala. Doťahuje sa prioritizovane, nie plošne — celý katalóg by pri kvóte kľúča trval mesiace.',
+  shop_has_none: 'Appka sa pýtala a eshop pri tomto kuse tento údaj nevedie.',
+  days_missing:
+    'Časť dní okna nie je stiahnutá, takže súčet by bol nanajvýš dolná hranica. Nula by tvrdila, že sa nepredalo.',
+  not_computable: 'Obe čísla poznáme, ale pomer z nich hodnotu nemá (delenie nulou).',
+  not_loaded: 'Odpoveď servera zatiaľ neprišla.',
+  unreadable: 'Pole v odpovedi má tvar, ktorý sa prečítať nedá. Appka si nič nedomyslela.',
+};
+
+/**
+ * Značka pre každé prázdno. Tvary sú z jedinej sady (`ui/Icon.tsx`).
+ *
+ * Dve mená sa zámerne opakujú: `shop_has_none` aj `not_computable` znamenajú
+ * „hodnota neexistuje" (prázdny krúžok) a `days_missing` aj `unreadable`
+ * znamenajú „pozor, číslo by klamalo". ROZDIEL medzi nimi nesie SLOVO, nie
+ * značka — značiek je v sade menej než dôvodov a vymýšľať pre povrch nový tvar
+ * by rozbilo sadu, ktorá platí pre celú appku.
+ *
+ * `not_enriched` má štvorec („strop vyčerpaný") zámerne: dôvod, prečo produkt
+ * obohatený nie je, JE strop kvóty (~200 čítaní na deň, D118).
+ */
+export const KPI_GAP_ICON: Readonly<
+  Record<KpiGapKind, 'circle' | 'loader' | 'square' | 'alertTriangle'>
+> = {
+  not_enriched: 'square',
+  shop_has_none: 'circle',
+  days_missing: 'alertTriangle',
+  not_computable: 'circle',
+  not_loaded: 'loader',
+  unreadable: 'alertTriangle',
+};
+
+/* ───────── 8b. Tvar, ktorý povrch potrebuje ───────────────────────────── */
+
+/** Stav zľavy PODĽA SHOPU (`KpiDiscountState` v `@/contracts`). */
+export type KpiDiscountStateKind = 'running' | 'scheduled' | 'ended' | 'none' | 'unknown';
+
+export interface KpiDiscountView {
+  readonly state: KpiDiscountStateKind;
+  /** % zľavy, ktorá v posudzovaný deň NAOZAJ beží. Mimo `running` vždy prázdno. */
+  readonly activePercent: KpiField<number>;
+  /** % okna tak, ako ho shop nahlásil — aj pre okno mimo dneška. */
+  readonly reportedPercent: KpiField<number>;
+  readonly from: string | null;
+  readonly to: string | null;
+  /** Kedy sa stav zmeral. `null` = produkt nie je obohatený (I11). */
+  readonly measuredAt: string | null;
+}
+
+/** Okno predajov a to, koľko z neho appka NEMÁ (D119). */
+export interface KpiWindowView {
+  readonly windowDays: number;
+  readonly from: string;
+  readonly to: string;
+  readonly completeDays: number;
+  readonly unknownDays: number;
+  readonly units: KpiField<number>;
+  /** `true` ⇔ hodnota je len DOLNÁ HRANICA. */
+  readonly lowerBound: boolean;
+}
+
+/** KPI jedného produktu, ako ich povrch potrebuje. Dátumy sú ISO reťazce. */
+export interface ProductKpiView {
+  readonly productId: number;
+  /** `true` = zrkadlo katalógu produkt vôbec nemá. */
+  readonly missing: boolean;
+  readonly name: string | null;
+  readonly reference: KpiField<string>;
+  readonly supplier: KpiField<string>;
+  readonly purchasePrice: KpiField<number>;
+  /** Marža v EUR TAK, AKO JU POSLAL SHOP. Nikdy dopočítaná. */
+  readonly margin: KpiField<number>;
+  readonly marginPercent: KpiField<number>;
+  readonly priceWithVat: KpiField<number>;
+  readonly stock: KpiField<number>;
+  readonly soldTotal: KpiField<number>;
+  readonly lastSaleAt: KpiField<string>;
+  readonly daysSinceLastSale: KpiField<number>;
+  readonly discount: KpiDiscountView;
+  readonly units30: KpiWindowView;
+  readonly units90: KpiWindowView;
+  readonly noSale: {
+    readonly mark: boolean;
+    readonly proof: 'shop_never_ordered' | 'no_sale_in_covered_days' | null;
+  };
+  /** Kedy sa obohatenie zmeralo. `null` = produkt NIE JE obohatený. */
+  readonly enrichedAt: string | null;
+}
+
+/* ───────── 8c. Fakty z obohatenia ako riadky ──────────────────────────── */
+
+/** Jeden riadok skupiny faktov. Hodnota je UŽ NAFORMÁTOVANÁ na text. */
+export interface KpiFactRow {
+  readonly key: string;
+  readonly label: string;
+  readonly field: KpiField<string>;
+}
+
+/**
+ * Percento BEZ znamienka mínus.
+ *
+ * `formatPercentSk()` píše `−12 %`, lebo vznikol pre ZĽAVU. Marža ani „koľko
+ * percent zľavy v eshope beží" zľavou v tomto zmysle nie sú a mínus pred nimi
+ * je vecná chyba, nie kozmetika.
+ */
+export function percentPlain(value: number): string {
+  return `${value} %`;
+}
+
+/** Kusy ako počet so slovom — `0` je platná nula, nie prázdno. */
+function pieces(value: number): string {
+  return `${formatCountSk(value)} ${pluralSk(value, 'kus', 'kusy', 'kusov')}`;
+}
+
+/** Prepis hodnoty na text; prázdno si nesie svoj dôvod nedotknuté. */
+function mapField<T>(field: KpiField<T>, render: (value: T) => string): KpiField<string> {
+  return field.known ? kpiKnown(render(field.value)) : field;
+}
+
+/**
+ * Marža ako JEDEN údaj: eurá a percentá vedľa seba.
+ *
+ * Percento samo je bez sumy nečitateľné a suma bez percenta sa nedá porovnať
+ * naprieč cenami. Nič sa nedopočítava — keď shop percento nepošle, riadok ho
+ * neuvedie a NEODVODÍ ho z nákupnej a predajnej ceny (D114).
+ */
+export function marginText(view: ProductKpiView): KpiField<string> {
+  const eur = view.margin;
+  if (!eur.known) return eur;
+  if (!view.marginPercent.known) return kpiKnown(formatEur(eur.value));
+  return kpiKnown(`${formatEur(eur.value)} · ${percentPlain(view.marginPercent.value)}`);
+}
+
+/**
+ * Aktívna zľava PODĽA SHOPU ako jeden text.
+ *
+ * `state: 'none'` je MERANÝ FAKT („shop k `measuredAt` povedal, že nič nebeží"),
+ * takže je to hodnota, nie prázdno. `unknown` je naopak prázdno — a keď produkt
+ * nie je obohatený, je to `not_enriched`, nie „bez zľavy".
+ */
+export function activeDiscountText(view: ProductKpiView): KpiField<string> {
+  const { discount } = view;
+  const range =
+    discount.from === null && discount.to === null
+      ? null
+      : `${formatDateSk(discount.from)} – ${formatDateSk(discount.to)}`;
+
+  if (discount.state === 'running') {
+    if (!discount.activePercent.known) return discount.activePercent;
+    const percent = percentPlain(discount.activePercent.value);
+    return kpiKnown(range === null ? percent : `${percent} · ${range}`);
+  }
+  if (discount.state === 'scheduled') {
+    const percent = discount.reportedPercent.known
+      ? `${percentPlain(discount.reportedPercent.value)} `
+      : '';
+    return kpiKnown(`${percent}naplánovaná${range === null ? '' : ` · ${range}`}`.trim());
+  }
+  if (discount.state === 'ended') {
+    return kpiKnown(`skončila${range === null ? '' : ` · ${range}`}`);
+  }
+  if (discount.state === 'none') return kpiKnown('bez zľavy');
+  return kpiMissing(view.enrichedAt === null ? 'not_enriched' : 'shop_has_none');
+}
+
+/** Menovky a poradie faktov. Jedno miesto — riadok sa pridáva aj uberá tu. */
+const FACT_LABELS: readonly { key: string; label: string }[] = [
+  { key: 'reference', label: 'Referencia' },
+  { key: 'supplier', label: 'Dodávateľ' },
+  { key: 'stock', label: 'Sklad' },
+  { key: 'soldTotal', label: 'Celkovo predané' },
+  { key: 'lastSale', label: 'Posledný predaj' },
+  { key: 'purchasePrice', label: 'Nákupná cena' },
+  { key: 'margin', label: 'Marža' },
+  { key: 'discount', label: 'Aktívna zľava v eshope' },
+];
+
+/**
+ * Osem faktov z obohatenia (D114 v revízii §2b) ako ZOZNAM.
+ *
+ * Zoznam, nie natvrdo napísané `<dt>`/`<dd>` páry: počet v nadpise zavretej
+ * skupiny sa počíta z tohto poľa, takže sa nedá rozísť s tým, čo je vnútri.
+ *
+ * `view === null` znamená „odpoveď zatiaľ neprišla", teda `not_loaded` na
+ * VŠETKÝCH riadkoch. Riadky sa NEVYNECHÁVAJÚ: z chýbajúceho riadku sa nedá
+ * zistiť, že tá informácia vôbec existuje.
+ */
+export function kpiFactRows(view: ProductKpiView | null | undefined): readonly KpiFactRow[] {
+  const values: Readonly<Record<string, KpiField<string>>> =
+    view === null || view === undefined
+      ? {}
+      : {
+          reference: view.reference,
+          supplier: view.supplier,
+          stock: mapField(view.stock, stockText),
+          soldTotal: mapField(view.soldTotal, pieces),
+          lastSale: mapField(view.lastSaleAt, formatDateSk),
+          purchasePrice: mapField(view.purchasePrice, formatEur),
+          margin: marginText(view),
+          discount: activeDiscountText(view),
+        };
+
+  return FACT_LABELS.map((entry) => ({
+    key: entry.key,
+    label: entry.label,
+    field: values[entry.key] ?? kpiMissing<string>('not_loaded'),
+  }));
+}
+
+/**
+ * Veta o tom, KEDY sa fakty z eshopu zmerali.
+ *
+ * Bez nej by panel tvrdil, že pozná stav eshopu TERAZ — a to je presne to, čo
+ * I11 zakazuje. Neobohatený produkt preto nedostane čas, ale priznanie.
+ */
+export function measuredNote(view: ProductKpiView | null | undefined): string {
+  if (view === null || view === undefined) return 'Fakty z eshopu sa načítavajú.';
+  if (view.enrichedAt === null) {
+    return 'Tento produkt sa z eshopu ešte nedoťahoval, takže fakty o ňom appka nemá.';
+  }
+  return `Fakty z eshopu zmerané ${formatDateSk(view.enrichedAt)} — nie je to stav v tejto sekunde.`;
+}
+
+/* ───────── 8d. Obohatenie na dopyt (D118) ─────────────────────────────── */
+
+/**
+ * Ako sa skončil pokus obohatiť JEDEN produkt.
+ *
+ * Zrkadlo `EnrichOneOutcome` z `@/lib/engine/catalog-enrich`; komponenty
+ * z `@/lib/engine/` neimportujú, tak zhodu drží typová kontrola v
+ * `test/unit/panel-kpi-produktu.spec.ts`.
+ */
+export type EnrichOutcomeKind =
+  | 'enriched'
+  | 'fresh'
+  | 'invalid_id'
+  | 'not_in_mirror'
+  | 'paused'
+  | 'locked'
+  | 'unknown_scope'
+  | 'no_key'
+  | 'budget_day'
+  | 'budget_minute'
+  | 'budget_unknown'
+  | 'ip_banned'
+  | 'rate_limited'
+  | 'not_found'
+  | 'reduction_unknown'
+  | 'failed';
+
+/**
+ * Veta, ktorou panel povie, ako sa doťahovanie skončilo.
+ *
+ * `tone: 'note'` je BEŽNÁ CESTA — nie porucha. Od 28. 8. 2026 shop odmieta
+ * našu adresu na všetko (`ip_banned`, KONTRAKT-V4 §2b), takže „nedotiahlo sa"
+ * je dnes NORMÁLNY stav a hlásiť ho ako chybu appky by bolo zavádzajúce:
+ * appka funguje, len jej eshop neodpovedá.
+ *
+ * `tone: 'attention'` je vtedy, keď sa s tým dá niečo urobiť (kľúč, kvóta).
+ * Zamknuté sa TU NEVYSVETĽUJE — vysvetlenie má jedno miesto (Nastavenia →
+ * Zamknuté funkcie) a odtiaľ vedie odkaz.
+ */
+export interface EnrichNoticeView {
+  readonly tone: 'note' | 'attention';
+  readonly text: string;
+}
+
+const ENRICH_NOTICE: Readonly<Record<EnrichOutcomeKind, EnrichNoticeView | null>> = {
+  /* Dotiahlo sa — fakty hovoria samé a ďalšia veta by bola šum. */
+  enriched: null,
+  /* Riadok bol dosť svieži, takže sa nič nevolalo. Úspora, nie problém. */
+  fresh: null,
+  invalid_id: { tone: 'attention', text: 'Toto číslo produktu appka za platné nepovažuje.' },
+  not_in_mirror: {
+    tone: 'note',
+    text: 'Tento produkt v načítanom katalógu nie je, takže obohatenie nemá čo doplniť.',
+  },
+  paused: {
+    tone: 'note',
+    text: 'Doťahovanie faktov je pozastavené po tom, čo nás eshop odmietol. Panel ukazuje to, čo je v appke.',
+  },
+  locked: {
+    tone: 'attention',
+    text: 'Fakty z eshopu sú zamknuté — kľúč na ich čítanie právo nemá.',
+  },
+  unknown_scope: {
+    tone: 'attention',
+    text: 'Appka zatiaľ nevie, či kľúč na fakty z eshopu právo má.',
+  },
+  no_key: { tone: 'attention', text: 'Bez kľúča sa fakty z eshopu dotiahnuť nedajú.' },
+  budget_day: {
+    tone: 'note',
+    text: 'Dnešný rozpočet čítaní z eshopu je minutý. Panel ukazuje to, čo je v appke.',
+  },
+  budget_minute: { tone: 'note', text: 'Minútový strop čítaní je na hrane; o chvíľu to pôjde.' },
+  budget_unknown: {
+    tone: 'note',
+    text: 'Rozpočet čítaní sa nedal prečítať, takže sa nič nedoťahovalo.',
+  },
+  ip_banned: {
+    tone: 'note',
+    text: 'Eshop odmieta našu adresu, takže fakty sa teraz dotiahnuť nedajú. Panel ukazuje to, čo je v appke.',
+  },
+  rate_limited: {
+    tone: 'note',
+    text: 'Eshop nás na chvíľu zastavil. Panel ukazuje to, čo je v appke.',
+  },
+  not_found: { tone: 'note', text: 'Eshop tento produkt nepozná, takže fakty o ňom nemá.' },
+  reduction_unknown: {
+    tone: 'note',
+    text: 'Eshop poslal stav zľavy v tvare, ktorý sa prečítať nedá, takže sa neuložilo nič.',
+  },
+  failed: {
+    tone: 'note',
+    text: 'Doťahovanie faktov z eshopu sa nepodarilo. Panel ukazuje to, čo je v appke.',
+  },
+};
+
+/** `null` = niet čo hlásiť (obohatilo sa, alebo bol riadok svieži). */
+export function enrichNotice(outcome: EnrichOutcomeKind | null): EnrichNoticeView | null {
+  if (outcome === null) return null;
+  /*
+   * `?? ENRICH_NOTICE.failed` sa tu použiť NEDÁ a bola to tu skutočná chyba:
+   * `enriched` a `fresh` majú v mape ZÁMERNE `null` („niet čo hlásiť") a `??`
+   * z toho spravilo vetu „doťahovanie sa nepodarilo" — teda hlásenie poruchy
+   * nad úspešne dotiahnutými faktmi. Preto sa neznámy výsledok rozlišuje
+   * PRÍTOMNOSŤOU kľúča, nie hodnotou.
+   */
+  if (!(outcome in ENRICH_NOTICE)) return ENRICH_NOTICE.failed;
+  return ENRICH_NOTICE[outcome];
+}
+
+/* ───────── 8e. Denná krivka 90 dní ────────────────────────────────────── */
+
+/** Jeden deň krivky zo servera. `units: null` = deň sa nesťahoval (NIE nula). */
+export interface SeriesDayWire {
+  readonly day: string;
+  readonly units: number | null;
+  readonly coverage: SalesDayCoverage;
+}
+
+/** Okno VLASTNEJ úspešne zapísanej zľavy (I11), nie stav v shope. */
+export interface DiscountWindowWire {
+  readonly campaignId: number;
+  readonly campaignName: string;
+  readonly percent: number;
+  readonly from: string;
+  readonly to: string;
+}
+
+export interface CurveDayView {
+  readonly day: string;
+  /** `null` = deň nie je dočítaný. NEKRESLÍ sa ako nula (bod A route). */
+  readonly units: number | null;
+  readonly coverage: SalesDayCoverage;
+  /** Ležal ten deň vo VLASTNOM okne zľavy? */
+  readonly inDiscount: boolean;
+}
+
+/** Pás pod krivkou — jedno vlastné okno zľavy, v indexoch dní. */
+export interface CurveBandView {
+  readonly campaignId: number;
+  readonly campaignName: string;
+  readonly percent: number;
+  readonly fromIndex: number;
+  readonly toIndex: number;
+}
+
+export interface ProductCurveView {
+  readonly days: readonly CurveDayView[];
+  readonly from: string;
+  readonly to: string;
+  /** Najvyšší DOČÍTANÝ deň. `null` = ani jeden deň dočítaný, takže niet mierky. */
+  readonly maxUnits: number | null;
+  readonly coveredDays: number;
+  readonly unknownDays: number;
+  /** Súčet za dočítané dni. `null` = ani jeden deň dočítaný (nie nula). */
+  readonly units: number | null;
+  readonly bands: readonly CurveBandView[];
+}
+
+/**
+ * Krivka a pásy zliav z toho, čo prišlo. NIČ SA NEDOPOČÍTAVA.
+ *
+ * Nedočítaný deň si nechá `units: null` — pruh sa nekreslí, kreslí sa šrafovaná
+ * medzera a legenda ju pomenuje slovom. Keby dostal nulu, krivka by tvrdila
+ * prepad predaja, ktorý nikto nezmeral (tá istá pasca ako v `SalesChart`).
+ */
+export function productCurve(
+  days: readonly SeriesDayWire[],
+  windows: readonly DiscountWindowWire[],
+): ProductCurveView {
+  const points: CurveDayView[] = days.map((entry) => ({
+    day: entry.day,
+    units: entry.coverage === 'complete' ? entry.units : null,
+    coverage: entry.coverage,
+    inDiscount: windows.some((window) => window.from <= entry.day && entry.day <= window.to),
+  }));
+
+  const covered = points.filter((point) => point.units !== null);
+  const bands: CurveBandView[] = [];
+  for (const window of windows) {
+    let fromIndex = -1;
+    let toIndex = -1;
+    for (let i = 0; i < points.length; i += 1) {
+      const day = points[i]!.day;
+      if (day < window.from || day > window.to) continue;
+      if (fromIndex === -1) fromIndex = i;
+      toIndex = i;
+    }
+    /* Okno mimo krivky sa NEPRETIAHNE na jej okraj — nakreslilo by pás tam,
+       kde zľava nebola. */
+    if (fromIndex === -1) continue;
+    bands.push({
+      campaignId: window.campaignId,
+      campaignName: window.campaignName,
+      percent: window.percent,
+      fromIndex,
+      toIndex,
+    });
+  }
+
+  return {
+    days: points,
+    from: points[0]?.day ?? '',
+    to: points[points.length - 1]?.day ?? '',
+    maxUnits:
+      covered.length === 0
+        ? null
+        : covered.reduce((max, point) => Math.max(max, point.units ?? 0), 0),
+    coveredDays: covered.length,
+    unknownDays: points.length - covered.length,
+    units:
+      covered.length === 0 ? null : covered.reduce((sum, point) => sum + (point.units ?? 0), 0),
+    bands,
+  };
+}
+
+/** Veta o priznanej medzere. „Nič nechýba" je tiež tvrdenie a hovorí sa nahlas. */
+export function curveGapNote(curve: ProductCurveView): string {
+  const total = curve.days.length;
+  if (total === 0) return 'Za toto okno appka nemá ani jeden deň.';
+  if (curve.unknownDays === 0) {
+    return `Všetky dni okna (${formatCountSk(total)}) sú stiahnuté.`;
+  }
+  return `${formatCountSk(curve.unknownDays)} z ${formatCountSk(total)} dní okna appka nemá stiahnutých — v krivke chýbajú, nie sú nula.`;
+}
+
+/* ───────── 8f. Uplift „pred / počas" (D115, pasca d00e081) ────────────── */
+
+/** Okno uplift-u zo servera. */
+export interface UpliftWindowWire {
+  readonly from: string;
+  readonly to: string;
+  readonly days: number;
+  readonly units: number | null;
+  readonly perDay: number | null;
+}
+
+/** Prečo sa uplift spočítať NEDÁ (`UpliftReason` v `insights/_shared.ts`). */
+export type UpliftReasonKind =
+  | 'no_discount_window'
+  | 'not_started'
+  | 'window_too_short'
+  | 'baseline_overlaps_discount'
+  | 'coverage_gap';
+
+/** Zrkadlo `UpliftResult`. Zhodu drží typová kontrola v teste panela. */
+export interface UpliftWire {
+  readonly available: boolean;
+  readonly reason: UpliftReasonKind | null;
+  readonly campaignId: number | null;
+  readonly campaignName: string | null;
+  readonly percent: number | null;
+  readonly startsOn: string | null;
+  readonly spanDays: number | null;
+  readonly duringTruncated: boolean;
+  readonly before: UpliftWindowWire | null;
+  readonly during: UpliftWindowWire | null;
+  readonly deltaPercent: number | null;
+  readonly deltaReason: 'zero_baseline' | null;
+  readonly missingDuring: readonly string[];
+  readonly missingBefore: readonly string[];
+}
+
+/**
+ * Uplift na vykreslenie — a v neúspešnej vetve BEZ ČÍSEL POROVNANIA.
+ *
+ * Toto je celý dôvod, prečo je to funkcia a nie `if` v JSX. 26. 8. 2026
+ * (commit `d00e081`) sa v tomto repe porovnávali dve okná, ktoré zľave OBE
+ * predchádzali, a nazývalo sa to výkonom zľavy. Endpoint to už rieši
+ * (`upliftFor()` v `app/api/insights/_shared.ts`) a povrch to má NEZAKRYŤ:
+ *
+ *  · keď server povie `available: false`, výsledok je tvaru `unavailable`
+ *    a číslo porovnania v ňom NIE JE ani ako „hodnota s výhradou",
+ *  · povrch uplift NIKDY nepočíta ani nedopočítava; číslo, ktoré server
+ *    nepošle, na obrazovke nevznikne.
+ */
+export interface UpliftValueView {
+  readonly kind: 'value';
+  readonly campaign: string | null;
+  readonly percent: string | null;
+  readonly beforeText: string;
+  readonly beforeRange: string;
+  readonly duringText: string;
+  readonly duringRange: string;
+  /** Rozdiel kusov na deň. `null` = vyjadriť sa nedá (nulová základňa). */
+  readonly deltaText: string | null;
+  readonly deltaNote: string | null;
+  /** `true` = zľava ešte beží, „počas" je len po dnešok. */
+  readonly truncatedNote: string | null;
+  /** Výhrada, ktorá k číslu PATRÍ: sú to dve čísla, nie príčina (P8). */
+  readonly caveat: string;
+}
+
+export interface UpliftGapView {
+  readonly kind: 'unavailable';
+  /** Priznanie. Vždy slovo, nikdy číslo. */
+  readonly word: string;
+  readonly why: string;
+  readonly campaign: string | null;
+  /** Čo by sa porovnávalo, keby dáta boli. Dátumy okien, nikdy hodnoty. */
+  readonly ranges: string | null;
+}
+
+export type UpliftView = UpliftValueView | UpliftGapView;
+
+/** Priznanie, ktoré panel vypíše, keď sa uplift spočítať nedá. */
+export const UPLIFT_UNAVAILABLE_WORD = 'nedá sa spočítať';
+
+const UPLIFT_WHY: Readonly<Record<UpliftReasonKind, string>> = {
+  no_discount_window:
+    'Appka na tento produkt nikdy zľavu nezapísala, takže niet čo s čím porovnať.',
+  not_started: 'Zľava sa ešte nezačala, takže o jej výkone sa nedá povedať nič.',
+  window_too_short: 'Okno zľavy je zatiaľ kratšie než tri dni — porovnanie by bolo šum.',
+  baseline_overlaps_discount:
+    'Do porovnávanej základne zasahuje iná zľava toho istého produktu; zľava sa so zľavou porovnávať nesmie.',
+  coverage_gap:
+    'Niektoré dni porovnávaných okien nie sú stiahnuté, takže rozdiel by meral výpadok sťahovania, nie zľavu.',
+};
+
+const upliftRange = (window: UpliftWindowWire): string =>
+  `${formatDateSk(window.from)} – ${formatDateSk(window.to)}`;
+
+/** Kusy a kusy na deň, VÝHRADNE tak, ako prišli. */
+const upliftUnits = (window: UpliftWindowWire): string => {
+  if (window.perDay === null || window.units === null) return KPI_GAP_WORD.days_missing;
+  return `${pieces(window.units)} · ${window.perDay} na deň`;
+};
+
+export function upliftView(wire: UpliftWire | null | undefined): UpliftView {
+  if (wire === null || wire === undefined) {
+    return {
+      kind: 'unavailable',
+      word: KPI_GAP_WORD.not_loaded,
+      why: KPI_GAP_TITLE.not_loaded,
+      campaign: null,
+      ranges: null,
+    };
+  }
+
+  const campaign =
+    wire.campaignName === null
+      ? null
+      : wire.percent === null
+        ? wire.campaignName
+        : `${wire.campaignName} · ${percentPlain(wire.percent)}`;
+
+  if (!wire.available || wire.before === null || wire.during === null) {
+    /*
+     * ŽIADNE `wire.before.units` ANI `wire.deltaPercent` V TEJTO VETVE.
+     * Server ich pri `available: false` posiela `null`, ale keby ich niekedy
+     * poslal, panel ich vypísať NESMIE — bolo by to číslo vydávané za výkon
+     * zľavy, teda presne d00e081.
+     */
+    const reason = wire.reason;
+    const why =
+      reason === null
+        ? 'Server porovnanie nespočítal a dôvod nepovedal.'
+        : reason === 'not_started' && wire.startsOn !== null
+          ? `${UPLIFT_WHY.not_started} Začína ${formatDateSk(wire.startsOn)}.`
+          : UPLIFT_WHY[reason];
+    const ranges =
+      wire.before === null || wire.during === null
+        ? null
+        : `pred: ${upliftRange(wire.before)} · počas: ${upliftRange(wire.during)}`;
+    return { kind: 'unavailable', word: UPLIFT_UNAVAILABLE_WORD, why, campaign, ranges };
+  }
+
+  return {
+    kind: 'value',
+    campaign,
+    percent: wire.percent === null ? null : percentPlain(wire.percent),
+    beforeText: upliftUnits(wire.before),
+    beforeRange: upliftRange(wire.before),
+    duringText: upliftUnits(wire.during),
+    duringRange: upliftRange(wire.during),
+    /* Rozdiel PRICHÁDZA zo servera. Tu sa nepočíta ani nezaokrúhľuje. */
+    deltaText:
+      wire.deltaPercent === null
+        ? null
+        : `${wire.deltaPercent > 0 ? '+' : ''}${wire.deltaPercent} %`,
+    deltaNote:
+      wire.deltaReason === 'zero_baseline'
+        ? 'Pred zľavou sa nepredalo nič, takže rozdiel v percentách sa vyjadriť nedá.'
+        : null,
+    truncatedNote: wire.duringTruncated ? 'Zľava ešte beží — „počas" je len po dnešok.' : null,
+    caveat:
+      'Sú to dve čísla vedľa seba, nie príčina: appka nevie oddeliť vplyv zľavy od sezóny a skladu.',
+  };
 }

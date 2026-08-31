@@ -10,7 +10,9 @@
  *   `GET /api/status`        — fakty (zápisy, kľúč, rozpočet, rozsah, katalóg)
  *                              a HOTOVÝ zoznam prekážok z `lib/status/blockers`,
  *   `GET /api/catalog/sync`  — kde je synchronizácia katalógu, prečo čaká
- *                              a dokedy to potrvá (A5).
+ *                              a dokedy to potrvá (A5),
+ *   `GET /api/catalog/enrich`— kde stojí DÁVKA obohacovania a prečo
+ *                              (D118 bod 2, D120; od 31. 8. 2026).
  *
  * ČO SA V TOMTO MODULE NESMIE POKAZIŤ
  * -----------------------------------
@@ -45,10 +47,16 @@ import {
   readCode,
   readCount,
   readFlag,
+  readNumber,
   readText,
   readTriState,
 } from '@/components/dashboard/json';
 import { fetchJson } from '@/components/layout/health';
+import {
+  ENRICH_PAUSE_REASONS,
+  type EnrichBatchStateWire,
+  type EnrichStatePayload,
+} from '@/lib/catalog/enrich-view';
 import { isIpBannedCode } from '@/lib/shop/errors';
 
 /* ═══════════════════════════ 1. Prekážky ══════════════════════════════════ */
@@ -320,4 +328,72 @@ export function parseCatalogSync(raw: unknown): CatalogSyncView | null {
 
 export async function getCatalogSync(): Promise<CatalogSyncView | null> {
   return parseCatalogSync(await fetchJson<unknown>('/api/catalog/sync'));
+}
+
+/* ═════════════════ 4. Dávka obohacovania (D118 bod 2, D120) ═══════════════ */
+
+/**
+ * Stav DÁVKY obohacovania z `GET /api/catalog/enrich`.
+ *
+ * Je to iná vec než `parseCatalogSync`: ten hovorí o ZOZNAMOVOM prechode
+ * (`catalog_sync_state`), tento o dávke, ktorá dopĺňa polia z `getFull`
+ * (`catalog_enrich_state`, migrácia 0014). Dva stavy, dve tabuľky, dve dráhy
+ * rozpočtu — nezlievajú sa.
+ *
+ * Vety sa tu NESKLADAJÚ: píše ich `lib/catalog/enrich-view.ts`, ktorý ich dáva
+ * aj sekcii Nastavení. Tento modul len bezpečne prečíta typy — čo sa nedá
+ * prečítať, je `null`, nikdy nula (bod 4 hlavičky).
+ */
+export function parseEnrichState(raw: unknown): EnrichStatePayload | null {
+  const root = asRecord(raw);
+  if (root === null) return null;
+
+  const stateRecord = asRecord(root['state']);
+  const coverageRecord = asRecord(root['coverage']);
+  // Bez pokrytia sa odpoveď nedá použiť ani na pomlčky — tvar je iný, než akému
+  // obrazovka rozumie, a domýšľať si ho by bolo tvrdenie.
+  if (coverageRecord === null) return null;
+
+  const state: EnrichBatchStateWire | null =
+    stateRecord === null
+      ? null
+      : {
+          everRan: readFlag(stateRecord, 'everRan'),
+          batchDay: readText(stateRecord, 'batchDay'),
+          // `null` znamená „dnes nebežala" a je to iná veta než nula (I11).
+          enrichedToday: readCount(stateRecord, 'enrichedToday'),
+          dailyTarget: readCount(stateRecord, 'dailyTarget') ?? 0,
+          startedAt: readText(stateRecord, 'startedAt'),
+          lastReadAt: readText(stateRecord, 'lastReadAt'),
+          pauseReason: readCode(stateRecord, 'pauseReason', ENRICH_PAUSE_REASONS),
+          pausedUntil: readText(stateRecord, 'pausedUntil'),
+          paused: readFlag(stateRecord, 'paused'),
+          waitsForHuman: readFlag(stateRecord, 'waitsForHuman'),
+          failedLastTime: readFlag(stateRecord, 'failedLastTime'),
+          updatedAt: readText(stateRecord, 'updatedAt'),
+        };
+
+  return {
+    state,
+    coverage: {
+      enriched: readCount(coverageRecord, 'enriched'),
+      catalogProducts: readCount(coverageRecord, 'catalogProducts'),
+      shopTotalProducts: readCount(coverageRecord, 'shopTotalProducts'),
+      remaining: readCount(coverageRecord, 'remaining'),
+      percent: readNumber(coverageRecord, 'percent'),
+      estimatedDaysLeft: readCount(coverageRecord, 'estimatedDaysLeft'),
+    },
+    unreadable: Array.isArray(root['unreadable'])
+      ? root['unreadable'].filter((item): item is string => typeof item === 'string')
+      : [],
+    at: readText(root, 'at') ?? '',
+  };
+}
+
+/**
+ * `GET /api/catalog/enrich` — kde stojí dávka a PREČO. Čisté čítanie: na shop
+ * neodošle ani jeden request (K8).
+ */
+export async function getEnrichState(): Promise<EnrichStatePayload | null> {
+  return parseEnrichState(await fetchJson<unknown>('/api/catalog/enrich'));
 }

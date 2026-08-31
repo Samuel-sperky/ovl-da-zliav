@@ -26,14 +26,34 @@
  *
  * Vlastník: doťahovanie detailov, 19. 8. 2026.
  */
+import type { SalesDayCoverage } from '@/contracts';
+
 import {
   absent,
   fieldOf,
+  kpiKnown,
+  kpiMissing,
+  productCurve,
   type AbsenceKind,
+  type ApiErrorView,
+  type DiscountWindowWire,
+  type EnrichOutcomeKind,
   type ExtrasCapabilityState,
+  type KpiDiscountStateKind,
+  type KpiDiscountView,
+  type KpiField,
+  type KpiGapKind,
+  type KpiWindowView,
+  type ProductCurveView,
   type ProductExtraView,
   type ProductExtrasView,
+  type ProductKpiView,
   type ProductVariantView,
+  type Result,
+  type SeriesDayWire,
+  type UpliftReasonKind,
+  type UpliftWindowWire,
+  type UpliftWire,
 } from '@/components/products/product-extras';
 
 /** Hodnota z repozitára: `gap === null` znamená, že hodnotu poznáme. */
@@ -268,3 +288,459 @@ export async function fetchExtras(
 export const PENDING_FIELD = absent<string>('pending');
 
 export { fieldOf };
+
+/* ═════════ KPI, KRIVKA A OBOHATENIE NA DOPYT (V4, D115 / D118) ════════════
+ *
+ * Tri ďalšie cesty pre BOČNÝ PANEL. Prvé dve sú čisto čítacie, tretia doťahuje
+ * `getFull` na JEDEN produkt:
+ *
+ *   `GET  /api/insights/product-kpi?ids=<id>` — fakty z obohatenia (D114),
+ *   `GET  /api/insights/product/<id>`         — denná krivka, okná zliav, uplift,
+ *   `POST /api/catalog/enrich`                — obohatenie TOHO produktu (D118).
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *
+ * 1. **`as` NIE JE overenie.** Odpoveď sa čítá po poliach (`kpiFieldOf`,
+ *    `readNumber`, …). Pole v neznámom tvare skončí ako `unreadable`, nikdy ako
+ *    hodnota a nikdy ako nula. Do 24. 8. 2026 sa v `catalog-api.ts` odpovede
+ *    „overovali" pretypovaním a práve tadiaľ prišiel stav, ktorý zhodil
+ *    obrazovku Zľavy.
+ *
+ * 2. **`gap` sa nesmie stratiť.** `KpiValue` zo servera nesie DÔVOD, prečo
+ *    hodnota chýba (`not_enriched`, `shop_has_none`, `days_missing`,
+ *    `not_computable`). Keby sa tu čítalo len `value`, obrazovka by mala `null`
+ *    a z `null` sa `?? 0` spraví nula v jednom riadku — to je chyba, ktorá sa
+ *    v tomto repe UŽ RAZ dostala do produkcie.
+ *
+ * 3. **Obohatenie NIKDY V CYKLE.** `enrichProduct()` sa volá RAZ na otvorenie
+ *    panela nad jedným produktom. Route je idempotentná (svieži riadok
+ *    `getFull` vôbec nezavolá) a má okenný limit, ale cyklus na povrchu by
+ *    minul dennú kvótu aj tak — na doťahovanie mnohých riadkov je dávka
+ *    na pozadí, nie panel.
+ *
+ * 4. **`ip_banned` nie je chyba tejto vrstvy.** Vracia sa ako `outcome`, teda
+ *    ako MERANÝ výsledok, nie ako `failed`. Panel z toho spraví vetu
+ *    (`enrichNotice()`), nie chybové hlásenie: od 28. 8. 2026 je to bežná cesta.
+ */
+
+/** Neznámy objekt → čitateľný záznam. Pole ani `null` záznam nie je. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+const readNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+const readText = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim().length > 0 ? value : null;
+
+const readBool = (value: unknown): boolean | null =>
+  typeof value === 'boolean' ? value : null;
+
+const KPI_GAPS: readonly KpiGapKind[] = [
+  'not_enriched',
+  'shop_has_none',
+  'days_missing',
+  'not_computable',
+  'not_loaded',
+  'unreadable',
+];
+
+const isKpiGap = (value: unknown): value is KpiGapKind =>
+  typeof value === 'string' && (KPI_GAPS as readonly string[]).includes(value);
+
+/**
+ * `KpiValue<T>` zo servera → `KpiField<T>`.
+ *
+ * `gap === null` znamená „hodnotu POZNÁME" a `0` je platná nula. Rozpor
+ * (`gap === null`, ale hodnota sa prečítať nedá) NIE JE nula ani „shop to
+ * nevie" — je to `unreadable`, teda priznanie, že sa rozišli tvary.
+ */
+function kpiFieldOf<T>(raw: unknown, coerce: (value: unknown) => T | null): KpiField<T> {
+  const record = asRecord(raw);
+  if (record === null) return kpiMissing<T>('unreadable');
+  const gap = record['gap'];
+  const value = coerce(record['value']);
+  if (gap === null || gap === undefined) {
+    return value === null ? kpiMissing<T>('unreadable') : kpiKnown(value);
+  }
+  return kpiMissing<T>(isKpiGap(gap) ? gap : 'unreadable');
+}
+
+/* ───────── Fakty z obohatenia: `/api/insights/product-kpi` ─────────────── */
+
+const DISCOUNT_STATES: readonly KpiDiscountStateKind[] = [
+  'running',
+  'scheduled',
+  'ended',
+  'none',
+  'unknown',
+];
+
+function parseDiscount(raw: unknown): KpiDiscountView {
+  const record = asRecord(raw);
+  const state = record === null ? null : record['state'];
+  return {
+    /* Neznámy stav je `unknown`, nie „bez zľavy": „bez zľavy" je MERANÝ fakt. */
+    state:
+      typeof state === 'string' && (DISCOUNT_STATES as readonly string[]).includes(state)
+        ? (state as KpiDiscountStateKind)
+        : 'unknown',
+    activePercent: kpiFieldOf(record?.['activePercent'], readNumber),
+    reportedPercent: kpiFieldOf(record?.['reportedPercent'], readNumber),
+    from: readText(record?.['from']),
+    to: readText(record?.['to']),
+    measuredAt: readText(record?.['measuredAt']),
+  };
+}
+
+function parseWindow(raw: unknown, fallbackDays: number): KpiWindowView {
+  const record = asRecord(raw);
+  return {
+    windowDays: readNumber(record?.['windowDays']) ?? fallbackDays,
+    from: readText(record?.['from']) ?? '',
+    to: readText(record?.['to']) ?? '',
+    completeDays: readNumber(record?.['completeDays']) ?? 0,
+    /*
+     * Neprečítané pokrytie je NAJHORŠÍ prípad, nie nula: `unknownDays: 0` by
+     * znamenalo „celé okno je stiahnuté" a to je tvrdenie, ktoré sa
+     * z nečitateľnej odpovede urobiť nesmie.
+     */
+    unknownDays: readNumber(record?.['unknownDays']) ?? fallbackDays,
+    units: kpiFieldOf(record?.['units'], readNumber),
+    lowerBound: readBool(record?.['lowerBound']) ?? true,
+  };
+}
+
+const NO_SALE_PROOFS: readonly string[] = ['shop_never_ordered', 'no_sale_in_covered_days'];
+
+export function parseProductKpi(raw: unknown, productId: number): ProductKpiView | null {
+  const page = asRecord(raw);
+  if (page === null) return null;
+  const rows = page['rows'];
+  if (!Array.isArray(rows)) return null;
+  const row = rows.map(asRecord).find((entry) => readNumber(entry?.['productId']) === productId);
+  if (row === undefined || row === null) return null;
+
+  const noSale = asRecord(row['noSale']);
+  const proof = noSale === null ? null : noSale['proof'];
+
+  return {
+    productId,
+    /* Neznáme `missing` je `false`: „zrkadlo ho nemá" je tvrdenie o katalógu. */
+    missing: readBool(row['missing']) ?? false,
+    name: readText(row['name']),
+    reference: kpiFieldOf(row['reference'], readText),
+    supplier: kpiFieldOf(row['supplier'], readText),
+    purchasePrice: kpiFieldOf(row['purchasePrice'], readNumber),
+    margin: kpiFieldOf(row['margin'], readNumber),
+    marginPercent: kpiFieldOf(row['marginPercent'], readNumber),
+    priceWithVat: kpiFieldOf(row['priceWithVat'], readNumber),
+    stock: kpiFieldOf(row['stock'], readNumber),
+    soldTotal: kpiFieldOf(row['soldTotal'], readNumber),
+    lastSaleAt: kpiFieldOf(row['lastSaleAt'], readText),
+    daysSinceLastSale: kpiFieldOf(row['daysSinceLastSale'], readNumber),
+    discount: parseDiscount(row['discount']),
+    units30: parseWindow(row['units30'], 30),
+    units90: parseWindow(row['units90'], 90),
+    noSale: {
+      mark: readBool(noSale?.['mark']) ?? false,
+      proof:
+        typeof proof === 'string' && NO_SALE_PROOFS.includes(proof)
+          ? (proof as 'shop_never_ordered' | 'no_sale_in_covered_days')
+          : null,
+    },
+    enrichedAt: readText(row['enrichedAt']),
+  };
+}
+
+/**
+ * KPI jedného produktu.
+ *
+ * `null` v úspešnej odpovedi znamená, že riadok pre toto ID neprišiel — panel
+ * to kreslí ako „zatiaľ nenačítané", nie ako nuly.
+ */
+export async function fetchProductKpi(
+  productId: number,
+  signal?: AbortSignal,
+): Promise<Result<ProductKpiView | null>> {
+  const res = await getJson(
+    `/api/insights/product-kpi?ids=${encodeURIComponent(String(productId))}`,
+    signal,
+  );
+  if (!res.ok) return res;
+  return { ok: true, data: parseProductKpi(res.data, productId) };
+}
+
+/* ───────── Krivka, okná zliav a uplift: `/api/insights/product/<id>` ───── */
+
+const COVERAGES: readonly SalesDayCoverage[] = ['missing', 'pending', 'partial', 'complete'];
+
+export interface ProductInsightsView {
+  readonly today: string | null;
+  readonly curve: ProductCurveView;
+  readonly windows: readonly DiscountWindowWire[];
+  /** `null` = odpoveď uplift neniesla. Panel z toho urobí priznanie, nie číslo. */
+  readonly uplift: UpliftWire | null;
+}
+
+function parseSeriesDays(raw: unknown): readonly SeriesDayWire[] {
+  const series = asRecord(raw);
+  const days = series === null ? null : series['days'];
+  if (!Array.isArray(days)) return [];
+  const out: SeriesDayWire[] = [];
+  for (const entry of days) {
+    const record = asRecord(entry);
+    const day = readText(record?.['day']);
+    if (day === null) continue;
+    const coverage = record?.['coverage'];
+    out.push({
+      day,
+      units: readNumber(record?.['units']),
+      /*
+       * Neznáme pokrytie je `missing`, nie `complete`. Opačná voľba by z dňa
+       * bez čísla urobila „stiahnutý deň s nulou", teda vymyslený prepad.
+       */
+      coverage:
+        typeof coverage === 'string' && (COVERAGES as readonly string[]).includes(coverage)
+          ? (coverage as SalesDayCoverage)
+          : 'missing',
+    });
+  }
+  return out;
+}
+
+function parseWindows(raw: unknown): readonly DiscountWindowWire[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DiscountWindowWire[] = [];
+  for (const entry of raw) {
+    const record = asRecord(entry);
+    const from = readText(record?.['from']);
+    const to = readText(record?.['to']);
+    const percent = readNumber(record?.['percent']);
+    if (from === null || to === null || percent === null) continue;
+    out.push({
+      campaignId: readNumber(record?.['campaignId']) ?? 0,
+      campaignName: readText(record?.['campaignName']) ?? 'zľava bez názvu',
+      percent,
+      from,
+      to,
+    });
+  }
+  return out;
+}
+
+function parseUpliftWindow(raw: unknown): UpliftWindowWire | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const from = readText(record['from']);
+  const to = readText(record['to']);
+  if (from === null || to === null) return null;
+  return {
+    from,
+    to,
+    days: readNumber(record['days']) ?? 0,
+    units: readNumber(record['units']),
+    perDay: readNumber(record['perDay']),
+  };
+}
+
+/** Chýbajúce dni okna. Nečitateľný záznam sa zahodí, nie „nič nechýba". */
+const readDays = (raw: unknown): readonly string[] =>
+  Array.isArray(raw) ? raw.map(readText).filter((day): day is string => day !== null) : [];
+
+const UPLIFT_REASONS: readonly string[] = [
+  'no_discount_window',
+  'not_started',
+  'window_too_short',
+  'baseline_overlaps_discount',
+  'coverage_gap',
+];
+
+/**
+ * Uplift zo servera.
+ *
+ * `available: true` sa uzná LEN vtedy, keď to server naozaj povedal — čokoľvek
+ * iné (chýbajúce pole, iný tvar) je `false`, teda priznanie. Opačná predvoľba by
+ * z nečitateľnej odpovede urobila „porovnanie platí".
+ */
+function parseUplift(raw: unknown): UpliftWire | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const reason = record['reason'];
+  const deltaReason = record['deltaReason'];
+  return {
+    available: readBool(record['available']) === true,
+    reason:
+      typeof reason === 'string' && UPLIFT_REASONS.includes(reason)
+        ? (reason as UpliftReasonKind)
+        : null,
+    campaignId: readNumber(record['campaignId']),
+    campaignName: readText(record['campaignName']),
+    percent: readNumber(record['percent']),
+    startsOn: readText(record['startsOn']),
+    spanDays: readNumber(record['spanDays']),
+    duringTruncated: readBool(record['duringTruncated']) === true,
+    before: parseUpliftWindow(record['before']),
+    during: parseUpliftWindow(record['during']),
+    deltaPercent: readNumber(record['deltaPercent']),
+    deltaReason: deltaReason === 'zero_baseline' ? 'zero_baseline' : null,
+    missingDuring: readDays(record['missingDuring']),
+    missingBefore: readDays(record['missingBefore']),
+  };
+}
+
+export async function fetchProductInsights(
+  productId: number,
+  windowDays: number,
+  signal?: AbortSignal,
+): Promise<Result<ProductInsightsView>> {
+  const res = await getJson(
+    `/api/insights/product/${encodeURIComponent(String(productId))}?window=${encodeURIComponent(String(windowDays))}`,
+    signal,
+  );
+  if (!res.ok) return res;
+  const body = asRecord(res.data);
+  if (body === null) return { ok: false, error: UNREADABLE };
+  const windows = parseWindows(body['discountWindows']);
+  return {
+    ok: true,
+    data: {
+      today: readText(body['today']),
+      curve: productCurve(parseSeriesDays(body['series']), windows),
+      windows,
+      uplift: parseUplift(body['uplift']),
+    },
+  };
+}
+
+/* ───────── Obohatenie na dopyt: `POST /api/catalog/enrich` ─────────────── */
+
+const ENRICH_OUTCOMES: readonly string[] = [
+  'enriched',
+  'fresh',
+  'invalid_id',
+  'not_in_mirror',
+  'paused',
+  'locked',
+  'unknown_scope',
+  'no_key',
+  'budget_day',
+  'budget_minute',
+  'budget_unknown',
+  'ip_banned',
+  'rate_limited',
+  'not_found',
+  'reduction_unknown',
+  'failed',
+];
+
+export interface EnrichResultView {
+  readonly outcome: EnrichOutcomeKind;
+  /** `true` = `getFull` sa nevolal, lebo riadok bol svieži. Úspora, nie chyba. */
+  readonly fresh: boolean;
+  /** Kedy sa produkt naposledy obohatil. `null` = nikdy (I11). */
+  readonly enrichedAt: string | null;
+}
+
+/**
+ * Dotiahne fakty pre JEDEN produkt.
+ *
+ * Volá sa RAZ na otvorenie panela nad jedným kusom (bod 3 hlavičky sekcie).
+ * NIKDY nehádže a nikdy nevracia „chybu appky": aj odmietnutie shopu je
+ * `outcome`, teda meraný výsledok.
+ */
+export async function enrichProduct(
+  productId: number,
+  signal?: AbortSignal,
+): Promise<Result<EnrichResultView>> {
+  let raw: unknown;
+  try {
+    const res = await fetch('/api/catalog/enrich', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId }),
+      signal,
+    });
+    raw = await bodyOf(res);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return { ok: false, error: ABORTED };
+    }
+    return { ok: false, error: OFFLINE };
+  }
+
+  const envelope = envelopeOf(raw);
+  if (!envelope.ok) return envelope;
+  const body = asRecord(envelope.data);
+  if (body === null) return { ok: false, error: UNREADABLE };
+  const outcome = body['outcome'];
+  const enrichment = asRecord(body['enrichment']);
+  return {
+    ok: true,
+    data: {
+      /* Neznámy výsledok je `failed`, nie `enriched`: „obohatilo sa" je
+         tvrdenie, ktoré sa z nečitateľnej odpovede urobiť nesmie. */
+      outcome:
+        typeof outcome === 'string' && ENRICH_OUTCOMES.includes(outcome)
+          ? (outcome as EnrichOutcomeKind)
+          : 'failed',
+      fresh: readBool(body['fresh']) === true,
+      enrichedAt: enrichment === null ? null : readText(enrichment['enrichedAt']),
+    },
+  };
+}
+
+/* ───────── Jedno miesto na `GET` s obálkou `{ok, data}` ────────────────── */
+
+const ABORTED: ApiErrorView = { code: 'aborted', message: '' };
+const UNREADABLE: ApiErrorView = {
+  code: 'unreadable',
+  message: 'Odpoveď servera sa nedá prečítať.',
+};
+const OFFLINE_MESSAGE = 'Server neodpovedá. Skúste to znova.';
+const OFFLINE: ApiErrorView = { code: 'network', message: OFFLINE_MESSAGE };
+const BAD_ENVELOPE: ApiErrorView = {
+  code: 'unexpected',
+  message: 'Server odpovedal inak, než sme čakali.',
+};
+
+/** Telo ako `unknown`; neplatný JSON je `undefined`, nie výnimka. */
+async function bodyOf(res: Response): Promise<unknown> {
+  try {
+    return (await res.json()) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Obálka `{ok, data}` → `Result<unknown>`. Čokoľvek iné je neprečítateľné. */
+function envelopeOf(body: unknown): Result<unknown> {
+  const record = asRecord(body);
+  if (record === null || !('ok' in record)) return { ok: false, error: BAD_ENVELOPE };
+  if (record['ok'] !== true) {
+    const error = asRecord(record['error']);
+    return {
+      ok: false,
+      error: {
+        code: readText(error?.['code']) ?? BAD_ENVELOPE.code,
+        message: readText(error?.['message']) ?? BAD_ENVELOPE.message,
+      },
+    };
+  }
+  return { ok: true, data: record['data'] };
+}
+
+async function getJson(url: string, signal?: AbortSignal): Promise<Result<unknown>> {
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal });
+    return envelopeOf(await bodyOf(res));
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return { ok: false, error: ABORTED };
+    }
+    return { ok: false, error: OFFLINE };
+  }
+}

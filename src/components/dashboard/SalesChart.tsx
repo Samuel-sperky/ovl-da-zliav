@@ -71,7 +71,14 @@
 import { useCallback, useId, useRef, useState } from 'react';
 
 import styles from '@/components/charts/charts.module.css';
-import type { ChartGeometry } from '@/components/dashboard/sales-view';
+/*
+ * Podfarbené okná zliav sú prvok PREHĽADU, nie grafu ako takého — zľava je
+ * pojem prístrojovej dosky a nie každý graf v appke ju má čo kresliť. Ich
+ * geometria preto býva vypnutá (`bands` je voliteľné) a ich vzhľad žije v CSS
+ * Prehľadu, nie v spoločnej palete grafov.
+ */
+import band from '@/components/dashboard/overview.module.css';
+import type { ChartGeometry, DiscountBand } from '@/components/dashboard/sales-view';
 import { CHART, axisDay } from '@/components/dashboard/sales-view';
 import { nearestPoint, pointerToViewBoxX, tipLeftPercent } from '@/components/charts/chart-hover';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
@@ -82,10 +89,19 @@ export interface SalesChartProps {
   caption: string;
   /** Text pre čítačku obrazovky; graf je obrázok, nie dekorácia. */
   label: string;
+  /**
+   * Podfarbené okná ZĽAV pod krivkou (V4, D113). Bez nich sa graf kreslí presne
+   * ako predtým — pásy sú prídavok Prehľadu, nie súčasť merania.
+   *
+   * Sú to VLASTNÉ zápisy appky, nie stav eshopu (I11), a popis nad grafom to
+   * musí povedať. Súradnice počíta `discountBands()` z tej istej osi ako body;
+   * pri poradovej osi vráti prázdne pole a pás sa nekreslí.
+   */
+  bands?: readonly DiscountBand[];
 }
 
 type HotPoint = ChartGeometry['hover'][number];
-type LegendKind = 'line' | 'dot' | 'trend' | 'today' | 'estimate' | 'gap';
+type LegendKind = 'line' | 'dot' | 'trend' | 'today' | 'estimate' | 'gap' | 'band';
 
 function pieces(value: number): string {
   return `${formatCountSk(value)} ${pluralSk(value, 'kus', 'kusy', 'kusov')}`;
@@ -101,11 +117,12 @@ function LegendMark({ kind, hatchId }: { kind: LegendKind; hatchId: string }) {
       {kind === 'today' ? <circle className={styles.dotOpen} cx="8" cy="6" r="4" /> : null}
       {kind === 'estimate' ? <circle className={styles.dotEstimate} cx="8" cy="6" r="4" /> : null}
       {kind === 'gap' ? <rect x="0" y="1" width="16" height="10" fill={`url(#${hatchId})`} /> : null}
+      {kind === 'band' ? <rect className={band.discountBand} x="0" y="1" width="16" height="10" /> : null}
     </svg>
   );
 }
 
-export function SalesChart({ geometry, caption, label }: SalesChartProps) {
+export function SalesChart({ geometry, caption, label, bands = [] }: SalesChartProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const [hot, setHot] = useState<HotPoint | null>(null);
 
@@ -133,6 +150,7 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
     geometry.trendLine !== null ||
     geometry.todayPoint !== null ||
     geometry.gaps.length > 0 ||
+    bands.length > 0 ||
     hasEstimate;
 
   /* Priamy popisok pri bode — len v režime `pair`, a nikdy nad nemeraným dňom. */
@@ -194,6 +212,55 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
             <text x="0" y={grid.y + 3}>
               {grid.label}
             </text>
+          </g>
+        ))}
+
+        {/*
+         * Okná zliav sú NAJNIŽŠIA vrstva — pod šrafovaním medzery aj pod
+         * krivkou. Poradie nie je estetika: deň, ktorý sa nesťahoval a zároveň
+         * v ňom bežala zľava, musí zostať čitateľný ako NESŤAHOVANÝ. Keby pás
+         * zľavy ležal nad šrafovaním, vyzeral by ten deň ako zmeraný.
+         */}
+        {bands.map((entry) => (
+          <g key={`zlava-${entry.id}-${entry.fromDay}`}>
+            <rect
+              className={band.discountBand}
+              x={entry.x1}
+              y={CHART.top}
+              width={Math.max(0, entry.x2 - entry.x1)}
+              height={CHART.baseline - CHART.top}
+            />
+            {/* Hrany sa kreslia len tam, kde okno naozaj začína a končí —
+                odrezaná hrana čiaru NEDOSTANE, inak by orezanie vyzeralo ako
+                koniec zľavy. */}
+            {entry.clippedStart ? null : (
+              <line
+                className={band.discountEdge}
+                x1={entry.x1}
+                y1={CHART.top}
+                x2={entry.x1}
+                y2={CHART.baseline}
+              />
+            )}
+            {entry.clippedEnd ? null : (
+              <line
+                className={band.discountEdge}
+                x1={entry.x2}
+                y1={CHART.top}
+                x2={entry.x2}
+                y2={CHART.baseline}
+              />
+            )}
+            {entry.x2 - entry.x1 < 40 ? null : (
+              <text
+                className={band.discountLabel}
+                x={(entry.x1 + entry.x2) / 2}
+                y={CHART.baseline - 4}
+                textAnchor="middle"
+              >
+                {`−${entry.percent} %`}
+              </text>
+            )}
           </g>
         ))}
 
@@ -334,6 +401,12 @@ export function SalesChart({ geometry, caption, label }: SalesChartProps) {
             <span className={styles.legendItem}>
               <LegendMark kind="gap" hatchId={hatchId} />
               nesťahované dni, predaj nepoznáme
+            </span>
+          )}
+          {bands.length === 0 ? null : (
+            <span className={styles.legendItem}>
+              <LegendMark kind="band" hatchId={hatchId} />
+              okná zliav podľa našich zápisov
             </span>
           )}
         </div>

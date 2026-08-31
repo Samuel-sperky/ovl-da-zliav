@@ -117,6 +117,7 @@ import {
   type DiscountItemView,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
+import { repeatDiscountHref } from '@/components/campaigns/presets-model';
 import { hrefForAnchor } from '@/components/settings/sub-pages';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Icon from '@/components/ui/Icon';
@@ -124,6 +125,7 @@ import StatTile from '@/components/ui/StatTile';
 import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { TONE_ICON } from '@/components/ui/ToneBadge';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
+import { productLabel } from '@/lib/ui/product-label';
 import { formatCountSk, itemSentence, pluralSk } from '@/lib/ui/vocabulary';
 
 /**
@@ -258,6 +260,20 @@ export function DetailActions({
           {expiryNoteText(campaign.dateTo)}
         </div>
       ) : null}
+      {/*
+       * ZOPAKOVAŤ ZĽAVU (D112, K7) — ODKAZ na formulár novej zľavy
+       * s predplnenými pásmami, percentami a dĺžkou okna. Nie je to zápis
+       * a nie je to kópia: produkty sa vyberú znova z aktuálneho katalógu
+       * a zľava prejde skúškou naprázdno aj potvrdením ako každá iná (I3).
+       * Prenášať zoznam ID by predstieralo, že appka vie, čo je dnes v pásme.
+       */}
+      <Link className="btn" href={repeatDiscountHref(campaign)} data-testid="detail-repeat">
+        Zopakovať zľavu
+      </Link>
+      <div className={styles.sideNote} data-testid="detail-repeat-note">
+        Predplní formulár novej zľavy. Nezapisuje — zľava vznikne až po skúške naprázdno a po
+        potvrdení.
+      </div>
     </>
   );
 }
@@ -450,9 +466,23 @@ export function ItemsTable({
                než tvar. */
             const itemSig: SigVariant = item.status === 'ok' ? 'ok' : 'warn';
             const reason = item.priceMismatch ? 'Cena sa medzitým zmenila' : say.reason;
+            const label = productLabel({
+              productId: item.productId,
+              reference: item.reference ?? null,
+              name: item.nameAtWrite,
+            });
             return (
               <tr key={item.id}>
-                <td className="name">{item.nameAtWrite ?? 'bez názvu'}</td>
+                {/*
+                 * D116 — na povrchu „referencia · názov". Referencia sa
+                 * k položke DOPĹŇA pri zobrazení (JOIN na strane servera);
+                 * história zápisu sa neprepisuje (I4). Keď ju appka nepozná
+                 * (produkt nie je obohatený, D118), zostáva názov a `#id`
+                 * v technickom detaile — nikdy vymyslený kód.
+                 */}
+                <td className="name" title={label.technical}>
+                  {label.text}
+                </td>
                 <td className="n" data-l="Cena">
                   {formatEur(item.priceAtPreview)}
                 </td>

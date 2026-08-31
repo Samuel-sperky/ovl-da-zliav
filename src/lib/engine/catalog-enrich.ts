@@ -54,16 +54,15 @@
  *  6. **Modul NIKDY nehádže.** Obohatenie je doplnok: keď eshop mlčí, obrazovka
  *     sa musí zobraziť aj tak, len s priznanou medzerou.
  *
- * KTORÁ DRÁHA ROZPOČTU (a prečo dnes `anon`)
- * ------------------------------------------
+ * KTORÁ DRÁHA ROZPOČTU (`product_read`, od 31. 8. 2026)
+ * ----------------------------------------------------
  * `getFull` je čítanie S KĽÚČOM, takže shop ho účtuje NA KĽÚČ, kým dráha `anon`
- * je rozpočtovaná na IP. Vlastná dráha (`product_read`) v `ReadLane` zatiaľ
- * nie je a založiť ju je zmena v `src/lib/shop/read-budget.ts`, ktorý táto vlna
- * nevlastní (DB migráciu si nevyžiada — `shop_read_budget.lane` je `VARCHAR`).
- * Dráhu preto vyberá VOLAJÚCI a tento modul o nej nevie ani slovo; zapojenie
- * dnes používa `anon` rovnako ako `reduction-check` (bod 3 jeho doc-bloku).
- * Je to konzervatívne — odpočíta sa viac, než sa v shope minulo — takže z toho
- * nemôže vzniknúť ban, len o niečo pomalšia synchronizácia katalógu.
+ * je rozpočtovaná na IP. Dráhu vyberá VOLAJÚCI a tento modul o nej nevie ani
+ * slovo; zapojenie (`/api/catalog/enrich`) používa `productReadBudget` — vlastnú
+ * dráhu `product_read`, do jedného počítadla s `reduction-check`, lebo je to
+ * ten istý kľúč. Do 31. 8. 2026 sa účtovalo do `anon`: obohacovanie si tak
+ * bralo strop dvojdňovej synchronizácie katalógu a zároveň sa škrtilo na
+ * čísle, ktoré shop pre kľúč nesleduje.
  *
  * DVE POČÍTADLÁ, KTORÉ SA NESMÚ ZLIAŤ
  * -----------------------------------

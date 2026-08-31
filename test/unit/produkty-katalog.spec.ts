@@ -572,8 +572,11 @@ describe('V10 — dôvod pri konkrétnom produkte', () => {
       }),
     );
     expect(html).toContain('shop ho nenašiel');
-    // Stĺpce zostávajú štyri plus zaškrtávacie políčko (P3).
-    expect(html.match(/<th[\s>]/g)?.length ?? 0).toBe(5);
+    /* Dôvod je PRI MENE, nie ako nový stĺpec — o to v tomto teste ide.
+       Počet stĺpcov je od kontraktu V4 D114 deväť plus zaškrtávacie políčko
+       (KPI riadku); dôvod medzi nimi ani teraz nie je. */
+    expect(html.match(/<th[\s>]/g)?.length ?? 0).toBe(10);
+    expect(html).not.toContain('<th class="n">Dôvod');
     expect(html).not.toContain('>18342<');
   });
 

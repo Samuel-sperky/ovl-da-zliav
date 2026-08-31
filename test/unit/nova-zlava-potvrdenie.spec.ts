@@ -78,7 +78,7 @@ const ROWS: SelectableRow[] = [
 
 const PROPS = {
   itemsCount: 8000,
-  tiers: buildTiers(ROWS, 180),
+  tiers: buildTiers(ROWS, 180).tiers,
   averagePrice: 46.2,
   typed: '',
   onTyped: () => {},

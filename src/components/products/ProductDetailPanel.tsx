@@ -34,6 +34,24 @@
  *    riadok: keby riadok chýbal, nedalo by sa zistiť, že tá informácia vôbec
  *    existuje. Nadpis sa mení podľa toho, či hodnoty naozaj prišli.
  *
+ * ČO PRIBUDLO VO V4 (D115, D118 — 28. 8. 2026)
+ * ────────────────────────────────────────────
+ *  · **Predaj po dňoch · 90 dní** — denná krivka z lokálnych predajov s oknami
+ *    NAŠICH zápisov zľavy a s PRIZNANÝMI medzerami: deň, ktorý sa nestiahol,
+ *    dostane šrafovaný pás, nie stĺpec nulovej výšky. Pod ňou **výkon zľavy
+ *    (uplift)** — a keď sa spočítať nedá, je tam SLOVO a dôvod, nikdy číslo
+ *    (pasca `d00e081`, pozri `UpliftBlock`).
+ *  · **Fakty z eshopu** (rozklik) — osem údajov z obohatenia `getFull`:
+ *    referencia, dodávateľ, sklad, celkovo predané, posledný predaj, nákupná
+ *    cena, marža (EUR aj %) a aktívna zľava v eshope. Marža sa NEPOČÍTA — shop
+ *    ju posiela hotovú. Nadpis sa mení podľa toho, či fakty naozaj sú.
+ *  · **Obohatenie NA DOPYT** — otvorenie panela dotiahne TENTO kus (D118 bod 1)
+ *    práve raz, nikdy v cykle. Ako sa to skončilo, hovorí veta na povrchu; dnes
+ *    je to typicky „eshop odmieta našu adresu" (`ip_banned`, KONTRAKT-V4 §2b)
+ *    a to NIE JE porucha appky — je to bežná cesta a fakty zostanú pomlčkami.
+ *  · Prázdna z KPI majú VLASTNÝ slovník (`KpiGapKind`), lebo „produkt nie je
+ *    obohatený" a „dni chýbajú" sú dve rôzne vety a ani jedna nie je nula.
+ *
  * ČO JE NA POVRCHU A ČO POD ROZKLIKOM (24. 8. 2026, UX3)
  * ──────────────────────────────────────────────────────
  * Panel mal 1 148 px obsahu v stĺpci, ktorý má 620 px (`max-height:
@@ -93,7 +111,7 @@
  * Vlastník: V10 (rozšírenie na „všetky údaje": P2 kontraktu produktov).
  */
 import Link from 'next/link';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 /*
@@ -110,21 +128,41 @@ import { catalogRow, isAborted, productWrites } from '@/components/products/cata
 import type { SoldWindow } from '@/components/products/catalog-filter';
 import { newDiscountHref, SOLD_WINDOWS } from '@/components/products/catalog-filter';
 import { productReasons } from '@/components/products/catalog-status';
-import { fetchExtras } from '@/components/products/extras-api';
+import {
+  enrichProduct,
+  fetchExtras,
+  fetchProductInsights,
+  fetchProductKpi,
+  type ProductInsightsView,
+} from '@/components/products/extras-api';
 import {
   absent,
+  curveGapNote,
+  enrichNotice,
   fieldOf,
   known,
+  kpiFactRows,
+  measuredNote,
+  percentPlain,
   stockText,
+  upliftView,
+  type EnrichOutcomeKind,
   type Field,
+  type KpiFactRow,
+  type ProductCurveView,
   type ProductExtraView,
+  type ProductKpiView,
+  type UpliftView,
 } from '@/components/products/product-extras';
-import { FieldValue } from '@/components/products/ProductFacts';
+import { FieldValue, KpiValueText } from '@/components/products/ProductFacts';
 import ProductVariants from '@/components/products/ProductVariants';
+import type { KpiCellView, SoldCoverageState } from '@/components/products/sold-coverage';
+import { SOLD_COVERAGE_UNASKED, soldUnitsViaCoverage } from '@/components/products/sold-coverage';
 import Icon from '@/components/ui/Icon';
 import type { Blocker } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateSk, formatDateTimeSk, formatEur, formatPercentSk } from '@/lib/ui/format';
+import { productLabel } from '@/lib/ui/product-label';
 import { formatCountSk, itemSentence, pluralSk, SURFACE_TERMS } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Pomôcky ═══════════════════════════════════ */
@@ -301,11 +339,16 @@ export function variantsHint(extra: ProductExtraView | undefined): string {
  * sa v testoch renderuje `renderToStaticMarkup`, kde efekty nebežia — takže
  * práve tá vetva, v ktorej pomlčka stála v 44 px reze, sa cez panel odmerať
  * NEDÁ. Nad týmto komponentom sa dajú odmerať obe vetvy naraz.
+ *
+ * ČÍSLO SI TU NEVYRÁBA: dostane hotovú bunku zo `soldUnitsViaCoverage()`
+ * (`sold-coverage.ts`), teda z toho istého miesta, ktoré formuluje vetu
+ * o pokrytí pre tabuľku. Panel a tabuľka tak o tej istej medzere nemôžu
+ * povedať dve rôzne veci (31. 8. 2026, nález I11 č. 2).
  */
-export function SoldDominant({ sold, windowDays }: { sold: number | null; windowDays: number }) {
+export function SoldDominant({ cell, windowDays }: { cell: KpiCellView; windowDays: number }) {
   return (
     <div className="lvl-1">
-      {sold === null ? (
+      {cell.unknown ? (
         /*
          * D11 — tu bola do 19. 8. 2026 em pomlčka v `.big.sm`, teda v 44 px
          * a reze 660. V tej veľkosti pomlčka nie je znak, ale vyplnený
@@ -314,16 +357,25 @@ export function SoldDominant({ sold, windowDays }: { sold: number | null; window
          * a veľkosť, v ktorej sa dá prečítať. Je to TEN ISTÝ tvar, aký dostala
          * karta potvrdenia novej zľavy, nie druhý podobný.
          */
-        <span className={styles.unknown} data-testid="detail-units-sold">
+        <span
+          className={styles.unknown}
+          data-testid="detail-units-sold"
+          title={cell.title ?? undefined}
+        >
           {DASH} zatiaľ nevieme
         </span>
       ) : (
-        <span className="big sm num" data-testid="detail-units-sold">
-          {formatCountSk(sold)}
+        <span
+          className="big sm num"
+          data-testid="detail-units-sold"
+          title={cell.title ?? undefined}
+          data-lower-bound={cell.lowerBound ? 'true' : undefined}
+        >
+          {cell.text}
         </span>
       )}
       <span className="sub">
-        {sold === null
+        {cell.unknown
           ? `koľko sa predalo za posledných ${windowDays} dní`
           : `predaných za posledných ${windowDays} dní`}
       </span>
@@ -436,6 +488,250 @@ function WriteRow({ write }: { write: ProductWriteView }) {
   );
 }
 
+/* ═══════ 1b. Krivka 90 dní, uplift a fakty z eshopu (V4, D115) ════════════
+ *
+ * Tri vlastné komponenty, nie kusy JSX vnútri panela — a je to z toho istého
+ * dôvodu ako pri `SoldDominant`: stavy, na ktorých tu všetko stojí, sa do
+ * panela dostanú AŽ EFEKTOM (KPI, krivka, výsledok obohatenia). Vykreslený
+ * panel sa v testoch renderuje `renderToStaticMarkup`, kde efekty nebežia,
+ * takže cez panel by sa dala odmerať jediná vetva — tá prázdna. Nad týmito
+ * komponentmi sa dajú odmerať všetky.
+ */
+
+/** Geometria krivky. 90 dní × 3 px sa zmestí do stĺpca panela (620 px). */
+const CURVE = { dayWidth: 3, height: 44, baseline: 43 } as const;
+
+/** Jeden riadok uplift-u. Tri stĺpce v jednom riadku, nie tabuľka. */
+const UPLIFT_ROW = {
+  alignItems: 'baseline',
+  gap: '8px',
+  fontSize: '13px',
+  padding: '3px 0',
+} as const;
+
+/**
+ * DENNÁ KRIVKA PREDAJA S OKNAMI ZĽIAV A PRIZNANÝMI MEDZERAMI.
+ *
+ * TRI VECI, KTORÉ SA V TEJTO KRIVKE NESMÚ ZLIAŤ
+ * ─────────────────────────────────────────────
+ *  1. **Nestiahnutý deň nie je nula.** Deň, ktorý appka nemá, dostane
+ *     ŠRAFOVANÝ PÁS na celú výšku, nie stĺpec nulovej výšky. Nula by tvrdila,
+ *     že sa v ten deň nepredalo — a to je presne chyba, ktorá sa v tomto repe
+ *     už raz dostala do produkcie (`sales_sync_state`, štrnásť dní `partial`
+ *     počítaných ako pokryté).
+ *  2. **Meraná nula je meranie.** Deň, ktorý sa stiahol CELÝ a produkt sa
+ *     v ňom nepredal, dostane 1 px pri základni. Je to viditeľné tvrdenie
+ *     „tu sme merali a bola nula", nie prázdne miesto.
+ *  3. **Okno zľavy je NAŠE okno.** Podfarbenie hovorí, kedy appka zľavu
+ *     ÚSPEŠNE ZAPÍSALA, nie kedy zľava v eshope bežala (I11). Hovorí to
+ *     legenda slovom, nie len farbou.
+ *
+ * Šrafovanie je vzorka, nie farba — na to, aby ju niekto spojil s výpadkom
+ * sťahovania, musí byť v legende SLOVO. Tri kanály (tvar, odtieň, slovo) sú tu
+ * z toho istého dôvodu ako v `SalesChart`.
+ */
+export function ProductCurveChart({ curve }: { curve: ProductCurveView }) {
+  // `useId()` vracia znaky, ktoré sa v odkaze `url(#…)` čítajú zle.
+  const hatchId = `curve-hatch-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const days = curve.days;
+  if (days.length === 0) {
+    return (
+      <div className="lvl-3" data-testid="detail-curve-empty">
+        Za toto okno appka nemá ani jeden deň, takže krivku nekreslí.
+      </div>
+    );
+  }
+
+  const width = days.length * CURVE.dayWidth;
+  /* Mierka stojí na NAJVYŠŠOM DOČÍTANOM dni. Bez dočítaného dňa niet mierky
+     a stĺpce sa nekreslia vôbec — vymyslená mierka by bola vymyslený graf. */
+  const top = curve.maxUnits === null || curve.maxUnits <= 0 ? null : curve.maxUnits;
+
+  return (
+    <div data-testid="detail-curve">
+      <svg
+        viewBox={`0 0 ${width} ${CURVE.height}`}
+        width="100%"
+        height={CURVE.height}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`Predané kusy po dňoch od ${formatDateSk(curve.from)} do ${formatDateSk(curve.to)}. ${curveGapNote(curve)}`}
+      >
+        <defs>
+          <pattern
+            id={hatchId}
+            width="4"
+            height="4"
+            patternUnits="userSpaceOnUse"
+            patternTransform="rotate(45)"
+          >
+            <line x1="0" y1="0" x2="0" y2="4" stroke="var(--line2)" strokeWidth="1.5" />
+          </pattern>
+        </defs>
+
+        {/* Okná VLASTNÝCH zápisov zľavy — pod dátami, nie nad nimi. */}
+        {curve.bands.map((band) => (
+          <rect
+            key={`${band.campaignId}-${band.fromIndex}`}
+            x={band.fromIndex * CURVE.dayWidth}
+            y={0}
+            width={(band.toIndex - band.fromIndex + 1) * CURVE.dayWidth}
+            height={CURVE.height}
+            fill="var(--sel)"
+            data-testid="detail-curve-band"
+          />
+        ))}
+
+        {days.map((day, index) => {
+          const x = index * CURVE.dayWidth;
+          if (day.units === null) {
+            /* Medzera na celú výšku — NIE stĺpec nulovej výšky (bod 1). */
+            return (
+              <rect
+                key={day.day}
+                x={x}
+                y={0}
+                width={CURVE.dayWidth}
+                height={CURVE.height}
+                fill={`url(#${hatchId})`}
+                data-testid="detail-curve-gap"
+              />
+            );
+          }
+          const scaled = top === null ? 0 : Math.round((day.units / top) * (CURVE.height - 6));
+          /* Meraná nula (aj meraný najnižší deň) má viditeľnú 1 px stopu (bod 2). */
+          const barHeight = Math.max(1, scaled);
+          return (
+            <rect
+              key={day.day}
+              x={x + 0.5}
+              y={CURVE.baseline - barHeight}
+              width={CURVE.dayWidth - 1}
+              height={barHeight}
+              fill="var(--barfill)"
+              data-testid="detail-curve-day"
+            />
+          );
+        })}
+        <line
+          x1="0"
+          y1={CURVE.baseline + 0.5}
+          x2={width}
+          y2={CURVE.baseline + 0.5}
+          stroke="var(--line)"
+          strokeWidth="1"
+        />
+      </svg>
+
+      <div className="lvl-3" data-testid="detail-curve-legend">
+        stĺpec = predané kusy · šrafovanie = dni, ktoré appka nemá · podfarbenie =
+        okno NÁŠHO zápisu zľavy
+      </div>
+    </div>
+  );
+}
+
+/**
+ * UPLIFT — A PRIZNANIE, KEĎ SA SPOČÍTAŤ NEDÁ.
+ *
+ * ZAPÍSANÁ PASCA (commit `d00e081`, 26. 8. 2026): v tomto repe sa už raz DVE
+ * OKNÁ, KTORÉ ZĽAVE OBE PREDCHÁDZALI, vydávali za výkon zľavy — graf nakreslil
+ * dva stĺpce, jeden bol „silnejší" a tvrdil tým vplyv, ktorý sa nemohol stať.
+ *
+ * Okná definuje `upliftFor()` na serveri a ten ich aj ODMIETNE spočítať, keď to
+ * poctivo nejde (zľava sa ešte nezačala, okno je krátke, do základne zasahuje
+ * iná zľava, chýbajú stiahnuté dni). ÚLOHA TOHTO KOMPONENTU JE TO NEZAKRYŤ:
+ *
+ *  · keď server povie „nedá sa", tu je SLOVO a dôvod — a ani jedno číslo
+ *    porovnania,
+ *  · uplift sa TU NIKDY NEDOPOČÍTAVA. Žiadne `during − before`, žiadne
+ *    percento z dvoch čísel, ktoré by po ruke boli.
+ *
+ * Rozhodnutie „hodnota, alebo priznanie" robí `upliftView()`; tu je len
+ * vykreslenie, aby sa to dalo zmerať bez prehliadača.
+ */
+export function UpliftBlock({ view }: { view: UpliftView }) {
+  if (view.kind === 'unavailable') {
+    return (
+      <div data-testid="detail-uplift" data-uplift="unavailable">
+        <div className="lvl-2">
+          Výkon zľavy — <b>{view.word}</b>
+        </div>
+        <div className="lvl-3">{view.why}</div>
+        {view.ranges === null ? null : (
+          <div className="lvl-3" data-testid="detail-uplift-ranges">
+            Porovnávalo by sa {view.ranges}.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="detail-uplift" data-uplift="value">
+      <div className="lvl-2">
+        Výkon zľavy{view.campaign === null ? '' : ` · ${view.campaign}`}
+      </div>
+      {/*
+        Tri riadky ako `<div>`, NIE ako `<dl>`. Rozpočet výšky povrchu panela sa
+        meria počtom `<dt>` (`produkty-detail-rozklik.spec.ts`) a je vyčerpaný
+        šiestimi riadkami skupiny „Zľavy podľa vlastných zápisov". Uplift patrí
+        na povrch — je to celý dôvod, prečo sa panel vo V4 otvára — takže výšku
+        neberie riadkom dvojstĺpcovej tabuľky.
+      */}
+      <div data-testid="detail-uplift-windows">
+        <div className="row" style={UPLIFT_ROW}>
+          <span className="lvl-3">Pred</span>
+          <span className="num">{view.beforeText}</span>
+          <span className="lvl-3" style={{ marginLeft: 'auto' }}>
+            {view.beforeRange}
+          </span>
+        </div>
+        <div className="row" style={UPLIFT_ROW}>
+          <span className="lvl-3">Počas</span>
+          <span className="num">{view.duringText}</span>
+          <span className="lvl-3" style={{ marginLeft: 'auto' }}>
+            {view.duringRange}
+          </span>
+        </div>
+        <div className="row" style={UPLIFT_ROW} data-testid="detail-uplift-delta">
+          <span className="lvl-3">Rozdiel na deň</span>
+          {view.deltaText === null ? (
+            <span style={{ color: 'var(--dim)' }}>{DASH} nedá sa vyjadriť</span>
+          ) : (
+            <b className="num">{view.deltaText}</b>
+          )}
+        </div>
+      </div>
+      {view.deltaNote === null ? null : <div className="lvl-3">{view.deltaNote}</div>}
+      {view.truncatedNote === null ? null : <div className="lvl-3">{view.truncatedNote}</div>}
+      <div className="lvl-3">{view.caveat}</div>
+    </div>
+  );
+}
+
+/**
+ * Osem faktov z obohatenia ako `<dl>`.
+ *
+ * Riadky prichádzajú HOTOVÉ z `kpiFactRows()` — vrátane toho, ktoré z prázdien
+ * to je. Komponent si o hodnote nič nedomýšľa a nič neformátuje: keby si tu
+ * čokoľvek dopočítal, existoval by ten výpočet v repe dvakrát.
+ */
+export function KpiFacts({ rows }: { rows: readonly KpiFactRow[] }) {
+  return (
+    <dl className="dl" data-testid="detail-kpi-facts">
+      {rows.map((row) => (
+        <Fragment key={row.key}>
+          <dt>{row.label}</dt>
+          <dd>
+            <KpiValueText field={row.field} render={(value) => <span className="num">{value}</span>} />
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
 /* ═══════════════════════════ 2. Panel ═════════════════════════════════════ */
 
 /**
@@ -447,6 +743,9 @@ function WriteRow({ write }: { write: ProductWriteView }) {
  * pri prepnutí riadku sa väzba nesmie na okamih rozpadnúť.
  */
 export const PRODUCT_DETAIL_ID = 'product-detail';
+
+/** D115: detail kreslí krivku za 90 dní. Endpoint má to isté ako predvoľbu. */
+export const DETAIL_CURVE_DAYS = 90;
 
 /**
  * ČO SA STANE S KLÁVESOU V PANELI.
@@ -474,6 +773,12 @@ export interface ProductDetailPanelProps {
   /** Okno, v ktorom je `row.unitsSold` — to isté, aké má tabuľka. */
   soldWindowDays: number;
   /**
+   * Za koľko dní má appka objednávky NAOZAJ stiahnuté. Bez neho je dominanta
+   * len dolná hranica (a nula pomlčka) — číslo z `catalog/search` bránu
+   * `status='complete'` nemá, viď `soldUnitsViaCoverage()`.
+   */
+  soldCoverage?: SoldCoverageState;
+  /**
    * Prekážky, ktoré by zápis na TENTO produkt zastavili
    * (`collectProductBlockers`). Informatívne riadky sem neposielajte —
    * odfiltruje ich panel sám, ale zbytočne.
@@ -494,6 +799,7 @@ const EMPTY: DetailState = { writes: null, today: null, failed: false };
 export function ProductDetailPanel({
   row,
   soldWindowDays,
+  soldCoverage,
   blockers,
   onClose,
 }: ProductDetailPanelProps) {
@@ -508,6 +814,15 @@ export function ProductDetailPanel({
    * všetky bunky sú `pending`; nikdy nie `none`.
    */
   const [extra, setExtra] = useState<ProductExtraView | undefined>(undefined);
+  /**
+   * Fakty z obohatenia (D114). `null` = odpoveď zatiaľ neprišla, takže riadky
+   * sú „zatiaľ nenačítané" — NIKDY nuly a nikdy „produkt nie je obohatený".
+   */
+  const [kpi, setKpi] = useState<ProductKpiView | null>(null);
+  /** Ako sa skončilo doťahovanie na dopyt. `null` = ešte nedobehlo. */
+  const [enriched, setEnriched] = useState<EnrichOutcomeKind | null>(null);
+  /** Krivka, okná zliav a uplift. `null` = zatiaľ nenačítané. */
+  const [insights, setInsights] = useState<ProductInsightsView | null>(null);
 
   const panelRef = useRef<HTMLElement | null>(null);
   /**
@@ -601,6 +916,71 @@ export function ProductDetailPanel({
     };
   }, [row.productId]);
 
+  /*
+   * OBOHATENIE NA DOPYT (D118 bod 1) A FAKTY PO ŇOM.
+   *
+   * Používateľ otvoril kus, takže sa TENTO kus dotiahne HNEĎ — presne to D118
+   * hovorí, a je to jediná cesta, ktorá smie do rezervy kvóty (~50 čítaní,
+   * ktoré si dávka na pozadí nesmie vziať).
+   *
+   * RAZ NA OTVORENIE, NIKDY V CYKLE. Efekt visí VÝHRADNE na `row.productId`;
+   * závislosť na čomkoľvek, čo sa mení odpoveďou (KPI, výsledok), by z panela
+   * urobila slučku, ktorá minie dennú kvótu za sekundy. Idempotenciu drží aj
+   * route (svieži riadok `getFull` vôbec nezavolá), ale to je druhá poistka,
+   * nie tá prvá.
+   *
+   * Poradie je zámerné: najprv doťahovanie, POTOM čítanie KPI — inak by panel
+   * ukázal fakty spred obohatenia a človek by videl pomlčky aj vtedy, keď sa
+   * hodnoty práve dotiahli. Keď doťahovanie neuspeje (dnes typicky `ip_banned`,
+   * KONTRAKT-V4 §2b), KPI sa čítajú AJ TAK: v DB môže ležať starší, stále
+   * pravdivý riadok, a „appka nemá nič" by bolo tvrdenie navyše.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    let live = true;
+    setKpi(null);
+    setEnriched(null);
+
+    void (async () => {
+      const done = await enrichProduct(row.productId, controller.signal);
+      if (!live) return;
+      // Odmietnutie shopu je MERANÝ výsledok, nie chyba appky — panel z neho
+      // spraví vetu (`enrichNotice`), nie chybové hlásenie.
+      if (done.ok) setEnriched(done.data.outcome);
+      const facts = await fetchProductKpi(row.productId, controller.signal);
+      if (!live || !facts.ok) return;
+      setKpi(facts.data);
+    })();
+
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [row.productId]);
+
+  /*
+   * Krivka 90 dní, okná NAŠICH zliav a uplift (D115).
+   *
+   * Čisto čítacie, z lokálnej DB (K8) — táto cesta shop nevolá, takže sa smie
+   * spustiť pri každom otvorení bez ohľadu na kvótu.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    let live = true;
+    setInsights(null);
+
+    void (async () => {
+      const res = await fetchProductInsights(row.productId, DETAIL_CURVE_DAYS, controller.signal);
+      if (!live || !res.ok) return;
+      setInsights(res.data);
+    })();
+
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [row.productId]);
+
   /* Zmena riadku alebo okna tabuľky vráti panel na to isté okno ako tabuľka. */
   useEffect(() => {
     setWindowDays(asSoldWindow(soldWindowDays));
@@ -630,6 +1010,13 @@ export function ProductDetailPanel({
       controller.abort();
     };
   }, [row.productId, row.unitsSold, soldWindowDays, windowDays]);
+
+  /*
+   * Dominanta panela: číslo z objednávok, prečítané cez pokrytie (I11, D119).
+   * Chýbajúce pokrytie znamená DOLNÚ HRANICU, nie fakt — a nula bez plného
+   * pokrytia je pomlčka. Rozhoduje o tom jediné miesto, `soldUnitsViaCoverage()`.
+   */
+  const soldCell = soldUnitsViaCoverage(sold, windowDays, soldCoverage ?? SOLD_COVERAGE_UNASKED);
 
   const writes = state.writes ?? [];
   const planned = writes.find((write) => write.status === 'pending');
@@ -671,6 +1058,23 @@ export function ProductDetailPanel({
   /** Čo je v zavretej skupine variantov — tri stavy, tri vety (`variantsHint`). */
   const variantHint = variantsHint(extra);
 
+  /* Osem faktov z obohatenia; `kpi === null` znamená „zatiaľ nenačítané". */
+  const factRows = kpiFactRows(kpi);
+  /** Veta o doťahovaní. `null` = dotiahlo sa (alebo bol riadok svieži). */
+  const notice = enrichNotice(enriched);
+  /** Uplift — hodnota, alebo PRIZNANIE. Nikdy dopočítané v komponente (D115). */
+  const uplift: UpliftView = upliftView(insights === null ? null : insights.uplift);
+
+  /**
+   * „referencia · názov" (D116). Referencia je z obohatenia, takže neobohatený
+   * produkt ju NEMÁ — a `productLabel()` z toho nespraví prázdno: ostane názov
+   * a `#id` v technickom detaile.
+   */
+  const label = ((): ReturnType<typeof productLabel> => {
+    const reference = kpi === null ? null : kpi.reference.known ? kpi.reference.value : null;
+    return productLabel({ productId: row.productId, reference, name: row.name });
+  })();
+
   /**
    * Marža ako jeden údaj: eurá a percentá vedľa seba. Percento samo o sebe je
    * bez sumy nečitateľné a suma bez percenta sa nedá porovnať naprieč cenami.
@@ -681,7 +1085,12 @@ export function ProductDetailPanel({
     if (!eur.known) return eur;
     const percent = extra?.keyed?.marginPercent ?? null;
     if (percent === null) return known(formatEur(eur.value));
-    return known(`${formatEur(eur.value)} · ${formatPercentSk(percent)}`);
+    /*
+     * `percentPlain`, NIE `formatPercentSk`: ten píše `−42 %`, lebo vznikol pre
+     * ZĽAVU. Marža mínus nemá a 42 % marža napísaná ako `−42 %` je vecná chyba
+     * (opravené 28. 8. 2026 spolu s KPI panela, ktoré tú istú funkciu volalo).
+     */
+    return known(`${formatEur(eur.value)} · ${percentPlain(percent)}`);
   })();
 
   /**
@@ -794,7 +1203,8 @@ export function ProductDetailPanel({
     >
       <div className="drawer-h">
         <div>
-          <div className="t">{row.name ?? 'bez názvu'}</div>
+          {/* D116: na povrchu „referencia · názov", `#id` v technickom detaile. */}
+          <div className="t">{label.text}</div>
           <div className="lvl-3" style={{ marginTop: '3px' }}>
             {formatEur(row.price)}
           </div>
@@ -817,7 +1227,7 @@ export function ProductDetailPanel({
         </button>
       </div>
 
-      <SoldDominant sold={sold} windowDays={windowDays} />
+      <SoldDominant cell={soldCell} windowDays={windowDays} />
       {/* `role="group"` — bez roly je `aria-label` na `<div>` neplatný
           a čítačka ho zahodí (to isté vo filtroch a v pätke tabuľky). */}
       <div className="seg" role="group" aria-label="Za koľko dní sa počítajú predané kusy">
@@ -837,6 +1247,32 @@ export function ProductDetailPanel({
       <div className="lvl-3" style={{ marginTop: '4px' }}>
         Vlastný výpočet z objednávok.
       </div>
+
+      {/*
+       * KRIVKA 90 DNÍ A VÝKON ZĽAVY (D115) — na povrchu, nie pod rozklikom.
+       *
+       * Toto je vo V4 dôvod, prečo sa panel otvára: jedno číslo nad ním hovorí
+       * KOĽKO, krivka hovorí KEDY a uplift hovorí, či to zľava spravila (alebo
+       * že sa to povedať nedá). Schované pod rozklikom by to bola referencia,
+       * a referencia sa neotvára.
+       */}
+      <DetailGroup title={`Predaj po dňoch · ${DETAIL_CURVE_DAYS} dní`}>
+        {insights === null ? (
+          <div className="lvl-3" data-testid="detail-curve-loading">
+            Krivka sa načítava.
+          </div>
+        ) : (
+          <>
+            <ProductCurveChart curve={insights.curve} />
+            <div className="lvl-3" data-testid="detail-curve-gaps">
+              {curveGapNote(insights.curve)}
+            </div>
+          </>
+        )}
+        <div style={{ marginTop: '8px' }}>
+          <UpliftBlock view={uplift} />
+        </div>
+      </DetailGroup>
 
       {/*
        * PREKÁŽKY MAJÚ NADPIS LEN VTEDY, KEĎ JE ČO VYMENOVAŤ.
@@ -908,6 +1344,42 @@ export function ProductDetailPanel({
         </dl>
         <div className="lvl-3" style={{ marginTop: '6px' }} data-testid="detail-row-fetched-at">
           Načítané {formatDateTimeSk(row.fetchedAt)}.
+        </div>
+      </DetailGroup>
+
+      {/*
+       * AKO SA SKONČILO DOŤAHOVANIE — NA POVRCHU, a to je celé rozhodnutie.
+       *
+       * Veta vysvetľuje, prečo sú fakty pod ňou prázdne. Pod rozklikom by ju
+       * nikto nevidel a pomlčky by vyzerali ako chyba appky. Od 28. 8. 2026
+       * eshop odmieta našu adresu (`ip_banned`), takže toto je dnes NORMÁLNY
+       * stav — hovorí sa preto vetou, nie chybovým hlásením.
+       */}
+      {notice === null ? null : notice.tone === 'attention' ? (
+        <div className="flag" style={{ marginTop: '8px' }} data-testid="detail-enrich-notice">
+          <FlagMark />
+          {notice.text}
+        </div>
+      ) : (
+        <div className="lvl-3" style={{ marginTop: '8px' }} data-testid="detail-enrich-notice">
+          {notice.text}
+        </div>
+      )}
+
+      {/*
+       * FAKTY Z OBOHATENIA (D114 v revízii §2b). Nadpis sa mení s tým, čo appka
+       * naozaj má — nadpis „Fakty z eshopu" nad ôsmimi pomlčkami by klamal.
+       * Marža sa NEPOČÍTA: shop ju posiela hotovú a appka ukazuje presne to.
+       */}
+      <DetailGroup
+        title={kpi !== null && kpi.enrichedAt !== null ? 'Fakty z eshopu' : 'Fakty z eshopu zatiaľ nemáme'}
+        hint={fieldCount(factRows.length)}
+        fold
+        testId="detail-kpi-fold"
+      >
+        <KpiFacts rows={factRows} />
+        <div className="lvl-3" style={{ marginTop: '6px' }} data-testid="detail-kpi-measured">
+          {measuredNote(kpi)}
         </div>
       </DetailGroup>
 

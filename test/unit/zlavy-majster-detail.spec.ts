@@ -111,7 +111,7 @@ const ROWS = [
 
 const CONFIRM_PROPS = {
   itemsCount: 2,
-  tiers: buildTiers(ROWS, 20),
+  tiers: buildTiers(ROWS, 20).tiers,
   averagePrice: 84,
   typed: '',
   onTyped: () => {},

@@ -1203,6 +1203,44 @@ export function createExecutor(deps: ExecutorDeps): {
               if (rest.status === 'pending') rest.status = 'interrupted';
             }
             return toNeedsKey(campaign, ordered, 'shop_ip_banned', actor, userId);
+          } else if (error.kind === 'rate_limited') {
+            /*
+             * 429 — SHOP NÁS ZASTAVIL, nie táto položka je zlá (31. 8. 2026).
+             *
+             * Do tohto dňa spadol 429 do všeobecnej vetvy nižšie: položka
+             * `failed` a cyklus pokračoval ďalej. Keďže dôvodom 429 je
+             * vyčerpaná kvóta kľúča (a tú si appka odteraz míňa aj ČÍTANÍM —
+             * obohacovanie D118 beží na tom istom kľúči), ďalšia položka
+             * dostane to isté 429 a kampaň sa v PRODUKČNOM eshope dopíše len
+             * spolovice: časť zliav zapísaná, zvyšok `failed`, a nikde nie je
+             * napísané, že to bola kvóta a nie chyba produktov.
+             *
+             * Preto sa beh zastaví ako pri vyčerpanom rozpočte: zvyšok
+             * zostáva `pending` (NEoznačuje sa ako chyba) a kampaň ide do
+             * `queued` s dôvodom. Fronta pokračuje, keď kvóta nabehne — bez
+             * ľudského zásahu a bez druhého zápisu na tie isté položky.
+             * Kľúča sa to NEDOTÝKA: 429 nie je výrok o kľúči (X1).
+             */
+            item.status = 'failed';
+            await itemsRepo.update(item.id, {
+              status: 'failed',
+              httpStatus: result.httpStatus,
+              requestId: result.requestId,
+              errorCode: error.code ?? error.kind,
+              errorMessage:
+                'Eshop odmietol zápis pre prekročenú kvótu (429) — kľúč je v poriadku a zostáva uložený.',
+              sentPayload: redact(sentPayload),
+              rawResponse: redact(result.raw),
+              finishedAt,
+            });
+            await audit.appendAudit({ ...commonAudit, eventType: 'write_failed', ok: false });
+
+            opLog.info('shop_rate_limited_mid_batch', {
+              campaignId: campaign.id,
+              productId: item.productId,
+              position: item.position,
+            });
+            return toQueued(campaign, ordered, 'shop_rate_limited', actor);
           } else if (keyRejected) {
             /* D51/D52 — wipe + zvyšok `interrupted` + kampaň `needs_key`. */
             item.status = 'failed';

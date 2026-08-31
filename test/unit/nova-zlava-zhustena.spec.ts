@@ -144,7 +144,7 @@ describe('B — kedy sa zapíše a kedy nabehne (P6, P7)', () => {
 
 const CONFIRM_PROPS = {
   itemsCount: 8000,
-  tiers: buildTiers(ROWS, 180),
+  tiers: buildTiers(ROWS, 180).tiers,
   averagePrice: 46.2,
   typed: '',
   onTyped: () => {},

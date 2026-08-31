@@ -66,13 +66,19 @@ import type {
 } from '@/lib/catalog/reduction-compare';
 import type { ShopCapability } from '@/lib/catalog/product-codes';
 import { LOGIC_TIME_ZONE, todayInZone } from '@/lib/domain/dates';
-import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
+import {
+  defineRoute,
+  expectedHost,
+  type NextRouteHandler,
+  type RouteDeps,
+} from '@/lib/http/define-route';
+import { AppError, HTTP_ERROR_CODES } from '@/lib/http/errors';
 import {
   apiKeyRepo as defaultApiKeyRepo,
   type ApiKeyRepository,
 } from '@/lib/repo/api-key.repo';
 import { insightsRepo as defaultInsightsRepo } from '@/lib/repo/insights.repo';
-import { anonReadBudget } from '@/lib/repo/read-budget.repo';
+import { productReadBudget } from '@/lib/repo/read-budget.repo';
 import { settingsRepo as defaultSettingsRepo } from '@/lib/repo/settings.repo';
 import { createShopClientFromSettings, type ShopClientV5 } from '@/lib/shop/client';
 import type { ReadBudget } from '@/lib/shop/read-budget';
@@ -109,18 +115,15 @@ export interface ReductionCheckRouteDeps {
   /** História VLASTNÝCH zápisov na produkt. */
   ownWrites?: ReductionCheckDeps['ownWrites'];
   /**
-   * Zdieľané počítadlo čítaní zo shopu (A4).
+   * Zdieľané počítadlo čítaní zo shopu (A4) — dráha `product_read`.
    *
-   * POZOR — je to DOČASNÉ napojenie a v reporte je to napísané nahlas: `getFull`
-   * je čítanie S KĽÚČOM, takže shop ho účtuje NA KĽÚČ, kým `anon` dráha je
-   * rozpočtovaná na IP. Vlastná dráha (`product`) v `ReadLane` zatiaľ nie je a
-   * založiť ju je zmena v `src/lib/shop/read-budget.ts`, ktorý táto vetva
-   * nevlastní (DB migráciu si nevyžiada — `shop_read_budget.lane` je
-   * `VARCHAR(24)`). Dovtedy sa účtuje do anonymnej dráhy: je to konzervatívne
-   * (odpočíta sa viac, než sa v shope minulo), takže z toho nemôže vzniknúť ban
-   * — len o niečo pomalšia synchronizácia katalógu. Kým chýba oprávnenie
-   * `product:read`, sa aj tak neminie ani jedno čítanie: overenie skončí na
-   * bráne oprávnenia PRED rezerváciou.
+   * `getFull` je čítanie S KĽÚČOM, takže shop ho účtuje NA KĽÚČ; `anon` dráha je
+   * rozpočtovaná na IP a žije z nej dvojdňová synchronizácia katalógu. Od
+   * 31. 8. 2026 (predtým `anon`, od 13. 8. 2026) sa preto účtuje do vlastnej
+   * dráhy `productReadBudget` — do jedného počítadla s obohacovaním katalógu,
+   * lebo je to ten istý kľúč. Kým chýba oprávnenie `product:read`, sa aj tak
+   * neminie ani jedno čítanie: overenie skončí na bráne oprávnenia PRED
+   * rezerváciou.
    */
   reads?: Pick<ReadBudget, 'reserve' | 'status'>;
   now?: () => Date;
@@ -161,7 +164,7 @@ export interface ProductReductionView {
 export interface ReductionCheckResponse {
   /**
    * `done` · `no_ids` · `locked` · `unknown_scope` · `no_key` · `budget_day` ·
-   * `budget_minute` · `budget_unknown` · `failed`.
+   * `budget_minute` · `budget_shared` · `budget_unknown` · `failed`.
    */
   outcome: ReductionCheckOutcome;
   /** Stav oprávnenia `product:read`. `note` patrí VÝHRADNE do `LockedFeatures`. */
@@ -206,13 +209,44 @@ function productView(row: ProductReductionCheck): ProductReductionView {
   };
 }
 
-/* ═══════════════════════════ 4. Route ═════════════════════════════════════ */
+/* ═══════════════════════════ 4. Brána cudzieho pôvodu ════════════════════ */
+
+/**
+ * Dôvod, prečo je požiadavka preukázateľne z cudzej stránky — alebo `null`,
+ * keď o cudzom pôvode niet dôkazu.
+ *
+ * Rozhoduje sa VÝHRADNE z hlavičiek, ktoré posiela prehliadač. Chýbajúce
+ * hlavičky nie sú dôkaz ničoho a prechádzajú (viď doc-blok v handleri).
+ */
+export function crossSiteVerdict(request: Request): 'origin_mismatch' | 'cross_site' | null {
+  const fetchSite = request.headers.get('sec-fetch-site')?.trim().toLowerCase();
+  // `same-origin` a `none` (adresný riadok, záložka) sú v poriadku; `same-site`
+  // tu nemôže nastať, appka žije na jedinom origine.
+  if (fetchSite === 'cross-site' || fetchSite === 'same-site') return 'cross_site';
+
+  const origin = request.headers.get('origin');
+  if (origin === null || origin.trim().length === 0) return null;
+  if (origin.trim().toLowerCase() === 'null') return 'origin_mismatch';
+
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host.toLowerCase();
+  } catch {
+    return 'origin_mismatch';
+  }
+  const host = expectedHost(request);
+  // Turbopack už raz zahodil `if (!x)` ako compile-time falsy — porovnávame explicitne.
+  if (host === null) return null;
+  return originHost === host ? null : 'origin_mismatch';
+}
+
+/* ═══════════════════════════ 5. Route ═════════════════════════════════════ */
 
 export function createReductionCheckRoute(deps: ReductionCheckRouteDeps = {}): NextRouteHandler {
   const apiKey = deps.apiKey ?? defaultApiKeyRepo;
   const ownWrites =
     deps.ownWrites ?? ((productId: number) => defaultInsightsRepo.productWrites(productId, OWN_WRITES_LOOKBACK));
-  const reads = deps.reads ?? anonReadBudget;
+  const reads = deps.reads ?? productReadBudget;
   const now = deps.now ?? ((): Date => new Date());
   // Klient sa zostavuje až keď je naozaj treba: `settings.shop_domain` sa číta
   // lazy a brána oprávnenia ho vo väčšine volaní vôbec nepotrebuje (D80).
@@ -223,7 +257,59 @@ export function createReductionCheckRoute(deps: ReductionCheckRouteDeps = {}): N
     {
       method: 'GET',
       query: checkQuerySchema,
+      /*
+       * STROP NA IP, HOCI JE TO GET (31. 8. 2026).
+       *
+       * `checkOrigin()` (D72) posudzuje len mutácie, takže na tejto route
+       * žiadna brána nestála — a od chvíle, čo účtuje do dráhy `product_read`,
+       * míňa KVÓTU ZÁPISOVÉHO KĽÚČA (10 ID na dopyt = 10 čítaní). Šestnásť
+       * obyčajných GETov teda vedelo vyprázdniť celý denný strop dráhy (160)
+       * a s ním 80 % reálnej kvóty kľúča; appka nemá prihlásenie (D98–D100),
+       * takže sa na port dostane čokoľvek, čo pošle GET.
+       *
+       * 6/min je pre človeka, ktorý si preklikáva produkty, stále štedré
+       * (60 ID/min) a proti minútovému stropu dráhy (16 čítaní) je to už
+       * brzda, nie ozdoba. Sama by ale nestačila — cudzia stránka sa vráti
+       * o minútu — preto sú nad ňou ešte DVE poistky, ktoré držia škodu
+       * ohraničenú aj na celý deň:
+       *
+       *   1. `reductionCheckDailyCeiling()` — overenie nikdy neminie viac než
+       *      polovicu dennej dráhy; druhá polovica zostáva obohacovaniu,
+       *   2. `WRITE_QUOTA_RESERVE` (`lib/engine/budget.ts`) — vyčerpaná dráha
+       *      nezníži rozpočet zápisov pod rezervu, takže cudzí GET nevie
+       *      appke odobrať schopnosť zapísať zľavu.
+       */
+      rateLimit: { limit: 6, windowMs: 60_000 },
       handler: async (ctx) => {
+        /*
+         * CUDZIA STRÁNKA V TOM ISTOM PREHLIADAČI (31. 8. 2026).
+         *
+         * POST z tejto cesty NEROBÍME: je to čítanie, POST by o nej klamal, a
+         * grep hovorí, že ju dnes nevolá ani jeden komponent — takže by sa
+         * verb zmenil len kvôli vypožičanej bráne. Namiesto toho tu stojí
+         * brána na POZITÍVNY dôkaz cudzieho pôvodu:
+         *
+         *  - `Origin`, ktorý sa nerovná hostu požiadavky (každý cross-origin
+         *    `fetch()` ho posiela — aj GET, je to CORS request),
+         *  - `Sec-Fetch-Site: cross-site` (posiela prehliadač aj pri
+         *    `<img>`/`<script>`, kde `Origin` nie je a odpoveď sa prečítať
+         *    nedá — kvótu to ale minie rovnako).
+         *
+         * ZÁMERNE nie fail-closed na CHÝBAJÚCE hlavičky: `curl` ani otvorenie
+         * URL v adresnom riadku ich nemá a toto je čítanie, nie mutácia.
+         * Zvyšok škody držia dva stropy vyššie.
+         */
+        const crossSite = crossSiteVerdict(ctx.request);
+        if (crossSite !== null) {
+          ctx.log.warn('reduction_check_cross_site_blocked', { reason: crossSite });
+          throw new AppError(
+            403,
+            HTTP_ERROR_CODES.originMismatch,
+            'Overenie zľavy sa dá vyžiadať len z tejto appky — požiadavka prišla z cudzej stránky.',
+            { logAsError: false, detail: { reason: crossSite } },
+          );
+        }
+
         const productIds = ctx.query.productIds
           .map((value) => Number(value))
           .filter((value) => Number.isInteger(value) && value > 0);

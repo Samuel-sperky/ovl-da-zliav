@@ -56,6 +56,33 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
 - Dva kľúče shopu žijú v jednej tabuľke `api_key` rozlíšené stĺpcom `kind`
   (`shop_write` 48 h / `orders_read` 30 dní). Jedna cesta pre šifrovanie, TTL,
   audit a wipe, takže panic button a zákaz logovania platia na oba automaticky.
+- `src/lib/engine/catalog-enrich.ts` — obohacovanie katalógu z `getFull`
+  (referencia, nákupná cena, marža, sklad, `qty_in_orders`, `last_time_in_order`,
+  dodávateľ, kategórie). `runEnrichBatch()` beží v poradí priority
+  (`catalog_cache.enrich_priority`: 1 = povolený zoznam, 2 = produkty
+  v kampaniach, 3 = zvyšok), strop `ENRICH_MAX_PER_RUN = 150`, rezerva kvóty
+  `ENRICH_QUOTA_RESERVE = 50`, sviežosť `ENRICH_FRESH_MS = 6 h`. Pauzy majú
+  DÔVOD: `ip_banned`, `rate_limited`, `daily_budget`, `no_key` — pri odmietnutí
+  shopom sa žiadny produkt neoznačí ako obohatený (D118, D120). Cesta „na dopyt"
+  (jeden produkt) je `POST /api/catalog/enrich`.
+- `src/lib/ui/product-label.ts` — JEDINÉ miesto, kde sa produkt pomenúva:
+  `productLabel({ productId, reference, name })` → „ref · názov", chýbajúca
+  referencia je pomlčka, nikdy nie vymyslené číslo (D116, K6). Používaj ho
+  všade, kde predtým stálo samotné `product_id`.
+- `src/lib/repo/presets.repo.ts` — pomenované presety zliav (filter + pásma +
+  trvanie, `MAX_PRESETS = 20`), UI v `src/components/campaigns/DiscountPresets.tsx`,
+  routy `src/app/api/presets/route.ts` a `.../[presetId]/route.ts`. Spustenie
+  presetu **nie je výnimka z I3** — vždy ide nanovo cez dry-run + potvrdenie
+  (D112, K7).
+- Čítacie endpointy pre obrazovky V4 (žiadne volanie shopu na render ceste, K8):
+  `src/app/api/insights/{product-kpi,top-products,revenue-daily,sales-daily,timeline,discount-depth,catalog-prices,activity}/route.ts`
+  a `src/app/api/insights/product/[productId]/route.ts`.
+- Migrácia `db/migrations/0014_obohatenie_katalogu.sql` (APLIKOVANÁ,
+  checksum-uzamknutá — needituj ju, pridaj novú) rozšírila `catalog_cache`
+  o obohatené stĺpce (všetky NULLABLE = „nevieme") a `enrich_priority`
+  (NOT NULL DEFAULT 3) a pridala dve tabuľky: `catalog_enrich_state` (stav
+  dávky obohacovania, dôvod pauzy) a `shop_revenue_daily` (denná tržba
+  eshopu — pozri D117 nižšie).
 
 ## Pasce, ktoré tu už raz prežili do produkcie
 
@@ -81,6 +108,29 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   INSERT INTO settings (id) VALUES (1)`. Nie je to race v kóde a nie je to pád
   tvrdenia. **Žiadny report z `npm test` nie je dôkaz, ak súčasne beží iný
   vitest** — over `ps | grep vitest` a beh zopakuj v izolácii.
+- **Kvóta kľúča je ~20/min a ~200/deň, katalóg má 41 348 produktov.** Celoplošné
+  `getFull` je teda **~207 dní** — plošné obohacovanie sa NEDÁ a nikdy ho
+  nenavrhuj. Preto je prioritizované a na dopyt (D118), a neobohatený produkt má
+  pomlčku, nie nulu ani odhad.
+- **Batch NEZNIŽUJE kvótu.** 25 položiek = 25 hitov (plus 1 za samotné batch
+  volanie), a `getFull` medzi batchovateľnými akciami vôbec **nie je**
+  (opted-in sú len `products/get` a `order/get`). Dôkaz:
+  `docs/api/sperky-api-v4.md` §Batch. „Zbatchujeme to" nie je optimalizácia.
+- **Ceny položiek objednávky API NEVRACIA** (`order/get` → `products: [{id, qty}]`).
+  Tržba v € existuje preto len na úrovni eshopu (denná suma `total_paid`,
+  tabuľka `shop_revenue_daily`), per produkt sú to **výhradne kusy** (D117).
+  Rozdeľovať `total_paid` medzi položky je ZAKÁZANÉ — poštovné, zľavy a kupóny
+  by z toho urobili vymyslené číslo (I11).
+- **API je zabanované na IP.** Shop vracia `{"error":"ip_banned"}` na všetko —
+  aj na verejné čítanie katalógu bez kľúča. Nikdy nevolaj `sperky-eshop.sk`;
+  stavia sa a testuje výhradne proti mock shopu (I6) a fetch guard v
+  `test/setup.ts` púšťa len loopback. Odblokovanie je akcia Samuela (`docs/60`).
+- **`src/db/pool.ts` a UTC.** Docblock tam kedysi tvrdil, že „všetky `DATETIME`
+  sú v DB v UTC". Nie sú: `timezone: 'Z'` prekladá hodnoty len na hranici poolu,
+  v stĺpcoch sú **lokálne hodiny procesu**. Dotaz, ktorý porovnáva surový stĺpec
+  s `UTC_TIMESTAMP()` alebo s UTC reťazcom, je preto tichá chyba. Chovanie sa
+  zámerne nemení (prepnutie by prepísalo význam už uložených dátumov) — čítaj
+  dnešný docblock v `src/db/pool.ts`.
 - **Čo test vyňal z kontroly, nestráži NIKTO.** `nastavenia-v12.spec.ts` si
   kotvu `odhlasenie` vyňal zo zoznamu identifikátorov s tým, že „kryje ju e2e";
   e2e ju nekryla, a keď D99 zmazalo `SignOut.tsx`, rozcestník Nastavení mesiac

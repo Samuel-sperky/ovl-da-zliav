@@ -159,20 +159,20 @@ describe('B — pásma vznikajú z merania, nie z domnienky', () => {
   });
 
   it('prázdne pásmo nevznikne a pásma sú v poradí od najhoršieho ležiaka', () => {
-    const tiers = buildTiers(ROWS, 180);
+    const tiers = buildTiers(ROWS, 180).tiers;
     expect(tiers.map((t) => t.bucket)).toEqual(['none', 'low', 'mid', 'high']);
     expect(tiers.map((t) => t.letter)).toEqual(['A', 'B', 'C', 'D']);
     expect(tiers.map((t) => t.productIds.length)).toEqual([3, 2, 1, 1]);
     expect(tiers[0]!.percent).toBe(DEFAULT_TIER_PERCENT.none);
 
     // Sada bez predajov má jediné pásmo — nie štyri, z toho tri prázdne.
-    const single = buildTiers(ROWS.filter((r) => r.unitsSold === 0), 180);
+    const single = buildTiers(ROWS.filter((r) => r.unitsSold === 0), 180).tiers;
     expect(single).toHaveLength(1);
     expect(single[0]!.productIds).toHaveLength(3);
   });
 
   it('hlavička zľavy nesie NAJVYŠŠIE percento pásiem (K3)', () => {
-    const tiers = buildTiers(ROWS, 180, { none: 30, low: 20, mid: 15, high: 10 });
+    const tiers = buildTiers(ROWS, 180, { none: 30, low: 20, mid: 15, high: 10 }).tiers;
     expect(headlinePercent(tiers)).toBe(30);
   });
 
@@ -193,7 +193,7 @@ describe('B — pásma vznikajú z merania, nie z domnienky', () => {
 
 describe('C — vzorka je rozložená naprieč pásmami, nie prvých 6', () => {
   it('každé pásmo dostane riadok skôr, než ktorékoľvek dostane druhý', () => {
-    const tiers = buildTiers(ROWS, 180);
+    const tiers = buildTiers(ROWS, 180).tiers;
     const sample = spreadSample(ROWS, tiers, 6);
     const byId = new Map(ROWS.map((r) => [r.productId, r]));
 
@@ -260,7 +260,7 @@ describe('E — odhad dobehnutia sa správa ako server, štart má rezervu', () 
 
 const CONFIRM_PROPS = {
   itemsCount: 8000,
-  tiers: buildTiers(ROWS, 180),
+  tiers: buildTiers(ROWS, 180).tiers,
   averagePrice: 46.2,
   typed: '',
   onTyped: () => {},

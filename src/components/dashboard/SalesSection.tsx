@@ -55,21 +55,50 @@
  * Vlastník: V9, graf V1.
  */
 import Link from 'next/link';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import ChartTable from '@/components/charts/ChartTable';
 import SalesChart from '@/components/dashboard/SalesChart';
 import styles from '@/components/dashboard/overview.module.css';
 import type { SalesDay, SalesSnapshot } from '@/components/dashboard/api';
-import type { SeriesDay } from '@/components/dashboard/sales-view';
-import { axisDay, chartGeometry, salesNumbers } from '@/components/dashboard/sales-view';
+import type { OverviewWindow } from '@/components/dashboard/overview-model';
+import { DEFAULT_OVERVIEW_WINDOW } from '@/components/dashboard/overview-model';
+import type { DiscountWindowInput, SeriesDay } from '@/components/dashboard/sales-view';
+import {
+  axisDay,
+  chartGeometry,
+  discountBands,
+  revenueDays,
+  salesNumbers,
+  windowDayList,
+} from '@/components/dashboard/sales-view';
+import type { RevenueDailyView } from '@/components/dashboard/window-api';
 import { fetchJson } from '@/components/layout/health';
 import { useRefreshable } from '@/components/layout/refresh';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 import { formatDateTimeSk } from '@/lib/ui/format';
+import { NEVIEME } from '@/lib/ui/product-label';
 
 export interface SalesSectionProps {
   sales: SalesSnapshot | null;
+  /**
+   * Okno prepínača Prehľadu. Bez neho zostáva predvolených 30 dní — sekcia si
+   * prepínač NEKRESLÍ, lebo ten patrí celej obrazovke (okno riadi aj rebríček).
+   */
+  windowDays?: OverviewWindow;
+  /** Prepínač okna do hlavičky sekcie. Kreslí ho obrazovka, nie sekcia. */
+  switcher?: ReactNode;
+  /**
+   * Okná zliav na podfarbenie POD krivku (V4, D113). Sú to VLASTNÉ zápisy
+   * appky, nie stav eshopu — hovorí to popis nad grafom.
+   */
+  discountWindows?: readonly DiscountWindowInput[];
+  /**
+   * Denná tržba ESHOPU (D117). `null` = nedalo sa prečítať; `undefined` =
+   * obrazovka o tržbu nežiadala. V oboch prípadoch sa nekreslí SUMA, len
+   * priznanie — nikdy nula.
+   */
+  revenue?: RevenueDailyView | null;
 }
 
 function pieces(value: number): string {
@@ -100,11 +129,13 @@ export function toSeriesDay(row: { day: string; units: number; status: string | 
  * nekreslíme a povieme prečo"; nula by znamenala „v ten deň sa nepredalo nič",
  * čo je tvrdenie o produkčnom eshope.
  */
-function useDailySeries(): SeriesDay[] {
+function useDailySeries(windowDays: OverviewWindow): SeriesDay[] {
   const [days, setDays] = useState<SeriesDay[]>([]);
 
-  useRefreshable(async () => {
-    const body = await fetchJson<{ days?: unknown }>('/api/insights/sales-daily');
+  const load = useCallback(async () => {
+    const body = await fetchJson<{ days?: unknown }>(
+      `/api/insights/sales-daily?window=${windowDays}`,
+    );
     const raw = body === null ? null : body.days;
     if (!Array.isArray(raw)) {
       setDays([]);
@@ -126,7 +157,25 @@ function useDailySeries(): SeriesDay[] {
     }
     out.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
     setDays(out);
-  });
+  }, [windowDays]);
+
+  useRefreshable(load);
+
+  /*
+   * Zmena okna je RUČNÁ akcia človeka (kliknutie do prepínača), takže načítanie
+   * po nej nie je automatické obnovovanie zakázané bodom 4 kontraktu — je to tá
+   * istá kategória ako stlačenie Obnoviť. Prvý beh sa preskočí, lebo ten už
+   * urobil `useRefreshable` pri otvorení obrazovky; bez tej stráže by každé
+   * otvorenie Prehľadu poslalo ten istý dotaz dvakrát.
+   */
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      return;
+    }
+    void load();
+  }, [load]);
 
   return days;
 }
@@ -185,6 +234,89 @@ function signedPercent(value: number): string {
   return value > 0 ? `+${value} %` : `−${Math.abs(value)} %`;
 }
 
+/* ═════════════ Denná tržba ESHOPU — jediné euro, ktoré appka má ═══════════ */
+
+/**
+ * TRŽBA ESHOPU, NIE TRŽBA ZA PRODUKT ANI ZA ZĽAVU (D117).
+ *
+ * Sonda 28. 8. 2026 zmerala, že objednávkové API ceny položiek nevracia. Euro
+ * preto existuje VÝHRADNE ako denný súčet `total_paid` za celý eshop a tento
+ * blok je jediné miesto Prehľadu, kde ho appka smie napísať. Menovka „celý
+ * eshop" nie je slušnosť — bez nej si suma sadne vedľa grafu kusov povolených
+ * produktov a prečíta sa ako ich obrat.
+ *
+ * ČO TU NIKDY NEBUDE: delenie sumy počtom kusov (v `total_paid` je poštovné,
+ * kupóny aj zľavy), sčítanie dvoch mien do jedného čísla, a nula za deň, ktorý
+ * appka nemá.
+ *
+ * ROZBEHNUTÝ DEŇ NIE JE POKLES. Deň s `dayComplete: false` je dolná hranica;
+ * dostane `≈` a vetu, a NIKDY nestojí vedľa dočítaných dní ako rovnocenné
+ * číslo. Bez toho vyzerá posledný deň okna vždy ako prudký pád tržby.
+ */
+function Revenue({
+  revenue,
+  windowDays,
+}: {
+  revenue: RevenueDailyView | null | undefined;
+  windowDays: OverviewWindow;
+}) {
+  if (revenue === undefined) return null;
+  if (revenue === null) {
+    return (
+      <div className="fresh" data-testid="overview-revenue" data-mode="unreadable">
+        Tržbu celého eshopu sa nepodarilo prečítať, tak ju neuvádzame
+      </div>
+    );
+  }
+
+  const list = windowDayList(revenue.from, revenue.to);
+
+  return (
+    <div className={styles.revenueRow} data-testid="overview-revenue" data-mode="data">
+      {revenue.series.length === 0 ? (
+        <span className="lvl-3">
+          {`Tržba celého eshopu za ${dayCount(windowDays)} — ${NEVIEME} · ani jeden deň okna zatiaľ nemáme`}
+        </span>
+      ) : (
+        revenue.series.map((series) => {
+          const days = revenueDays(list, series.days);
+          const last = days[days.length - 1];
+          /* Súčet je meranie LEN pri dočítanom okne; inak je to dolná hranica
+             a musí to byť vidieť pred číslom, nie až v poznámke pod ním. */
+          const sum =
+            series.sum === null
+              ? NEVIEME
+              : `${series.sumState === 'measured' ? '' : '≈ '}${series.sum} ${series.currency}`;
+          return (
+            <span key={series.currency} className="lvl-3" data-testid="revenue-series">
+              {`Tržba celého eshopu za ${dayCount(windowDays)}: ${sum}`}
+              {series.sumState === 'lower_bound' ? ' · aspoň toľko, časť dní nemáme celú' : ''}
+              {last !== undefined && last.state === 'lower_bound'
+                ? ` · posledný deň sa ešte dopočítava (${last.text} ${series.currency}), nie je to pokles`
+                : ''}
+            </span>
+          );
+        })
+      )}
+      {/*
+        Tri stavy, nie dva (I11): číslo je zmeraná medzera, nula znamená
+        „nechýba ani jeden deň" a `null` znamená, že odpoveď zoznam chýbajúcich
+        dní vôbec nenesie. Posledné dva sa nesmú zliať — mlčanie pri `null` by
+        prečítalo ako „okno je celé".
+      */}
+      {revenue.missingDays === null ? (
+        <span className="lvl-3" data-testid="revenue-gap" data-mode="unknown">
+          {`Koľko dní okna appke chýba, nevieme (${NEVIEME}) — nie je to nula`}
+        </span>
+      ) : revenue.missingDays === 0 ? null : (
+        <span className="lvl-3" data-testid="revenue-gap" data-mode="measured">
+          {`${dayCount(revenue.missingDays)} okna appka nemá — tržbu za ne nepoznáme, nie je to nula`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /**
  * Prázdny stav = JEDNA VETA a JEDNO TLAČIDLO (kontrakt UI, bod 11). Veta je
  * dôvod, nie „žiadne dáta": prázdny graf môže znamenať vypnuté sťahovanie
@@ -211,9 +343,15 @@ function Empty({ reason }: { reason: string }) {
   );
 }
 
-export function SalesSection({ sales }: SalesSectionProps) {
+export function SalesSection({
+  sales,
+  windowDays = DEFAULT_OVERVIEW_WINDOW,
+  switcher,
+  discountWindows = [],
+  revenue,
+}: SalesSectionProps) {
   // Hook stojí PRED prázdnymi stavmi — podmienené volanie hooku React zakazuje.
-  const fetched = useDailySeries();
+  const fetched = useDailySeries(windowDays);
 
   if (sales === null) {
     return <Empty reason="Údaje o predaji sa nepodarilo načítať." />;
@@ -245,6 +383,9 @@ export function SalesSection({ sales }: SalesSectionProps) {
   const to = sales.coverage.to;
   const range = from === null || to === null ? null : `${axisDay(from)} – ${axisDay(to)}`;
   const missing = geometry === null ? 0 : geometry.gaps.reduce((n, g) => n + g.days, 0);
+  /* Pásy zliav sedia na TÚ ISTÚ os ako body — mierku dáva geometria, nie druhý
+     výpočet. Pri poradovej osi vráti `discountBands()` prázdne pole. */
+  const bands = geometry === null ? [] : discountBands(geometry, discountWindows);
 
   return (
     <section className="sec" data-testid="overview-sales" data-mode="data">
@@ -256,6 +397,7 @@ export function SalesSection({ sales }: SalesSectionProps) {
           <span className="lvl-3">
             {dayCount(measured.length)} s údajmi · {pieces(numbers.windowUnits)}
           </span>
+          {switcher}
         </div>
       </div>
 
@@ -296,10 +438,15 @@ export function SalesSection({ sales }: SalesSectionProps) {
             <>
               <SalesChart
                 geometry={geometry}
+                bands={bands}
                 /* Popis nesie OBDOBIE aj ROZSAH. Rad kusov bez uvedeného
                    rozsahu vyzerá ako obrat celého eshopu; sú to pritom len
-                   povolené produkty. */
-                caption={`${range ?? 'Denný predaj'} · ${dayCount(measured.length)} s údajmi · povolené produkty`}
+                   povolené produkty. Pri pásoch zliav pribúda tretia vec:
+                   podfarbenie hovorí o NAŠICH zápisoch, nie o tom, čo v tie dni
+                   naozaj videl zákazník (I11). */
+                caption={`${range ?? 'Denný predaj'} · ${dayCount(measured.length)} s údajmi · povolené produkty${
+                  bands.length === 0 ? '' : ' · podfarbené sú okná našich zliav'
+                }`}
                 label="Predané kusy povolených produktov po dňoch; nestiahnutý deň nie je nula"
               />
               <ChartTable
@@ -319,11 +466,15 @@ export function SalesSection({ sales }: SalesSectionProps) {
         </div>
       )}
 
+      <Revenue revenue={revenue} windowDays={windowDays} />
+
       <div className="fresh">
         {sales.coverage.lastSyncedAt === null
           ? 'Predaj sa zatiaľ nesťahoval'
           : `Dáta k ${formatDateTimeSk(sales.coverage.lastSyncedAt)}`}{' '}
-        · appka pozná predané kusy, nie sumu v eurách
+        {/* Od D117 je veta presnejšia: euro appka MÁ, ale len za celý eshop.
+            Pôvodné „nie sumu v eurách" by teraz protirečilo bloku nad ním. */}
+        · graf je v kusoch; euro appka pozná len ako tržbu celého eshopu
       </div>
     </section>
   );

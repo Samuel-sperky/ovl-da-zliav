@@ -1476,3 +1476,136 @@
     min-width: 0;
   }
 }
+
+/* ═══════════════ Presety — zoznam a uloženie (D112, K7) ═════════════════ */
+
+/*
+ * Zoznam presetov je pod rozklikom, teda mimo počtu sekcií (P5). Riadok je
+ * meno + súhrn vľavo a dve akcie vpravo; „Predplniť formulár" je ODKAZ, nie
+ * zápis (I3), preto nemá tón potvrdzovacieho tlačidla.
+ */
+.presetList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+
+.presetRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.presetName {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.presetSave {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.presetSave :global(.inp) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ═══════════════ Okná zliav v čase — pásy na osi (graf G1) ══════════════ */
+
+.tlAxis {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tlRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 210px) 1fr;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.tlName {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+/* Dráha pásu. `position: relative` je nosná: pás aj značka dneška sú v nej
+   umiestnené v percentách osi, ktoré počíta `timeline-model.ts`. */
+.tlTrack {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.tlBand {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  display: block;
+}
+
+/* Orezaná hrana je HRANA, nie zaoblenie — pás pokračuje mimo osi. */
+.tlBand[data-clip-start='true'] {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.tlBand[data-clip-end='true'] {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.tlToday {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink2);
+  display: block;
+}
+
+.tlFlags {
+  grid-column: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Na užšom okne (~720 px) sa meno zľavy zalomí nad svoj pás. */
+@media (max-width: 760px) {
+  .tlRow {
+    grid-template-columns: 1fr;
+  }
+
+  .tlFlags {
+    grid-column: 1;
+  }
+}

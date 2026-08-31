@@ -105,12 +105,14 @@ import SelectionBar from '@/components/products/SelectionBar';
 import type {
   CatalogPricesView,
   CatalogSearchView,
+  ProductKpiPageView,
   ShopStatus,
 } from '@/components/products/catalog-api';
 import {
   appStatus,
   catalogPrices,
   catalogSyncStatus,
+  fetchProductKpis,
   isAborted,
   runCatalogBatch,
   lookupInShop,
@@ -422,6 +424,38 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
     })();
     return () => abort.abort();
     // `pageIds` je odtlačok stránky — pri tých istých ID sa nedoťahuje znova.
+  }, [pageIds]);
+
+  /*
+   * KPI PRE VIDITEĽNÚ STRÁNKU — JEDEN DOTAZ, NIE STO (kontrakt V4 D114).
+   *
+   * `GET /api/insights/product-kpi?ids=…` vezme celú stránku naraz. Dotaz na
+   * riadok by bol N+1: pri stránkovaní po 100 sto dotazov na jedno prelistovanie.
+   * Route je čisto čítacia nad lokálnou DB — na shop neodíde nič (K8), takže
+   * to nemíňa ani rozpočet čítaní, ani kvótu kľúča.
+   *
+   * `null` sa drží ako TRETÍ STAV: kým odpoveď nie je, bunky KPI hovoria
+   * „nevieme", nie nulu. Preto sa pri zmene stránky NAJPRV zahodí (`setKpi(null)`)
+   * — nechať tam odpoveď o inej stránke by znamenalo kresliť čísla, ktoré sa
+   * k práve zobrazeným riadkom nevzťahujú.
+   */
+  const [kpi, setKpi] = useState<ProductKpiPageView | null>(null);
+
+  useEffect(() => {
+    setKpi(null);
+    if (rows.length === 0) return;
+    const abort = new AbortController();
+    void fetchProductKpis(
+      rows.map((row) => row.productId),
+      abort.signal,
+    ).then((res) => {
+      if (abort.signal.aborted) return;
+      // Neúspech NIE JE prázdna odpoveď: `null` znamená „nevieme", a presne to
+      // bunky vykreslia. Nula by z medzery urobila tvrdenie o nepredaní.
+      if (res.ok) setKpi(res.data);
+    });
+    return () => abort.abort();
+    // Ten istý odtlačok stránky ako pri kódoch — pri rovnakých ID sa nepýta znova.
   }, [pageIds]);
 
   /**
@@ -890,6 +924,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
               <CatalogTable
                 rows={rows}
                 extras={extras}
+                kpi={kpi}
                 soldWindowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
                 total={matching}
                 totalIsLowerBound={matchingIsLowerBound}
@@ -960,6 +995,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 <ProductDetailPanel
                   row={detailRow}
                   soldWindowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
+                  soldCoverage={soldCoverage}
                   blockers={detailBlockers}
                   onClose={() => setDetailId(null)}
                 />

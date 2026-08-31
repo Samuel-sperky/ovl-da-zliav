@@ -45,6 +45,7 @@ import type {
   DateOnly,
   DiscountPercent,
   ItemStatus,
+  Logger,
   MoneyString,
   PreviewTokenClaims,
   PreviewTokenService,
@@ -74,6 +75,7 @@ import {
 import { createExecutor, EngineError, executorFlagsFromEnv, type ExecutorFlags } from '@/lib/engine/executor';
 import { writeMutex as defaultWriteMutex } from '@/lib/engine/mutex';
 import { AppError, badRequest, conflict, notFound } from '@/lib/http/errors';
+import { logger as rootLogger } from '@/lib/log/logger';
 import { redact } from '@/lib/log/redact';
 import { allowlistRepo as defaultAllowlistRepo } from '@/lib/repo/allowlist.repo';
 import { apiKeyRepo as defaultApiKeyRepo } from '@/lib/repo/api-key.repo';
@@ -202,6 +204,15 @@ export interface RoutesDeps {
    * `catalogLookup` v `catalog/search`). Produkčne je to ten istý repozitár.
    */
   readBudget?: Pick<CatalogRepoExt, 'reserveShopReads' | 'shopReadBudget'>;
+  /**
+   * D118 — prepočet PORADIA frontu obohacovania (`catalog_cache.enrich_priority`).
+   *
+   * Samostatná závislosť, nie širší `catalogRepo`, z tej istej príčiny ako
+   * `readBudget`: trojica `get`/`getMany`/`upsert` je kontrakt, o ktorý sa
+   * opierajú existujúce fakes, a rozšíriť ju by znamenalo prepísať cudzie testy.
+   * Produkčne je to ten istý repozitár.
+   */
+  enrichPriority?: Pick<CatalogRepoExt, 'refreshEnrichPriority'>;
   auditRepo?: Pick<AuditRepo, 'list' | 'getById' | 'countWritesInLastHour'>;
   settingsRepo?: Pick<SettingsRepo, 'get' | 'lockWrites'>;
   apiKeyRepo?: Pick<ApiKeyRepo, 'getMeta' | 'loadForUse' | 'wipe' | 'touchLastUsed'>;
@@ -253,18 +264,120 @@ function withRequeue(repo: RoutesCampaignsRepo): ResolvedCampaignsRepo {
     : (repo as ResolvedCampaignsRepo);
 }
 
+/* ─────────── D118: poradie obohacovania po zmene kampaní/allowlistu ─────── */
+
+/**
+ * Stavy, ktorými kampaň KONČÍ — teda tie, po ktorých jej produkty už nemajú
+ * prednosť v poradí obohacovania.
+ *
+ * Je to presne doplnok k `ENRICH_CAMPAIGN_STATUSES` v `catalog.repo.ts` bez
+ * `draft` a bez `queued`: `done` a `partial` sú tu ZÁMERNE NIE — zapísaná
+ * kampaň, ktorej okno ešte beží, je práve ten prípad, o ktorom obrazovka
+ * potrebuje čísla, a `queued` znamená „čaká na rozpočet", nie „skončila".
+ * Zoznam je vypísaný ručne a nie odvodený, aby pribudnutie stavu do jedného
+ * zoznamu neprepísalo význam druhého potichu.
+ */
+export const CAMPAIGN_ENDING_STATUSES: readonly CampaignStatus[] = [
+  'failed',
+  'missed',
+  'cancelled',
+  'lapsed',
+];
+
+/** Čo tichý prepočet priority naozaj potrebuje (`ResolvedRoutesDeps` to spĺňa). */
+export interface EnrichPriorityDeps {
+  readonly enrichPriority: Pick<CatalogRepoExt, 'refreshEnrichPriority'>;
+  readonly now: () => Date;
+  readonly timeZone: string;
+}
+
+/**
+ * D118 — prepočíta poradie frontu obohacovania a NIKDY nehádže.
+ *
+ * Prečo tiché: priorita je PORADIE VO FRONTE, nie fakt o dátach. Keby padnutý
+ * prepočet zhodil mutáciu, používateľ by nemohol pridať produkt do povoleného
+ * zoznamu preto, že sa nedal preusporiadať front obohacovania — a to je horšia
+ * porucha než horšie poradie. Bez prepočtu ide front podľa poslednej známej
+ * priority a najbližšia dávka (`runEnrichBatch`) si ho prepočíta znova sama.
+ *
+ * Volá sa VŽDY PO úspešnej mutácii a jej auditnom riadku, a NIKDY s `conn`
+ * transakcie mutácie: sú to tri `UPDATE`-y nad `catalog_cache`, ktoré s ňou
+ * nemajú nič spoločné — vnútri by ich rollback zahodil (alebo naopak nechal
+ * zapísané poradie po kampani, ktorá nevznikla) a na tom istom spojení by
+ * predĺžili transakciu o prechod celého zrkadla.
+ *
+ * Deň sa posiela v ZÓNE LOGIKY (D31), nie v UTC — inak by kampaň končiaca dnes
+ * medzi 22:00 a 24:00 UTC stratila prednosť o dve hodiny skôr.
+ */
+export async function refreshEnrichPriorityQuietly(
+  d: EnrichPriorityDeps,
+  log?: Logger,
+): Promise<void> {
+  try {
+    await d.enrichPriority.refreshEnrichPriority({ today: todayInZone(d.now(), d.timeZone) });
+  } catch (error) {
+    (log ?? rootLogger).warn('enrich_priority_unrefreshed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Obalí `setStatus` tichým prepočtom priority pre stavy, ktorými kampaň KONČÍ.
+ *
+ * Prečo obal a nie volanie v route-och: `setStatus` je jediná cesta, ktorou sa
+ * kampaň v route-och (zrušenie, `lapsed` pri spustení) aj v executore dostane
+ * do koncového stavu. Keby si prepočet volal každý volajúci sám, ďalšia cesta
+ * do koncového stavu by ho ticho vynechala a front by navždy vozil dopredu
+ * produkty zrušených kampaní.
+ */
+function withEnrichPriorityOnEnd(
+  repo: ResolvedCampaignsRepo,
+  hook: EnrichPriorityDeps,
+): ResolvedCampaignsRepo {
+  const inner = repo.setStatus.bind(repo);
+  return {
+    ...repo,
+    async setStatus(...args: Parameters<ResolvedCampaignsRepo['setStatus']>): Promise<void> {
+      await inner(...args);
+      // Prepočet ide LEN po úspešnom prechode a len pre koncový stav — inak by
+      // každý tik executora prešiel zrkadlo katalógu nadarmo.
+      if (!CAMPAIGN_ENDING_STATUSES.includes(args[1])) return;
+      await refreshEnrichPriorityQuietly(hook);
+    },
+  };
+}
+
 export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDeps {
   const settingsRepo = overrides.settingsRepo ?? defaultSettingsRepo;
+  const enrichPriority = overrides.enrichPriority ?? defaultCatalogRepo;
+  const now = overrides.now ?? ((): Date => new Date());
+  // Zóna sa číta LAZY z toho istého dôvodu ako `timeZone` nižšie: `env.*` na
+  // module scope láme `next build`.
+  const enrichHook: EnrichPriorityDeps = {
+    enrichPriority,
+    now,
+    get timeZone(): string {
+      return overrides.timeZone ?? env.LOGIC_TIMEZONE;
+    },
+  };
   return {
     // K2: fake bez `requeueMissed` dostane náhradu, ktorá nevráti do fronty
     // NIČ. Fail-closed — chýbajúca schopnosť nesmie znamenať tichý zápis.
-    campaignsRepo: withRequeue(overrides.campaignsRepo ?? defaultCampaignsRepo),
+    // D118: a nad tým obal, ktorý po KONCOVOM stave kampane prepočíta poradie
+    // frontu obohacovania (ticho — viď `refreshEnrichPriorityQuietly`).
+    campaignsRepo: withEnrichPriorityOnEnd(
+      withRequeue(overrides.campaignsRepo ?? defaultCampaignsRepo),
+      enrichHook,
+    ),
     campaignItemsRepo: overrides.campaignItemsRepo ?? defaultCampaignItemsRepo,
     allowlistRepo: overrides.allowlistRepo ?? defaultAllowlistRepo,
     catalogRepo: overrides.catalogRepo ?? defaultCatalogRepo,
     // K7: rovnaké počítadlo, z ktorého berie synchronizácia katalógu aj
     // `catalog/search`. Druhý zdroj by znamenal dva stropy proti jednému shopu.
     readBudget: overrides.readBudget ?? defaultCatalogRepo,
+    // D118 — ten istý repozitár, len úzky výsek: prepočet poradia obohacovania.
+    enrichPriority,
     auditRepo: overrides.auditRepo ?? defaultAuditRepo,
     settingsRepo,
     apiKeyRepo: overrides.apiKeyRepo ?? defaultApiKeyRepo,
@@ -282,7 +395,7 @@ export function resolveRoutesDeps(overrides: RoutesDeps = {}): ResolvedRoutesDep
       createShopClientFromSettings({ get: () => settingsRepo.get() }),
     mutex: overrides.mutex ?? defaultWriteMutex,
     executorFlags: overrides.executorFlags ?? executorFlagsFromEnv,
-    now: overrides.now ?? (() => new Date()),
+    now,
     // LAZY (A19): route moduly volajú `resolveRoutesDeps()` na module scope
     // (`export const GET = createXGet()`), takže eager čítanie `env.*` by
     // spustilo zod validáciu už počas `next build` (collect page data) a build
@@ -739,7 +852,7 @@ export async function insertConfirmedCampaign(
   const sortedIds = [...args.claims.productIds].sort((a, b) => a - b);
   const percents = args.percents ?? {};
 
-  return d.tx(async (conn) => {
+  const created = await d.tx(async (conn) => {
     const record = await d.campaignsRepo.create(
       {
         operationId,
@@ -801,6 +914,16 @@ export async function insertConfirmedCampaign(
 
     return record;
   });
+
+  /*
+   * D118 — nová kampaň dáva svojim produktom prednosť v poradí obohacovania
+   * (priorita 2). AŽ PO COMMITE a bez `conn`: viď `refreshEnrichPriorityQuietly`.
+   * Keď prepočet padne, kampaň to NEZHODÍ — je vložená, potvrdená a auditovaná;
+   * front pôjde podľa poslednej známej priority a najbližšia dávka si ho
+   * prepočíta sama.
+   */
+  await refreshEnrichPriorityQuietly(d);
+  return created;
 }
 
 /* ═══════════════ 7. Odpoveď dry-runu s preview tokenom (O2) ═══════════════ */

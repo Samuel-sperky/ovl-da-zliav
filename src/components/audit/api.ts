@@ -53,6 +53,7 @@ import {
   readText,
   readTriState,
 } from '@/components/dashboard/json';
+import { NEVIEME, productLabel, type ProductLabel } from '@/lib/ui/product-label';
 
 export interface AuditRow {
   id: number;
@@ -64,6 +65,18 @@ export interface AuditRow {
   campaignId: number | null;
   campaignItemId: number | null;
   productId: number | null;
+  /**
+   * Kód produktu DOPLNENÝ K ZOBRAZENIU (D116). Audit sa NEPREPISUJE (I4) —
+   * referencia sa k riadku pripája JOIN-om pri čítaní, takže `null` znamená
+   * „appka ju nepozná" (produkt nie je obohatený, D118 — alebo ju server
+   * k riadku neposlal), nikdy „produkt referenciu nemá".
+   *
+   * Pole je VOLITEĽNÉ zámerne: doplnenie je vlastnosť zobrazenia, nie riadku
+   * histórie, a riadok bez neho je úplne platný záznam.
+   */
+  reference?: string | null;
+  /** Názov produktu z toho istého doplnenia; `null` = nevieme. */
+  productName?: string | null;
   operationId: string | null;
   requestId: string | null;
   httpStatus: number | null;
@@ -159,6 +172,24 @@ export const AUDIT_EVENT_LABELS: Readonly<Record<string, string>> = {
   sudo_fail: 'neúspešné potvrdenie heslom (do 27. 8. 2026)',
 };
 
+/**
+ * Pomenovanie produktu pre riadok histórie (D116).
+ *
+ * `null` znamená „tento riadok nie je o konkrétnom produkte" (napr. rotácia
+ * kľúča) ALEBO „appka o ňom nevie ani referenciu, ani názov". V druhom prípade
+ * by na povrchu stálo len `#id`, teda slepé číslo, ktoré D116 z povrchu práve
+ * sťahuje — patrí do rozkliku Technický detail, kde `productId` stojí ďalej.
+ */
+export function auditProductLabel(row: AuditRow): ProductLabel | null {
+  if (row.productId === null) return null;
+  const label = productLabel({
+    productId: row.productId,
+    reference: row.reference ?? null,
+    name: row.productName ?? null,
+  });
+  return label.referenceUnknown && label.name === NEVIEME ? null : label;
+}
+
 /** Kód udalosti → veta. Neznámy kód sa NIKDY nezobrazí surový. */
 export function auditEventLabel(eventType: string): string {
   const known = Object.prototype.hasOwnProperty.call(AUDIT_EVENT_LABELS, eventType)
@@ -226,6 +257,14 @@ export function parseAuditRow(raw: unknown): AuditRow | null {
     campaignId: readCount(record, 'campaignId'),
     campaignItemId: readCount(record, 'campaignItemId'),
     productId: readCount(record, 'productId'),
+    /*
+     * Doplnenie z JOIN-u sa číta TOLERANTNE: server ho môže poslať pod
+     * `reference`/`productName` alebo pod `productReference`/`name`, a keď ho
+     * neposiela vôbec, zostáva `null`. Chýbajúce doplnenie NIE JE chyba riadku
+     * — história je dôkazný záznam a musí sa zobraziť aj bez pomenovania.
+     */
+    reference: readText(record, 'reference') ?? readText(record, 'productReference'),
+    productName: readText(record, 'productName') ?? readText(record, 'name'),
     operationId: readText(record, 'operationId'),
     requestId: readText(record, 'requestId'),
     httpStatus: readCount(record, 'httpStatus'),
