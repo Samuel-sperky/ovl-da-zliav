@@ -73,6 +73,7 @@ function catalogFake(): {
           soldFrom: '2026-02-11',
           soldTo: '2026-08-10',
           lockedFilters: [...LOCKED],
+          enrichedOnly: [],
         };
       },
       async counts(filter: CatalogSearchFilter): Promise<CatalogCounts> {
@@ -82,10 +83,13 @@ function catalogFake(): {
           sold: { none: 0, low: 0, mid: 0, high: 0 },
           neverDiscounted: 0,
           discountedNow: 0,
+          shopDiscountedNow: 0,
+          enrichedRows: 0,
           soldWindowDays: filter.soldWindowDays ?? 180,
           soldFrom: '2026-02-11',
           soldTo: '2026-08-10',
           lockedFilters: [...LOCKED],
+          enrichedOnly: [],
         };
       },
       async totalRows(): Promise<number> {

@@ -15,13 +15,20 @@
  *     ide cez VEREJNÝ `searchIndex` + `get`, teda bez nového oprávnenia — ale
  *     míňa anonymný rozpočet čítaní, a preto sa NIKDY nespúšťa samo.
  *
- * ČO HĽADÁ ZRKADLO: SLOVÁ V `name`, SPOJENÉ CEZ `AND`
- * ---------------------------------------------------
- * Text z `?query=` sa v repozitári delí na slová (strop 6) a každé dostane
- * vlastný `LIKE` nad `c.name`. Nie je to fráza: „náramok zirkón" vráti 797
- * produktov, nie 10, ktoré vracal jeden súvislý podreťazec. Diakritika sa
- * nerieši nikde v kóde — kolácia `utf8mb4_unicode_ci` skladá `á` a `a` sama.
+ * ČO HĽADÁ ZRKADLO: SLOVÁ V `name`, `reference` A `ean13`, SPOJENÉ CEZ `AND`
+ * -------------------------------------------------------------------------
+ * Text z `?q=` sa v repozitári delí na slová (strop 6) a každé dostane vlastný
+ * `LIKE` nad názvom, kódom produktu a EAN-om. Nie je to fráza: „náramok zirkón"
+ * vráti 797 produktov, nie 10, ktoré vracal jeden súvislý podreťazec. Diakritika
+ * sa nerieši nikde v kóde — kolácia `utf8mb4_unicode_ci` skladá `á` a `a` sama.
  * Prečo tu nie je FULLTEXT ani engine, hovorí hlavička `catalog.repo.ts`.
+ *
+ * `reference` a `ean13` sú v zrkadle vyplnené LEN pri OBOHATENÝCH produktoch
+ * (migrácia 0014, D116) — pri ostatných sú `NULL` a `LIKE` na ne nesadne.
+ * Hľadanie podľa kódu teda funguje, ale nad ČASŤOU katalógu, a odpoveď to
+ * priznáva v `enrichedOnly` (koľko riadkov je obohatených, hovorí
+ * `counts.enrichedRows`). Pre kód, ktorý zrkadlo nepozná, je tu `?lookup=1` —
+ * eshop hľadá aj v kóde, popise a kategóriách.
  *
  * ŠTYRI VECI, NA KTORÝCH TÁTO ROUTE STOJÍ
  * ---------------------------------------
@@ -35,8 +42,15 @@
  *     (názov a cena z posledného prechodu synchronizácie) alebo `shop` (appka
  *     si ich práve vypýtala z eshopu, lebo v zrkadle nie sú). Bez toho by na
  *     jednej obrazovke stáli vedľa seba dva rôzne stupne istoty a vyzerali by
- *     rovnako. „V zľave" je naďalej výhradne podľa VLASTNÝCH zápisov
- *     (`discountSource`), nikdy podľa shopu.
+ *     rovnako. „V zľave" (`discountSource`) je naďalej výhradne podľa VLASTNÝCH
+ *     zápisov — na ne sa pýta `?currentlyDiscounted=1`.
+ *
+ *     STAV ZĽAVY V SHOPE je od migrácie 0014 DRUHÁ, samostatná vec:
+ *     `?shopDiscounted=1` filtruje podľa `catalog_cache.reduction_*`, teda podľa
+ *     toho, čo o produkte povedal shop pri obohatení (`shopDiscountSource`).
+ *     Dve vety, dva filtre, a kombinovať sa dajú („shop zlacnil, my nie").
+ *     Neobohatený produkt do výsledku NESPADNE: o ňom appka stav shopu nepozná,
+ *     a to je „nevieme", nie „nie je v zľave" (I11 — preto `enrichedOnly`).
  *  3. **P7 — meraný fakt a odhad sa nemiešajú.** `dataAsOf` je `MAX(fetched_at)`
  *     zrkadla, `lookup.shopTotal` je počet, ktorý eshop naozaj vrátil,
  *     `lookup.at` je čas, kedy sa hľadalo. Ani jedno nie je odhad, takže ani
@@ -94,6 +108,7 @@ import {
   type CatalogSearchRow,
   type CatalogShopStatus,
   type CatalogSort,
+  type EnrichedOnlyFeature,
   type LockedCatalogFilter,
   type SoldBucket,
 } from '@/lib/repo/catalog.repo';
@@ -148,6 +163,14 @@ const searchQuerySchema = z.object({
   shopStatus: csvQuery,
   neverDiscounted: boolQuery,
   currentlyDiscounted: boolQuery,
+  /**
+   * `shopDiscounted=1` — len produkty, na ktorých beží zľava PODĽA SHOPU (D116).
+   *
+   * Meno je zámerne iné než `currentlyDiscounted`: to sa pýta na vlastné zápisy
+   * appky. Zliať ich do jedného parametra by znamenalo, že obrazovka nevie
+   * povedať, čie tvrdenie práve ukazuje.
+   */
+  shopDiscounted: boolQuery,
   productIds: csvQuery,
   sort: z.string().max(20).optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -312,6 +335,15 @@ export interface CatalogSearchResponse {
   dataAsOf: string | null;
   lockedFilters: Record<string, LockedFilterView>;
   discountSource: 'own_writes';
+  /** Odkiaľ je `?shopDiscounted=1` — z obohatenia zrkadla, nie z vlastných zápisov. */
+  shopDiscountSource: 'shop_enrichment';
+  /**
+   * Čo appka vie LEN o obohatených riadkoch (I11, D116): hľadanie podľa kódu
+   * a EAN-u a filter `shopDiscounted`. Tieto filtre sa APLIKOVALI a vrátili
+   * pravdivé riadky — ale nad časťou katalógu. Koľko je tá časť, hovorí
+   * `counts.enrichedRows` (a teda `counts=0` ju vypne aj tu).
+   */
+  enrichedOnly: EnrichedOnlyFeature[];
   lookup: LookupView;
   codes: CodesView;
   capabilities: ShopCapabilities;
@@ -425,6 +457,7 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
           perPage: q.perPage,
           neverDiscounted: q.neverDiscounted,
           currentlyDiscounted: q.currentlyDiscounted,
+          shopDiscounted: q.shopDiscounted,
         };
         const term = q.q === undefined ? '' : q.q.trim();
         if (term.length > 0) filter.query = term;
@@ -541,6 +574,14 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
           lockedFilters: lockedFiltersView(result.lockedFilters, lockedRequested),
           /** Čo znamená „v zľave" — nikdy netvrdíme, že poznáme stav shopu (I11). */
           discountSource: 'own_writes',
+          /** …a keď sa pýtame na shop, hovorí sa to menovite (D116). */
+          shopDiscountSource: 'shop_enrichment',
+          /**
+           * I11 — filtre, ktoré PLATIA len pre obohatené riadky. Nie sú zamknuté
+           * (tie sú v `lockedFilters` a neaplikujú sa vôbec); toto je tretí stav:
+           * aplikované, pravdivé, ale nad časťou katalógu.
+           */
+          enrichedOnly: result.enrichedOnly,
           lookup,
           codes,
           /**

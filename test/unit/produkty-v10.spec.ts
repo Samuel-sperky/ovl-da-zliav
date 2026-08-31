@@ -71,6 +71,8 @@ const COUNTS = {
   sold: { none: 11640, low: 7564, mid: 12918, high: 8361 },
   neverDiscounted: 21049,
   discountedNow: 2380,
+  shopDiscountedNow: 311,
+  enrichedRows: 1204,
   soldWindowDays: 30,
 };
 
@@ -107,6 +109,22 @@ describe('V10 — filter katalógu prežije cestu cez adresu', () => {
     expect(back.soldBuckets).toEqual(['none', 'low']);
     expect(back.priceTo).toBe('40.50');
     expect(back.neverDiscounted).toBe(true);
+  });
+
+  it('`shopDiscounted` prežije cestu cez adresu pod tým istým menom ako v API', () => {
+    // Meno parametra je kontrakt medzi adresou obrazovky a `GET /api/catalog/search`
+    // (D116). Iné meno na klientovi by znamenalo preklad, a teda druhý slovník.
+    const parsed = parseCatalogFilter({ shopDiscounted: '1' });
+    expect(parsed.shopDiscounted).toBe(true);
+    // …a je to DRUHÁ veta než vlastné zápisy, nie ich prepis.
+    expect(parsed.currentlyDiscounted).toBe(false);
+
+    const query = catalogSearchQuery(parsed);
+    expect(query).toContain('shopDiscounted=1');
+    expect(parseCatalogFilterQuery(query).shopDiscounted).toBe(true);
+
+    // Vypnutý filter sa NEPOSIELA — prázdny parameter drží adresy krátke.
+    expect(catalogSearchQuery(DEFAULT_CATALOG_FILTER)).not.toContain('shopDiscounted');
   });
 
   it('nezmysel v adrese spadne na predvolenú hodnotu, nikdy na výnimku', () => {
