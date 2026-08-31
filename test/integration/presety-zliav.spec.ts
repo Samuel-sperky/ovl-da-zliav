@@ -42,6 +42,8 @@ import type { Connection } from 'mariadb';
 
 import type { DiscountPresetTier, NewDiscountPreset } from '@/contracts';
 
+import { auditEventLabelSk, isAuditEventType } from '@/lib/audit/events';
+import { appendAuditResult } from '@/lib/audit/write';
 import {
   createPresetsRepo,
   MAX_PRESETS,
@@ -231,7 +233,7 @@ describe.skipIf(!available)('0015 — presety zliav (D112): úložisko, strop, f
 
   /* ═══════════════ 3. Životný cyklus aplikačným DB userom ═════════════════ */
 
-  it('aplikačný user preset vytvorí, prečíta v zozname, zmení a zmaže (D89)', async () => {
+  it('aplikačný user preset vytvorí, prečíta v zozname, označí za použitý a zmaže (D89)', async () => {
     await cleanup();
 
     const created = await asApp((repo) => repo.create(preset('Ležiaky −30/−20')));
@@ -246,12 +248,17 @@ describe.skipIf(!available)('0015 — presety zliav (D112): úložisko, strop, f
     const listed = await asApp((repo) => repo.list());
     expect(listed.map((row) => row.name)).toEqual(['Ležiaky −30/−20']);
 
-    const changed = await asApp((repo) =>
-      repo.update(created.id, { durationDays: 21, name: 'Ležiaky −30/−20 (dlhšie)' }),
-    );
-    expect(changed.durationDays).toBe(21);
-    expect(changed.name).toBe('Ležiaky −30/−20 (dlhšie)');
-    expect(changed.id).toBe(created.id);
+    /*
+     * D89 — aplikačný user musí mať na `discount_presets` aj UPDATE. Do
+     * 31. 8. 2026 to meral `repo.update()`, ktorý appka nikdy nespustila (nemal
+     * volajúceho) a je zmazaný; jediný UPDATE v repozitári je odteraz
+     * `markUsed()`, takže grant meria on.
+     */
+    const usedAt = new Date('2026-08-31T07:15:00.000Z');
+    await asApp((repo) => repo.markUsed(created.id, usedAt));
+    const afterUse = await asApp((repo) => repo.getById(created.id));
+    expect(afterUse?.lastUsedAt?.toISOString()).toBe(usedAt.toISOString());
+    expect(afterUse?.id).toBe(created.id);
 
     await asApp((repo) => repo.remove(created.id));
     expect(await asApp((repo) => repo.getById(created.id))).toBeNull();
@@ -371,11 +378,14 @@ describe.skipIf(!available)('0015 — presety zliav (D112): úložisko, strop, f
     expect(after?.filterQuery).toBe(FILTER_QUERY);
     expect(await asApp((repo) => repo.count())).toBe(1);
 
-    // Ani premenovanie na obsadené meno neprejde.
+    /*
+     * Premenovanie na obsadené meno sa tu netestuje, pretože preset sa
+     * NEEDITUJE: `update()` je od 31. 8. 2026 zmazaná (nemala v `src/` ani
+     * jedného volajúceho). Meno drží UNIQUE v schéme a stráži ho vyššie test
+     * „schéma drží UNIQUE meno…" — cesta, ktorou sa dnes dá meno obsadiť, je
+     * jediná, a je to `create()`.
+     */
     const other = await asApp((repo) => repo.create(preset('Veľká noc')));
-    await expect(
-      asApp((repo) => repo.update(other.id, { name: 'Vianoce' })),
-    ).rejects.toBeInstanceOf(PresetNameTakenError);
     expect((await asApp((repo) => repo.getById(other.id)))?.name).toBe('Veľká noc');
 
     await cleanup();
@@ -393,16 +403,84 @@ describe.skipIf(!available)('0015 — presety zliav (D112): úložisko, strop, f
     await expect(asApp((repo) => repo.remove(-1))).rejects.toBeInstanceOf(PresetNotFoundError);
   });
 
-  it('`markUsed()` a `update()` nad neexistujúcim presetom sú tiež fail-closed', async () => {
+  it('`markUsed()` nad neexistujúcim presetom je tiež fail-closed', async () => {
     await expect(
       asApp((repo) => repo.markUsed(987_655, new Date('2026-08-30T00:00:00.000Z'))),
     ).rejects.toBeInstanceOf(PresetNotFoundError);
+    // Nezmyselné ID skončí rovnako, nie ticho: `0` a záporné číslo.
     await expect(
-      asApp((repo) => repo.update(987_656, { durationDays: 5 })),
+      asApp((repo) => repo.markUsed(0, new Date('2026-08-30T00:00:00.000Z'))),
     ).rejects.toBeInstanceOf(PresetNotFoundError);
-    // Ani prázdny patch nesmie vrátiť vymyslený preset.
-    await expect(asApp((repo) => repo.update(987_657, {}))).rejects.toBeInstanceOf(
-      PresetNotFoundError,
+    await expect(
+      asApp((repo) => repo.markUsed(-1, new Date('2026-08-30T00:00:00.000Z'))),
+    ).rejects.toBeInstanceOf(PresetNotFoundError);
+  });
+
+  /*
+   * `update()` tu mala tri tvrdenia (zmena presetu, premenovanie na obsadené
+   * meno, prázdny patch) a sú zmazané spolu s metódou (31. 8. 2026): nemala
+   * v `src/` ani jedného volajúceho, takže testovala kód, ktorý appka nikdy
+   * nespustí. Kto ju vráti, vracia druhú zápisovú cestu do `discount_presets` —
+   * a mala by potom mať aj obrazovku a audit, nie len test.
+   */
+
+  /* ═════════════════ 6. Audit presetov v OSTREJ tabuľke ═══════════════════ */
+
+  it('`preset_created` a `preset_deleted` sa do `audit_log` zapíšu bez migrácie (I4)', async () => {
+    /*
+     * Prečo tento test existuje: tvrdenie „migrácia netreba" sa dá overiť len
+     * proti DB. `audit_log.event_type` je `VARCHAR(48)` (hlavička 0006 to
+     * hovorí výslovne — ENUM by pridanie typu robilo migráciou nad append-only
+     * tabuľkou), takže nové hodnoty prejdú. Zapisuje sa spojením APLIKAČNÉHO
+     * usera, ktorý má na `audit_log` výhradne `SELECT, INSERT` (I4, 0008).
+     */
+    const marker = `preset-audit-${Date.now()}`;
+    /*
+     * `audit_log.user_id` je FK na `users(id)` s `ON DELETE RESTRICT` a
+     * `truncateAll()` `users` čistí, takže lokálneho actora si tento test musí
+     * vložiť sám — inak by INSERT padol na 1452 a test by hovoril o niečom
+     * inom, než chce merať. Heslo je sentinel `no-login-D99` (D99: appka
+     * prihlásenie nemá).
+     */
+    await withMigrationConn(async (conn) => {
+      await conn.query(
+        'INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?) ' +
+          'ON DUPLICATE KEY UPDATE username = VALUES(username)',
+        [1, 'samuel', 'no-login-D99'],
+      );
+    });
+    for (const eventType of ['preset_created', 'preset_deleted'] as const) {
+      const ok = await withAppConn(async (conn) =>
+        appendAuditResult(
+          {
+            actor: 'user',
+            eventType,
+            ok: true,
+            // Lokálny actor `samuel` (D102) — FK na `users(id)`.
+            userId: 1,
+            message: `${marker} ${eventType}`,
+          },
+          conn,
+        ),
+      );
+      expect(ok, eventType).toBe(true);
+    }
+
+    const rows = await withAppConn(
+      async (conn) =>
+        (await conn.query(
+          `SELECT event_type, user_id FROM audit_log
+            WHERE message LIKE ? ORDER BY id ASC`,
+          [`${marker}%`],
+        )) as { event_type: string; user_id: number }[],
     );
+    expect(rows.map((row) => row.event_type)).toEqual(['preset_created', 'preset_deleted']);
+    for (const row of rows) {
+      expect(Number(row.user_id)).toBe(1);
+      // Uložila sa presná hodnota, nie `unknown_event` — a je to typ, ktorý
+      // História vie pomenovať (I11).
+      expect(isAuditEventType(row.event_type)).toBe(true);
+      expect(auditEventLabelSk(row.event_type)).not.toBe(row.event_type);
+    }
   });
 });

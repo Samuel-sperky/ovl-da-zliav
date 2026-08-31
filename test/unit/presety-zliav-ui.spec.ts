@@ -301,6 +301,26 @@ describe('D. panel presetov: odkaz, nie tlačidlo zápisu', () => {
     expect(tag).toContain('href="/zlavy/nova?');
   });
 
+  it('klik na predplnenie zapíše „naposledy použité" — a nič iné', () => {
+    /*
+     * Bez tohto volania zostane `last_used_at` NULL a zoznam radí podľa stĺpca,
+     * ktorý nikto nezapisuje (D112 — presne to bolo do 31. 8. 2026 rozbité).
+     * Odkaz pritom zostáva odkazom: `onClick` navigáciu neruší a jediná adresa,
+     * na ktorú panel POSTuje pri predplnení, je `mark-used`.
+     */
+    const panel = read('../../src/components/campaigns/DiscountPresets.tsx');
+    const code = panel.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    expect(code).toContain('markPresetUsed(');
+
+    const api = read('../../src/components/campaigns/presets-api.ts');
+    const apiCode = api.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    expect(apiCode).toContain('/mark-used`');
+    // Žiadne „spusti preset": ani `run`, ani `apply`, ani potvrdenie.
+    expect(apiCode).not.toContain('/run');
+    expect(apiCode).not.toContain('apply=');
+    expect(apiCode).not.toContain('confirmed');
+  });
+
   it('mazanie je dvojkrokové a je to tlačidlo, nie odkaz', () => {
     expect(rowHtml).toContain('data-testid="preset-delete-7"');
     expect(rowHtml).not.toContain('data-testid="preset-delete-confirm-7"');
@@ -350,6 +370,23 @@ describe('E. nevieme sa nepredstiera ako vieme (I11)', () => {
       'ešte nepoužitý',
     );
     expect(parsePreset({ id: 1, name: 'X' })?.lastUsedAt).toBeNull();
+  });
+
+  it('použitý preset hovorí, ČO appka merala — predplnenie formulára, nie zľavu', () => {
+    /*
+     * `last_used_at` sa zapíše pri klike na „Predplniť formulár"
+     * (`POST /api/presets/:id/mark-used`). Že z presetu naozaj vznikla zľava,
+     * appka nevie — preset do zápisovej cesty nevstupuje (I3) — takže to riadok
+     * ani netvrdí. Tri miesta musia hovoriť to isté: táto veta, `SQL_LIST`
+     * v `presets.repo.ts` a hlavička route.
+     */
+    const html = renderToStaticMarkup(
+      createElement(PresetRow, {
+        preset: { ...PRESET, lastUsedAt: '2026-08-30T18:30:00.000Z' },
+      }),
+    );
+    expect(html).toContain('naposledy predplnil formulár');
+    expect(html).not.toContain('ešte nepoužitý');
   });
 
   it('pásmo bez čitateľného pravidla sa NEHÁDŽE na iné pásmo — prizná sa', () => {

@@ -24,6 +24,8 @@ import {
   soldBucketOf,
   type SelectableRow,
 } from '@/components/campaigns/discounts-model';
+import { parseCatalogPage } from '@/components/campaigns/zlavy-api';
+import { parseCatalogSearch } from '@/components/products/catalog-api';
 
 function row(productId: number, unitsSold: number | null): SelectableRow {
   return {
@@ -172,5 +174,60 @@ describe('discountWriteRequest — produkty a pásma sa nemajú ako rozísť (D1
       DEFAULT_TIER_PERCENT.none,
       DEFAULT_TIER_PERCENT.high,
     ]);
+  });
+});
+
+/*
+ * SERVEROVÁ POLOVICA D121 (31. 8. 2026). Model vyššie bol pripravený od
+ * 28. 8. 2026, ale server posielal `unitsSold` vždy ako číslo a KLIENTSKE
+ * parsery mali `?? 0`, takže „nevieme" sa na cestu k `buildTiers()` nikdy
+ * nedostalo. Tieto testy hovoria o tvare, ktorý PRÍDE PO DRÔTE — a `?? 0`
+ * v ktoromkoľvek z dvoch parserov ich zčervená (mutačne overené).
+ */
+describe('parsery odpovede — `null` z drôtu prežije až do pásiem (D121)', () => {
+  /** Odpoveď servera pri okne, z ktorého nie sú stiahnuté dni. */
+  const payload = {
+    data: [
+      { productId: 11, name: 'Neznámy', price: '10.00', unitsSold: null, discountedNow: false },
+      { productId: 12, name: 'Zmeraná nula', price: '10.00', unitsSold: 0, discountedNow: false },
+      { productId: 13, name: 'Predaný', price: '10.00', unitsSold: 7, discountedNow: false },
+    ],
+    page: 1,
+    perPage: 50,
+    total: 3,
+    soldWindowDays: 180,
+  };
+
+  it('Produkty (`catalog-api`): `null` zostane `null`, nula zostane nulou', () => {
+    const view = parseCatalogSearch(payload);
+    expect(view?.data.map((row) => row.unitsSold)).toEqual([null, 0, 7]);
+  });
+
+  it('Nová zľava (`zlavy-api`): to isté — je to tá istá odpoveď', () => {
+    const view = parseCatalogPage(payload);
+    expect(view?.data.map((row) => row.unitsSold)).toEqual([null, 0, 7]);
+  });
+
+  it('chýbajúce pole je „nevieme", nie nula (odpoveď bez `unitsSold`)', () => {
+    const view = parseCatalogPage({ data: [{ productId: 21, name: 'Bez poľa' }] });
+    expect(view?.data[0]?.unitsSold).toBeNull();
+  });
+
+  it('`buildTiers()` nad parsovanou odpoveďou preskočí len neznámy riadok', () => {
+    const view = parseCatalogPage(payload);
+    const rows: SelectableRow[] = (view?.data ?? []).map((row) => ({
+      productId: row.productId,
+      name: row.name,
+      price: row.price,
+      unitsSold: row.unitsSold,
+      discountedNow: row.discountedNow,
+    }));
+    const partition = buildTiers(rows, 180);
+
+    expect(partition.unknownProductIds).toEqual([11]);
+    // Vedro `none` (30 %) patrí VÝHRADNE zmeranej nule.
+    const none = partition.tiers.find((tier) => tier.bucket === 'none');
+    expect(none?.percent).toBe(DEFAULT_TIER_PERCENT.none);
+    expect(none?.productIds).toEqual([12]);
   });
 });

@@ -79,7 +79,7 @@ import type {
 import { SOLD_WINDOWS } from '@/components/products/catalog-filter';
 import type { SavedFilter } from '@/components/products/saved-filters';
 import Icon from '@/components/ui/Icon';
-import { formatCountSk, SURFACE_TERMS } from '@/lib/ui/vocabulary';
+import { formatCountSk, pluralSk, SURFACE_TERMS } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Popisy ════════════════════════════════════ */
 
@@ -330,6 +330,28 @@ export function CatalogFilters({
             <Count value={soldCount(bucket)} />
           </label>
         ))}
+        {/*
+         * D121 — vedrá hovoria len o produktoch, ktorých predaj appka ZMERALA.
+         * Pri nedočítanom okne je „0 predaných" nula (server prepne bránu na
+         * `1 = 0`), takže súčet vedier je zlomok `total` a bez tohto riadku by
+         * chýbajúce desaťtisíce riadkov zmizli bez slova — používateľ zaklikne
+         * „0 predaných", dostane prázdny zoznam a v paneli číslo 0.
+         * `null` = odpoveď to nepovedala, teda „nevieme koľko nevieme".
+         */}
+        {counts === null ? null : (
+          <p className="lvl-3" data-testid="filter-sold-unknown">
+            {counts.soldUnknown === null
+              ? 'Koľko produktov má predaj neznámy, sa nedalo zistiť.'
+              : counts.soldUnknown === 0
+                ? null
+                : `${formatCountSk(counts.soldUnknown)} ${pluralSk(
+                    counts.soldUnknown,
+                    'produkt má',
+                    'produkty majú',
+                    'produktov má',
+                  )} predaj za toto okno NEZNÁMY — do vedier sa nepočítajú a ani jedno ich nevyberie.`}
+          </p>
+        )}
       </div>
 
       <div className="fgroup">

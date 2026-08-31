@@ -9,25 +9,20 @@
  * je v hlavičke `_shared.ts` a je to o I3, nie o štýle. Zľava sa aj z presetu
  * vytvára tou istou cestou: dry-run → potvrdenie → `POST /api/campaigns`.
  *
- * ═══ AUDIT (I4, D102) — CHÝBAJÚCI TYP UDALOSTI, VEDOMÁ MEDZERA ═══
+ * ═══ AUDIT (I4, D102) — DOPOJENÝ 31. 8. 2026 ═══
  *
- * Vytvorenie presetu sa do `audit_log` NEZAPISUJE, a to zámerne: `audit_log.
- * event_type` je uzavretá únia `AuditEventType` (`src/contracts.ts`) zosúladená
- * s runtime zoznamom v `src/lib/audit/events.ts` typovou kontrolou, a hodnota
- * pre presety v nej NIE JE. Vymyslený string by neprešiel typecheckom a keby
- * prešiel, `appendAudit()` by ho zahodil ako `audit_unknown_event_type` — čiže
- * zápis, o ktorom si volajúci myslí, že je v audite, a v audite nie je. To je
- * horšie než priznaná medzera (I11).
+ * Uloženie presetu zapíše riadok `preset_created` s `userId = ctx.actor.id`
+ * (lokálny actor `samuel`, D102). Do 31. 8. 2026 tu bola priznaná medzera:
+ * `AuditEventType` hodnotu pre presety nemal a vymyslený string by `appendAudit()`
+ * zahodil ako `audit_unknown_event_type` — teda zápis, o ktorom si volajúci
+ * myslí, že je v audite, a v audite nie je. Typ pribudol v `src/contracts.ts`
+ * a `src/lib/audit/events.ts`; migráciu nepotreboval, `audit_log.event_type`
+ * je `VARCHAR(48)` (hlavička 0006).
  *
- * Doplniť to znamená pridať `preset_created`/`preset_deleted` na TRI miesta
- * naraz (`contracts.ts` únia, `AUDIT_EVENT_TYPES` + `AuditEvent` +
- * `AUDIT_EVENT_LABEL_SK` v `events.ts`) — inak typecheck padne. Tie súbory sú
- * mimo sady tejto route, takže je to samostatná úloha.
- *
- * Riziko medzery je malé a treba ho povedať nahlas: preset nič nezapisuje do
- * shopu a nič neuvoľňuje. Čo sa naozaj stalo v eshope, drží audit kampane
- * (`campaign_created`, `write_*`) — a tam sa preset ani nedostane, pretože
- * kampaň vzniká z dry-runu a potvrdenia, nie z presetu.
+ * Snapshot nesie meno, filter, pásma a dĺžku okna — teda PERCENTÁ, ktoré niekto
+ * o mesiac naklikne jedným klikom. Zápis do shopu tým nevzniká: čo sa naozaj
+ * stalo v eshope, drží audit kampane (`campaign_created`, `write_*`), a preset
+ * sa tam nedostane, pretože kampaň vzniká z dry-runu a potvrdenia.
  *
  * Vlastník: V4 (presety).
  */
@@ -93,9 +88,30 @@ export function createPresetsPost(
             tiers: ctx.body.tiers,
             durationDays: ctx.body.durationDays,
           });
-          // Audit sem patrí, ale chýba mu typ udalosti — viď hlavičku súboru.
-          // `ctx.actor` je aj tak dohľadaný pipeline pred handlerom (D102),
-          // takže mutácia bez actora neprejde.
+          /*
+           * I4 / D102 — audit až PO úspešnom vložení a s lokálnym actorom;
+           * `ctx.actor` dohľadá pipeline pred handlerom (fail-closed), takže
+           * mutácia bez actora sa k tomuto riadku ani nedostane. `appendAudit()`
+           * nikdy nehodí — stratený audit sa hlási v logu, nezhodí odpoveď.
+           */
+          await d.audit.appendAudit({
+            actor: 'user',
+            eventType: 'preset_created',
+            ok: true,
+            userId: ctx.actor.id,
+            message: `Preset „${preset.name}" uložený (${preset.tiers.length} pásiem, ${preset.durationDays} dní).`,
+            afterSnapshot: {
+              presetId: preset.id,
+              name: preset.name,
+              filterQuery: preset.filterQuery,
+              durationDays: preset.durationDays,
+              tiers: preset.tiers.map((tier) => ({
+                ord: tier.ord,
+                label: tier.label,
+                percent: tier.percent,
+              })),
+            },
+          });
           ctx.log.info('preset_created', { presetId: preset.id, userId: ctx.actor.id });
           return presetView(preset);
         }),

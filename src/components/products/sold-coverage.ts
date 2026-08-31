@@ -59,9 +59,25 @@ export interface SoldCoverage {
   readonly syncEnabled: boolean;
   /** Koľko dní appka NAOZAJ zmerala. Nie nastavené okno. */
   readonly daysCovered: number;
+  /**
+   * Koľko z tých dní je len ČIASTOČNE prečítaných (`status = 'partial'` aspoň
+   * s jednou objednávkou). Server po D121 sčítava kusy VÝHRADNE z dní so
+   * `status = 'complete'` (`SQL_COMPLETE_DAYS` v `catalog.repo.ts`), takže
+   * čiastočný deň je pre číslo predajov medzera — a keby ho klient počítal za
+   * pokrytý, vydal by dolnú hranicu za meranie.
+   */
+  readonly daysPartial: number;
   /** Prvý a posledný zmeraný deň; `null` = ani jeden. */
   readonly from: string | null;
   readonly to: string | null;
+}
+
+/**
+ * Dni, ktoré sú prečítané CELÉ — jediné, z ktorých server kusy sčítava.
+ * Toto číslo sa porovnáva s nakliknutým oknom, nie `daysCovered`.
+ */
+export function fullyReadDays(coverage: SoldCoverage): number {
+  return Math.max(0, coverage.daysCovered - coverage.daysPartial);
 }
 
 /**
@@ -83,9 +99,13 @@ export interface SoldCoverageNoteView {
 
 /**
  * `coverage` z odpovede `/api/insights/sales-daily`. `null` znamená „odpoveď sa
- * nedala prečítať" — nie prázdne pokrytie. Chýbajúci `syncEnabled` alebo
- * `daysCovered` je nečitateľná odpoveď: dopočítať si ich znamená vyrobiť
- * tvrdenie o tom, čo appka zmerala.
+ * nedala prečítať" — nie prázdne pokrytie. Chýbajúci `syncEnabled`,
+ * `daysCovered` alebo `daysPartial` je nečitateľná odpoveď: dopočítať si ich
+ * znamená vyrobiť tvrdenie o tom, čo appka zmerala.
+ *
+ * `daysPartial` je povinné od 31. 8. 2026. Dosadená nula by znamenala „všetky
+ * zmerané dni sú prečítané celé", teda presne to tvrdenie, ktoré server po
+ * D121 nerobí — a klient by z dolnej hranice vyrobil meranie.
  */
 export function parseSoldCoverage(raw: unknown): SoldCoverage | null {
   const root = asRecord(raw);
@@ -94,10 +114,12 @@ export function parseSoldCoverage(raw: unknown): SoldCoverage | null {
   if (coverage === null) return null;
   const syncEnabled = readTriState(coverage, 'syncEnabled');
   const daysCovered = readCount(coverage, 'daysCovered');
-  if (syncEnabled === null || daysCovered === null) return null;
+  const daysPartial = readCount(coverage, 'daysPartial');
+  if (syncEnabled === null || daysCovered === null || daysPartial === null) return null;
   return {
     syncEnabled,
     daysCovered,
+    daysPartial,
     from: readText(coverage, 'from'),
     to: readText(coverage, 'to'),
   };
@@ -126,7 +148,15 @@ export function soldCoverageNote(
     };
   }
 
-  const { syncEnabled, daysCovered } = state.coverage;
+  const { syncEnabled } = state.coverage;
+  /*
+   * Nie `daysCovered`, ale dni prečítané CELÉ. Server po D121 sčítava kusy len
+   * z dní so `status = 'complete'`; keby klient počítal aj čiastočné dni,
+   * pri okne 30 dní s 25 celými a 5 čiastočnými by veta zmizla a bunka by
+   * vypísala dolnú hranicu bez znaku `≥` s titulkom „je to celý počet" (nález
+   * WIRING: dve definície plného pokrytia o tom istom čísle).
+   */
+  const daysCovered = fullyReadDays(state.coverage);
 
   if (!syncEnabled) {
     return {
@@ -138,11 +168,17 @@ export function soldCoverageNote(
   }
 
   if (daysCovered <= 0) {
+    // Rozlíšenie „nestiahlo sa nič" od „stiahlo sa, ale ani jeden deň celý":
+    // druhé je iná veta a bez nej by appka tvrdila, že sa nestiahlo nič.
+    const zacate = state.coverage.daysPartial > 0;
     return {
       variant: 'warn',
-      text:
-        `Objednávky sa zatiaľ nestiahli ani za jeden deň, takže predané kusy za ` +
-        `${asked} dní appka nemá zmerané. Nula neznamená, že sa produkt nepredáva.`,
+      text: zacate
+        ? `Ani jeden deň nie je stiahnutý celý (rozbehnutých je ` +
+          `${state.coverage.daysPartial}), takže predané kusy za ${asked} dní appka nemá ` +
+          `zmerané. Nula neznamená, že sa produkt nepredáva.`
+        : `Objednávky sa zatiaľ nestiahli ani za jeden deň, takže predané kusy za ` +
+          `${asked} dní appka nemá zmerané. Nula neznamená, že sa produkt nepredáva.`,
     };
   }
 
@@ -278,11 +314,19 @@ export function kpiCell<T>(
  * `{ value: N, gap: 'days_missing' }` NIE JE nekonzistentná odpoveď (na rozdiel
  * od všeobecnej `kpiCell`) — je to práve tá dolná hranica, viď výnimku
  * v hlavičke sekcie. Bez hodnoty (`value === null`) je to pomlčka ako predtým.
+ *
+ * VÝNIMKA Z VÝNIMKY (31. 8. 2026): dolná hranica NULA sa za hodnotu neberie.
+ * `{ value: 0, gap: 'days_missing' }` je tvar, ktorý server po D121 posiela pre
+ * takmer celý katalóg (2 dočítané dni zo 180 → 40 511 produktov), a `≥ 0` nie
+ * je priznanie, ale prázdna veta — presne to isté pravidlo, aké o tom istom
+ * čísle drží `soldUnitsViaCoverage()` v bočnom paneli tej istej obrazovky. Bez
+ * tejto vetvy dá tabuľka `≥ 0` tam, kde panel vedľa nej dá pomlčku, teda dve
+ * odpovede na tú istú otázku na jednej obrazovke (nález I11 č. 2).
  */
 export function kpiUnitsCell(window: KpiWindowUnitsView | null | undefined): KpiCellView {
   if (window === null || window === undefined) return unknownCell(KPI_UNASKED_REASON);
   const { units, windowDays, completeDays, unknownDays } = window;
-  const measuredFloor = units.gap === 'days_missing' && units.value !== null;
+  const measuredFloor = units.gap === 'days_missing' && units.value !== null && units.value > 0;
   if (units.gap !== null && !measuredFloor) {
     return unknownCell(
       `${KPI_GAP_REASON[units.gap]} Z ${windowDays} ${pluralSk(windowDays, 'dňa', 'dní', 'dní')} ` +
@@ -291,6 +335,14 @@ export function kpiUnitsCell(window: KpiWindowUnitsView | null | undefined): Kpi
   }
   if (units.value === null) return unknownCell(KPI_NO_REASON);
   const lowerBound = measuredFloor || window.lowerBound || unknownDays > 0;
+  // Druhá závora na to isté pravidlo: `≥ 0` sa nesmie vykresliť ani vtedy, keď
+  // dolnú hranicu ohlásilo pole `lowerBound` / `unknownDays` a nie `gap`.
+  if (lowerBound && units.value === 0) {
+    return unknownCell(
+      `${KPI_GAP_REASON.days_missing} Z ${windowDays} ${pluralSk(windowDays, 'dňa', 'dní', 'dní')} ` +
+        `je dočítaných ${completeDays}.`,
+    );
+  }
   return {
     text: lowerBound ? `≥ ${formatCountSk(units.value)}` : formatCountSk(units.value),
     unknown: false,
@@ -312,12 +364,18 @@ const SOLD_DOMINANT_UNASKED = 'Predané kusy za toto okno appka zatiaľ nemá.';
 /**
  * DOMINANTA BOČNÉHO PANELA — to isté priznanie ako v tabuľke (I11, D119).
  *
- * Číslo panela prichádza z `catalog/search` (`unitsSold`), a tá cesta bránu
- * `status='complete'` NEMÁ: nestiahnutý deň v nej vyjde ako deň s nulou. Do
- * 31. 8. 2026 ho panel vypisoval v 44 px reze ako meraný fakt s vetou
+ * Číslo panela prichádza z `catalog/search` (`unitsSold`). Do 31. 8. 2026 tá
+ * cesta bránu `status='complete'` NEMALA — nestiahnutý deň v nej vyšiel ako deň
+ * s nulou — a panel to vypisoval v 44 px reze ako meraný fakt s vetou
  * „predaných za posledných 30 dní", kým tabuľka vedľa neho to isté číslo
- * zámerne nezobrazovala vôbec — jedna obrazovka, dve odpovede na tú istú
- * otázku a ani jedna označená (nález I11 č. 2).
+ * zámerne nezobrazovala vôbec: jedna obrazovka, dve odpovede na tú istú otázku
+ * a ani jedna označená (nález I11 č. 2).
+ *
+ * Bránu má odvtedy aj server (D121 — `catalogRepo.search()`, `factsFor()`), a
+ * `unitsSold` je preto `number | null`. Táto funkcia sa NERUŠÍ a `null` číta
+ * ako „nevieme": server hovorí o dňoch, klient o tom istom okne, a ich pravidlo
+ * je zhodné — nová brána nemôže z tejto bunky vyrobiť inú vetu, len ju
+ * potvrdiť.
  *
  * Preto sa dominanta odteraz opiera o POKRYTIE (`useSoldCoverage`, tá istá
  * odpoveď a tá istá veta, akú nesie vysvetlivka nad tabuľkou):

@@ -424,7 +424,11 @@ describe('catalog.repo — dávkový upsert a parametrizované SQL (K7)', () => 
     const { conn, calls } = recordingConn();
     const repo = createCatalogRepo({ defaultConn: conn });
     await repo.search({ productIds: [] });
-    expect(calls[0]?.sql).toContain('1 = 0');
+    // `calls[0]` je od D121 pokrytie okna (`sales_sync_state`), preto sa hľadá
+    // dotaz nad zrkadlom — fail-closed `1 = 0` patrí jemu.
+    const mirror = calls.filter((call) => call.sql.includes('FROM catalog_cache'));
+    expect(mirror.length).toBeGreaterThan(0);
+    for (const call of mirror) expect(call.sql).toContain('1 = 0');
   });
 
   it('zamknuté filtre sa priznávajú, nie predstierajú (K8)', async () => {

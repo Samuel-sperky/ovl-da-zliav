@@ -797,14 +797,24 @@ export async function syncSales(
  *  - **Zápis NIKDY nezhorší, čo už v DB je.** Neúplné čítanie neprepíše deň,
  *    ktorý bol predtým dočítaný, ani deň s vyšším počtom objednávok.
  *
- * ZNÁMA MEDZERA, KTORÚ TÁTO SCHÉMA UNIESŤ NEVIE (povedané nahlas)
- * --------------------------------------------------------------
+ * MEDZERA „PREČÍTANÉ, NIČ SA NEPREDALO" — ZATVORENÁ 31. 8. 2026 (migrácia 0016)
+ * ----------------------------------------------------------------------------
  * Mena je časť primárneho kľúča `shop_revenue_daily`, ale deň BEZ JEDINEJ
- * objednávky žiadnu menu neprináša — taký deň teda nemá ako dostať riadok a
- * čítacia strana ho vidí ako „nevieme", hoci sme ho dočítali. Je to asymetria
- * v BEZPEČNOM smere: I11 zakazuje vydávať neznámo za nulu, nie naopak. Zatvoriť
- * sa dá len ďalšou (aditívnou) migráciou so stavom čítania tržby po dňoch;
- * vymyslieť si menu pre prázdny deň sa NESMIE.
+ * objednávky žiadnu menu neprináša — taký deň teda nemal ako dostať riadok a
+ * čítacia strana ho videla ako „nevieme", hoci sme ho dočítali. Bola to
+ * asymetria v BEZPEČNOM smere (I11 zakazuje vydávať neznámo za nulu, nie
+ * naopak), ale znamenala, že appka NIKDY nepovie „v tento deň sa nepredalo nič".
+ *
+ * Zatvára to `shop_revenue_read_state` (0016): PRÍZNAK PREČÍTANOSTI DŇA oddelený
+ * od sumy, jeden riadok na deň, BEZ meny. Tento beh ho zapisuje presne tam, kde
+ * predtým nezapisoval nič — pri dni, z ktorého sa strana zoznamu prečítala, ale
+ * objednávka v ňom nebola. Dve veci sa tým NEZMENILI:
+ *
+ *   · **Vymyslieť si menu pre prázdny deň sa naďalej NESMIE.** Nulový riadok
+ *     v `shop_revenue_daily` s menou z nastavení by tvrdil viac, než sme videli
+ *     — a nulu by dostal aj deň, ktorý sa nikdy nesťahoval (I11).
+ *   · **Riadok stavu vznikne LEN pre deň, z ktorého sa naozaj prečítala aspoň
+ *     jedna strana.** Predvyplnenie okna dopredu je tá istá lož ako nula.
  */
 
 /**
@@ -839,6 +849,17 @@ export interface ShopRevenueDayReport {
   lastError: string | null;
   /** Zapísal sa deň do DB, alebo sa nechala predchádzajúca hodnota? */
   written: boolean;
+  /**
+   * Zapísal sa príznak prečítanosti dňa (`shop_revenue_read_state`, 0016)?
+   * Pri prázdnom dni je to JEDINÝ zápis, ktorý o dni vôbec vznikne — bez neho
+   * by dočítaný deň bez objednávok zostal „nevieme".
+   */
+  stateWritten: boolean;
+  /**
+   * `true` = deň sa DOČÍTAL a objednávka v ňom NEBOLA. Meraný fakt, nie
+   * nevedomosť — presne to, čo migrácia 0016 pridala.
+   */
+  emptyDay: boolean;
 }
 
 export interface ShopRevenueSyncResult {
@@ -866,7 +887,10 @@ export interface ShopRevenueSyncDeps {
   key: SecretRef;
   /** Zdieľaný denný rozpočet dráhy `orders` (A4). Bez neho len pamäť behu. */
   budget?: SalesReadBudgetGate;
-  salesRepo?: Pick<SalesRepoContract, 'upsertRevenueDay' | 'listRevenue'>;
+  salesRepo?: Pick<
+    SalesRepoContract,
+    'upsertRevenueDay' | 'listRevenue' | 'upsertRevenueReadState' | 'listRevenueReadStates'
+  >;
   logger?: Logger;
   flags?: SalesSyncFlags | (() => SalesSyncFlags);
   sleepFn?: (ms: number) => Promise<void>;
@@ -1018,7 +1042,19 @@ export async function syncShopRevenue(
       // Čo o dni už v DB je. Slúži na dve veci: preskočiť dočítaný deň (P7) a
       // nikdy ho neprepísať horším výsledkom (nižšie).
       const before = await repo.listRevenue(day, day);
-      const knownComplete = before.length > 0 && before.every((row) => row.dayComplete);
+      /*
+       * Stav prečítanosti dňa (0016). Je to JEDINÝ zdroj, ktorý o dočítanom dni
+       * BEZ objednávok vie — ten v `shop_revenue_daily` riadok nemá. Bez neho by
+       * sa prázdny deň čítal každú noc nanovo a zbytočne platil z rozpočtu (A4).
+       *
+       * Turbopack tu už raz zahodil guard cez `!row` — porovnávaj `=== null`.
+       */
+      const beforeStates = await repo.listRevenueReadStates(day, day);
+      const beforeState = beforeStates.length > 0 ? (beforeStates[0] ?? null) : null;
+      const knownComplete =
+        beforeState === null
+          ? before.length > 0 && before.every((row) => row.dayComplete)
+          : beforeState.dayComplete;
       const alwaysRecompute = day === today || day === yesterday;
 
       // P7 — dočítaný deň v minulosti sa znova nečíta. Dnešok a včerajšok áno:
@@ -1033,6 +1069,10 @@ export async function syncShopRevenue(
           requestsUsed: 0,
           lastError: null,
           written: false,
+          stateWritten: false,
+          // Preskočený deň sa nemeral TERAZ; „prázdny" o ňom hovorí DB, nie
+          // tento beh, a tvrdiť to z nulového počtu mien tohto behu by bola lož.
+          emptyDay: false,
         });
         continue;
       }
@@ -1171,6 +1211,33 @@ export async function syncShopRevenue(
         }
       }
 
+      /*
+       * PRÍZNAK PREČÍTANOSTI DŇA (0016) — jediný zápis, ktorý vznikne aj pre deň
+       * BEZ objednávok. Podmienka je preto `pagesRead > 0` a NIČ VIAC: keby sem
+       * pribudlo `measuredOrders > 0` ako pri menových riadkoch, prázdny deň by
+       * zostal presne tam, kde bol — v „nevieme".
+       *
+       * Dve pravidlá, obe rovnaké ako pri menových riadkoch, aby oba zápisy
+       * jedného dňa hovorili to isté:
+       *  1. Deň, z ktorého neprišla ani jedna strana, sa NEZAPISUJE — riadok tu
+       *     znamená „tento deň sme čítali" (I11).
+       *  2. Neúplné čítanie NEPREPÍŠE stav, ktorý už bol dočítaný. Inak by prvý
+       *     `rate_limited` deň zmenil meranú nulu späť na nevedomosť.
+       */
+      let stateWritten = false;
+      if (pagesRead > 0) {
+        const downgradesState = !dayComplete && beforeState !== null && beforeState.dayComplete;
+        if (!downgradesState) {
+          await repo.upsertRevenueReadState(day, {
+            dayComplete,
+            ordersSeen: measuredOrders,
+            pagesRead,
+            lastError: dayError,
+          });
+          stateWritten = true;
+        }
+      }
+
       reports.push({
         day,
         complete: dayComplete,
@@ -1180,6 +1247,9 @@ export async function syncShopRevenue(
         requestsUsed: dayRequests,
         lastError: dayError,
         written,
+        stateWritten,
+        // Meraný fakt: dočítali sme celý zoznam a objednávka v ňom nebola.
+        emptyDay: dayComplete && pagesRead > 0 && measuredOrders === 0,
       });
 
       opLog.info('shop_revenue_day_done', {
@@ -1188,6 +1258,10 @@ export async function syncShopRevenue(
         pagesRead,
         requestsUsed: dayRequests,
         ordersCount: measuredOrders,
+        // 0016 — „prečítané, nič sa nepredalo" musí byť vidieť aj v logu, inak
+        // sa prázdny deň nedá odlíšiť od dňa, ktorý sa vôbec nečítal.
+        emptyDay: dayComplete && pagesRead > 0 && measuredOrders === 0,
+        stateWritten,
         // Mena je kód, nie údaj o zákazníkovi — do logu smie.
         currencies: currencies.map((c) => c.currency).join(','),
         ...(dayError !== null ? { errorCode: dayError } : {}),

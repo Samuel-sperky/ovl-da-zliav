@@ -165,6 +165,8 @@ function katalogStranka(url: URL): CatalogSearchView {
     counts: {
       total: KATALOG.length,
       sold: { none: 96, low: 74, mid: 48, high: 22 },
+      // Snímky stoja na dočítanom okne: vedrá dávajú v súčte celý katalóg.
+      soldUnknown: 0,
       neverDiscounted: 132,
       discountedNow: 27,
       shopDiscountedNow: 9,
@@ -524,13 +526,18 @@ const PREDAJ = {
     lastSyncedAt: okamih(-60 * 6),
     hasData: true,
   },
-  products: KATALOG.slice(0, 40).map((row) => ({
-    productId: row.productId,
-    unitsSold: row.unitsSold,
-    unitsPerDay: Number((row.unitsSold / 30).toFixed(2)),
-    recentUnits: Math.round(row.unitsSold * 0.6),
-    previousUnits: Math.round(row.unitsSold * 0.4),
-  })),
+  products: KATALOG.slice(0, 40).map((row) => {
+    // Fixtúra má predaj vždy zmeraný; `null` („nevieme", D121) sa do snímok
+    // nekreslí, preto sa tu zrovná na nulu VEDOME a len tu.
+    const units = row.unitsSold ?? 0;
+    return {
+      productId: row.productId,
+      unitsSold: units,
+      unitsPerDay: Number((units / 30).toFixed(2)),
+      recentUnits: Math.round(units * 0.6),
+      previousUnits: Math.round(units * 0.4),
+    };
+  }),
   days: DNI_PREDAJA,
 };
 

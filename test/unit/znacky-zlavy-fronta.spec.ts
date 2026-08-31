@@ -115,7 +115,16 @@ const PLNA = { itemsOk: 12, itemsPending: 3, itemsFailed: 2, itemsUncertain: 1, 
 const NULOVA = { itemsOk: 18, itemsPending: 0, itemsFailed: 0, itemsUncertain: 0, itemsTotal: 18 };
 
 const tiles = (counts: typeof PLNA): string =>
-  render(createElement(QueueTiles, { campaign: counts as never }));
+  render(
+    createElement(QueueTiles, {
+      campaign: counts as never,
+      // MERANÝ počet čakajúcich (U6, 31. 8. 2026). Dlaždica ho už neberie
+      // z `campaign.itemsPending` — to je odčítanie, do ktorého padnú aj
+      // položky, ktoré dopadli. Fixtúra posiela to isté číslo, takže
+      // tvrdenia nižšie merajú presne to, čo merali predtým.
+      pendingItems: counts.itemsPending,
+    }),
+  );
 
 /** Uzol jednej dlaždice — kľúčuje sa `data-state`, teda tým, čo nesie farbu. */
 function dlazdica(html: string, state: string): Uzol {

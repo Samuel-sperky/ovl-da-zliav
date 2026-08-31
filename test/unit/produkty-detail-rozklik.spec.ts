@@ -165,27 +165,27 @@ describe('panel kusu — rozklik neschováva existenciu údaja', () => {
     }
   });
 
-  it('skupina spoza kľúča má trinásť riadkov a ani jeden nechýba', () => {
+  it('skupina spoza kľúča má päť riadkov a ani jeden nechýba', () => {
+    /*
+     * Päť, nie trinásť (31. 8. 2026): osem riadkov hovorilo to isté, čo
+     * skupina „Fakty z eshopu", a duplicita odišla. Zostalo presne to, čo
+     * obohatenie v `catalog_cache` NENESIE, teda čo inde v paneli nie je —
+     * pozri `panel-fakty-dvakrat.spec.ts`, ktorý tú disjunktnosť meria.
+     */
     const kus = fold(html, 'detail-locked-fold');
     const LABELS = [
-      'Kód produktu',
       'EAN produktu',
-      'Sklad',
-      'Nákupná cena',
-      'Marža',
       'Cena s DPH',
-      'Dodávateľ',
       'Kategórie',
       'Zapnutý v eshope',
       'Pridané do eshopu',
-      'Naposledy objednané',
-      'Objednané kusy spolu',
-      'Skutočná zľava v eshope',
     ];
     for (const label of LABELS) expect(kus, `chýba zamknutý riadok ${label}`).toContain(label);
     expect(rows(kus)).toBe(LABELS.length);
     // Zamknuté sa NEVYSVETĽUJE tu — vedie odtiaľto odkaz na jediné miesto.
     expect(kus).toContain('/nastavenia#zamknute');
+    // …a skupina povie, KEDY sa merala. Bez toho sa tu nekreslí (bod 7 panela).
+    expect(kus).toContain('detail-keyed-measured');
   });
 
   it('nadpis skupiny je pomenovanie, nie „ďalšie" — dá sa z neho zistiť, čo je vnútri', () => {

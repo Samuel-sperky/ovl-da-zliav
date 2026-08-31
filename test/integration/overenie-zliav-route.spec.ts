@@ -21,13 +21,15 @@
  * skutočný `createReadBudget()` nad pamäťovým úložiskom, takže aritmetika je tá
  * istá, ktorá chráni produkciu.
  *
- * ČO TENTO SÚBOR ZATIAĽ NEDOKÁŽE
- * ------------------------------
- * Overiť zhodu naostro. `test/mock-shop/server.ts` endpoint
- * `GET /api/products/getFull` neimplementuje (route ho pozná len ako
- * `invalid_action`), takže sa nedá odohrať „my 20 %, eshop 15 %" cez skutočný
- * HTTP. Kým tam nepribudne, žije táto vetva v jednotkových testoch
- * (`test/unit/overenie-zliav.spec.ts`), kde je klient shopu nahradený.
+ * ROZDIEL NAOSTRO (31. 8. 2026)
+ * ----------------------------
+ * `test/mock-shop/server.ts` už `GET /api/products/getFull` implementuje, ale
+ * stav zľavy v ňom odvádzal z `lastReduction`, teda z toho, čo appka sama
+ * predtým zapísala — proti takému mocku sa rozdiel NIKDY neobjavil a route,
+ * ktorá existuje práve na hľadanie rozdielu, nemala čo dokázať. Mock preto vie
+ * `state.setShopReduction(id, …)`: nezávislé tvrdenie shopu (`null` = „zľava
+ * nebeží", objekt = „beží TÁTO"). Posledný describe v tomto súbore odohrá „my
+ * 20 %, eshop 15 %" cez skutočné HTTP.
  *
  * Vlastník: V16 (overenie skutočnosti).
  */
@@ -46,7 +48,7 @@ import {
   type ReadBudget,
 } from '@/lib/shop/read-budget';
 
-import { startMockShopWithOverride, type RunningMockShop } from '../helpers/mock';
+import { startMockShopWithOverride, VALID_API_KEY, type RunningMockShop } from '../helpers/mock';
 import { makeRequest, parse, actorRouteDeps } from './routes-harness';
 
 const NOW = new Date('2026-08-18T09:00:00.000Z');
@@ -56,6 +58,15 @@ const TODAY: DateOnly = '2026-08-18';
 /** `SecretRef` nad textom — kľúč v testoch nikdy nie je skutočný. */
 const testKey: SecretRef = async (): Promise<SecretHandle> => {
   const value = Buffer.from('test-key', 'utf8');
+  return { value, release: () => value.fill(0) };
+};
+
+/**
+ * Kľúč, ktorý mock POZNÁ — bez neho končí `getFull` na `401` a všetko je
+ * `unknown`, teda rozdiel by sa nemal ako ukázať.
+ */
+const knownKey: SecretRef = async (): Promise<SecretHandle> => {
+  const value = Buffer.from(VALID_API_KEY, 'utf8');
   return { value, release: () => value.fill(0) };
 };
 
@@ -90,12 +101,12 @@ beforeEach(() => {
   budget = createReadBudget({ store: createMemoryReadBudgetStore(), lane: 'anon', now });
 });
 
-function routeWith(scopes: readonly ShopScope[] | null) {
+function routeWith(scopes: readonly ShopScope[] | null, key: SecretRef = testKey) {
   return createReductionCheckRoute({
     // Skutočný klient A3 proti mocku (I6) — nič sa nestubuje.
     shop: createShopClient({ baseUrl: mock.baseUrl, policy: { maxAttempts: 1, retryAfterCapSeconds: 1 } }),
     apiKey: {
-      loadForUse: async () => testKey,
+      loadForUse: async () => key,
       recallScopes: () => ({ scopes, checkedAt: scopes === null ? null : NOW }),
     },
     ownWrites: async () => [ownWrite()],
@@ -108,8 +119,9 @@ function routeWith(scopes: readonly ShopScope[] | null) {
 async function call(
   scopes: readonly ShopScope[] | null,
   query: string,
+  key: SecretRef = testKey,
 ): Promise<ReductionCheckResponse> {
-  const response = await routeWith(scopes)(
+  const response = await routeWith(scopes, key)(
     makeRequest('GET', `/api/catalog/reduction-check${query}`),
   );
   const parsed = await parse(response);
@@ -177,5 +189,62 @@ describe('GET /api/catalog/reduction-check — mlčanie shopu nie je „sedí"',
     expect(request?.query.id).toBe('18342');
     // Overenie je ČÍTANIE — na zápisovom endpointe sa nič neobjaví (I7, I13).
     expect(mock.state.writeCount).toBe(0);
+  });
+});
+
+describe('GET /api/catalog/reduction-check — rozdiel medzi shopom a appkou naostro', () => {
+  /** Produkt z default fixtures mocku; vlastný zápis je 20 % na 10.–24. 8. */
+  const PRODUCT_ID = 201;
+  const QUERY = `?productIds=${PRODUCT_ID}&day=${TODAY}`;
+  const SCOPES: readonly ShopScope[] = ['product:edit', 'product:read'];
+
+  it('eshop hlási 15 %, appka zapísala 20 % → `differs`, nie „sedí"', async () => {
+    // Stav shopu je nastavený NEZÁVISLE od appky — appka nezapísala nič.
+    mock.state.setShopReduction(PRODUCT_ID, {
+      reduction: 15,
+      from: '2026-08-10',
+      to: '2026-08-24',
+    });
+
+    const data = await call(SCOPES, QUERY, knownKey);
+    const row = data.products[0];
+
+    expect(row?.shop).toEqual({
+      state: 'active',
+      percent: 15,
+      from: '2026-08-10',
+      to: '2026-08-24',
+    });
+    expect(row?.own.state).toBe('expected');
+    expect(row?.verdict).toBe('differs');
+    expect(row?.differences).toContain('percent');
+    // Zápis sa nedotkol ničoho — overenie je čítanie (I7, I13).
+    expect(mock.state.writeCount).toBe(0);
+  });
+
+  it('eshop hlási „žiadna zľava", appka má zápis → `differs`', async () => {
+    // `null` je tvrdenie shopu, nie „nevieme" — a NESMIE ho prekryť zápis appky.
+    mock.state.setShopReduction(PRODUCT_ID, null);
+
+    const data = await call(SCOPES, QUERY, knownKey);
+    const row = data.products[0];
+
+    expect(row?.shop).toEqual({ state: 'none' });
+    expect(row?.verdict).toBe('differs');
+    expect(row?.unknownCause).toBeNull();
+  });
+
+  it('to isté percento aj okno → `match` (aby „differs" nebolo len šum)', async () => {
+    mock.state.setShopReduction(PRODUCT_ID, {
+      reduction: 20,
+      from: '2026-08-10',
+      to: '2026-08-24',
+    });
+
+    const data = await call(SCOPES, QUERY, knownKey);
+    const row = data.products[0];
+
+    expect(row?.verdict).toBe('match');
+    expect(row?.differences).toEqual([]);
   });
 });

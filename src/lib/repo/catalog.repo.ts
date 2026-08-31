@@ -154,12 +154,40 @@ export interface CatalogCacheRecordV3 extends CatalogCacheRecord {
 }
 
 /**
+ * POKRYTIE OKNA PREDAJNOSTI — koľko dní okna appka NAOZAJ má (I11, D121).
+ *
+ * Je to vlastnosť OKNA, nie produktu: `sales_sync_state` je kľúčované dňom,
+ * takže „koľko dní je dočítaných" je jedno číslo na celú odpoveď a nie stĺpec
+ * v každom riadku. Rovnaká definícia ako `salesRepo.coverageFor()` — dočítaný
+ * je LEN deň so `status = 'complete'`; `pending`, `partial` aj chýbajúci riadok
+ * sú „nevieme".
+ */
+export interface SoldWindowCoverage {
+  /** Dní v okne (30/60/90/180/360). */
+  readonly windowDays: number;
+  /** Z toho dní so `status = 'complete'`. */
+  readonly completeDays: number;
+  /** Z toho dní, o ktorých appka nič nevie. `0` ⇒ okno je celé dočítané. */
+  readonly unknownDays: number;
+}
+
+/**
  * Riadok výsledku vyhľadávania. `unitsSold`, `everDiscounted` a `discountedNow`
  * sú DOPOČÍTANÉ z vlastných tabuliek, nie zo shopu (I11).
  */
 export interface CatalogSearchRow extends CatalogCacheRecordV3 {
-  /** Predané kusy za okno `soldWindowDays` (0 = za okno sa nepredal). */
-  unitsSold: number;
+  /**
+   * Predané kusy za okno `soldWindowDays`, alebo `null` = **„za toto okno to
+   * NEVIEME"** (D121, 31. 8. 2026). Tri stavy, jedno pravidlo — to isté, aké už
+   * používajú KPI (`soldUnitsForWindow()`, dôvod tam).
+   *
+   * Do 31. 8. 2026 tu bolo `number` a SQL malo `COALESCE(s.units, 0)` bez brány
+   * `status = 'complete'`, takže nestiahnutý deň vyšiel ako deň s nulou. Pri
+   * okne 180 dní a dvoch stiahnutých prišiel KAŽDÝ produkt ako meraná nula,
+   * `soldBucketOf(0)` ho zaradil do vedra `none` a obrazovka Nová zľava hlásila
+   * „10 000 produktov dostane zľavu · 30 %" o predajoch, ktoré appka nezmerala.
+   */
+  unitsSold: number | null;
   /** `true` = appka na produkt už niekedy úspešne zapísala zľavu (I11). */
   everDiscounted: boolean;
   /** `true` = podľa VLASTNÉHO zápisu je dnes v okne zľavy (I11). */
@@ -179,8 +207,12 @@ export interface CatalogSearchRow extends CatalogCacheRecordV3 {
  * Vracať tam nulu bez merania by bolo tvrdenie, nie údaj.
  */
 export interface CatalogProductFacts {
-  /** Predané kusy za okno. `0` znamená „za okno sa nepredal", nie „nevieme". */
-  unitsSold: number;
+  /**
+   * Predané kusy za okno. `0` je MERANÝ fakt „za okno sa nepredal" — a smie ním
+   * byť len vtedy, keď je okno celé dočítané. `null` = „nevieme" (D121); to isté
+   * pravidlo ako `CatalogSearchRow.unitsSold`, spoločné v `soldUnitsForWindow()`.
+   */
+  unitsSold: number | null;
   /** `true` = appka na produkt už niekedy úspešne zapísala zľavu (I11). */
   everDiscounted: boolean;
   /** `true` = podľa VLASTNÉHO zápisu je dnes v okne zľavy (I11). */
@@ -188,11 +220,18 @@ export interface CatalogProductFacts {
 }
 
 export interface CatalogFactsResult {
-  /** Kľúč je `product_id`; chýbajúce ID znamená „bez predaja a bez zľavy". */
+  /**
+   * Kľúč je `product_id`. Riadok dostane KAŽDÉ platné ID zo vstupu — aj to, ku
+   * ktorému niet ani predaja, ani zľavy. Chýbajúci kľúč by volajúceho nútil
+   * dosadiť si default sám, a práve z takého `?? 0` v `catalog/search` sa stalo,
+   * že neznámy predaj prišiel na obrazovku ako nula (D121).
+   */
   facts: Map<number, CatalogProductFacts>;
   soldWindowDays: number;
   soldFrom: DateOnly;
   soldTo: DateOnly;
+  /** Koľko dní okna je dočítaných — bez toho je `unitsSold` nečitateľné (I11). */
+  soldCoverage: SoldWindowCoverage;
 }
 
 /* ───────── Doťahnuté detaily produktu (kód, EAN, sklad, varianty) ───────── */
@@ -383,6 +422,11 @@ export interface CatalogSearchResult extends Paged<CatalogSearchRow> {
   soldWindowDays: number;
   soldFrom: DateOnly;
   soldTo: DateOnly;
+  /**
+   * Koľko dní okna je naozaj dočítaných (I11, D121). Hovorí, ako sa má číslo
+   * `unitsSold` čítať: pri `unknownDays > 0` je to DOLNÁ HRANICA, nie počet.
+   */
+  soldCoverage: SoldWindowCoverage;
   /** Filtre, ktoré sa NEAPLIKOVALI, lebo na ne nie sú dáta (K8). */
   lockedFilters: LockedCatalogFilter[];
   /** Čo platí len pre obohatené riadky — aplikované, ale nad časťou katalógu (I11). */
@@ -392,7 +436,18 @@ export interface CatalogSearchResult extends Paged<CatalogSearchRow> {
 /** Čísla do bočného panela (K7). Jeden dotaz, nie šesť. */
 export interface CatalogCounts {
   total: number;
+  /**
+   * Vedrá predajnosti. `none` je „0 predaných" ako MERANÝ fakt, takže pri
+   * nedočítanom okne je nula — produkty, o ktorých appka nič nevie, sú
+   * v `soldUnknown` a do žiadneho vedra nepatria (D121).
+   */
   sold: Record<SoldBucket, number>;
+  /**
+   * Koľko riadkov má za okno „nevieme" (`unitsSold === null`). Vedrá plus toto
+   * číslo dá `total`; bez neho by nula vo vedre `none` vyzerala ako „takých
+   * produktov niet", hoci ich je celý katalóg (I11).
+   */
+  soldUnknown: number;
   neverDiscounted: number;
   discountedNow: number;
   /**
@@ -683,8 +738,15 @@ const MAX_PER_PAGE = 200;
 /** Default okno predajnosti (bočný panel má prednastavených 180 dní). */
 const DEFAULT_SOLD_WINDOW_DAYS = 180;
 
-/** Povolené okná predajnosti podľa prepínača v UI. */
-const ALLOWED_SOLD_WINDOWS: readonly number[] = [30, 60, 90, 180, 360];
+/**
+ * Povolené okná predajnosti podľa prepínača v UI.
+ *
+ * JEDINÝ ZDROJ toho, ktoré okná zrkadlo vie triediť v SQL. Exportuje sa preto,
+ * že `api/insights/top-products` si z toho počíta, kedy poradie zvládne SQL a
+ * kedy musí ísť obchádzkou cez kohortu (`MIRROR_SORTABLE_WINDOWS`) — ručná
+ * kópia toho zoznamu sa pri prvej zmene ticho rozišla.
+ */
+export const ALLOWED_SOLD_WINDOWS: readonly number[] = [30, 60, 90, 180, 360];
 
 /**
  * Filtre bez dát v schéme (K8). Zoznam je ZÁMERNE tu a nie v UI: keď dáta
@@ -809,8 +871,14 @@ const SORT_SQL: Record<CatalogSort, string> = {
   name: 'c.name ASC, c.product_id ASC',
   price_asc: 'c.price ASC, c.product_id ASC',
   price_desc: 'c.price DESC, c.product_id ASC',
-  sold_asc: 'units_sold ASC, c.product_id ASC',
-  sold_desc: 'units_sold DESC, c.product_id ASC',
+  /*
+   * Radí sa `COALESCE(s.units, 0)`, nie alias `units_sold`: ten je od D121
+   * NULLOVATEĽNÝ („nevieme"), a `ORDER BY` s NULL-mi by ticho zmenilo poradie
+   * obrazovky. Neznámy riadok sa radí ako nula — poradie nie je tvrdenie
+   * o predaji, to hovorí pomlčka v bunke.
+   */
+  sold_asc: 'COALESCE(s.units, 0) ASC, c.product_id ASC',
+  sold_desc: 'COALESCE(s.units, 0) DESC, c.product_id ASC',
   id: 'c.product_id ASC',
 };
 
@@ -974,10 +1042,31 @@ const SQL_PROGRESS_SAVE =
 /**
  * Predané kusy za okno. Odvodená tabuľka (nie korelovaný poddotaz v SELECT-e):
  * poddotaz na riadok by sa pri 40 tisícoch riadkov vyhodnocoval 40-tisíckrát.
+ *
+ * BRÁNA `status = 'complete'` (D121, 31. 8. 2026). Kusy sa sčítavajú VÝHRADNE
+ * z dní, ktoré sú naozaj stiahnuté. `product_sales_daily` má riadok len pre
+ * (produkt, deň) s predajom, takže bez tejto brány je nestiahnutý deň na
+ * nerozoznanie od dňa bez predaja — a súčet za okno potom tvrdí nulu o dňoch,
+ * ktoré appka nikdy nečítala (0014 §4, hlavička `product_sales_daily` v 0009).
+ *
+ * `JOIN` (nie `LEFT JOIN`) na `sales_sync_state` je zámer: deň bez riadku je
+ * „nevieme", a ten sa do súčtu dostať NESMIE. Je to spojenie na PRIMARY KEY
+ * (`sale_day`), takže plán zostáva `ref` — dôkaz `EXPLAIN`-om je v
+ * `test/integration/predaje-brana-pokrytia.spec.ts`.
  */
 const JOIN_SALES =
-  'LEFT JOIN (SELECT product_id, SUM(units_sold) AS units FROM product_sales_daily ' +
-  'WHERE sale_day >= ? AND sale_day <= ? GROUP BY product_id) s ON s.product_id = c.product_id ';
+  'LEFT JOIN (SELECT p.product_id, SUM(p.units_sold) AS units FROM product_sales_daily p ' +
+  "JOIN sales_sync_state ss ON ss.sale_day = p.sale_day AND ss.status = 'complete' " +
+  'WHERE p.sale_day >= ? AND p.sale_day <= ? GROUP BY p.product_id) s ' +
+  'ON s.product_id = c.product_id ';
+
+/**
+ * Koľko dní okna je dočítaných. Jeden riadok, `PRIMARY KEY` range nad tabuľkou
+ * s jedným riadkom na deň — lacnejšie než niesť pokrytie v každom riadku.
+ */
+const SQL_COMPLETE_DAYS =
+  "SELECT COUNT(*) AS complete_days FROM sales_sync_state WHERE status = 'complete' " +
+  'AND sale_day >= ? AND sale_day <= ?';
 
 /**
  * VLASTNÉ úspešné zápisy zliav (I11). `now_on` je „dnes v okne" — okno berieme
@@ -996,10 +1085,12 @@ const JOIN_OWN_DISCOUNTS =
  * musela byť `catalog_cache` — a práve o produkty, ktoré v nej NIE SÚ, tu ide.
  */
 
+/* Tá istá brána pokrytia ako v `JOIN_SALES` — dôvod tam (D121). */
 const SQL_FACTS_SALES_PREFIX =
-  'SELECT product_id, SUM(units_sold) AS units FROM product_sales_daily ' +
-  'WHERE sale_day >= ? AND sale_day <= ? AND product_id IN ';
-const SQL_FACTS_SALES_SUFFIX = ' GROUP BY product_id';
+  'SELECT p.product_id, SUM(p.units_sold) AS units FROM product_sales_daily p ' +
+  "JOIN sales_sync_state ss ON ss.sale_day = p.sale_day AND ss.status = 'complete' " +
+  'WHERE p.sale_day >= ? AND p.sale_day <= ? AND p.product_id IN ';
+const SQL_FACTS_SALES_SUFFIX = ' GROUP BY p.product_id';
 
 const SQL_FACTS_DISCOUNTS_PREFIX =
   'SELECT i.product_id, ' +
@@ -1200,10 +1291,10 @@ function mapRow(row: CatalogRow): CatalogCacheRecordV3 {
   };
 }
 
-function mapSearchRow(row: SearchRow): CatalogSearchRow {
+function mapSearchRow(row: SearchRow, coverage: SoldWindowCoverage): CatalogSearchRow {
   return {
     ...mapRow(row),
-    unitsSold: Number(row.units_sold ?? 0),
+    unitsSold: soldUnitsForWindow(row.units_sold, coverage),
     everDiscounted: Number(row.ever_discounted ?? 0) === 1,
     discountedNow: Number(row.discounted_now ?? 0) === 1,
   };
@@ -1691,13 +1782,68 @@ const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * Predikáty vedier predajnosti. Výraz `COALESCE(s.units, 0)` sa opakuje, lebo
  * alias zo SELECT-u sa v `WHERE` použiť nedá (a `HAVING` by zabilo `LIMIT`).
+ *
+ * VEDRO `none` JE „0 PREDANÝCH", NIE „NEVIEME" (D121, 31. 8. 2026)
+ * ───────────────────────────────────────────────────────────────
+ * Do 31. 8. 2026 bolo `none` doslova `COALESCE(s.units, 0) = 0` bez ohľadu na
+ * pokrytie, takže pri okne 180 dní a dvoch stiahnutých vybral filter „0
+ * predaných" CELÝ katalóg — a obrazovka Nová zľava, ktorá s tým filtrom
+ * ŠTARTUJE (`app/zlavy/nova/page.tsx`), na ňom postavila „10 000 produktov ·
+ * 30 %". Filter „0 predaných" musí vyberať produkty, o ktorých appka VIE, že sa
+ * nepredali; produkty, o ktorých nevie, sa doň nesmú dostať (`soldUnknown`).
+ *
+ * Preto pri nedočítanom okne `none` NEVYBERIE NIČ (`1 = 0`) — je to tá istá
+ * hranica ako v `soldUnitsForWindow()`: meraná nula existuje len vtedy, keď je
+ * okno celé dočítané. Vedrá `low`/`mid`/`high` bránu nepotrebujú: `s.units > 0`
+ * je zmeraný predaj v dočítaných dňoch, teda dolná hranica, a tá do vedra pod
+ * svojou skutočnou hodnotou nespadne (`≥` sa priznáva na povrchu).
  */
-const SOLD_BUCKET_SQL: Record<SoldBucket, string> = {
-  none: 'COALESCE(s.units, 0) = 0',
-  low: 'COALESCE(s.units, 0) BETWEEN 1 AND 2',
-  mid: 'COALESCE(s.units, 0) BETWEEN 3 AND 9',
-  high: 'COALESCE(s.units, 0) >= 10',
-};
+function soldBucketSql(coverage: SoldWindowCoverage): Record<SoldBucket, string> {
+  const measuredZero = coverage.completeDays > 0 && coverage.unknownDays === 0;
+  return {
+    none: measuredZero ? 'COALESCE(s.units, 0) = 0' : '1 = 0',
+    low: 'COALESCE(s.units, 0) BETWEEN 1 AND 2',
+    mid: 'COALESCE(s.units, 0) BETWEEN 3 AND 9',
+    high: 'COALESCE(s.units, 0) >= 10',
+  };
+}
+
+/** Riadky, o ktorých predaji appka za okno nič nevie — doplnok vedier (D121). */
+function soldUnknownSql(coverage: SoldWindowCoverage): string {
+  if (coverage.completeDays === 0) return '1 = 1';
+  if (coverage.unknownDays === 0) return '1 = 0';
+  // Čiastočne dočítané okno: nula nie je meraná, kladné číslo je dolná hranica.
+  return 'COALESCE(s.units, 0) = 0';
+}
+
+/**
+ * TRI STAVY JEDNÉHO ČÍSLA (I11, D121) — a je to to isté pravidlo, aké už
+ * používajú KPI (`sales/insights.ts` → `kpiWindowUnits`) aj dominanta bočného
+ * panela (`products/sold-coverage.ts` → `soldUnitsViaCoverage`). Nie štvrté
+ * pravidlo, len presunuté tam, kde sa číslo rodí — pred `soldBucketOf()`:
+ *
+ *  · ani jeden dočítaný deň  → `null`. Nula by bola tvrdenie o nepredaní.
+ *  · okno celé dočítané      → číslo; `0` je MERANÝ fakt „nepredalo sa nič".
+ *  · okno dočítané len z časti:
+ *      – súčet > 0 → číslo. Toľko kusov appka NAOZAJ zmerala; povrch to ukáže
+ *        ako `≥ N` (`kpiUnitsCell`) a skryť to by bolo druhé zlyhanie I11.
+ *      – súčet = 0 → `null`. `≥ 0` nie je priznanie, ale prázdna veta — a práve
+ *        z tejto nuly vzniklo vedro `none` s 30 % zľavou (D121).
+ *
+ * Dôsledok, ktorý je ZÁMER: najhlbšie pásmo (`none`, 30 %) je odteraz
+ * dosiahnuteľné VÝHRADNE z celého dočítaného okna.
+ */
+function soldUnitsForWindow(
+  raw: number | string | bigint | null | undefined,
+  coverage: SoldWindowCoverage,
+): number | null {
+  if (coverage.completeDays === 0) return null;
+  const parsed = raw === null || raw === undefined ? 0 : Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  const units = Math.max(0, Math.trunc(parsed));
+  if (coverage.unknownDays === 0) return units;
+  return units === 0 ? null : units;
+}
 
 const isSoldBucket = (value: unknown): value is SoldBucket =>
   value === 'none' || value === 'low' || value === 'mid' || value === 'high';
@@ -1736,6 +1882,7 @@ function buildWhere(
   filter: CatalogSearchFilter,
   includeFacets: boolean,
   day: DateOnly,
+  coverage: SoldWindowCoverage,
 ): WhereParts {
   const where: string[] = [];
   const values: unknown[] = [];
@@ -1803,7 +1950,8 @@ function buildWhere(
   if (includeFacets) {
     const buckets = [...new Set((filter.soldBuckets ?? []).filter(isSoldBucket))];
     if (buckets.length > 0 && buckets.length < 4) {
-      where.push(`(${buckets.map((bucket) => SOLD_BUCKET_SQL[bucket]).join(' OR ')})`);
+      const bucketSql = soldBucketSql(coverage);
+      where.push(`(${buckets.map((bucket) => bucketSql[bucket]).join(' OR ')})`);
     }
     if (filter.neverDiscounted === true) {
       where.push('d.product_id IS NULL');
@@ -1959,6 +2107,27 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
     return poolQuery<T>(sql, values);
   };
 
+  /**
+   * Pokrytie okna: koľko jeho dní je `complete` (D121). Strop je `windowDays`,
+   * lebo `sales_sync_state` môže mať aj deň mimo okna — a viac dočítaných dní,
+   * než okno má, by z medzery spravilo zápornú hodnotu.
+   */
+  const completeDaysFor = async (
+    window: ResolvedWindow,
+    conn?: Queryable,
+  ): Promise<SoldWindowCoverage> => {
+    const rows = await run<Array<{ complete_days: number | bigint | null }>>(
+      conn,
+      SQL_COMPLETE_DAYS,
+      [window.from, window.to],
+    );
+    const row = Array.isArray(rows) ? rows[0] : undefined;
+    const measured = row === undefined ? 0 : Math.max(0, Math.trunc(Number(row.complete_days ?? 0)));
+    const windowDays = Math.max(0, Math.trunc(window.windowDays));
+    const completeDays = Math.min(measured, windowDays);
+    return { windowDays, completeDays, unknownDays: windowDays - completeDays };
+  };
+
   const repo: CatalogRepoExt = {
     async get(productId: number, conn?: Queryable): Promise<CatalogCacheRecordV3 | null> {
       if (!isValidProductId(productId)) return null;
@@ -2041,19 +2210,23 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
     },
 
     /**
-     * Stránkované vyhľadávanie s filtrami. Dva dotazy: `COUNT(*)` a stránka —
-     * `SQL_CALC_FOUND_ROWS` je v MariaDB deprecated a v tomto tvare pomalší.
+     * Stránkované vyhľadávanie s filtrami. Tri dotazy: pokrytie okna, `COUNT(*)`
+     * a stránka — `SQL_CALC_FOUND_ROWS` je v MariaDB deprecated a pomalší.
+     *
+     * Pokrytie ide PRVÉ a je to jeden `COUNT(*)` nad `sales_sync_state`: bez
+     * neho sa `unitsSold` prečítať nedá (nula verzus „nevieme", D121).
      */
     async search(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogSearchResult> {
       const page = Math.max(1, Math.trunc(filter.page ?? 1));
       const perPage = Math.min(MAX_PER_PAGE, Math.max(1, Math.trunc(filter.perPage ?? 50)));
       const window = resolveWindow(filter);
       const sort = SORT_SQL[filter.sort ?? 'name'] ?? SORT_SQL.name;
+      const coverage = await completeDaysFor(window, conn);
 
       // Poradie parametrov MUSÍ zodpovedať poradiu JOIN-ov v `FROM`.
       const joinValues = [window.from, window.to, window.to, window.to];
       const from = `FROM catalog_cache c ${JOIN_SALES}${JOIN_OWN_DISCOUNTS}`;
-      const where = buildWhere(filter, true, window.to);
+      const where = buildWhere(filter, true, window.to, coverage);
 
       const countRows = await run<Array<{ total: number | bigint }>>(
         conn,
@@ -2062,9 +2235,15 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
       );
       const total = Array.isArray(countRows) ? Number(countRows[0]?.total ?? 0) : 0;
 
+      /*
+       * `s.units` sa vracia SUROVÉ, bez `COALESCE(…, 0)`: `NULL` znamená „za
+       * dočítané dni sa nepredal", a rozdiel medzi tým a „dni nie sú stiahnuté"
+       * rozhoduje `soldUnitsForWindow()`. Dosadená nula tu bola presne to, čo
+       * D121 porušilo.
+       */
       const dataSql =
         `SELECT ${COLUMNS.replace(/(^|, )/g, '$1c.')}, ` +
-        'COALESCE(s.units, 0) AS units_sold, ' +
+        's.units AS units_sold, ' +
         'CASE WHEN d.product_id IS NULL THEN 0 ELSE 1 END AS ever_discounted, ' +
         'COALESCE(d.now_on, 0) AS discounted_now ' +
         `${from}${where.sql} ORDER BY ${sort} LIMIT ? OFFSET ?`;
@@ -2077,13 +2256,14 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
       ]);
 
       return {
-        data: (Array.isArray(rows) ? rows : []).map(mapSearchRow),
+        data: (Array.isArray(rows) ? rows : []).map((row) => mapSearchRow(row, coverage)),
         page,
         perPage,
         total,
         soldWindowDays: window.windowDays,
         soldFrom: window.from,
         soldTo: window.to,
+        soldCoverage: coverage,
         lockedFilters: [...LOCKED_FILTERS],
         enrichedOnly: [...ENRICHED_ONLY_FEATURES],
       };
@@ -2097,9 +2277,10 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
      */
     async counts(filter: CatalogSearchFilter, conn?: Queryable): Promise<CatalogCounts> {
       const window = resolveWindow(filter);
+      const coverage = await completeDaysFor(window, conn);
       const joinValues = [window.from, window.to, window.to, window.to];
       const from = `FROM catalog_cache c ${JOIN_SALES}${JOIN_OWN_DISCOUNTS}`;
-      const where = buildWhere(filter, false, window.to);
+      const where = buildWhere(filter, false, window.to, coverage);
       /*
        * Hranice dňa pre stav zľavy V SHOPE. Sú v SELECT-e, takže ich parametre
        * idú PRVÉ — pred parametrami JOIN-ov a `WHERE`. Poradie `?` je poradie
@@ -2107,12 +2288,19 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
        */
       const selectValues = shopDiscountDayValues(window.to);
 
+      /*
+       * Vedrá idú z TÝCH ISTÝCH predikátov ako filter (`soldBucketSql`) — inak
+       * by bočný panel sľuboval počet, ktorý zaškrtnutie filtra nedodrží. Piate
+       * číslo `sold_unknown` je doplnok: vedrá plus ono dávajú `total` (D121).
+       */
+      const bucketSql = soldBucketSql(coverage);
       const sql =
         'SELECT COUNT(*) AS total, ' +
-        'SUM(CASE WHEN COALESCE(s.units, 0) = 0 THEN 1 ELSE 0 END) AS sold_none, ' +
-        'SUM(CASE WHEN COALESCE(s.units, 0) BETWEEN 1 AND 2 THEN 1 ELSE 0 END) AS sold_low, ' +
-        'SUM(CASE WHEN COALESCE(s.units, 0) BETWEEN 3 AND 9 THEN 1 ELSE 0 END) AS sold_mid, ' +
-        'SUM(CASE WHEN COALESCE(s.units, 0) >= 10 THEN 1 ELSE 0 END) AS sold_high, ' +
+        `SUM(CASE WHEN ${bucketSql.none} THEN 1 ELSE 0 END) AS sold_none, ` +
+        `SUM(CASE WHEN ${bucketSql.low} THEN 1 ELSE 0 END) AS sold_low, ` +
+        `SUM(CASE WHEN ${bucketSql.mid} THEN 1 ELSE 0 END) AS sold_mid, ` +
+        `SUM(CASE WHEN ${bucketSql.high} THEN 1 ELSE 0 END) AS sold_high, ` +
+        `SUM(CASE WHEN ${soldUnknownSql(coverage)} THEN 1 ELSE 0 END) AS sold_unknown, ` +
         'SUM(CASE WHEN d.product_id IS NULL THEN 1 ELSE 0 END) AS never_discounted, ' +
         'SUM(CASE WHEN COALESCE(d.now_on, 0) = 1 THEN 1 ELSE 0 END) AS discounted_now, ' +
         // D116 — dve čísla o obohatení: koľko riadkov má zľavu PODĽA SHOPU a
@@ -2138,6 +2326,7 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
           mid: num('sold_mid'),
           high: num('sold_high'),
         },
+        soldUnknown: num('sold_unknown'),
         neverDiscounted: num('never_discounted'),
         discountedNow: num('discounted_now'),
         shopDiscountedNow: num('shop_discounted_now'),
@@ -2232,28 +2421,38 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
         ...(opts.soldWindowDays !== undefined ? { soldWindowDays: opts.soldWindowDays } : {}),
         ...(opts.today !== undefined ? { today: opts.today } : {}),
       });
+      const coverage = await completeDaysFor(window, opts.conn);
       const empty: CatalogFactsResult = {
         facts: new Map<number, CatalogProductFacts>(),
         soldWindowDays: window.windowDays,
         soldFrom: window.from,
         soldTo: window.to,
+        soldCoverage: coverage,
       };
 
       const unique = [...new Set(productIds.filter(isValidProductId))];
       if (unique.length === 0) return empty;
 
       const facts = empty.facts;
+      /*
+       * Default riadku je „bez predaja" PODĽA POKRYTIA, nie nula (D121): produkt
+       * bez riadku v `product_sales_daily` sa v dočítanom okne naozaj nepredal,
+       * ale v nedočítanom o ňom appka nevie NIČ. Riadok dostane každé platné ID,
+       * aby volajúci nemusel dosadzovať default sám — presne tým `?? 0` v
+       * `catalog/search` sa neznámy predaj menil na meranú nulu.
+       */
       const touch = (productId: number): CatalogProductFacts => {
         const existing = facts.get(productId);
         if (existing !== undefined) return existing;
         const created: CatalogProductFacts = {
-          unitsSold: 0,
+          unitsSold: soldUnitsForWindow(0, coverage),
           everDiscounted: false,
           discountedNow: false,
         };
         facts.set(productId, created);
         return created;
       };
+      for (const productId of unique) touch(productId);
 
       // Dávkovanie z rovnakého dôvodu ako v `getMany()`: `IN (…)` s tisíckami
       // `?` narazí na limit parametrov. Volajúci sem posiela desiatky ID, nie
@@ -2268,7 +2467,7 @@ export function createCatalogRepo(deps: CatalogRepoDeps = {}): CatalogRepoExt {
           [window.from, window.to, ...chunk],
         );
         for (const row of Array.isArray(salesRows) ? salesRows : []) {
-          touch(Number(row.product_id)).unitsSold = Number(row.units ?? 0);
+          touch(Number(row.product_id)).unitsSold = soldUnitsForWindow(row.units, coverage);
         }
 
         const discountRows = await run<

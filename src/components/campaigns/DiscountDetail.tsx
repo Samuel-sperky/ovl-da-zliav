@@ -47,6 +47,26 @@
  * opravovať niečo, čo je možno v poriadku — preto sa tie dve čísla nikdy
  * nesčítajú a každé má vlastný ďalší krok.
  *
+ * „ČAKÁ NA ZÁPIS" JE ODTERAZ MERANÉ ČÍSLO (nález U6, 31. 8. 2026)
+ * ---------------------------------------------------------------
+ * `campaign.itemsPending` z `/api/campaigns/[id]` je ODČÍTANIE
+ * (`items_total − ok − failed − uncertain`), takže do dlaždice „Čaká na zápis"
+ * spadla aj **preskočená, nenájdená, prerušená a zablokovaná** položka — a tá
+ * už nikam čakať nebude. Osem stavov sa tým zlialo do štyroch kolónok, súčet
+ * dlaždíc nesedel so `spolu` a obrazovka o hotových položkách tvrdila, že sa
+ * na ne fronta ešte len dostane.
+ *
+ * Číslo preto pochádza z `GET /api/insights/campaign/[id]/items` (`GROUP BY
+ * status` nad `campaign_items`) — endpoint existoval od 24. 8. 2026 a nikto ho
+ * nečítal. Keď sa rozpad prečítať nedá, dlaždica má **pomlčku a vetu**, nikdy
+ * odčítané číslo (P7): odčítanie je pravdivé len vtedy, keď žiadny netabuľkový
+ * stav neexistuje, a to sa bez rozpadu zistiť nedá.
+ *
+ * Zvyšné stavy dlaždicu NEDOSTALI — pridať štyri ďalšie do radu, ktorý sa
+ * 24. 8. skracoval kvôli P4, by obrazovku vrátilo nad strop. Sú v sekcii
+ * Položky ako jeden riadok počtov a spolu s nimi aj počet položiek, ktorých
+ * stav appka nepozná (K10 — počet áno, kód stavu nikdy).
+ *
  * PRETO SA DUPLICITA RIEŠILA INAK (D15, 19. 8. 2026)
  * -------------------------------------------------
  * Dominanta a štyri dlaždice hovorili pri hotovej zľave to isté (`21 / 21`
@@ -110,11 +130,13 @@ import {
   type QueueSnapshotView,
 } from '@/components/campaigns/queue-model';
 import {
+  discountItemBreakdown,
   fetchQueue,
   getDiscount,
   stopDiscountQueue,
   type DiscountDetailData,
   type DiscountItemView,
+  type ItemBreakdownView,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
 import { repeatDiscountHref } from '@/components/campaigns/presets-model';
@@ -147,6 +169,14 @@ const PROBLEM_ROWS = 20;
 
 /** Stavy, ktoré sú v poriadku alebo sa ešte len chystajú — tie sa nevypisujú. */
 const QUIET_STATUSES = new Set(['ok', 'pending', 'skipped']);
+
+/**
+ * Stavy, ktoré majú v Priebehu vlastnú dlaždicu (D45). Sekcia Položky vypisuje
+ * PRÁVE ZVYŠOK — tie stavy, ktoré by inak na obrazovke neboli vôbec. Zoznam je
+ * napísaný takto (a nie ako výber štyroch z ôsmich), aby stav pridaný budúcou
+ * migráciou spadol do zvyšku a objavil sa sám, nie aby ticho zmizol.
+ */
+const TILED_STATUSES = new Set(['ok', 'pending', 'failed', 'uncertain']);
 
 function isProblem(item: DiscountItemView): boolean {
   if (!QUIET_STATUSES.has(item.status)) return true;
@@ -237,9 +267,12 @@ export function expiryNoteText(dateTo: string): string {
  */
 export function DetailActions({
   campaign,
+  pendingItems,
   onChanged,
 }: {
   campaign: DiscountDetailData['campaign'];
+  /** Meraný počet čakajúcich položiek, `null` = rozpad sa nedal prečítať. */
+  pendingItems: number | null;
   onChanged: () => void;
 }) {
   /*
@@ -252,9 +285,13 @@ export function DetailActions({
 
   return (
     <>
-      {campaign.itemsPending === 0 ? null : (
-        <StopQueue id={campaign.id} onChanged={onChanged} />
-      )}
+      {/*
+       * Zastavenie fronty sa skrýva len vtedy, keď VIEME, že nič nečaká.
+       * Pri neznámom počte (`null`) tlačidlo zostáva: zastavenie nič
+       * nezapisuje, takže tu je fail-open správna strana — skryť poistku na
+       * základe nevedomosti by bolo horšie než ju ponúknuť zbytočne.
+       */}
+      {pendingItems === 0 ? null : <StopQueue id={campaign.id} onChanged={onChanged} />}
       {showExpiry ? (
         <div className={styles.sideNote} data-testid="detail-expiry">
           {expiryNoteText(campaign.dateTo)}
@@ -295,9 +332,24 @@ export function DetailActions({
  * markup von. `test/unit/znacky-zlavy-fronta.spec.ts` ho vykresľuje naozaj a
  * pri KAŽDEJ zo štyroch dlaždíc kontroluje tri kanály zvlášť.
  */
-export function QueueTiles({ campaign }: { campaign: DiscountDetailData['campaign'] }) {
+export function QueueTiles({
+  campaign,
+  pendingItems,
+}: {
+  campaign: DiscountDetailData['campaign'];
+  /**
+   * Koľko položiek naozaj čaká na zápis — MERANÝ počet zo rozpadu po stavoch,
+   * alebo `null`, keď sa rozpad prečítať nedal. Nie je to
+   * `campaign.itemsPending`: to je odčítanie a počíta aj položky, ktoré už
+   * dopadli (preskočené, nenájdené, prerušené, zablokované). Pozri hlavičku
+   * modulu, sekciu o U6.
+   */
+  pendingItems: number | null;
+}) {
   /** Má stav čo hlásiť? Prúžok farby dostane len dlaždica s nenulovým číslom. */
   const anyOf = (units: number): 'ano' | 'nie' => (units > 0 ? 'ano' : 'nie');
+  /* Neznámy počet nefarbí — pomlčka nie je poplach a nie je ani nula. */
+  const pendingAny: 'ano' | 'nie' = pendingItems === null ? 'nie' : anyOf(pendingItems);
 
   return (
     <>
@@ -353,17 +405,21 @@ export function QueueTiles({ campaign }: { campaign: DiscountDetailData['campaig
             testId="tile-ok"
           />
         </div>
-        <div
-          className={styles.queueTile}
-          data-state="pending"
-          data-any={anyOf(campaign.itemsPending)}
-        >
+        <div className={styles.queueTile} data-state="pending" data-any={pendingAny}>
           {/* tón `progress` — zápis ešte len príde, nie je to chyba */}
           <Icon className={styles.queueGlyph} name={TONE_ICON.progress} size={0.85} />
           <StatTile
             label={`Čaká na zápis`}
-            value={formatCountSk(campaign.itemsPending)}
-            detail={campaign.itemsPending === 0 ? null : 'fronta na ne ešte nedošla'}
+            /* Pomlčka, nie odčítané číslo: bez rozpadu po stavoch sa nedá
+               povedať, či v odčítaní nie sú položky, ktoré už dopadli (U6). */
+            value={pendingItems === null ? '—' : formatCountSk(pendingItems)}
+            detail={
+              pendingItems === null
+                ? 'rozpad položiek po stavoch sa nepodarilo prečítať'
+                : pendingItems === 0
+                  ? null
+                  : 'fronta na ne ešte nedošla'
+            }
             testId="tile-pending"
           />
         </div>
@@ -510,15 +566,26 @@ export function ItemsTable({
 export function DiscountDetail({ id }: { id: number }) {
   const [data, setData] = useState<DiscountDetailData | null>(null);
   const [queue, setQueue] = useState<QueueSnapshotView | null>(null);
+  const [breakdown, setBreakdown] = useState<ItemBreakdownView | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
   /**
-   * Detail zľavy a stav celej fronty JEDNÝM načítaním. Do 13. 8. sa fronta
-   * doťahovala vlastným časovačom každých 30 s — dve skupiny čísel na jednej
-   * obrazovke tak platili k rôznym okamihom a riadok sa pod rukami prepisoval.
+   * Detail zľavy, stav celej fronty a rozpad položiek po stavoch JEDNÝM
+   * načítaním. Do 13. 8. sa fronta doťahovala vlastným časovačom každých 30 s —
+   * dve skupiny čísel na jednej obrazovke tak platili k rôznym okamihom a
+   * riadok sa pod rukami prepisoval. Rozpad prišiel k nim (31. 8. 2026) z toho
+   * istého dôvodu: dlaždica „Čaká na zápis" a riadok zvyšných stavov sa
+   * navzájom dopĺňajú, takže musia platiť k jednému okamihu.
+   *
+   * Neúspešný rozpad NEZHODÍ obrazovku — je to jedno číslo a jeden riadok, oba
+   * majú svoju pomlčku. Detail zľavy je to, bez čoho tu nie je čo kresliť.
    */
   const load = useCallback(async () => {
-    const [detail, snapshot] = await Promise.all([getDiscount(id, ITEMS_LIMIT), fetchQueue()]);
+    const [detail, snapshot, items] = await Promise.all([
+      getDiscount(id, ITEMS_LIMIT),
+      fetchQueue(),
+      discountItemBreakdown(id),
+    ]);
     if (detail.ok) {
       setData(detail.data);
       setFailed(null);
@@ -527,6 +594,7 @@ export function DiscountDetail({ id }: { id: number }) {
       setFailed(detail.error.message);
     }
     setQueue(snapshot.ok ? snapshot.data : null);
+    setBreakdown(items.ok ? items.data : null);
   }, [id]);
 
   const { at, pending } = useRefreshable(load);
@@ -581,6 +649,42 @@ export function DiscountDetail({ id }: { id: number }) {
   const shareOf = (units: number): string =>
     campaign.itemsTotal <= 0 ? '0' : ((units / campaign.itemsTotal) * 100).toFixed(2);
 
+  /*
+   * KOĽKO POLOŽIEK NAOZAJ ČAKÁ (nález U6) — jedna hodnota pre celú obrazovku.
+   *
+   * `campaign.itemsPending` sa tu už nečíta: je to odčítanie, do ktorého padnú
+   * aj položky, ktoré dopadli. Meraný počet je v rozpade po stavoch; keď rozpad
+   * nie je, je to `null` — teda „nevieme", nie nula (P7). Explicitné
+   * `=== undefined` je tu zámer: `?? null` by na kľúči s hodnotou `0` fungoval
+   * rovnako, ale Turbopack v tomto repe už raz zahodil práve takú skratku.
+   */
+  const pendingRaw = breakdown === null ? undefined : breakdown.tally['pending'];
+  const pendingItems: number | null = pendingRaw === undefined ? null : pendingRaw;
+
+  /*
+   * Stavy, ktoré v Priebehu dlaždicu NEMAJÚ. Zoznam sa neopisuje z číselníka —
+   * odvodzuje sa od toho, čo dlaždice pokrývajú, takže deviaty stav z budúcej
+   * migrácie sa na obrazovke objaví sám. Nuly sa nevypisujú (P2): riadok má
+   * hovoriť o tom, čo sa naozaj stalo.
+   */
+  const otherStates =
+    breakdown === null
+      ? []
+      : Object.entries(breakdown.tally)
+          .filter(([status, count]) => count > 0 && !TILED_STATUSES.has(status))
+          .map(([status, count]) => ({ status, count }));
+
+  /*
+   * Riadok mlčí len vtedy, keď rozpad JE a nemá čo dodať — teda všetko, čo
+   * kampaň má, pokrývajú štyri dlaždice. Prázdny `<div>` by na obrazovke
+   * nechal medzeru bez významu.
+   */
+  const breakdownSilent =
+    breakdown !== null &&
+    otherStates.length === 0 &&
+    breakdown.unrecognized === 0 &&
+    breakdown.total === campaign.itemsTotal;
+
   return (
     <div className={styles.page} data-testid="discount-detail">
       {/* Omrvinka „← Zľavy" tu bola dovtedy, kým bol detail samostatná
@@ -633,16 +737,20 @@ export function DiscountDetail({ id }: { id: number }) {
                 <span className="of">/ {formatCountSk(campaign.itemsTotal)}</span>
               </div>
               <div className="side lvl-3">
-                {campaign.itemsPending === 0
-                  ? 'fronta má túto zľavu vybavenú'
-                  : 'vybavených z fronty'}
+                {/* „Vybavenú" sa smie povedať len z MERANEJ nuly; pri neznámom
+                    počte zostáva neutrálny popisok, nie tvrdenie o hotovosti. */}
+                {pendingItems === 0 ? 'fronta má túto zľavu vybavenú' : 'vybavených z fronty'}
               </div>
             </div>
 
           </div>
 
           <div className={styles.side}>
-            <DetailActions campaign={campaign} onChanged={() => void load()} />
+            <DetailActions
+              campaign={campaign}
+              pendingItems={pendingItems}
+              onChanged={() => void load()}
+            />
             {/* Tlačidlo „Späť na zoznam" tu stálo, kým bol detail samostatná
                 stránka. Zoznam je odteraz vľavo — v stĺpci akcií zostávajú len
                 akcie, ktoré niečo menia. */}
@@ -663,10 +771,16 @@ export function DiscountDetail({ id }: { id: number }) {
           <i data-state="ok" style={{ width: `${shareOf(campaign.itemsOk)}%` }} />
           <i data-state="uncertain" style={{ width: `${shareOf(campaign.itemsUncertain)}%` }} />
           <i data-state="failed" style={{ width: `${shareOf(campaign.itemsFailed)}%` }} />
-          <i data-state="pending" style={{ width: `${shareOf(campaign.itemsPending)}%` }} />
+          {/* Neznámy počet nekreslí úsek — prázdna koľaj je „nevieme" a slovami
+              to hovorí dlaždica pod pruhom, ktorá má v tej chvíli pomlčku.
+              Nulová šírka z neznalosti by tvrdila, že nič nečaká. */}
+          <i
+            data-state="pending"
+            style={{ width: `${pendingItems === null ? '0' : shareOf(pendingItems)}%` }}
+          />
         </div>
 
-        <QueueTiles campaign={campaign} />
+        <QueueTiles campaign={campaign} pendingItems={pendingItems} />
 
         {/*
          * Pod dlaždicami zostáva už len to, čo v nich NIE JE — deň
@@ -701,7 +815,8 @@ export function DiscountDetail({ id }: { id: number }) {
              * a obrazovka je o riadok kratšia (P4).
              */}
             {data.estimate === null ? (
-              campaign.itemsPending === 0 ? null : (
+              /* Mlčí sa len pri MERANEJ nule — vtedy nie je čo odhadovať. */
+              pendingItems === 0 ? null : (
                 <span className="lvl-3">odhad dokončenia zatiaľ nevieme</span>
               )
             ) : (
@@ -836,6 +951,54 @@ export function DiscountDetail({ id }: { id: number }) {
             {pluralSk(campaign.itemsTotal, 'položka', 'položky', 'položiek')}
           </div>
         </div>
+
+        {/*
+         * ZVYŠNÉ STAVY — to, čo štyri dlaždice Priebehu nepokrývajú (U6).
+         *
+         * Kým tento riadok neexistoval, preskočená, nenájdená, prerušená a
+         * zablokovaná položka nebola na obrazovke NIKDE: v Priebehu ju
+         * odčítanie prilepilo k „čaká na zápis" a v tabuľke nižšie sa vypisujú
+         * len problémové riadky, a to najviac `PROBLEM_ROWS` z prvej
+         * stránky. Rozpad ide `GROUP BY status` nad celou kampaňou, takže
+         * hovorí aj o položkách, ktoré si detail vôbec nestiahol.
+         *
+         * Pri neznámych stavoch sa píše POČET, nikdy kód stavu (K10). Nuly sa
+         * nevypisujú — riadok má hovoriť o tom, čo sa stalo, nie o ôsmich
+         * kolónkach.
+         */}
+        {breakdownSilent ? null : (
+          <div className="lvl-3" data-testid="detail-items-breakdown">
+            {breakdown === null ? (
+              'Rozpad položiek po stavoch sa nepodarilo prečítať — koľko z nich už dopadlo mimo štyroch dlaždíc vyššie, appka teraz nevie.'
+            ) : (
+              <>
+                {otherStates.length === 0 ? null : (
+                  <span data-testid="detail-items-other">
+                    Mimo štyroch dlaždíc:{' '}
+                    {otherStates
+                      .map((s) => `${itemSentence(s.status).label} ${formatCountSk(s.count)}`)
+                      .join(' · ')}
+                    .{' '}
+                  </span>
+                )}
+                {breakdown.unrecognized === 0 ? null : (
+                  <span data-testid="detail-items-unknown">
+                    {formatCountSk(breakdown.unrecognized)}{' '}
+                    {pluralSk(breakdown.unrecognized, 'položka', 'položky', 'položiek')} je v stave,
+                    ktorý appka nepozná — čo sa s nimi stalo, nevieme.{' '}
+                  </span>
+                )}
+                {breakdown.total === campaign.itemsTotal ? null : (
+                  <span data-testid="detail-items-mismatch">
+                    Rozpad našiel {formatCountSk(breakdown.total)}{' '}
+                    {pluralSk(breakdown.total, 'položku', 'položky', 'položiek')}, hlavička{' '}
+                    {formatCountSk(campaign.itemsTotal)} — tie dve čísla sa rozišli.
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         <div className="tbl-frame">
           <div className={styles.itemsScroll}>

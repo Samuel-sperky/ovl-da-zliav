@@ -170,21 +170,29 @@ describe('sklad cez varianty', () => {
 describe('údaje spoza oprávnenia product:read', () => {
   const html = renderPanel();
 
-  it('všetko, čo `getFull` dá, má v paneli svoj riadok', () => {
+  it('všetko, čo `getFull` dá, má v paneli svoj riadok — ale práve JEDEN', () => {
+    /*
+     * ZMENA 31. 8. 2026. Zoznam sa nezoslabil, iba sa rozdelil: osem z týchto
+     * polí kreslila naraz aj skupina „Fakty z eshopu", takže panel o tom istom
+     * fakte hovoril dvakrát a z dvoch čítaní. Riadky teda existujú ďalej, len
+     * každý na jednom mieste (kde presne, meria `panel-fakty-dvakrat.spec.ts`).
+     */
     for (const label of [
-      'Kód produktu',
+      // …spoza kľúča: to, čo obohatenie v `catalog_cache` nenesie.
       'EAN produktu',
-      'Sklad',
-      'Nákupná cena',
-      'Marža',
       'Cena s DPH',
-      'Dodávateľ',
       'Kategórie',
       'Zapnutý v eshope',
       'Pridané do eshopu',
-      'Naposledy objednané',
-      'Objednané kusy spolu',
-      'Skutočná zľava v eshope',
+      // …z obohatenia: tie isté fakty, ktoré skupina za kľúčom opakovala.
+      'Referencia',
+      'Sklad',
+      'Nákupná cena',
+      'Marža',
+      'Dodávateľ',
+      'Celkovo predané',
+      'Posledný predaj',
+      'Aktívna zľava v eshope',
     ]) {
       expect(html, `riadok ${label} sa nekreslí`).toContain(label);
     }
@@ -198,8 +206,17 @@ describe('údaje spoza oprávnenia product:read', () => {
   });
 
   it('nadpis skupiny nesľubuje hodnoty, ktoré appka nemá', () => {
-    expect(html).toContain('Zatiaľ nedostupné');
-    expect(html).not.toContain('Podrobnosti z eshopu');
+    /*
+     * Meria sa NADPIS, nie celý panel (upresnené 31. 8. 2026): skupina odteraz
+     * nesie aj vetu o čase merania (`keyedMeasuredNote()`) a tá slovo
+     * „Podrobnosti z eshopu" obsahuje aj v stave „ešte sme sa nepýtali".
+     * Tvrdenie sa tým nezoslabuje — klamať môže len nadpis.
+     */
+    const at = html.indexOf('data-testid="detail-locked-fold"');
+    expect(at).toBeGreaterThan(-1);
+    const summary = html.slice(at, html.indexOf('</summary>', at));
+    expect(summary).toContain('Zatiaľ nedostupné');
+    expect(summary).not.toContain('Podrobnosti z eshopu');
   });
 
   it('vysvetlenie „prečo" tu nie je, je naň jediný odkaz (D, bod 18)', () => {

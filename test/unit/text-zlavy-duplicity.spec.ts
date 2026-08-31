@@ -221,7 +221,16 @@ const DLAZDICE = [
 ] as const;
 
 const tiles = (counts: typeof PLNA): string =>
-  render(createElement(QueueTiles, { campaign: counts as never }));
+  render(
+    createElement(QueueTiles, {
+      campaign: counts as never,
+      // MERANÝ počet čakajúcich (U6, 31. 8. 2026). Dlaždica ho už neberie
+      // z `campaign.itemsPending` — to je odčítanie, do ktorého padnú aj
+      // položky, ktoré dopadli. Fixtúra posiela to isté číslo, takže
+      // tvrdenia nižšie merajú presne to, čo merali predtým.
+      pendingItems: counts.itemsPending,
+    }),
+  );
 
 describe('dlaždica fronty pri nule nevysvetľuje nulu', () => {
   it('všetky štyri dlaždice sú tam aj pri nule (kontrakt UI, bod 22)', () => {

@@ -159,7 +159,12 @@ function mirrorRecord(productId: number, name: string): CatalogCacheRecordV3 {
   };
 }
 
-function mirrorRow(productId: number, name: string, unitsSold = 0): CatalogSearchRow {
+/** Riadok zrkadla. `unitsSold: null` znamená „za toto okno to nevieme" (D121). */
+function mirrorRow(
+  productId: number,
+  name: string,
+  unitsSold: number | null = 0,
+): CatalogSearchRow {
   return { ...mirrorRecord(productId, name), unitsSold, everDiscounted: false, discountedNow: false };
 }
 
@@ -660,6 +665,7 @@ function routeDepsFor(world: RouteWorld): {
     soldWindowDays: 180,
     soldFrom: '2026-02-18',
     soldTo: '2026-08-17',
+    soldCoverage: { windowDays: 180, completeDays: 180, unknownDays: 0 },
     lockedFilters: ['stock', 'category', 'metal', 'jewelryType', 'margin', 'turnover'],
     enrichedOnly: ['referenceSearch', 'ean13Search', 'shopDiscounted'],
   });
@@ -676,6 +682,7 @@ function routeDepsFor(world: RouteWorld): {
         counts: async () => ({
           total: 0,
           sold: { none: 0, low: 0, mid: 0, high: 0 },
+          soldUnknown: 0,
           neverDiscounted: 0,
           discountedNow: 0,
           shopDiscountedNow: 0,
@@ -696,12 +703,15 @@ function routeDepsFor(world: RouteWorld): {
           facts: new Map(
             [...productIds].map((id) => [
               id,
-              { unitsSold: 0, everDiscounted: false, discountedNow: false },
+              // D121 — appka o predaji za okno NEVIE (dva dočítané dni zo 180),
+              // takže fakty hovoria `null`. Route to NESMIE zliať na nulu.
+              { unitsSold: null, everDiscounted: false, discountedNow: false },
             ]),
           ),
           soldWindowDays: 180,
           soldFrom: '2026-02-18',
           soldTo: '2026-08-17',
+          soldCoverage: { windowDays: 180, completeDays: 2, unknownDays: 178 },
         }),
       },
     },
@@ -711,7 +721,13 @@ function routeDepsFor(world: RouteWorld): {
 interface RouteBody {
   ok: boolean;
   data: {
-    data: Array<{ productId: number; origin: string; name: string | null }>;
+    data: Array<{
+      productId: number;
+      origin: string;
+      name: string | null;
+      /** D121 — `null` znamená „za toto okno to nevieme“, nikdy nula. */
+      unitsSold: number | null;
+    }>;
     total: number;
     totalSource: string;
     lookup: Record<string, unknown>;
@@ -781,6 +797,36 @@ describe('GET /api/catalog/search — hľadanie na obrazovke', () => {
     expect(body.data.lookup.at).toBe('2026-08-17T09:00:00.000Z');
     // `total` ostáva počtom v ZRKADLE; koľko ich má eshop, hovorí `shopTotal`.
     expect(body.data.total).toBe(0);
+  });
+
+  /*
+   * D121 — SERVEROVÁ POLOVICA. Model „nevieme" (`SelectableRow.unitsSold`)
+   * existoval už 28. 8. 2026, ale server naň nikdy neposlal `null`: route mala
+   * `fact?.unitsSold ?? 0` a repozitár `COALESCE(s.units, 0)`, takže obrazovka
+   * Nová zľava zaradila 10 000 neznámych produktov do vedra „0 predaných" a
+   * ponúkla im 30 %. Tento test hovorí o TVARE NA DRÔTE: ak sa `?? 0` vráti,
+   * zčervená (mutačne overené 31. 8. 2026).
+   */
+  it('neznámy predaj ide na klienta ako `null`, nikdy ako nula (D121)', async () => {
+    const { body } = await callSearch('?q=C16.19&lookup=1', {
+      // Riadok zo zrkadla, ktorého predaj repozitár nezmeral.
+      page: [mirrorRow(41, 'Náramok zo zrkadla', null)],
+      shop: {
+        ids: [30582],
+        total: 1,
+        products: { 30582: { name: 'Náramok C16.19', price: 24.5 } },
+      },
+    });
+
+    const rows = body.data.data;
+    // Dohľadané ide NA KONIEC — riadok zrkadla je prvý (kontrakt bod 4).
+    expect(rows.map((row) => row.productId)).toEqual([41, 30582]);
+    // Živý eshop: čísla o predaji dáva `factsFor()`, a tie hovoria „nevieme".
+    expect(rows.find((row) => row.productId === 30582)?.unitsSold).toBeNull();
+    // Zrkadlo: hodnota repozitára prejde bez dosadenia nuly.
+    expect(rows.find((row) => row.productId === 41)?.unitsSold).toBeNull();
+    // A nikde ani jedna nula — tá by bola meraný fakt o nepredaní.
+    expect(rows.map((row) => row.unitsSold)).not.toContain(0);
   });
 
   it('ten istý produkt sa nezobrazí dvakrát', async () => {

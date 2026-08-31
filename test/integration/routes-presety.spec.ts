@@ -14,9 +14,12 @@
  *     pri odmietnutí repozitára nikto nedotkol,
  *  4. **I3** — v celom priečinku `presets/` nesmie byť cesta, ktorá z presetu
  *     vyrobí zápis do shopu,
- *  5. **priznaná medzera v audite** — chýbajúci `AuditEventType` pre presety.
- *     Test padne v momente, keď typ pribudne a audit sa nedopojí (viď posledný
- *     describe).
+ *  5. **audit uloženia a zmazania** (I4, D102) — riadok vznikne, nesie lokálneho
+ *     actora a jeho typ NIE JE neznámy; odmietnutá mutácia riadok nevyrobí.
+ *     Použitie presetu sa neaudituje a je to tvrdenie, nie opomenutie,
+ *  6. **`mark-used`** — `last_used_at` sa naozaj zapíše (do 31. 8. 2026 nemala
+ *     `markUsed()` v `src/` ani jedného volajúceho, takže SQL radilo podľa
+ *     stĺpca, ktorý bol vždy NULL).
  *
  * Vlastník: V4 (presety).
  */
@@ -26,8 +29,9 @@ import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type {
+  AuditInput,
+  AuditWriter,
   DiscountPreset,
-  DiscountPresetPatch,
   DiscountPresetTier,
   NewDiscountPreset,
 } from '@/contracts';
@@ -44,6 +48,7 @@ import {
 
 import { createPresetsGet, createPresetsPost } from '@/app/api/presets/route';
 import { createPresetDelete } from '@/app/api/presets/[presetId]/route';
+import { createPresetMarkUsed } from '@/app/api/presets/[presetId]/mark-used/route';
 import type { PresetsRouteDeps } from '@/app/api/presets/_shared';
 
 /* ═════════════════════════════ pomôcky ════════════════════════════════════ */
@@ -92,14 +97,14 @@ async function parse(response: Response): Promise<ParsedResponse> {
 
 interface FakeRepo extends PresetsRepoContract {
   /** Koľkokrát sa route naozaj dotkla úložiska (dôkaz pri odmietnutých mutáciách). */
-  calls: { create: number; remove: number; list: number };
+  calls: { create: number; remove: number; list: number; markUsed: number };
   seed(preset: DiscountPreset): void;
 }
 
 function makeRepo(): FakeRepo {
   const rows = new Map<number, DiscountPreset>();
   let nextId = 1;
-  const calls = { create: 0, remove: 0, list: 0 };
+  const calls = { create: 0, remove: 0, list: 0, markUsed: 0 };
 
   const byName = (name: string): DiscountPreset | null => {
     for (const row of rows.values()) if (row.name === name) return row;
@@ -144,14 +149,8 @@ function makeRepo(): FakeRepo {
     async count(): Promise<number> {
       return rows.size;
     },
-    async update(id: number, patch: DiscountPresetPatch): Promise<DiscountPreset> {
-      const existing = rows.get(id);
-      if (existing === undefined) throw new PresetNotFoundError(id);
-      const updated: DiscountPreset = { ...existing, ...patch };
-      rows.set(id, updated);
-      return updated;
-    },
     async markUsed(id: number, at: Date): Promise<void> {
+      calls.markUsed += 1;
       const existing = rows.get(id);
       if (existing === undefined) throw new PresetNotFoundError(id);
       rows.set(id, { ...existing, lastUsedAt: at });
@@ -186,9 +185,31 @@ function seeded(
   };
 }
 
-function world(): { repo: FakeRepo; deps: PresetsRouteDeps } {
+/**
+ * Audit ako v produkcii — s tým rozdielom, že riadky zostanú v pamäti.
+ *
+ * `appendAudit()` v ostrom kóde NIKDY nehodí (zlyhanie len zaloguje), takže
+ * tento dvojník tiež nehádže: keby hádzal, test by dokazoval niečo, čo sa
+ * v produkcii nestane.
+ */
+interface FakeAudit extends AuditWriter {
+  rows: AuditInput[];
+}
+
+function makeAudit(): FakeAudit {
+  const rows: AuditInput[] = [];
+  return {
+    rows,
+    async appendAudit(input: AuditInput): Promise<void> {
+      rows.push(input);
+    },
+  };
+}
+
+function world(): { repo: FakeRepo; audit: FakeAudit; deps: PresetsRouteDeps } {
   const repo = makeRepo();
-  return { repo, deps: { presetsRepo: repo, now: () => NOW } };
+  const audit = makeAudit();
+  return { repo, audit, deps: { presetsRepo: repo, audit, now: () => NOW } };
 }
 
 const validBody = {
@@ -416,6 +437,87 @@ describe('DELETE /api/presets/[presetId]', () => {
   });
 });
 
+/* ═════════ 3b. POST mark-used — „naposledy predplnil formulár" ════════════ */
+
+describe('POST /api/presets/[presetId]/mark-used', () => {
+  const use = (deps: PresetsRouteDeps, id: string, opts: { origin?: string | null } = {}) =>
+    createPresetMarkUsed(deps, routeDeps())(
+      makeRequest('POST', `/api/presets/${id}/mark-used`, undefined, opts),
+      { params: Promise.resolve({ presetId: id }) },
+    );
+
+  it('zapíše čas použitia a vráti presne ten, ktorý zapísal (I11)', async () => {
+    const { repo, deps } = world();
+    repo.seed(seeded(4, 'Ležiaky'));
+
+    const res = await parse(await use(deps, '4'));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ presetId: 4, lastUsedAt: NOW.toISOString() });
+    expect(repo.calls.markUsed).toBe(1);
+    // Čas je NAOZAJ v úložisku, nie len v odpovedi.
+    expect((await repo.getById(4))?.lastUsedAt?.toISOString()).toBe(NOW.toISOString());
+  });
+
+  it('po zápise ide preset v zozname pred nepoužité — sľub `SQL_LIST` má krytie', async () => {
+    /*
+     * Poradie určuje SQL (dokazuje ho `presety-zliav.spec.ts` nad MariaDB);
+     * TU sa dokazuje to, čo bolo do 31. 8. 2026 rozbité: že `last_used_at`
+     * vôbec NIEKTO zapíše. Bez volajúceho zostával NULL, takže SQL radilo
+     * podľa stĺpca, ktorý bol vždy prázdny, a dvadsaťkrát použitý preset sa
+     * hlásil ako nepoužitý (D112).
+     */
+    const { repo, deps } = world();
+    repo.seed(seeded(1, 'Prvý'));
+    repo.seed(seeded(2, 'Druhý'));
+
+    await parse(await use(deps, '2'));
+
+    const rows = await repo.list();
+    const used = rows.filter((row) => row.lastUsedAt !== null).map((row) => row.id);
+    expect(used).toEqual([2]);
+  });
+
+  it('neexistujúci preset je 404 `preset_not_found`, nie tiché „ok" (fail-closed)', async () => {
+    const { repo, deps } = world();
+    repo.seed(seeded(4, 'Ostáva'));
+
+    const res = await parse(await use(deps, '99'));
+
+    expect(res.status).toBe(404);
+    expect(res.body.error?.code).toBe('preset_not_found');
+    expect(repo.calls.markUsed).toBe(1);
+    expect((await repo.getById(4))?.lastUsedAt).toBeNull();
+  });
+
+  it('s CUDZÍM Origin je 403 a úložiska sa nedotkne (D72)', async () => {
+    const { repo, deps } = world();
+    repo.seed(seeded(4, 'Ležiaky'));
+
+    const res = await parse(await use(deps, '4', { origin: 'https://zly.example' }));
+
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe('origin_mismatch');
+    expect(repo.calls.markUsed).toBe(0);
+  });
+
+  it('použitie presetu sa NEAUDITUJE — je to rozhodnutie, nie zabudnuté miesto', async () => {
+    /*
+     * `last_used_at` je sám záznamom o použití: nesie čas, je vidieť v paneli
+     * presetov a nedá sa ním nič uvoľniť. História je forenzný záznam o
+     * zápisoch do PRODUKČNÉHO eshopu a nikdy sa nemaže (I4, D75) — riadok za
+     * každé predplnenie formulára by v nej utopil `write_*`. Zdôvodnenie je aj
+     * v hlavičke route, aby si to o mesiac nikto nevysvetlil ako dieru.
+     */
+    const { repo, audit, deps } = world();
+    repo.seed(seeded(4, 'Ležiaky'));
+
+    await parse(await use(deps, '4'));
+
+    expect(audit.rows).toEqual([]);
+  });
+});
+
 /* ══════════════════════ 4. Origin check na mutáciách (D72) ════════════════ */
 
 describe('mutácie dedia Origin check (D72)', () => {
@@ -493,16 +595,39 @@ describe('I3 — presety nezaložili druhú zápisovú cestu', () => {
 
   it('sanity — zdroje sa naozaj čítajú', () => {
     const files = sources();
-    expect(files.length).toBeGreaterThanOrEqual(3);
+    expect(files.length).toBeGreaterThanOrEqual(4);
     for (const source of files) expect(source.text.length).toBeGreaterThan(500);
   });
 
-  it('priečinok obsahuje LEN zoznam, vytvorenie a zmazanie — žiadne „spusti preset"', () => {
+  it('priečinok obsahuje LEN zoznam, vytvorenie, zmazanie a mark-used — žiadne „spusti preset"', () => {
+    /*
+     * Zoznam je ÚPLNÝ naschvál: nová route v tomto priečinku má byť vedomé
+     * rozhodnutie. `[presetId]/mark-used/route.ts` pribudol 31. 8. 2026 a je
+     * to protipól „spusti preset" — zapíše JEDEN časový údaj do lokálneho
+     * `last_used_at`, nevracia z presetu nič a nedotýka sa kampaní. Ostatné
+     * tvrdenia tohto describe naň platia rovnako ako na zvyšok priečinku
+     * (walk() ho číta), takže tým, že je v zozname, nie je z ničoho vyňatý.
+     */
     expect(sources().map((s) => s.file).sort()).toEqual([
+      '[presetId]/mark-used/route.ts',
       '[presetId]/route.ts',
       '_shared.ts',
       'route.ts',
     ]);
+  });
+
+  it('mark-used nevracia obsah presetu — z jej odpovede sa nedá nič zapísať', () => {
+    const markUsed = sources().find((s) => s.file === '[presetId]/mark-used/route.ts');
+    expect(markUsed).toBeDefined();
+    const text = markUsed?.text ?? '';
+    // Jediné volanie úložiska je `markUsed()`; čítanie presetu tu nie je,
+    // takže route nemá čo vrátiť ani keby chcela.
+    const repoCalls = text
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('*'))
+      .filter((line) => line.includes('d.presetsRepo.'));
+    expect(repoCalls).toHaveLength(1);
+    expect(repoCalls[0]).toContain('markUsed(');
   });
 
   it('žiadny súbor presetov nesiaha na shop, executor ani preview token', () => {
@@ -554,39 +679,115 @@ describe('I3 — presety nezaložili druhú zápisovú cestu', () => {
   });
 });
 
-/* ══════════ 6. Audit — priznaná medzera, ktorá sama zavolá o pomoc ════════ */
+/* ═══════════ 6. Audit presetov (I4, D102) — dopojený 31. 8. 2026 ══════════ */
 
-describe('audit presetov (I4, D102) — chýbajúci typ udalosti', () => {
-  it('pre presety NEEXISTUJE `AuditEventType`, takže sa audit riadok nefalšuje', () => {
-    // Toto NIE JE súhlas s medzerou, je to jej ukotvenie. `appendAudit()` by
-    // vymyslený typ zahodil ako `audit_unknown_event_type` — zápis, o ktorom si
-    // volajúci myslí, že je v audite, a v audite nie je. To je horšie než
-    // priznaná medzera (I11).
-    expect(isAuditEventType('preset_created')).toBe(false);
-    expect(isAuditEventType('preset_deleted')).toBe(false);
+describe('audit presetov (I4, D102)', () => {
+  it('typ udalosti pre presety EXISTUJE, takže sa riadok nezahodí ako neznámy', () => {
+    /*
+     * Toto je tvrdenie, ktoré chýbajúci typ usvedčí. `appendAudit()` neznámy
+     * string nezahodí ticho — zaloguje ho ako `audit_unknown_event_type`
+     * a zapíše ho do stĺpca, ktorý ho História nedokáže pomenovať. Zápis,
+     * o ktorom si volajúci myslí, že je v audite, a v audite ho nikto neprečíta,
+     * je horší než priznaná medzera (I11). Do 31. 8. 2026 tu bolo `false`.
+     */
+    expect(isAuditEventType('preset_created')).toBe(true);
+    expect(isAuditEventType('preset_deleted')).toBe(true);
   });
 
-  it('keď typ pribudne, tento test PADNE a vynúti dopojenie auditu', () => {
-    const dir = fileURLToPath(new URL('../../src/app/api/presets/', import.meta.url));
-    const files = ['route.ts', '[presetId]/route.ts'];
-    // Komentáre `appendAudit()` menujú (vysvetľujú, prečo tam nie je), takže
-    // sa hľadá VOLANIE, teda výskyt mimo komentára.
-    const auditWired = files.some((file) =>
-      readFileSync(`${dir}${file}`, 'utf8')
-        .split('\n')
-        .some((line) => {
-          const trimmed = line.trimStart();
-          if (trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('//')) {
-            return false;
-          }
-          return line.includes('appendAudit(');
-        }),
-    );
-    const typeExists = isAuditEventType('preset_created') || isAuditEventType('preset_deleted');
+  it('uloženie presetu zapíše `preset_created` s lokálnym actorom (D102)', async () => {
+    const { audit, deps } = world();
 
-    // Dva stavy sú v poriadku: (a) typ nie je a audit sa nevolá — dnešný stav,
-    // (b) typ je a audit sa volá. Stav „typ je, audit nie" je zabudnuté miesto
-    // a tento test ho ukáže.
-    expect(typeExists ? auditWired : !auditWired).toBe(true);
+    const res = await parse(
+      await createPresetsPost(deps, routeDeps())(makeRequest('POST', '/api/presets', validBody)),
+    );
+    expect(res.status).toBe(200);
+
+    expect(audit.rows).toHaveLength(1);
+    const row = audit.rows[0]!;
+    expect(row.eventType).toBe('preset_created');
+    expect(isAuditEventType(row.eventType)).toBe(true);
+    expect(row.actor).toBe('user');
+    expect(row.userId).toBe(TEST_USER_ID);
+    expect(row.ok).toBe(true);
+    expect(row.message).toContain('Ležiaky −20 %');
+    // Snapshot nesie PERCENTÁ — to je jediné miesto, kde po zmazaní presetu
+    // zostane, čo v ňom bolo.
+    expect(row.afterSnapshot).toMatchObject({
+      name: 'Ležiaky −20 %',
+      durationDays: 14,
+      tiers: [
+        { ord: 1, label: 'Pásmo 1', percent: 20 },
+        { ord: 2, label: 'Pásmo 2', percent: 10 },
+      ],
+    });
+  });
+
+  it('zmazanie zapíše `preset_deleted` a v snapshote to, ČO zmizlo', async () => {
+    const { repo, audit, deps } = world();
+    repo.seed(
+      seeded(4, 'Na zmazanie', { tiers: [{ ord: 1, label: 'Bez predaja', percent: 30 }] }),
+    );
+
+    const res = await parse(
+      await createPresetDelete(deps, routeDeps())(
+        makeRequest('DELETE', '/api/presets/4', undefined),
+        { params: Promise.resolve({ presetId: '4' }) },
+      ),
+    );
+    expect(res.status).toBe(200);
+
+    expect(audit.rows).toHaveLength(1);
+    const row = audit.rows[0]!;
+    expect(row.eventType).toBe('preset_deleted');
+    expect(isAuditEventType(row.eventType)).toBe(true);
+    expect(row.actor).toBe('user');
+    expect(row.userId).toBe(TEST_USER_ID);
+    expect(row.message).toContain('Na zmazanie');
+    expect(row.beforeSnapshot).toMatchObject({
+      presetId: 4,
+      name: 'Na zmazanie',
+      tiers: [{ ord: 1, label: 'Bez predaja', percent: 30 }],
+    });
+  });
+
+  it('odmietnutá mutácia auditný riadok NEVYROBÍ (nič sa nestalo)', async () => {
+    const { repo, audit, deps } = world();
+    repo.seed(seeded(4, 'Ostáva'));
+
+    // 404 — mazanie neexistujúceho presetu.
+    await parse(
+      await createPresetDelete(deps, routeDeps())(
+        makeRequest('DELETE', '/api/presets/99', undefined),
+        { params: Promise.resolve({ presetId: '99' }) },
+      ),
+    );
+    // 409 — obsadené meno.
+    await parse(
+      await createPresetsPost(deps, routeDeps())(
+        makeRequest('POST', '/api/presets', { ...validBody, name: 'Ostáva' }),
+      ),
+    );
+
+    expect(audit.rows).toEqual([]);
+  });
+
+  it('obe routy, ktoré menia zoznam presetov, audit NAOZAJ volajú', () => {
+    /*
+     * Strážca proti zabudnutému miestu: keby audit z ktorejkoľvek z týchto
+     * dvoch ciest vypadol, testy vyššie by ho síce nezachytili len vtedy, keby
+     * niekto zmenil aj ich — toto tvrdenie stojí v zdroji, nie v dvojníkovi.
+     * `mark-used` tu ZÁMERNE nie je (viď describe 3b).
+     */
+    const dir = fileURLToPath(new URL('../../src/app/api/presets/', import.meta.url));
+    for (const file of ['route.ts', '[presetId]/route.ts']) {
+      const calls = readFileSync(`${dir}${file}`, 'utf8')
+        .split('\n')
+        .filter((line) => {
+          const trimmed = line.trimStart();
+          return !trimmed.startsWith('*') && !trimmed.startsWith('/*') && !trimmed.startsWith('//');
+        })
+        .filter((line) => line.includes('appendAudit('));
+      expect(calls, `${file} nezapisuje audit`).toHaveLength(1);
+    }
   });
 });

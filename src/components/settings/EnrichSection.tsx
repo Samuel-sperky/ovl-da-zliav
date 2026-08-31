@@ -15,7 +15,11 @@
  * --------------------------
  * Dávka míňa denný ČÍTACÍ rozpočet (dráha `product_read`, ~150 produktov na
  * deň) — je to teda tá istá otázka ako „koľko toho appka smie za deň", nie
- * samostatný kút. Vlastnú kotvu do `SETTINGS_ANCHORS` zámerne NEDOSTALA: ploché
+ * samostatný kút. Od 31. 8. 2026 to platí dvojnásobne: dráha `product_read`
+ * číta SO zápisovým kľúčom, takže tie čítania sa v `engine/budget.ts`
+ * odpočítavajú od zápisového stropu (nad rezervou `WRITE_QUOTA_RESERVE`).
+ * Sekcia to preto povie aj tu, dvoma vetami BEZ čísel — čísla vlastní
+ * rozpočtová sekcia, ktorá ich dostáva zo servera. Vlastnú kotvu do `SETTINGS_ANCHORS` zámerne NEDOSTALA: ploché
  * poradie kotiev je zmluva, ktorú strážia testy V12, a sekcia sa dá nájsť
  * rovnako dobre pod rozpočtami, kam vecne patrí. Odkaz z Prehľadu preto vedie
  * priamo na `#obohacovanie` na tejto podstránke.
@@ -114,6 +118,21 @@ export function EnrichSection({ enrich }: EnrichSectionProps) {
           </>
         )}
       </Note>
+
+      {/*
+        Odkiaľ sa dávke berie kvóta — a hlavne, že ju delí so zápismi zliav.
+        Vety sú ZÁMERNE bez čísel: presné čísla (koľko čítaní sa dnes odpočítalo
+        a aká je rezerva) vlastní rozpočtová sekcia, ktorá ich má zo servera.
+        Tu by museli byť odpísané z konštanty, a to je tvrdenie o stave, ktorý
+        táto sekcia neprečítala (I11). Tón je bežný text: ubúdanie kvóty
+        čítaniami je priebeh, nie zastavenie zápisov.
+      */}
+      <div className="lvl-3" data-testid="enrich-shared-quota">
+        Obohacovanie číta so zápisovým kľúčom, takže míňa tú istú dennú kvótu ako zľavy.
+      </div>
+      <div className="lvl-3" data-testid="enrich-write-reserve">
+        Rezervu zápisov to nezmenšuje — tú časť kvóty si zľavy držia.
+      </div>
 
       <div className="kpis">
         <StatTile

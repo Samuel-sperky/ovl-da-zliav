@@ -40,6 +40,10 @@ export function createAllowlistDelete(
     {
       method: 'DELETE',
       params: productIdParamSchema,
+      // 30/min ako pri porovnateľných lokálnych mutáciách (settings/*).
+      // `bucket` je POVINNÝ: predvolený kľúč je cesta, a tá tu obsahuje
+      // `productId`, takže strop by platil per produkt a stačilo by meniť ID.
+      rateLimit: { limit: 30, windowMs: 60_000, bucket: 'allowlist-remove' },
       handler: (ctx) =>
         withRouteErrors(async () => {
           const planned = await d.campaignsRepo.findPlannedForProduct(ctx.params.productId);

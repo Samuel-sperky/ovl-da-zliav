@@ -61,9 +61,23 @@ function recordingConn(rows: unknown[] = []): { conn: Queryable; calls: Call[] }
   };
 }
 
+/*
+ * `COUNT(*)` NAD ZRKADLOM, nie ktorýkoľvek `COUNT(*)`. Od D121 posiela
+ * `search()` ako prvý dotaz pokrytie okna (`COUNT(*)` nad `sales_sync_state`),
+ * takže „prvý počítací dotaz" už nie je ten, o ktorom tieto testy hovoria.
+ */
 const countCall = (calls: readonly Call[]): Call => {
-  const call = calls.find((item) => item.sql.startsWith('SELECT COUNT(*)'));
-  if (call === undefined) throw new Error('Repozitár neposlal `COUNT(*)` dotaz.');
+  const call = calls.find(
+    (item) => item.sql.startsWith('SELECT COUNT(*)') && item.sql.includes('FROM catalog_cache'),
+  );
+  if (call === undefined) throw new Error('Repozitár neposlal `COUNT(*)` dotaz nad zrkadlom.');
+  return call;
+};
+
+/** Dotaz počtov do bočného panela — ten, ktorý skladá vedrá predajnosti. */
+const countsCall = (calls: readonly Call[]): Call => {
+  const call = calls.find((item) => item.sql.includes('AS sold_none'));
+  if (call === undefined) throw new Error('Repozitár neposlal dotaz počtov.');
   return call;
 };
 
@@ -179,7 +193,7 @@ describe('filter „zľava v shope" stojí na obohatení, nie na vlastných záp
       shopDiscounted: true,
       today: TODAY,
     });
-    const sql = calls[0]?.sql ?? '';
+    const sql = countsCall(calls).sql;
 
     // Facetový filter vo vlastnom počte nesmie byť — inak by zaškrtnuté políčko
     // vynulovalo číslo pri sebe samom.
@@ -215,6 +229,7 @@ function routeDeps(seen: CatalogSearchFilter[]): CatalogSearchRouteDeps {
           soldWindowDays: 30,
           soldFrom: '2026-08-02',
           soldTo: TODAY,
+          soldCoverage: { windowDays: 30, completeDays: 30, unknownDays: 0 },
           lockedFilters: [],
           enrichedOnly: [...ENRICHED_ONLY_FEATURES],
         };
@@ -224,6 +239,7 @@ function routeDeps(seen: CatalogSearchFilter[]): CatalogSearchRouteDeps {
         return {
           total: 0,
           sold: { none: 0, low: 0, mid: 0, high: 0 },
+          soldUnknown: 0,
           neverDiscounted: 0,
           discountedNow: 0,
           shopDiscountedNow: 9,

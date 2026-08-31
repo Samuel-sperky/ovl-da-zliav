@@ -28,15 +28,32 @@
  *  · `days[].dayComplete === false` — súčet dňa je DOLNÁ HRANICA (sťahovanie
  *    zoznamu sa nedočítalo). Bez toho posledný, rozbehnutý deň vždy vyzerá ako
  *    prudký pokles tržieb a graf kreslí pád, ktorý sa nestal.
- *  · `missing` — dni okna, ku ktorým appka NEMÁ riadok. Nulou sa NEDOPLŇUJÚ.
+ *  · `missing` — dni okna, ktoré appka NEPOZNÁ. Nulou sa NEDOPLŇUJÚ.
+ *  · `emptyDays` — dni, ktoré appka PREČÍTALA a nepredalo sa v nich nič.
  *  · `sumState` — čím je `sum`: meranie, dolná hranica, alebo „nevieme".
  *
- * MEDZERA, KTORÁ SEM PATRÍ NAHLAS: deň, ktorý sa naozaj čítal a NEMAL ani jednu
- * objednávku, nemá menu, takže v `shop_revenue_daily` nemá ani riadok — a tu
- * vyjde ako `missing`, teda „nevieme". Je to nepresnosť v BEZPEČNOM smere (I11
- * zakazuje vydávať neznáme za nulu, nie naopak) a zavrie ju až stav čítania
- * tržby po dňoch v ďalšej aditívnej migrácii. Dovtedy sa nesmie „opraviť" tak,
- * že chýbajúci deň dostane nulu.
+ * ═══ TRI STAVY DŇA, NIE DVA (31. 8. 2026, migrácia 0016) ═══
+ * Do 0016 táto route poznala len dva: „mám riadok" a „nemám riadok". Deň, ktorý
+ * sa naozaj čítal a NEMAL ani jednu objednávku, pritom žiadnu menu neprinesie,
+ * takže v `shop_revenue_daily` riadok nemá — a vychádzal ako `missing`, teda
+ * „nevieme", hoci sme ho dočítali. Bola to nepresnosť v BEZPEČNOM smere (I11
+ * zakazuje vydávať neznáme za nulu, nie naopak), ale znamenala, že appka NIKDY
+ * nepovie „v tento deň sa nepredalo nič".
+ *
+ * Zatvára to `shop_revenue_read_state` (0016) — príznak prečítanosti dňa oddelený
+ * od sumy, bez meny. `dayStates[]` má preto riadok pre KAŽDÝ deň okna a hovorí:
+ *
+ *   · `measured`    — deň dočítaný, objednávky boli; suma je celý deň,
+ *   · `empty`       — deň DOČÍTANÝ a objednávka v ňom NEBOLA. Meraná nula.
+ *   · `lower_bound` — čítanie sa nedočítalo; suma je dolná hranica a o nule
+ *                     nehovorí nič (`≥ 0` je prázdna veta, nie priznanie),
+ *   · `unknown`     — o dni appka nevie nič. Pomlčka, NIKDY nula.
+ *
+ * Deň s riadkami v `shop_revenue_daily`, ale bez stavu (čítal sa ešte pred 0016),
+ * zostáva čítaný — hovorí to jeho vlastný `dayComplete`. Žiadny backfill.
+ *
+ * ČO SA TÝM NEUVOĽNILO: chýbajúci deň naďalej NEDOSTANE nulu. Nula tu vzniká
+ * VÝHRADNE z príznaku „prečítali sme celý deň", nikdy z ticha.
  *
  * ČISTO ČÍTACIE. Žiadne volanie shopu (K8) — sťahovanie tržby má na starosti
  * `lib/engine/sales-sync.ts` a beží nočne. Žiadny zápis, teda ani cesta, ktorá
@@ -77,6 +94,23 @@ export interface RevenueDayRow {
   dayComplete: boolean;
 }
 
+/**
+ * Čím je jeden deň okna. Štyri stavy, nie dva (0016) — a rozdiel medzi `empty`
+ * a `unknown` je celý dôvod, prečo tá migrácia vznikla.
+ */
+export type RevenueDayKnowledge = 'measured' | 'empty' | 'lower_bound' | 'unknown';
+
+/** Jeden deň okna a to, čo o ňom appka naozaj vie. */
+export interface RevenueDayStateRow {
+  day: DateOnly;
+  state: RevenueDayKnowledge;
+  /**
+   * POČET objednávok dňa z príznaku prečítanosti (0016). `null` = stav appka
+   * nemá; nula je MERANÝ fakt „čítali sme a objednávka nebola".
+   */
+  ordersSeen: number | null;
+}
+
 /** Rad jednej meny za okno. Meny sa NIKDY nesčítavajú do jedného čísla. */
 export interface RevenueSeries {
   currency: string;
@@ -86,8 +120,18 @@ export interface RevenueSeries {
   completeDays: number;
   /** Dni okna s riadkom, ktorý je zatiaľ len dolná hranica. */
   lowerBoundDays: number;
-  /** Dni okna BEZ riadku — „nevieme", nikdy nula. */
+  /**
+   * Dni okna, o ktorých táto mena NEVIE NIČ — deň bez stavu čítania, alebo deň
+   * prečítaný len čiastočne. „Nevieme", nikdy nula.
+   */
   missing: DateOnly[];
+  /**
+   * Dni okna bez riadku tejto meny, ktoré sa ale DOČÍTALI (0016) — teda meraná
+   * nula: „čítali sme celý deň a v tejto mene nebolo nič". Do `sum` nepridávajú
+   * nič (nula sa nesčítava), ale sú to práve ony, čo z dolnej hranice robí
+   * meranie.
+   */
+  measuredZeroDays: DateOnly[];
   /** Súčet okna. `null` = v okne nie je ani jeden riadok tejto meny. */
   sum: MoneyString | null;
   sumState: MeasurementState;
@@ -100,17 +144,26 @@ export interface RevenueDailyResponse {
   scope: 'eshop';
   currencies: string[];
   series: RevenueSeries[];
-  /** Dni okna, ku ktorým nie je riadok v ŽIADNEJ mene. */
+  /** Riadok pre KAŽDÝ deň okna — tri stavy naraz, na jednom mieste (0016). */
+  dayStates: RevenueDayStateRow[];
+  /** Dni okna, o ktorých appka NEVIE NIČ. Nulou sa nedopĺňajú (I11). */
   missing: DateOnly[];
-  /** Koľko dní okna má aspoň jeden riadok. */
+  /** Dni okna, ktoré sa DOČÍTALI a nepredalo sa v nich nič. Meraná nula. */
+  emptyDays: DateOnly[];
+  /** Koľko dní okna appka naozaj pozná (vrátane prečítaných prázdnych dní). */
   readDays: number;
   /** `true` = v okne je aspoň jeden deň, ktorý appka nemá alebo nedočítala. */
   hasGap: boolean;
 }
 
 export interface RevenueDailyDeps extends InsightsDeps {
-  /** Čítacia strana `shop_revenue_daily` (migrácia 0014). */
-  salesRepo?: Pick<typeof defaultSalesRepo, 'listRevenue'>;
+  /**
+   * Čítacia strana tržby: `shop_revenue_daily` (0014) A `shop_revenue_read_state`
+   * (0016). Obe naraz zámerne — bez stavu čítania sa deň bez objednávok nedá
+   * odlíšiť od dňa, ktorý sa nikdy nesťahoval, a route by opäť vydávala meranú
+   * nulu za „nevieme".
+   */
+  salesRepo?: Pick<typeof defaultSalesRepo, 'listRevenue' | 'listRevenueReadStates'>;
 }
 
 /* ═══════════════════════════ Peniaze v centoch ════════════════════════════ */
@@ -161,6 +214,9 @@ export function createInsightsRevenueDailyGet(
         const range = windowRange(today, ctx.query.window ?? DEFAULT_WINDOW_DAYS);
 
         const rows = await sales.listRevenue(range.from, range.to);
+        /* 0016 — príznak prečítanosti dňa. Bez neho by dočítaný deň bez
+         * objednávok vyšiel ako „nevieme", hoci sa nepredalo nič. */
+        const states = await sales.listRevenueReadStates(range.from, range.to);
 
         /* Zoskupenie po menách. Mena je časť kľúča a nikdy sa nesčítava. */
         const byCurrency = new Map<string, ShopRevenueDayRecord[]>();
@@ -180,6 +236,57 @@ export function createInsightsRevenueDailyGet(
           cursor = addDays(cursor, 1);
         }
 
+        /*
+         * TRI STAVY DŇA (0016). Poradie podmienok je tu to podstatné:
+         *
+         *  · riadky sú  ⇒ deň sa čítal; `measured` alebo `lower_bound` podľa
+         *    toho, či je dočítaný. Deň s riadkami z času PRED 0016 stav nemá,
+         *    takže rozhoduje `dayComplete` samotných riadkov — žiadny backfill.
+         *  · riadky nie sú a stav hovorí „dočítané"  ⇒ `empty`: PREČÍTALI SME
+         *    a nepredalo sa nič. To je meraný fakt, ktorý 0016 pridala.
+         *  · riadky nie sú a stav je čiastočný alebo chýba ⇒ `unknown`. Dolná
+         *    hranica `≥ 0` je prázdna veta, nie priznanie nuly.
+         */
+        const rowsByDay = new Map<DateOnly, ShopRevenueDayRecord[]>();
+        for (const row of rows) {
+          const bucket = rowsByDay.get(row.day);
+          if (bucket === undefined) rowsByDay.set(row.day, [row]);
+          else bucket.push(row);
+        }
+        const stateByDay = new Map<DateOnly, (typeof states)[number]>();
+        for (const state of states) stateByDay.set(state.day, state);
+
+        const dayStates: RevenueDayStateRow[] = windowDays.map((day) => {
+          // Turbopack tu už raz zahodil guard cez `!row` — porovnávaj presne.
+          const state = stateByDay.get(day) ?? null;
+          const dayRows = rowsByDay.get(day) ?? [];
+          const rowsComplete = dayRows.length > 0 && dayRows.every((row) => row.dayComplete);
+          const ordersSeen = state === null ? null : state.ordersSeen;
+
+          if (dayRows.length > 0) {
+            /*
+             * Dva fakty o tom istom dni musia súhlasiť OBA. Zápisová strana ich
+             * drží v zhode, ale nie vždy: keď mal deň dočítanú NULU (stav áno,
+             * riadok nie) a neskoršie ČIASTOČNÉ čítanie v ňom nájde objednávku,
+             * vznikne nedočítaný riadok pri stave, ktorý ešte hovorí „dočítané".
+             * `||` by vtedy tvrdilo, že suma je celý deň — a to už nie je pravda.
+             */
+            const complete = state === null ? rowsComplete : state.dayComplete && rowsComplete;
+            return { day, state: complete ? 'measured' : 'lower_bound', ordersSeen };
+          }
+          if (state !== null && state.dayComplete) return { day, state: 'empty', ordersSeen };
+          return { day, state: 'unknown', ordersSeen };
+        });
+
+        const knowledgeOf = new Map<DateOnly, RevenueDayKnowledge>(
+          dayStates.map((row) => [row.day, row.state]),
+        );
+        /** Deň sa DOČÍTAL — chýbajúca mena v ňom je meraná nula, nie medzera. */
+        const readWhole = (day: DateOnly): boolean => {
+          const state = knowledgeOf.get(day);
+          return state === 'measured' || state === 'empty';
+        };
+
         const currencies = [...byCurrency.keys()].sort();
         const series: RevenueSeries[] = currencies.map((currency) => {
           const list = (byCurrency.get(currency) ?? [])
@@ -196,15 +303,23 @@ export function createInsightsRevenueDailyGet(
 
           const completeDays = days.filter((row) => row.dayComplete).length;
           const lowerBoundDays = days.length - completeDays;
-          const missing = windowDays.filter((day) => !present.has(day));
+          /*
+           * Deň bez riadku tejto meny má DVE úplne rôzne príčiny a rozhodne
+           * o nich stav dňa (0016), nie ticho v tabuľke hodnôt:
+           *  · deň dočítaný ⇒ v tejto mene nebolo nič. MERANÁ nula.
+           *  · inak         ⇒ nevieme.
+           */
+          const absent = windowDays.filter((day) => !present.has(day));
+          const measuredZeroDays = absent.filter((day) => readWhole(day));
+          const missing = absent.filter((day) => !readWhole(day));
 
           /*
-           * Súčet je meranie LEN vtedy, keď je každý deň okna prítomný aj
-           * dočítaný. Inak je to dolná hranica — a keď nie je ani jeden riadok,
-           * je to „nevieme" a `sum` je `null`, nie `0.00`.
+           * Súčet je meranie LEN vtedy, keď o každom dni okna vieme — buď má
+           * dočítaný riadok, alebo je to prečítaná nula. Inak je to dolná
+           * hranica; a keď nevieme nič, `sum` je `null`, nie `0.00`.
            */
           const sumState: MeasurementState =
-            days.length === 0
+            days.length === 0 && measuredZeroDays.length === 0
               ? 'unknown'
               : missing.length === 0 && lowerBoundDays === 0
                 ? 'measured'
@@ -216,13 +331,19 @@ export function createInsightsRevenueDailyGet(
             completeDays,
             lowerBoundDays,
             missing,
+            measuredZeroDays,
             sum: days.length === 0 ? null : sumMoney(days.map((row) => row.totalPaidSum)),
             sumState,
           };
         });
 
-        const anyDay = new Set(rows.map((row) => row.day));
-        const missing = windowDays.filter((day) => !anyDay.has(day));
+        /*
+         * `missing` je odteraz „nevieme", nie „nemám riadok". Deň, ktorý sa
+         * dočítal a nepredalo sa v ňom nič, je v `emptyDays` — appka o ňom VIE
+         * a tvrdiť pri ňom pomlčku by bolo priznanie nevedomosti, ktorú nemá.
+         */
+        const missing = dayStates.filter((row) => row.state === 'unknown').map((row) => row.day);
+        const emptyDays = dayStates.filter((row) => row.state === 'empty').map((row) => row.day);
 
         return {
           today,
@@ -230,7 +351,9 @@ export function createInsightsRevenueDailyGet(
           scope: 'eshop',
           currencies,
           series,
+          dayStates,
           missing,
+          emptyDays,
           readDays: windowDays.length - missing.length,
           hasGap: missing.length > 0 || series.some((row) => row.lowerBoundDays > 0),
         };

@@ -29,6 +29,13 @@
  * bránu pred produkčným eshopom. Zjednodušenie patrí do UI (predplnené polia),
  * nie do novej zápisovej cesty.
  *
+ * `POST /api/presets/:id/mark-used` (31. 8. 2026) tento zákaz NEPORUŠUJE
+ * a treba vedieť prečo: zapíše JEDEN časový údaj do lokálneho stĺpca
+ * `last_used_at`, nevracia z presetu nič, čo by sa dalo zapísať, a nedotýka sa
+ * kampaní. Je to protipól „spusti preset" — dôvod jeho existencie je, že klik
+ * na „Predplniť formulár" je jediný okamih, kedy appka vie, že po presete
+ * niekto siahol. Rozbor je v hlavičke tej route.
+ *
  * ═══ ČO TU EŠTE PLATÍ ═══
  *
  *  - Mutácie (POST, DELETE) idú `defineRoute()` pipeline, takže dedia Origin
@@ -43,8 +50,9 @@
  */
 import { z } from 'zod';
 
-import type { DiscountPercent, DiscountPreset } from '@/contracts';
+import type { AuditWriter, DiscountPercent, DiscountPreset } from '@/contracts';
 
+import { auditWriter as defaultAuditWriter } from '@/lib/audit/write';
 import { AppError } from '@/lib/http/errors';
 import {
   presetsRepo as defaultPresetsRepo,
@@ -56,17 +64,21 @@ import {
 export interface PresetsRouteDeps {
   /** Produkčne `presetsRepo` nad poolom; testy si prinesú in-memory alebo DB. */
   presetsRepo?: PresetsRepoContract;
+  /** Audit uloženia a zmazania presetu (I4, D102). */
+  audit?: AuditWriter;
   now?: () => Date;
 }
 
 export interface ResolvedPresetsDeps {
   presetsRepo: PresetsRepoContract;
+  audit: AuditWriter;
   now: () => Date;
 }
 
 export function resolvePresetsDeps(overrides: PresetsRouteDeps = {}): ResolvedPresetsDeps {
   return {
     presetsRepo: overrides.presetsRepo ?? defaultPresetsRepo,
+    audit: overrides.audit ?? defaultAuditWriter,
     now: overrides.now ?? ((): Date => new Date()),
   };
 }

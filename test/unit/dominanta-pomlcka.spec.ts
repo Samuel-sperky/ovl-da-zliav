@@ -86,7 +86,13 @@ const dominant = (sold: number | null): string =>
        */
       cell: soldUnitsViaCoverage(sold, 30, {
         asked: true,
-        coverage: { syncEnabled: true, daysCovered: 30, from: '2026-07-21', to: '2026-08-19' },
+        coverage: {
+          syncEnabled: true,
+          daysCovered: 30,
+          daysPartial: 0,
+          from: '2026-07-21',
+          to: '2026-08-19',
+        },
       }),
       windowDays: 30,
     }),

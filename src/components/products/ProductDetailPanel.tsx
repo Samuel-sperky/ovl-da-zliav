@@ -28,11 +28,12 @@
  *    a kreslí sa len pri kuse, ktorý varianty naozaj má.
  *  · **Zľavy podľa vlastných zápisov** — výhradne to, čo appka sama zapísala.
  *  · **Zatiaľ nedostupné / Podrobnosti z eshopu** — polia z `products/getFull`
- *    za oprávnením `product:read`: kód a EAN produktu, sklad, nákupná cena,
- *    marža, cena s DPH, dodávateľ, kategórie, stav, dátumy, objednané kusy
- *    a SKUTOČNÁ zľava v eshope. Prázdna hodnota so slovom, NIE vynechaný
- *    riadok: keby riadok chýbal, nedalo by sa zistiť, že tá informácia vôbec
- *    existuje. Nadpis sa mení podľa toho, či hodnoty naozaj prišli.
+ *    za oprávnením `product:read`, ktoré obohatenie v `catalog_cache` NENESIE:
+ *    EAN produktu, cena s DPH, kategórie, či je kus v eshope zapnutý a kedy doň
+ *    pribudol. Prázdna hodnota so slovom, NIE vynechaný riadok: keby riadok
+ *    chýbal, nedalo by sa zistiť, že tá informácia vôbec existuje. Nadpis sa
+ *    mení podľa toho, či hodnoty naozaj prišli, a skupina nesie ČAS MERANIA
+ *    (`keyedMeasuredNote()`) — pozri bod 7 nižšie.
  *
  * ČO PRIBUDLO VO V4 (D115, D118 — 28. 8. 2026)
  * ────────────────────────────────────────────
@@ -108,6 +109,36 @@
  *    karta potvrdenia novej zľavy (`.unknown`, 26 px, `--dim`). Nikdy nedávaj
  *    `'—'` do `.big` ani do `.big.sm`.
  *
+ * 7. **TEN ISTÝ FAKT SA V PANELI NEKRESLÍ DVAKRÁT — a každá vykreslená skupina
+ *    nesie čas merania** (31. 8. 2026, otvorený bod 5 kontraktu V4).
+ *
+ *    Panel mal dve skupiny z eshopu a osem faktov v oboch naraz: „Fakty
+ *    z eshopu" (obohatenie, stĺpce `catalog_cache`, datované `enriched_at`)
+ *    a „Podrobnosti z eshopu" (`extra.keyed`, teda `raw` odpoveď TOHO ISTÉHO
+ *    riadku, BEZ času merania). Kód/referencia, sklad, nákupná cena, marža,
+ *    dodávateľ, `qty_in_orders` aj `last_time_in_order` tak stáli v paneli
+ *    dvakrát, z dvoch čítaní — a človek nemal ako zistiť, ktoré je novšie,
+ *    lebo druhá skupina o svojom čase mlčala.
+ *
+ *    Rozhodlo sa PRE „Fakty z eshopu", a nie preto, že sú vyššie:
+ *      (a) appka ich vie DATOVAŤ na povrchu (`enriched_at` → `measuredNote()`),
+ *      (b) ich slovník prázdna (`KpiGapKind`) rozlišuje „produkt nie je
+ *          obohatený" · „eshop to nevedie" · „dni chýbajú" — presne to, čo I11
+ *          rozlišovať káže. `AbsenceKind` skupiny za kľúčom (`none`/`pending`/
+ *          `locked`) prvé dve zliať MUSÍ, lebo naň slovo nemá,
+ *      (c) je to kanonická cesta D118 (prioritizované obohacovanie, účtované
+ *          do dráhy `product_read`).
+ *
+ *    Riadok „Skutočná zľava v eshope" bol `LockedRow` s pevným zámkom a s
+ *    komentárom, že `getFull` ju nenesie. Obohatenie ju nesie
+ *    (`reduction_percent/from/to`, migrácia 0014) a riadok „Aktívna zľava
+ *    v eshope" ju vypisuje — ten zámok teda o tom istom fakte tvrdil opak.
+ *    Zmizol spolu s duplicitami.
+ *
+ *    Skupina za kľúčom NEZMIZLA celá: päť jej riadkov obohatenie nenesie,
+ *    takže inde v paneli nie sú. Dostala čas merania z `extra.at`, a keď ho
+ *    nemá, povie to slovom — nikdy „asi teraz".
+ *
  * Vlastník: V10 (rozšírenie na „všetky údaje": P2 kontraktu produktov).
  */
 import Link from 'next/link';
@@ -141,10 +172,9 @@ import {
   enrichNotice,
   fieldOf,
   known,
+  keyedMeasuredNote,
   kpiFactRows,
   measuredNote,
-  percentPlain,
-  stockText,
   upliftView,
   type EnrichOutcomeKind,
   type Field,
@@ -383,18 +413,6 @@ export function SoldDominant({ cell, windowDays }: { cell: KpiCellView; windowDa
   );
 }
 
-/** Zamknutý riadok: názov, prázdna hodnota, zámok. Nikdy vynechaný riadok. */
-function LockedRow({ label }: { label: string }) {
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd className="lockcell" title={SURFACE_TERMS.lockedFeature}>
-        {DASH}
-      </dd>
-    </>
-  );
-}
-
 /* ───────── Údaje spoza kľúča `product:read` ──────────────────────────────
  *
  * Panel ich kreslí ako RIADKY, nie ako vynechanie: keby riadok chýbal, nedalo
@@ -405,12 +423,14 @@ function LockedRow({ label }: { label: string }) {
  *   detail prišiel bez bloku `keyed` → `locked`  (chýba kľúč)
  *   blok `keyed` prišiel, pole prázdne → `none`  (shop to o kuse nevedie)
  *
- * PREČO `lockcell` NIE JE NA VŠETKÝCH RIADKOCH. `.lockcell` je iba tlmená
- * bunka (`color: var(--dim)`), nie tvrdenie — čo presne chýba, hovorí SLOVO
- * vnútri (`AbsenceValue`), a to slovo si bunka nesie samo aj bez tej triedy.
- * Historických šesť riadkov (kód, sklad, nákupná cena, marža, kategórie,
- * skutočná zľava) ju drží ďalej, lebo na ich počte stojí kontrola, že sa
- * zamknuté NEVYNECHÁVA. Nové riadky ju nepotrebujú a vyzerajú rovnako.
+ * `lockcell` JE NA KAŽDOM PRÁZDNOM RIADKU (31. 8. 2026). `.lockcell` je iba
+ * tlmená bunka (`color: var(--dim)`), nie tvrdenie — čo presne chýba, hovorí
+ * SLOVO vnútri (`AbsenceValue`). Do 31. 8. 2026 ju držalo len historických
+ * šesť riadkov (kód, sklad, nákupná cena, marža, kategórie, skutočná zľava),
+ * lebo na ich počte stála kontrola, že sa zamknuté NEVYNECHÁVA. Päť z tých
+ * šiestich odišlo ako duplicita (viď hlavičku modulu) a jednoprvková výnimka
+ * by tú kontrolu nekryla, tak triedu nesú všetky riadky skupiny naraz.
+ * Vizuálne je to bez zmeny: `AbsenceValue` si `--dim` nesie aj sama.
  */
 
 /**
@@ -439,25 +459,20 @@ function keyedList(
   return list.length === 0 ? absent('none') : known(list);
 }
 
-/**
- * Jeden riadok skupiny za kľúčom. `legacy` drží triedu `.lockcell` na tých
- * šiestich riadkoch, ktoré ju mali odjakživa — pozri poznámku vyššie.
- */
+/** Jeden riadok skupiny za kľúčom. Prázdna bunka je tlmená — pozri vyššie. */
 function KeyedRow<T>({
   label,
   field,
   render,
-  legacy,
 }: {
   label: string;
   field: Field<T>;
   render: (value: T) => ReactNode;
-  legacy?: boolean;
 }) {
   return (
     <>
       <dt>{label}</dt>
-      <dd className={!field.known && legacy === true ? 'lockcell' : undefined}>
+      <dd className={field.known ? undefined : 'lockcell'}>
         <FieldValue field={field} render={render} />
       </dd>
     </>
@@ -1076,39 +1091,20 @@ export function ProductDetailPanel({
   })();
 
   /**
-   * Marža ako jeden údaj: eurá a percentá vedľa seba. Percento samo o sebe je
-   * bez sumy nečitateľné a suma bez percenta sa nedá porovnať naprieč cenami.
-   * Nič sa nedopočítava — keď shop percento nepošle, riadok ho neuvedie.
-   */
-  const marginField = ((): Field<string> => {
-    const eur = keyedField(extra, (keyed) => keyed.margin);
-    if (!eur.known) return eur;
-    const percent = extra?.keyed?.marginPercent ?? null;
-    if (percent === null) return known(formatEur(eur.value));
-    /*
-     * `percentPlain`, NIE `formatPercentSk`: ten píše `−42 %`, lebo vznikol pre
-     * ZĽAVU. Marža mínus nemá a 42 % marža napísaná ako `−42 %` je vecná chyba
-     * (opravené 28. 8. 2026 spolu s KPI panela, ktoré tú istú funkciu volalo).
-     */
-    return known(`${formatEur(eur.value)} · ${percentPlain(percent)}`);
-  })();
-
-  /**
-   * TRINÁSŤ RIADKOV SPOZA KĽÚČA AKO ZOZNAM.
+   * PÄŤ RIADKOV SPOZA KĽÚČA AKO ZOZNAM — a je ich päť, nie trinásť.
    *
-   * Dôvod je ten istý ako pri `facts`: počet v nadpise zavretej skupiny sa
-   * počíta z `keyedRows.length`, takže sa NEDÁ dostať do stavu, keď nadpis
-   * sľubuje trinásť údajov a vnútri ich je dvanásť. Riadok sa tu pridáva aj
-   * uberá práve raz.
+   * Osem z pôvodných trinástich riadkov hovorilo TO ISTÉ, čo skupina „Fakty
+   * z eshopu" nad nimi (rozhodnutie 31. 8. 2026, celý dôvod je v hlavičke
+   * modulu). Zostalo presne to, čo `getFull` dá a čo obohatenie v `catalog_cache`
+   * NENESIE, takže inde v paneli nie je: EAN, cena s DPH, kategórie, či je kus
+   * v eshope zapnutý a kedy doň pribudol.
+   *
+   * Dôvod, prečo je to ZOZNAM, je ten istý ako pri `facts`: počet v nadpise
+   * zavretej skupiny sa počíta z `keyedRows.length`, takže sa NEDÁ dostať do
+   * stavu, keď nadpis sľubuje päť údajov a vnútri ich sú štyri. Riadok sa tu
+   * pridáva aj uberá práve raz.
    */
   const keyedRows: readonly ReactNode[] = [
-    <KeyedRow
-      key="reference"
-      legacy
-      label="Kód produktu"
-      field={keyedField(extra, (k) => k.reference)}
-      render={(value) => <span className="num">{value}</span>}
-    />,
     <KeyedRow
       key="ean13"
       label="EAN produktu"
@@ -1116,35 +1112,13 @@ export function ProductDetailPanel({
       render={(value) => <span className="num">{value}</span>}
     />,
     <KeyedRow
-      key="stock"
-      legacy
-      label="Sklad"
-      field={keyedField(extra, (k) => k.stockQuantity)}
-      render={(value) => <span className="num">{stockText(value)}</span>}
-    />,
-    <KeyedRow
-      key="wholesale"
-      legacy
-      label="Nákupná cena"
-      field={keyedField(extra, (k) => k.wholesalePrice)}
-      render={(value) => formatEur(value)}
-    />,
-    <KeyedRow key="margin" legacy label="Marža" field={marginField} render={(value) => value} />,
-    <KeyedRow
       key="price-tax"
       label="Cena s DPH"
       field={keyedField(extra, (k) => k.priceWithTax)}
       render={(value) => formatEur(value)}
     />,
     <KeyedRow
-      key="supplier"
-      label="Dodávateľ"
-      field={keyedField(extra, (k) => k.supplier)}
-      render={(value) => value}
-    />,
-    <KeyedRow
       key="categories"
-      legacy
       label="Kategórie"
       field={keyedList(extra, (k) => k.categories)}
       render={(value) => value.join(' · ')}
@@ -1161,24 +1135,6 @@ export function ProductDetailPanel({
       field={keyedField(extra, (k) => k.addedAt)}
       render={(value) => formatDateSk(value)}
     />,
-    <KeyedRow
-      key="last-ordered"
-      label="Naposledy objednané"
-      field={keyedField(extra, (k) => k.lastOrderedAt)}
-      render={(value) => formatDateSk(value)}
-    />,
-    <KeyedRow
-      key="ordered-total"
-      label="Objednané kusy spolu"
-      field={keyedField(extra, (k) => k.orderedTotal)}
-      render={(value) => <span className="num">{formatCountSk(value)}</span>}
-    />,
-    /*
-     * Skutočnú zľavu v eshope zatiaľ nenesie ANI cesta `getFull`, ktorú appka
-     * číta — nie je to teda „shop nemá", ale „appka nedovidí". Preto zostáva
-     * pevne zamknutá, kým to doťahovanie nedoplní.
-     */
-    <LockedRow key="real-discount" label="Skutočná zľava v eshope" />,
   ];
 
   return (
@@ -1465,6 +1421,12 @@ export function ProductDetailPanel({
        * neprišiel, je celá skupina „Zatiaľ nedostupné"; keď príde, sú to
        * podrobnosti z eshopu. Nadpis, ktorý by nad vypísanými hodnotami tvrdil
        * „nedostupné", by bol nepravdivý.
+       *
+       * ČAS MERANIA JE POVINNÝ (31. 8. 2026). Skupina o ňom mlčala, a keďže
+       * osem jej riadkov opakovalo „Fakty z eshopu", nedalo sa povedať, ktoré
+       * z dvoch čísel o tom istom poli je novšie. Duplicita odišla; mlčanie
+       * odchádza spolu s ňou, lebo skupina bez času merania sa v tomto paneli
+       * nekreslí. Vetu skladá `keyedMeasuredNote()`, nie JSX.
        */}
       <DetailGroup
         title={keyedShown ? 'Podrobnosti z eshopu' : 'Zatiaľ nedostupné'}
@@ -1475,7 +1437,10 @@ export function ProductDetailPanel({
         <dl className="dl" data-testid="detail-locked">
           {keyedRows}
         </dl>
-        <div className="lvl-3" style={{ marginTop: '6px' }}>
+        <div className="lvl-3" style={{ marginTop: '6px' }} data-testid="detail-keyed-measured">
+          {keyedMeasuredNote(extra)}
+        </div>
+        <div className="lvl-3">
           {SURFACE_TERMS.lockedFeature} · <Link href="/nastavenia#zamknute">viac</Link>
         </div>
       </DetailGroup>

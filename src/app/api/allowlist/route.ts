@@ -84,6 +84,11 @@ export function createAllowlistPost(
     {
       method: 'POST',
       body: addBodySchema,
+      // Lokálna DB mutácia, nie zápis do shopu — strop je preto rovnaký ako pri
+      // porovnateľných mutáciách nastavení (30/min), nie tvrdý ako pri
+      // `catalog/sync` (2/min). Vlastný `bucket`: bez neho by kľúč vznikal
+      // z cesty a tri mutácie allowlistu by si strop navzájom zjedli.
+      rateLimit: { limit: 30, windowMs: 60_000, bucket: 'allowlist-add' },
       handler: (ctx) =>
         withRouteErrors(async () => {
           // Repozitár hodí doménovú chybu `allowlist_full` pri 10 obsadených

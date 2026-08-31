@@ -267,6 +267,38 @@ describe('V4 — predané kusy za okno (D119)', () => {
     expect(cell.text).not.toBe('0');
   });
 
+  it('čiastočné okno s NULOU je pomlčka — `≥ 0` je prázdna veta, nie priznanie', () => {
+    /*
+     * Nález z 31. 8. 2026 (I11 č. 2). Server po D121 posiela pre produkt bez
+     * riadku v dočítaných dňoch presne tento tvar (`insights.ts` →
+     * `kpiWindowUnits`: `value = units ?? 0`, `gap: 'days_missing'`), a pri
+     * dnešnom pokrytí (2 dni zo 180) to je 40 511 zo 41 348 produktov. Bunka
+     * z toho robila HODNOTU `≥ 0`, kým bočný panel tej istej obrazovky
+     * (`soldUnitsViaCoverage`) dával na to isté číslo pomlčku — dve odpovede
+     * na tú istú otázku na jednej obrazovke.
+     */
+    const cell = kpiUnitsCell(OKNO_CIASTOCNE(0));
+    expect(cell.text).toBe(KPI_DASH);
+    expect(cell.text).not.toBe('≥ 0');
+    expect(cell.unknown).toBe(true);
+    expect(cell.lowerBound).toBe(false);
+    expect(cell.title).toContain('je dočítaných 4');
+  });
+
+  it('čiastočné okno s nulou je pomlčka aj vtedy, keď medzeru ohlási len `lowerBound`', () => {
+    // Druhá závora: `gap: null` + `lowerBound: true` je tvar, aký server dnes
+    // nevyrobí, ale keby ho vyrobil, `≥ 0` nesmie prejsť ani tak.
+    const cell = kpiUnitsCell({
+      windowDays: 30,
+      completeDays: 4,
+      unknownDays: 26,
+      units: { value: 0, gap: null },
+      lowerBound: true,
+    });
+    expect(cell.text).toBe(KPI_DASH);
+    expect(cell.unknown).toBe(true);
+  });
+
   it('čiastočné okno dá číslo označené ako DOLNÁ hranica', () => {
     const cell = kpiUnitsCell(OKNO_CIASTOCNE(3));
     expect(cell.text).toBe('≥ 3');
@@ -348,7 +380,7 @@ describe('V4 — predané kusy za okno (D119)', () => {
 describe('V4 — dominanta panela hovorí o pokrytí (I11, D119)', () => {
   const coverage = (daysCovered: number, syncEnabled = true): SoldCoverageState => ({
     asked: true,
-    coverage: { syncEnabled, daysCovered, from: '2026-08-01', to: '2026-08-31' },
+    coverage: { syncEnabled, daysCovered, daysPartial: 0, from: '2026-08-01', to: '2026-08-31' },
   });
 
   it('plné pokrytie okna → číslo je celý počet, bez `≥`', () => {

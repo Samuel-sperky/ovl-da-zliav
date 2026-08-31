@@ -37,7 +37,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
-import { createPreset, deletePreset, listPresets } from '@/components/campaigns/presets-api';
+import {
+  createPreset,
+  deletePreset,
+  listPresets,
+  markPresetUsed,
+} from '@/components/campaigns/presets-api';
 import {
   PRESET_NAME_MAX,
   PRESET_NOTE,
@@ -91,6 +96,7 @@ export function PresetRow({
   confirming = false,
   onAskDelete,
   onDelete,
+  onUse,
 }: {
   readonly preset: PresetView;
   readonly busy?: boolean;
@@ -98,6 +104,12 @@ export function PresetRow({
   readonly confirming?: boolean;
   readonly onAskDelete?: (presetId: number) => void;
   readonly onDelete?: (presetId: number) => void;
+  /**
+   * „Siahol som po tomto presete" — beží PRI odkaze, nie namiesto neho.
+   * Odkaz zostáva odkazom (I3); toto je jediný okamih, o ktorom appka vie, že
+   * preset niekto použil.
+   */
+  readonly onUse?: (presetId: number) => void;
 }) {
   const mapping = presetPercents(preset.tiers);
   return (
@@ -106,10 +118,17 @@ export function PresetRow({
         <b>{preset.name}</b>
         <span className="lvl-3">{presetSummarySk(preset)}</span>
         <span className="lvl-3" data-testid={`preset-used-${preset.id}`}>
-          {/* I11 — „ešte nepoužitý" nie je dátum a nedopĺňa sa. */}
+          {/*
+           * I11 — „ešte nepoužitý" nie je dátum a nedopĺňa sa.
+           *
+           * Veta hovorí presne to, čo appka MERALA: `last_used_at` sa zapisuje
+           * pri klike na „Predplniť formulár". Že z presetu naozaj vznikla
+           * zľava, appka nevie a netvrdí — preset do zápisovej cesty
+           * nevstupuje (I3).
+           */}
           {preset.lastUsedAt === null
             ? 'ešte nepoužitý'
-            : `naposledy ${formatDateSk(preset.lastUsedAt.slice(0, 10))}`}
+            : `naposledy predplnil formulár ${formatDateSk(preset.lastUsedAt.slice(0, 10))}`}
         </span>
         {mapping.unmappedTiers === 0 ? null : (
           <span className="lvl-3" data-testid={`preset-unmapped-${preset.id}`}>
@@ -122,10 +141,16 @@ export function PresetRow({
         {/*
          * ODKAZ, nie zápis: vedie na formulár novej zľavy s predplnenými
          * poľami. Skúška naprázdno a potvrdenie sa odohrajú tam, nanovo (I3).
+         *
+         * `onClick` na tom nič nemení — zapíše iba „naposledy predplnil
+         * formulár" do lokálnej DB, aby zoznam ponúkol zhora ten, po ktorom
+         * človek naozaj siaha. Nič sa tým nezapisuje do eshopu a odkaz sa
+         * neprerušuje: navigácia beží ďalej aj keď ten zápis padne.
          */}
         <Link
           className="btn sm"
           href={presetPrefillHref(preset)}
+          onClick={() => onUse?.(preset.id)}
           data-testid={`preset-use-${preset.id}`}
         >
           Predplniť formulár
@@ -212,6 +237,18 @@ export function DiscountPresets({
     await load();
   }, [draft, name, load]);
 
+  /**
+   * Klik na „Predplniť formulár". Zápis JE fire-and-forget a je to zámer:
+   * odkaz nesmie čakať na server ani sa dať zablokovať jeho zlyhaním. Keď
+   * zápis nevyjde, riadok zostane „ešte nepoužitý" — teda pravda o tom, čo je
+   * v DB (I11); vymyslený dátum by pravda nebol. Chybová veta sa nezobrazuje,
+   * pretože človek už je medzitým na formulári a poradie v zozname nie je
+   * niečo, čo by mal riešiť.
+   */
+  const onUse = useCallback((presetId: number) => {
+    void markPresetUsed(presetId);
+  }, []);
+
   const onDelete = useCallback(
     async (presetId: number) => {
       setBusy(true);
@@ -269,6 +306,7 @@ export function DiscountPresets({
                 confirming={confirmDelete === preset.id}
                 onAskDelete={setConfirmDelete}
                 onDelete={(presetId) => void onDelete(presetId)}
+                onUse={onUse}
               />
             ))}
           </div>

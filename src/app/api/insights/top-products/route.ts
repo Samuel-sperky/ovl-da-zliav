@@ -61,6 +61,7 @@ import type { DateOnly, MoneyString } from '@/contracts';
 
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 import {
+  ALLOWED_SOLD_WINDOWS,
   catalogRepo as defaultCatalogRepo,
   type CatalogSearchRow,
 } from '@/lib/repo/catalog.repo';
@@ -78,6 +79,7 @@ import {
   windowCoverage,
   windowQuery,
   windowRange,
+  WINDOW_DAYS_ALLOWED,
   type InsightsDeps,
   type MeasurementState,
   type WindowCoverage,
@@ -93,12 +95,17 @@ export const DEFAULT_TOP_LIMIT = 10;
 const MAX_TOP_LIMIT = 50;
 
 /**
- * Okná, ktoré zrkadlo katalógu vie triediť v SQL (`ALLOWED_SOLD_WINDOWS`
- * v `catalog.repo.ts`). Nie je to náš zoznam a nesmie sa rozšíriť tu — keď
- * niekto pridá 7 do repozitára, pridá ho AJ sem, a cesta B prestane byť
- * potrebná.
+ * Okná, ktoré Prehľad ponúka A zrkadlo katalógu ich vie triediť v SQL — teda
+ * PRIENIK `WINDOW_DAYS_ALLOWED` (7/30/90) a `ALLOWED_SOLD_WINDOWS` z
+ * `catalog.repo.ts`. Dnes je to `[30, 90]`.
+ *
+ * Zoznam sa tu ZÁMERNE nepíše ručne: do 31. 8. 2026 tu stála kópia `[30, 90]`
+ * a jediný zdroj pravdy pritom vlastní repozitár. Keď doň pribudne `7`, cesta B
+ * sa prestane volať sama a nič sa tu meniť nemusí.
  */
-const MIRROR_SORTABLE_WINDOWS: readonly number[] = [30, 90];
+export const MIRROR_SORTABLE_WINDOWS: readonly number[] = WINDOW_DAYS_ALLOWED.filter((days) =>
+  ALLOWED_SOLD_WINDOWS.includes(days),
+);
 
 /**
  * Nadmnožinové okno pre cestu B. Musí byť z `MIRROR_SORTABLE_WINDOWS` a musí
@@ -258,8 +265,17 @@ export function createInsightsTopProductsGet(
           };
           const desc = await catalog.search({ ...filter, sort: 'sold_desc' as const });
           const asc = await catalog.search({ ...filter, sort: 'sold_asc' as const });
-          topRows = desc.data.map((row) => ({ row, units: row.unitsSold }));
-          flopRows = asc.data.map((row) => ({ row, units: row.unitsSold }));
+          /*
+           * Riadok s neznámym predajom (`unitsSold === null`, D121) do rebríčka
+           * NEVSTUPUJE — rovnaký dôvod, prečo sa neradí bez jediného dočítaného
+           * dňa: bolo by to poradie nevedomosti, nie predaja.
+           */
+          topRows = desc.data.flatMap((row) =>
+            row.unitsSold === null ? [] : [{ row, units: row.unitsSold }],
+          );
+          flopRows = asc.data.flatMap((row) =>
+            row.unitsSold === null ? [] : [{ row, units: row.unitsSold }],
+          );
           cohortSize = desc.total;
         } else {
           /* ── Cesta B: presné súčty nad nadmnožinovou kohortou. ───────── */

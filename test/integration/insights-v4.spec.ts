@@ -48,6 +48,7 @@ import type {
   CatalogSearchRow,
   CatalogShopStatus,
 } from '@/lib/repo/catalog.repo';
+import type { ShopRevenueReadStateRecord } from '@/lib/repo/sales.repo';
 import type { RouteDeps } from '@/lib/http/define-route';
 
 import { emptyCatalogEnrichment } from '@/lib/repo/catalog.repo';
@@ -309,12 +310,41 @@ function revenueDay(
   };
 }
 
+/**
+ * Príznak prečítanosti dňa (`shop_revenue_read_state`, 0016). Deň bez tohto
+ * riadku appka NEPOZNÁ; deň s `dayComplete: true` a bez sumy je PREČÍTANÝ deň,
+ * v ktorom sa nepredalo nič.
+ */
+function revenueRead(
+  day: string,
+  dayComplete: boolean,
+  ordersSeen: number,
+): ShopRevenueReadStateRecord {
+  return {
+    day: day as DateOnly,
+    dayComplete,
+    ordersSeen,
+    pagesRead: 1,
+    lastError: null,
+    firstReadAt: new Date(`${day}T23:00:00.000Z`),
+    updatedAt: new Date(`${day}T23:00:00.000Z`),
+  };
+}
+
 async function callRevenue(
   rows: ShopRevenueDayRecord[],
   query = '?window=7',
+  states: ShopRevenueReadStateRecord[] = [],
 ): Promise<RevenueDailyResponse> {
   const handler = createInsightsRevenueDailyGet(
-    { now: () => NOW, timeZone: 'Europe/Bratislava', salesRepo: { listRevenue: async () => rows } },
+    {
+      now: () => NOW,
+      timeZone: 'Europe/Bratislava',
+      salesRepo: {
+        listRevenue: async () => rows,
+        listRevenueReadStates: async () => states,
+      },
+    },
     routeDeps(),
   );
   const response = await handler(
@@ -402,6 +432,120 @@ describe('GET /api/insights/revenue-daily — eshopová tržba, nikdy produktov�
     expect(data.readDays).toBe(0);
     expect(data.missing).toHaveLength(7);
   });
+
+  /* ── 0016: „prečítané, nič sa nepredalo" verzus „nečítané, nevieme" ──── */
+
+  /**
+   * Okno smie byť len 7/30/90 (`windowQuery`), takže všetko nižšie beží nad
+   * SIEDMIMI dňami `2026-08-13` … `2026-08-19`. Dni, o ktorých test nič nepovie,
+   * zostávajú `unknown` — a to je zámer: ticho v DB je nevedomosť, nie nula.
+   */
+  const WEEK = ['13', '14', '15', '16', '17', '18', '19'].map((d) => `2026-08-${d}`);
+
+  it('tri stavy dňa sa dajú rozlíšiť naraz (suma · prečítaná nula · nevieme)', async () => {
+    const data = await callRevenue([revenueDay('2026-08-19', 'EUR', '10.00', 1)], '?window=7', [
+      revenueRead('2026-08-18', true, 0),
+      revenueRead('2026-08-19', true, 1),
+    ]);
+    expect(data.dayStates.map((row) => [row.day, row.state])).toEqual([
+      // 13.–17. 8. sa nikdy nesťahovali — ani riadok tržby, ani stav čítania.
+      ['2026-08-13', 'unknown'],
+      ['2026-08-14', 'unknown'],
+      ['2026-08-15', 'unknown'],
+      ['2026-08-16', 'unknown'],
+      ['2026-08-17', 'unknown'],
+      // 18. 8. sa PREČÍTAL a objednávka v ňom nebola. Meraná nula.
+      ['2026-08-18', 'empty'],
+      // 19. 8. sa prečítal a objednávky boli. Suma je celý deň.
+      ['2026-08-19', 'measured'],
+    ]);
+    expect(data.emptyDays).toEqual(['2026-08-18']);
+    expect(data.missing).toEqual(WEEK.slice(0, 5));
+    expect(data.readDays).toBe(2);
+  });
+
+  it('prečítaný deň bez objednávok NIE JE „nevieme" (0016)', async () => {
+    const data = await callRevenue(
+      [revenueDay('2026-08-19', 'EUR', '10.00', 1)],
+      '?window=7',
+      WEEK.map((day) => revenueRead(day, true, day === '2026-08-19' ? 1 : 0)),
+    );
+    expect(data.missing).toEqual([]);
+    expect(data.emptyDays).toHaveLength(6);
+    expect(data.readDays).toBe(7);
+    expect(data.hasGap).toBe(false);
+    // Celé okno je známe, takže súčet je MERANIE, nie dolná hranica.
+    expect(data.series[0]?.sumState).toBe('measured');
+    expect(data.series[0]?.sum).toBe('10.00');
+    expect(data.series[0]?.measuredZeroDays).toHaveLength(6);
+    expect(data.series[0]?.missing).toEqual([]);
+  });
+
+  it('ČIASTOČNE prečítaný deň bez objednávok zostáva „nevieme" (≥ 0 je prázdna veta)', async () => {
+    const data = await callRevenue([], '?window=7', [revenueRead('2026-08-18', false, 0)]);
+    expect(data.dayStates.every((row) => row.state === 'unknown')).toBe(true);
+    expect(data.emptyDays).toEqual([]);
+    expect(data.missing).toHaveLength(7);
+  });
+
+  it('deň s riadkami z času PRED 0016 (bez stavu) zostáva čítaný, bez backfillu', async () => {
+    const data = await callRevenue([revenueDay('2026-08-19', 'EUR', '10.00', 1)], '?window=7', []);
+    expect(data.dayStates[6]).toEqual({
+      day: '2026-08-19',
+      state: 'measured',
+      ordersSeen: null,
+    });
+    expect(data.emptyDays).toEqual([]);
+    // Zvyšok okna zostáva „nevieme" — stav sa dozadu NEDOPLŇUJE.
+    expect(data.missing).toEqual(WEEK.slice(0, 6));
+  });
+
+  it('dva fakty o dni musia súhlasiť OBA — nedočítaný riadok prebije „dočítaný" stav', async () => {
+    /*
+     * Deň mal dočítanú NULU (stav áno, riadok nie) a neskoršie ČIASTOČNÉ čítanie
+     * v ňom našlo objednávku. Riadok je preto nedočítaný, kým stav ešte hovorí
+     * „dočítané". Suma NIE JE celý deň — a route to musí povedať.
+     */
+    const data = await callRevenue(
+      [revenueDay('2026-08-19', 'EUR', '2.00', 1, false)],
+      '?window=7',
+      [revenueRead('2026-08-19', true, 0)],
+    );
+    expect(data.dayStates[6]?.state).toBe('lower_bound');
+    expect(data.emptyDays).toEqual([]);
+    expect(data.series[0]?.sumState).toBe('lower_bound');
+    // A pre ostatné dni okna sa taký deň nesmie počítať ako „prečítaný".
+    expect(data.series[0]?.measuredZeroDays).toEqual([]);
+  });
+
+  it('prečítaná nula JEDNEJ meny je nula aj pre DRUHÚ menu toho istého dňa', async () => {
+    const data = await callRevenue(
+      [revenueDay('2026-08-19', 'EUR', '10.00', 1), revenueDay('2026-08-18', 'CZK', '250.00', 1)],
+      '?window=7',
+      WEEK.map((day) => revenueRead(day, true, day >= '2026-08-18' ? 1 : 0)),
+    );
+    const czk = data.series.find((row) => row.currency === 'CZK');
+    const eur = data.series.find((row) => row.currency === 'EUR');
+    // Celé okno je dočítané, takže deň bez riadku meny je MERANÁ nula.
+    expect(czk?.missing).toEqual([]);
+    expect(czk?.measuredZeroDays).toEqual([...WEEK.slice(0, 5), '2026-08-19']);
+    expect(czk?.sumState).toBe('measured');
+    expect(eur?.missing).toEqual([]);
+    expect(eur?.measuredZeroDays).toEqual([...WEEK.slice(0, 5), '2026-08-18']);
+    expect(eur?.sumState).toBe('measured');
+    // A ich súčet nikde nevznikne (D117).
+    expect(JSON.stringify(data)).not.toContain('260.00');
+  });
+
+  it('chýbajúci deň NEDOSTANE nulu ani vtedy, keď iný deň prečítaný je', async () => {
+    const data = await callRevenue([revenueDay('2026-08-19', 'EUR', '10.00', 1)], '?window=7', [
+      revenueRead('2026-08-19', true, 1),
+    ]);
+    expect(data.missing).toEqual(WEEK.slice(0, 6));
+    expect(data.series[0]?.days.map((row) => row.day)).toEqual(['2026-08-19']);
+    expect(data.series[0]?.sumState).toBe('lower_bound');
+    expect(data.series[0]?.measuredZeroDays).toEqual([]);
+  });
 });
 
 /* ═════════════════ 3. `top-products` — top/flop stojí na meraní ═══════════ */
@@ -432,6 +576,8 @@ function searchResult(rows: CatalogSearchRow[], total = rows.length): CatalogSea
     perPage: 200,
     total,
     soldWindowDays: 30,
+    // Celé okno dočítané: `unitsSold` je meraný počet, nie dolná hranica (D121).
+    soldCoverage: { windowDays: 30, completeDays: 30, unknownDays: 0 },
     soldFrom: '2026-07-21' as DateOnly,
     soldTo: TODAY,
     lockedFilters: [],
@@ -443,6 +589,7 @@ function counts(cohort: number): CatalogCounts {
   return {
     total: 41_348,
     sold: { none: 41_348 - cohort, low: cohort, mid: 0, high: 0 },
+    soldUnknown: 0,
     neverDiscounted: 41_348,
     discountedNow: 0,
     shopDiscountedNow: 0,
@@ -481,8 +628,8 @@ async function callTop(
           world.searchCalls.push({ ...filter });
           const sorted = [...rows].sort((a, b) =>
             filter.sort === 'sold_asc'
-              ? a.unitsSold - b.unitsSold
-              : b.unitsSold - a.unitsSold,
+              ? (a.unitsSold ?? 0) - (b.unitsSold ?? 0)
+              : (b.unitsSold ?? 0) - (a.unitsSold ?? 0),
           );
           return searchResult(sorted.slice(0, filter.perPage ?? 50), rows.length);
         },

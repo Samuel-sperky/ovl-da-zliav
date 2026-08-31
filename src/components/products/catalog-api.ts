@@ -184,8 +184,17 @@ export interface CatalogRowView {
   readonly price: string | null;
   readonly hasAttributes: boolean;
   readonly shopStatus: ShopStatus;
-  /** Predané kusy za zvolené okno — jediné číslo predajnosti, ktoré máme. */
-  readonly unitsSold: number;
+  /**
+   * Predané kusy za zvolené okno, alebo `null` = **„za toto okno to nevieme"**
+   * (D121, 31. 8. 2026 — dni nie sú stiahnuté). Číslo je meraný fakt o
+   * stiahnutých dňoch; pri neúplnom okne je to dolná hranica a povrch to
+   * priznáva znakom `≥` (`sold-coverage.ts`).
+   *
+   * `?? 0` NA TOMTO POLI JE ZAKÁZANÝ. Server sa naň dopracoval prácne (brána
+   * `status = 'complete'` v `catalogRepo.search()`) a jedna dosadená nula z toho
+   * urobí vedro „0 predaných" a 30 % zľavu na produkte, o ktorom appka nič nevie.
+   */
+  readonly unitsSold: number | null;
   /** I11 — z vlastných úspešných zápisov, nie zo shopu. */
   readonly everDiscounted: boolean;
   readonly discountedNow: boolean;
@@ -216,6 +225,12 @@ export interface CatalogCountsView {
   readonly shopDiscountedNow: number;
   /** Z `total` tie, ktoré sú obohatené — koľkých sa stav shopu vôbec týka. */
   readonly enrichedRows: number;
+  /**
+   * Koľko riadkov nemá predaj za okno ZMERANÝ (D121). Vedrá + toto = `total`.
+   * `null` = odpoveď to nepovedala; dosadená nula by tvrdila, že vedrá pokrývajú
+   * celý katalóg, hoci pri nedočítanom okne dávajú v súčte zlomok.
+   */
+  readonly soldUnknown: number | null;
   readonly soldWindowDays: number;
 }
 
@@ -303,7 +318,8 @@ function parseCatalogRow(raw: unknown): CatalogRowView | null {
     price: readText(record, 'price'),
     hasAttributes: readFlag(record, 'hasAttributes'),
     shopStatus: readCode(record, 'shopStatus', SHOP_STATUSES) ?? 'unknown',
-    unitsSold: readCount(record, 'unitsSold') ?? 0,
+    // Bez `?? 0` — chýbajúce aj `null` pole je „nevieme" (D121, doc pri type).
+    unitsSold: readCount(record, 'unitsSold'),
     everDiscounted: readFlag(record, 'everDiscounted'),
     discountedNow: readFlag(record, 'discountedNow'),
     fetchedAt: readText(record, 'fetchedAt') ?? '',
@@ -334,6 +350,8 @@ function parseCounts(raw: unknown): CatalogCountsView | null {
     discountedNow: readCount(record, 'discountedNow') ?? 0,
     shopDiscountedNow: readCount(record, 'shopDiscountedNow') ?? 0,
     enrichedRows: readCount(record, 'enrichedRows') ?? 0,
+    // „Nevieme koľko nevieme" je iná veta než nula — preto bez `?? 0`.
+    soldUnknown: readCount(record, 'soldUnknown'),
     soldWindowDays: readCount(record, 'soldWindowDays') ?? 0,
   };
 }

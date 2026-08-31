@@ -244,8 +244,20 @@ export interface CatalogRowView {
   price: string | null;
   hasAttributes: boolean;
   shopStatus: CatalogShopStatus;
-  /** Predané kusy za `soldWindowDays`. Meraný fakt z vlastných tabuliek. */
-  unitsSold: number;
+  /**
+   * Predané kusy za `soldWindowDays` z vlastných tabuliek, alebo `null` = **„za
+   * toto okno to NEVIEME"** (D121, 31. 8. 2026).
+   *
+   * Číslo je meraný fakt o dňoch, ktoré sú naozaj stiahnuté
+   * (`sales_sync_state.status = 'complete'`) — pri neúplnom okne je to DOLNÁ
+   * HRANICA a povrch ju hovorí znakom `≥`. `null` sa NESMIE nahradiť nulou:
+   * z nuly je vedro „0 predaných" a z neho 30 % zľava (D121, `soldBucketOf`).
+   *
+   * Do 31. 8. 2026 tu bolo `number` a route posielala `fact?.unitsSold ?? 0`,
+   * takže obrazovka Nová zľava hlásila „10 000 produktov dostane zľavu · 30 %"
+   * o predajoch, ktoré appka nikdy nezmerala.
+   */
+  unitsSold: number | null;
   /** I11 — z NAŠICH úspešných zápisov, nie zo shopu. */
   everDiscounted: boolean;
   discountedNow: boolean;
@@ -716,7 +728,14 @@ async function runLookup(input: RunLookupInput): Promise<LookupView> {
       hasAttributes: fromShop.hasAttributes,
       // Eshop na produkt práve odpovedal, takže v ňom existuje — meraný fakt.
       shopStatus: 'ok',
-      unitsSold: fact?.unitsSold ?? 0,
+      /*
+       * D121 — `?? 0` tu STÁŤ NESMIE. Produkt práve prišiel živý z eshopu,
+       * takže o jeho predajoch appka vie presne to, čo jej povedali VLASTNÉ
+       * tabuľky: `factsFor()` vracia riadok pre každé platné ID a `null` v ňom
+       * znamená „za toto okno to nevieme". Dosadená nula z toho robila meraný
+       * fakt, z ktorého `soldBucketOf` odvodil vedro `none` a 30 % zľavu.
+       */
+      unitsSold: fact === undefined ? null : fact.unitsSold,
       everDiscounted: fact?.everDiscounted ?? false,
       discountedNow: fact?.discountedNow ?? false,
       fetchedAt: fromShop.fetchedAt.toISOString(),

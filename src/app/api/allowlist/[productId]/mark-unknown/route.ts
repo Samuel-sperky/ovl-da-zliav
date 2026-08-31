@@ -32,6 +32,9 @@ export function createMarkUnknownPost(
     {
       method: 'POST',
       params: productIdParamSchema,
+      // 30/min; vlastný `bucket` z rovnakého dôvodu ako pri odobraní —
+      // cesta nesie `productId`, takže per-cestový kľúč by sa dal obísť.
+      rateLimit: { limit: 30, windowMs: 60_000, bucket: 'allowlist-mark-unknown' },
       handler: (ctx) =>
         withRouteErrors(async () => {
           await d.allowlistRepo.markShopStatus(

@@ -15,6 +15,20 @@
  * si myslel, že načítavanie katalógu mu ujedá zo zliav. Sú to dva prúžky vedľa
  * seba a každý má svoj popis.
  *
+ * TRETIA DRÁHA, KTORÁ TÚ KVÓTU NAOPAK DELÍ (31. 8. 2026)
+ * ------------------------------------------------------
+ * Obohacovanie katalógu (`getFull`, dráha `product_read`) číta SO zápisovým
+ * kľúčom, takže míňa tú istú dennú kvótu ako zápisy zliav. `engine/budget.ts`
+ * to od 31. 8. 2026 odpočítava — ale len NAD rezervou `WRITE_QUOTA_RESERVE`,
+ * takže čítania nedokážu zápisom zobrať všetko. Na obrazovke z toho boli dva
+ * oddelené prúžky a nič, čo by povedalo, prečo zápisový zostatok klesol; táto
+ * sekcia to preto pomenúva dvoma vetami pod zápisovým prúžkom.
+ *
+ * Čísla na to prichádzajú HOTOVÉ zo servera (`keyedReadsCharged`,
+ * `writeReserve`). Keď v odpovedi nie sú (staršia odpoveď), veta sa NEKRESLÍ:
+ * rezerva odpísaná z konštanty v tomto súbore by bola tvrdenie o stave, ktorý
+ * appka neprečítala (I11). Nikdy sa nedosádza nula.
+ *
  * TRI VECI, KTORÉ SA TU NESMÚ POKAZIŤ
  * -----------------------------------
  * 1. **Vyčerpaný rozpočet nie je chyba.** Je to informácia, takže má neutrálnu
@@ -89,6 +103,26 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
   const remaining = budget?.remaining ?? 0;
   const exhausted = budget?.exhausted === true;
 
+  /*
+   * JEDNA KVÓTA KĽÚČA: čítania na zápisovom kľúči a rezerva zápisov.
+   *
+   * Obe čísla musia prísť zo servera. `undefined` znamená „nevieme" a vtedy sa
+   * o rezerve NEHOVORÍ vôbec — dosadená nula by tvrdila, že rezerva neexistuje,
+   * a odpísaná konštanta by tvrdila stav, ktorý appka neprečítala (I11).
+   * Porovnáva sa explicitne (`!== undefined`); Turbopack tu už raz zahodil
+   * skrátený guard ako compile-time falsy.
+   */
+  const keyedReads = budget?.keyedReadsToday;
+  const keyedReadsCharged = budget?.keyedReadsCharged;
+  const writeReserve = budget?.writeReserve;
+  const shared =
+    keyedReadsCharged !== undefined &&
+    writeReserve !== undefined &&
+    Number.isFinite(keyedReadsCharged) &&
+    Number.isFinite(writeReserve)
+      ? { charged: keyedReadsCharged, reserve: writeReserve }
+      : null;
+
   const pending = queue?.queue.pending ?? 0;
   const total = queue?.queue.total ?? 0;
   const done = queue?.queue.done ?? 0;
@@ -115,8 +149,12 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
       {/* Zostáva JEDINÁ veta, ktorú nehovorí nič iné na tejto obrazovke: že sú
           to dva oddelené rozpočty. Prečo je zľava fronta na dni, povie dlaždica
           „Fronta hotová ≈" vedľa; čo z oddelenia plynie, stojí pod rozklikom. */}
+      {/* „Čítania" bez určenia by po 31. 8. 2026 nebola pravda: čítanie
+          KATALÓGU má naozaj oddelený rozpočet, ale obohacovanie ide so
+          zápisovým kľúčom a kvótu delí. Veta preto pomenúva, o ktoré čítanie
+          ide; to druhé je pod zápisovým prúžkom a v technickom detaile. */}
       <Note testId="budget-intro">
-        <b>Zápisy a čítania majú oddelené rozpočty.</b>
+        <b>Zápisy a čítanie katalógu majú oddelené rozpočty.</b>
       </Note>
 
       <div className="set-meters" data-testid="budget-meters">
@@ -134,6 +172,25 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
             <Note variant="warn" testId="budget-writes-unknown">
               Koľko zápisov dnes odišlo, <b>zatiaľ neviem</b>.
             </Note>
+          )}
+
+          {/*
+            Prečo zápisový zostatok nesedí s odčítaním „strop − zápisy".
+            Tón je bežný text, nie výstraha: ubúdanie kvóty čítaniami je
+            NORMÁLNY priebeh dňa. Červená je v tejto appke vyhradená strate
+            dát a zastavenému zápisu a rezerva je presne to, čo zastaveniu
+            zabraňuje. Keď čísla neprišli, nekreslí sa ani jedna z viet.
+          */}
+          {shared === null ? null : (
+            <>
+              <div className="lvl-3" data-testid="budget-writes-keyed-reads">
+                Zo zostatku ubrali dnes čítania na tom istom kľúči{' '}
+                {formatCountSk(shared.charged)} zápisov.
+              </div>
+              <div className="lvl-3" data-testid="budget-writes-reserve">
+                Rezerva {formatCountSk(shared.reserve)} zápisov je pre zľavy nedotknuteľná.
+              </div>
+            </>
           )}
         </div>
 
@@ -270,9 +327,20 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
               písané ako trvalé pravidlá, nie ako komentár k aktuálnemu stavu,
               preto sa kreslia vždy — aj keď práve teraz všetky čísla poznáme. */}
           <p data-testid="budget-why-two">
-            Zápisy idú s kľúčom a majú vlastnú kvótu na kľúč. Čítanie katalógu ide bez
+            Zápisy idú s kľúčom a majú vlastnú kvótu na kľúč. Načítavanie katalógu ide bez
             kľúča, na inú kvótu, počítanú na adresu počítača. Preto načítavanie katalógu
             neuberá zo zliav a naopak.
+          </p>
+          {/* Toto je TRVALÉ pravidlo, nie komentár k dnešným číslam, takže sa
+              kreslí vždy — a zámerne bez jediného čísla. Číslami hovoria len
+              vety pod zápisovým prúžkom, a tie len vtedy, keď čísla naozaj
+              prišli zo servera (I11). */}
+          <p data-testid="budget-why-shared-quota">
+            Obohacovanie katalógu (podrobnosti o produkte) naopak číta so zápisovým
+            kľúčom, takže míňa tú istú dennú kvótu ako zápisy zliav. Čítania nad rezervu
+            preto zápisový strop zmenšujú — je to normálny priebeh dňa, nie zastavenie
+            zápisov. Na rezervu zápisov sa čítania nedostanú ani vtedy, keď vyčerpajú
+            celú svoju dráhu, takže appka nikdy nestratí schopnosť zapísať zľavu.
           </p>
           <p data-testid="budget-why-unknown-writes">
             Kým appka nevie, koľko zápisov dnes odišlo, správa sa, akoby bol rozpočet
@@ -300,6 +368,19 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
                 <td>Pauza medzi zápismi</td>
                 <td className="mono">min. 3 s (limit 20/min)</td>
               </tr>
+              {/* Riadok existuje len vtedy, keď čísla prišli. Pomlčka by tu
+                  bola menšie zlo než nula, ale aj tak by tvrdila, že rezerva
+                  je vec, ktorú appka sledovala a nedočítala — pri staršej
+                  odpovedi o nej nevie vôbec. */}
+              {shared === null ? null : (
+                <tr>
+                  <td>Čítania na zápisovom kľúči</td>
+                  <td className="mono" data-testid="budget-keyed-reads-detail">
+                    {keyedReads === undefined ? '' : `${keyedReads} dnes · `}
+                    {shared.charged} odpočítaných · rezerva {shared.reserve}
+                  </td>
+                </tr>
+              )}
               <tr>
                 <td>Čítania</td>
                 <td className="mono">

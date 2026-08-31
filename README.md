@@ -70,6 +70,13 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
   výnimka z I3.
 - **„ref · názov" namiesto `product_id`** tam, kde sa produkt pomenúva
   (`src/lib/ui/product-label.ts`, D116). Chýbajúca referencia je pomlčka.
+- **Detail produktu** (bočný panel s krivkou 90 d a oknami zliav), **timeline
+  bežiacich a naplánovaných zliav** a **hľadanie podľa referencie**, nie len
+  podľa názvu.
+- **Rezerva zápisov proti vyhladovaniu čítaniami**: čítania sa z denného
+  rozpočtu odpočítavajú len nad rezervou (`WRITE_QUOTA_RESERVE`, odvodená ako
+  200 − 160), takže obohacovanie ani sondy nevedia appke zobrať schopnosť
+  zapísať zľavu.
 
 ### Čo appka NEVIE — povedané nahlas
 
@@ -85,6 +92,16 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
 - **Predajové okná 30/90 d ukazujú len dni, ktoré sú naozaj stiahnuté** a
   medzeru priznávajú (D119). Číslo bez plného pokrytia je dolná hranica, nie
   fakt; kde chýba všetko, je pomlčka.
+- **Predaje za okno appka vo väčšine prípadov nepozná.** Objednávky sú stiahnuté
+  za 2 dni z 180, takže „0 predaných" sa NESMIE čítať ako fakt — appka takému
+  produktu dá pomlčku a do pásiem zľavy ho **nezaradí vôbec** (D121, fail-closed:
+  radšej nič než 30 % z nemeraného predpokladu).
+- **Denný graf tržby ešte nekreslí stav „deň prečítaný, nepredalo sa nič".**
+  Tabuľka `shop_revenue_read_state` (migrácia 0016) ten stav drží a
+  `/api/insights/revenue-daily` ho posiela ako `dayStates`, ale obrazovka číta
+  len počet chýbajúcich dní — taký deň teda z grafu zmizne bez bodu aj bez
+  značky. Smer je bezpečný (appka netvrdí nič navyše), dokresliť ho je
+  otvorené rozhodnutie o vzhľade.
 - Zoznam vedome vynechaných vecí (mobil, notifikácie, CSV export, druhý
   používateľ…) je v `KONTRAKT-V4-2026-08-28.md` §3.
 
@@ -203,8 +220,9 @@ rozbehnúť).
   (čísla D98–D100 sú obsadené dvakrát, kolízia je opísaná v úvode dokumentu)
   a **INVARIANTY I1–I14**
 - `KONTRAKT-V4-2026-08-28.md` — **kontrakt V4** (D108–D120, akceptačné kritériá
-  K1–K11): predaje na Prehľade, KPI produktov, presety. §2b je revízia po sonde
-  API — zmerané fakty o kvóte, bane a o tom, čo API nevracia
+  K1–K11, po revízii D121): predaje na Prehľade, KPI produktov, presety. §2b je
+  revízia po sonde API — zmerané fakty o kvóte, bane a o tom, čo API nevracia,
+  a doplnenie z 31. 8. 2026 o tom, čo preklik našel nad nasadeným buildom
 - `docs/50-KONTRAKT-V3.md` — **kontrakt V3 (K1–K12)**: fronta, denný rozpočet,
   režim rozsahu, pásma. Mení `10-KONTRAKT.md` v menovaných bodoch
 - `docs/40-ODPOVEDE-V3.md` — 100 odpovedí, zdroj pravdy pre správanie V3

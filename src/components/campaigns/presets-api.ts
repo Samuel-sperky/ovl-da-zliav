@@ -3,11 +3,12 @@
 /**
  * Aura Zľavy — ČÍTANIE A SPRÁVA PRESETOV zo strany prehliadača (D112, K7).
  *
- * Tri volania, presne tie tri, ktoré server má (`src/app/api/presets`):
- * zoznam, uloženie, zmazanie. **Volanie „spusť preset" tu nie je a nesmie
- * vzniknúť** — preset predplní formulár a zľava sa aj z neho zapíše až po
- * skúške naprázdno a potvrdení (I3). Zdôvodnenie je v `presets-model.ts`
- * a na serveri v `presets/_shared.ts`.
+ * Štyri volania, presne tie štyri, ktoré server má (`src/app/api/presets`):
+ * zoznam, uloženie, zmazanie a „naposledy predplnil formulár". **Volanie
+ * „spusť preset" tu nie je a nesmie vzniknúť** — preset predplní formulár
+ * a zľava sa aj z neho zapíše až po skúške naprázdno a potvrdení (I3).
+ * Zdôvodnenie je v `presets-model.ts` a na serveri v `presets/_shared.ts`;
+ * prečo `mark-used` ten zákaz neporušuje, je v hlavičke jej route.
  *
  * Odpoveď sa ČÍTA, nie pretypúva: `Envelope<T>` sa overuje len po obálku,
  * takže `getJson<PresetView[]>` by bol `as` bez kontroly. Nečitateľný riadok sa
@@ -97,4 +98,23 @@ export async function createPreset(draft: PresetDraft): Promise<Envelope<PresetV
  */
 export function deletePreset(presetId: number): Promise<Envelope<unknown>> {
   return delJson<unknown>(`/api/presets/${presetId}`);
+}
+
+/**
+ * „Po tomto presete som siahol" — zapíše čas do `last_used_at`, aby ho zoznam
+ * ponúkol zhora.
+ *
+ * NIE JE to spustenie presetu: server tu iba zapíše jeden časový údaj do
+ * lokálnej DB a nevracia z presetu nič (viď hlavičku
+ * `presets/[presetId]/mark-used/route.ts`). Volá sa pri klike na „Predplniť
+ * formulár", pretože to je jediný okamih, o ktorom appka vie.
+ *
+ * Zlyhanie sa NEHLÁSI ako chyba obrazovky a NEDOPOČÍTAVA sa: keď zápis
+ * neprejde, v zozname zostane „ešte nepoužitý", čo je pravda o tom, čo je
+ * v DB (I11). Vymyslený dátum v riadku by pravda nebol.
+ */
+export function markPresetUsed(presetId: number): Promise<Envelope<unknown>> {
+  // Bez tela — preset identifikuje výhradne adresa a čas si berie server
+  // (`d.now()`), aby sa nedal poslať z prehliadača.
+  return postJson<unknown>(`/api/presets/${presetId}/mark-used`);
 }

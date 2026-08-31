@@ -207,19 +207,26 @@ describe('detail produktu — „zľava teraz" sa nevydáva za stav eshopu', () 
 describe('detail produktu — zamknuté údaje', () => {
   const html = renderPanel(ROW);
 
-  it('všetkých šesť zamknutých údajov má riadok, nie vynechanie', () => {
+  it('všetkých päť zamknutých údajov má riadok, nie vynechanie', () => {
+    /*
+     * ZMENA 31. 8. 2026: šesť → päť. Kód produktu, sklad, nákupná cena a marža
+     * z tejto skupiny odišli ako DUPLICITA skupiny „Fakty z eshopu" (ktorá ich
+     * vie datovať a má na ne slovník I11), riadok „Skutočná zľava v eshope"
+     * ako tvrdenie, ktoré si s ňou protirečilo. Tvrdenie „zamknuté je vidieť,
+     * nie vynechané" tým nezoslablo — meria sa na tom, čo v skupine JE, a že
+     * odídené polia sú inde, drží `panel-fakty-dvakrat.spec.ts`.
+     */
     for (const label of [
-      'Kód produktu',
-      'Sklad',
-      'Nákupná cena',
-      'Marža',
+      'EAN produktu',
+      'Cena s DPH',
       'Kategórie',
-      'Skutočná zľava v eshope',
+      'Zapnutý v eshope',
+      'Pridané do eshopu',
     ]) {
       expect(html, `zamknutý údaj ${label} sa nekreslí`).toContain(label);
     }
-    // Šesť prázdnych hodnôt so zámkom — hodnota sa nedopĺňa ani nevymýšľa.
-    expect(html.match(/class="lockcell"/g)?.length ?? 0).toBe(6);
+    // Päť prázdnych hodnôt so zámkom — hodnota sa nedopĺňa ani nevymýšľa.
+    expect(html.match(/class="lockcell"/g)?.length ?? 0).toBe(5);
   });
 
   it('vysvetlenie tu nie je, je naň odkaz na jediné miesto', () => {

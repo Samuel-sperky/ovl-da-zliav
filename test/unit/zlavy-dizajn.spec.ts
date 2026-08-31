@@ -145,7 +145,13 @@ describe('B — detail a katalóg hovoria o rušení zľavy to isté', () => {
 
   it('stĺpec akcií ponúka zastavenie fronty, nie rušenie zľavy', () => {
     const html = renderToStaticMarkup(
-      createElement(DetailActions, { campaign: KAMPAN_BEZI, onChanged: () => {} }),
+      createElement(DetailActions, {
+        campaign: KAMPAN_BEZI,
+        // MERANÝ počet čakajúcich (U6) — dlaždica ani stĺpec akcií už nečítajú
+        // odčítané `campaign.itemsPending`. Fixtúra posiela to isté číslo.
+        pendingItems: KAMPAN_BEZI.itemsPending,
+        onChanged: () => {},
+      }),
     );
     expect(html).toContain('Zastaviť frontu');
     expect(html).toContain(expiryNoteText(KAMPAN_BEZI.dateTo));
@@ -155,7 +161,11 @@ describe('B — detail a katalóg hovoria o rušení zľavy to isté', () => {
 
   it('pri skončenej zľave sa veta o konci už nekreslí', () => {
     const html = renderToStaticMarkup(
-      createElement(DetailActions, { campaign: KAMPAN_SKONCILA, onChanged: () => {} }),
+      createElement(DetailActions, {
+        campaign: KAMPAN_SKONCILA,
+        pendingItems: KAMPAN_SKONCILA.itemsPending,
+        onChanged: () => {},
+      }),
     );
     expect(html).not.toContain(expiryNoteText(KAMPAN_SKONCILA.dateTo));
   });
@@ -164,6 +174,7 @@ describe('B — detail a katalóg hovoria o rušení zľavy to isté', () => {
     const html = renderToStaticMarkup(
       createElement(DetailActions, {
         campaign: { ...KAMPAN_BEZI, itemsOk: 0, itemsUncertain: 0 },
+        pendingItems: KAMPAN_BEZI.itemsPending,
         onChanged: () => {},
       }),
     );

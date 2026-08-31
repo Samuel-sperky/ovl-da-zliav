@@ -34,8 +34,14 @@
  * bránu pred produkčným eshopom (D98–D100). Rozdiel je jediný: **zapisuje sa
  * do shopu, alebo nie.**
  *
- * Audit zmazania chýba pre chýbajúci `AuditEventType` — zdôvodnenie a čo treba
- * doplniť je v hlavičke `../route.ts`.
+ * ═══ AUDIT (I4, D102) ═══
+ *
+ * Zmazanie zapíše `preset_deleted` s `userId = ctx.actor.id` a s `beforeSnapshot`
+ * toho, čo zmizlo (meno, filter, pásma, okno). Snapshot sa číta PRED mazaním
+ * zámerne: audit „zmazal sa preset #7" bez obsahu by o percentách, ktoré preset
+ * niesol, nepovedal nič — a `discount_presets` je jediné miesto, kde boli.
+ * Do 31. 8. 2026 tu audit nebol, lebo pre presety neexistoval `AuditEventType`;
+ * história tejto medzery je v hlavičke `../route.ts`.
  *
  * Vlastník: V4 (presety).
  */
@@ -68,9 +74,38 @@ export function createPresetDelete(
       handler: (ctx): Promise<DeletePresetResult> =>
         withPresetErrors(async () => {
           const presetId = ctx.params.presetId;
+          /*
+           * Obsah pre audit sa číta PRED mazaním — po ňom už nie je odkiaľ.
+           * `null` sa NEDOPLŇUJE ničím (I11): keď preset nebolo vidno,
+           * `remove()` o riadok nižšie skončí 404 a auditný riadok nevznikne.
+           */
+          const before = await d.presetsRepo.getById(presetId);
           // Hádže `PresetNotFoundError` → 404 (`_shared.ts`). Žiadne tiché „ok".
           await d.presetsRepo.remove(presetId);
-          // Audit sem patrí, ale chýba typ udalosti — viď hlavičku súboru.
+          await d.audit.appendAudit({
+            actor: 'user',
+            eventType: 'preset_deleted',
+            ok: true,
+            userId: ctx.actor.id,
+            message:
+              before === null
+                ? `Preset #${presetId} zmazaný.`
+                : `Preset „${before.name}" zmazaný.`,
+            beforeSnapshot:
+              before === null
+                ? { presetId }
+                : {
+                    presetId: before.id,
+                    name: before.name,
+                    filterQuery: before.filterQuery,
+                    durationDays: before.durationDays,
+                    tiers: before.tiers.map((tier) => ({
+                      ord: tier.ord,
+                      label: tier.label,
+                      percent: tier.percent,
+                    })),
+                  },
+          });
           ctx.log.info('preset_deleted', { presetId, userId: ctx.actor.id });
           return { deleted: true, presetId };
         }),

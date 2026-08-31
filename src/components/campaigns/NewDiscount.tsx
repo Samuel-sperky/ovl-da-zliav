@@ -151,7 +151,11 @@ import {
   type CatalogFilterState,
 } from '@/components/products/catalog-filter';
 import SoldCoverageNote from '@/components/products/SoldCoverageNote';
-import { soldUnitsViaCoverage, useSoldCoverage } from '@/components/products/sold-coverage';
+import {
+  soldCoverageNote,
+  soldUnitsViaCoverage,
+  useSoldCoverage,
+} from '@/components/products/sold-coverage';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
 import { collectOperationBlockers } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
@@ -229,6 +233,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const [notInCatalog, setNotInCatalog] = useState(0);
   /** Koľko riadkov má zrkadlo katalógu vôbec; `0` = ešte sa nesynchronizovalo. */
   const [catalogTotal, setCatalogTotal] = useState<number | null>(null);
+  /**
+   * Koľko produktov filtra nemá predaj za okno ZMERANÝ (D121, `counts.soldUnknown`).
+   * `null` = nepýtali sme sa alebo to odpoveď nepovedala — teda „nevieme koľko
+   * nevieme", nikdy nie nula. Bez tohto čísla obrazovka pri nedočítanom okne
+   * tvrdila, že filtru nevyhovuje ani jeden produkt.
+   */
+  const [soldUnknown, setSoldUnknown] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -378,6 +389,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     let dropped = 0;
     let total: number | null = null;
     let mirrorRows: number | null = null;
+    let unknownSold: number | null = null;
     let failure: string | null = null;
 
     const take = (
@@ -386,7 +398,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         name: string | null;
         reference?: string | null;
         price: string | null;
-        unitsSold: number;
+        /** `null` = „za toto okno to nevieme" (D121) — nikdy sa nedosádza nula. */
+        unitsSold: number | null;
         discountedNow: boolean;
       }[],
     ): void => {
@@ -451,6 +464,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         if (page === 1) {
           total = res.data.total;
           mirrorRows = res.data.catalogTotal;
+          unknownSold = res.data.counts === null ? null : res.data.counts.soldUnknown;
         }
         take(res.data.data);
         setLoaded(collected.length);
@@ -465,11 +479,13 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
       // Zlyhanie čítania NIE JE prázdny výber (P7).
       setRows(null);
       setMatching(null);
+      setSoldUnknown(null);
       setLoadError(failure);
       return;
     }
     setRows(collected);
     setMatching(total);
+    setSoldUnknown(unknownSold);
     setSkipped(dropped);
     // Chýbajúce hlásime LEN pri označených produktoch: pri výbere z filtra
     // prišlo z katalógu všetko, čo v ňom je, takže „chýbajúce" tam neexistuje.
@@ -528,6 +544,23 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     [tiers],
   );
   const itemsCount = rows === null ? 0 : rows.length;
+  /**
+   * KOĽKO PRODUKTOV ZĽAVU NAOZAJ DOSTANE (D121, I3).
+   *
+   * `itemsCount` je veľkosť VÝBERU, `discountedCount` je veľkosť ZÁPISU. Kým
+   * server posielal predaje ako nulu, boli to tie isté čísla; po D121 sa
+   * rozchádzajú: produkt s neznámym predajom je vo výbere, ale do pásma sa
+   * nezaradí a `discountWriteRequest()` ho do tela zápisu nepustí
+   * (`discounts-model.ts` — telo je zjednotenie pásiem).
+   *
+   * Preto všade, kde sa hovorí o TOM, ČO SA ZAPÍŠE — brána ručne vpísaného
+   * počtu, dominanta karty rozhodnutia, odhad dobehnutia, súčtový riadok pásiem
+   * — stojí `discountedCount`. Do 31. 8. 2026 tam stál `itemsCount`, takže pri
+   * dnešnom pokrytí (2 dni zo 180) karta hlásila „Vyberá sa 200", brána žiadala
+   * napísať 200 a do fronty išlo 5: ručne vpísaný počet je povrchová podoba I3
+   * a potvrdzoval INÚ množinu, než sa zapisuje.
+   */
+  const discountedCount = tieredProductIds.length;
   const sample = useMemo(() => spreadSample(rows ?? [], tiers, 6), [rows, tiers]);
   const tierOfProduct = useMemo(() => {
     const map = new Map<number, TierPlan>();
@@ -562,9 +595,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   // Bez známeho rozpočtu ANI bez známej fronty pred nami sa dátum nedopočíta —
   // vymyslený deň dobehnutia je horší než priznaná medzera (P7).
   const estimate =
-    perDay === null || itemsCount === 0 || !aheadView.known
+    perDay === null || discountedCount === 0 || !aheadView.known
       ? null
-      : estimateFinishDay(aheadPending + itemsCount, perDay, {
+      : estimateFinishDay(aheadPending + discountedCount, perDay, {
           ...(remainingToday !== null ? { remainingToday } : {}),
         });
   const finishDay = estimate === null ? null : estimate.date;
@@ -652,7 +685,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
    * (`selectionVersion`), iný počet, iné okno, iné pásmo, iné percento a iné
    * obdobie predajnosti (mení pravidlo pásma, teda aj to, čo človek videl).
    */
-  const signature = `${selectionVersion}|${itemsCount}|${from}|${to}|${filter.soldWindowDays}|${tiers
+  const signature = `${selectionVersion}|${itemsCount}|${discountedCount}|${from}|${to}|${filter.soldWindowDays}|${tiers
     .map((tier) => `${tier.ord}:${tier.percent}`)
     .join(',')}`;
   const previewFresh =
@@ -691,7 +724,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   }, [rows, tiers, tieredProductIds, percentError, windowError, from, to, signature]);
 
   const blockedReason = queueBlockedReason({
-    itemsCount,
+    itemsCount: discountedCount,
+    skippedUnknown: skippedUnknown.length,
     writesLocked: scope !== null && scope.writesLocked,
     percentError,
     windowError,
@@ -757,6 +791,24 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   const soldCell = (units: number | null) =>
     soldUnitsViaCoverage(units, filter.soldWindowDays, soldCoverage);
   const emptySelection = rows !== null && itemsCount === 0 && busy !== 'loading';
+
+  /*
+   * PRÁZDNY VÝBER MÁ DVA RÔZNE DÔVODY A NESMÚ SA ZLIAŤ (I11, 31. 8. 2026).
+   *
+   * Predvolený filter tejto obrazovky je „0 predaných za 180 dní" (`LEZIAKY`
+   * v `app/zlavy/nova/page.tsx`), a vedro `none` znamená po D121 MERANÚ nulu:
+   * pri nedočítanom okne server prepne bránu na `1 = 0` a nevráti nič. Veta
+   * „filtru nevyhovuje ani jeden produkt" je vtedy nepravda — produktov je
+   * 40 511, len o ich predaji appka nevie nič. Fail-closed drží (nič sa
+   * nezapíše), ale obrazovka musí povedať PRAVÝ dôvod.
+   */
+  const emptyText = emptySelectionText({
+    catalogEmpty,
+    wantsMeasuredZero: filter.soldBuckets.includes('none'),
+    coverageAdmitted: soldCoverageNote(soldCoverage, filter.soldWindowDays) !== null,
+    soldWindowDays: filter.soldWindowDays,
+    soldUnknown,
+  });
 
   return (
     <div data-testid="new-discount">
@@ -966,13 +1018,18 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
              * stĺpca bolo prázdnych. Veta a tlačidlo zostávajú presne jedno
              * a jedno (kontrakt UI, bod 11), len prestali potrebovať kartu.
              */}
+            {/*
+             * Vysvetlivka o pokrytí musí prežiť aj prázdny výber — do 31. 8.
+             * 2026 ležala VNÚTRI sekcie pásiem, ktorú `emptySelection` skrýva,
+             * takže práve na obrazovke, ktorá „nevieme" potrebuje najviac, tretí
+             * stav zmizol úplne.
+             */}
+            {emptySelection ? (
+              <SoldCoverageNote coverage={soldCoverage} windowDays={filter.soldWindowDays} />
+            ) : null}
             {emptySelection ? (
               <div className={styles.nzEmpty} data-testid="new-discount-empty">
-                <span className="lvl-2">
-                  {catalogEmpty
-                    ? 'Zatiaľ nie je čo zlacniť — katalóg ešte nie je načítaný.'
-                    : 'Zatiaľ nie je čo zlacniť — filtru nevyhovuje ani jeden produkt.'}
-                </span>
+                <span className="lvl-2">{emptyText}</span>
                 <Link
                   className={`btn primary sm ${styles.pushRight}`}
                   href={`/produkty?${catalogSearchQuery(filter)}`}
@@ -1054,7 +1111,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                     {tiers.length === 0 ? null : (
                       <tr className="sum">
                         <td colSpan={2}>Spolu — najhoršie ležiaky prvé, po strop</td>
-                        <td className="n">{formatCountSk(itemsCount)}</td>
+                        {/* Súčet pásiem, nie veľkosť výberu: riadky nad ním
+                            hovoria o produktoch, ktoré pásmo dostali. */}
+                        <td className="n">{formatCountSk(discountedCount)}</td>
                         <td className="n">
                           <span className="lvl-3">
                             {formatCountSk(tiers.length)}{' '}
@@ -1104,7 +1163,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                     </span>
                   </div>
                   <span className="lvl-3">
-                    Rovnaké okno pre všetkých {formatCountSk(itemsCount)}
+                    Rovnaké okno pre všetkých {formatCountSk(discountedCount)}
                   </span>
                 </div>
                 {/* Dátumy stoja v poliach hneď nad tým. V nápovede zostáva len
@@ -1125,7 +1184,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                     <thead>
                       <tr>
                         <th>
-                          Vzorka — {formatCountSk(sample.length)} z {formatCountSk(itemsCount)}
+                          Vzorka — {formatCountSk(sample.length)} z{' '}
+                          {formatCountSk(discountedCount)}
                         </th>
                         <th className="n">Cena</th>
                         <th className="n">Predané {filter.soldWindowDays} d</th>
@@ -1217,14 +1277,14 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
            * nad obrazovkou. Prekážka patrí k rozhodnutiu, ktoré blokuje.
            */}
           <NewDiscountConfirm
-            itemsCount={itemsCount}
+            itemsCount={discountedCount}
             countKnown={!(catalogEmpty && itemsCount === 0)}
             tiers={tiers}
             averagePrice={avgPrice}
             obstacles={alarming}
             plan={
               <NewDiscountStart
-                itemsCount={itemsCount}
+                itemsCount={discountedCount}
                 perDay={perDay}
                 aheadPending={aheadPending}
                 aheadNames={ahead === null ? [] : ahead.names}
@@ -1270,8 +1330,18 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
 /** Všetko, z čoho sa rozhoduje, či sa dá zaradiť do fronty. */
 export interface QueueGateState {
-  /** Koľko produktov je naozaj načítaných vo výbere. */
+  /**
+   * Koľko produktov by sa NAOZAJ zapísalo — súčet pásiem, nie veľkosť výberu.
+   * Po D121 to nie je to isté číslo (produkt s neznámym predajom je vo výbere,
+   * ale do zápisu nejde), a brána musí strážiť to, čo sa zapíše.
+   */
   itemsCount: number;
+  /**
+   * Koľko produktov výberu vypadlo, lebo ich predaj appka nezmerala (D121).
+   * Chýbajúca hodnota sa číta ako 0 — je to len text dôvodu, nie povolenie:
+   * pri `itemsCount === 0` je zaradenie zakázané tak či tak.
+   */
+  skippedUnknown?: number;
   /** Rozsah appky zápisy zamkol (`scope.writesLocked`). */
   writesLocked: boolean;
   /** Chyba percenta pásma; `undefined` aj `null` znamenajú „bez chyby". */
@@ -1284,6 +1354,48 @@ export interface QueueGateState {
   previewBlockers: number;
   /** Čo je vpísané v poli ručného počtu. */
   typed: string;
+}
+
+/** Z čoho sa skladá veta o prázdnom výbere. */
+export interface EmptySelectionReason {
+  /** Zrkadlo katalógu je prázdne — nemá sa z čoho vyberať. */
+  catalogEmpty: boolean;
+  /** Filter žiada MERANÚ nulu (vedro `none`) — presne to, čo brána vyprázdni. */
+  wantsMeasuredZero: boolean;
+  /** Pokrytie okna si appka priznala (`soldCoverageNote() !== null`). */
+  coverageAdmitted: boolean;
+  soldWindowDays: number;
+  /** `counts.soldUnknown`; `null` = odpoveď to nepovedala. */
+  soldUnknown: number | null;
+}
+
+/**
+ * PRÁZDNY VÝBER MÁ DVA RÔZNE DÔVODY A NESMÚ SA ZLIAŤ (I11, 31. 8. 2026).
+ *
+ * Predvolený filter tejto obrazovky je „0 predaných za 180 dní" (`LEZIAKY`
+ * v `app/zlavy/nova/page.tsx`), a vedro `none` znamená po D121 MERANÚ nulu: pri
+ * nedočítanom okne server prepne bránu na `1 = 0` a nevráti nič. Veta „filtru
+ * nevyhovuje ani jeden produkt" je vtedy NEPRAVDA — produktov je 40 511, len
+ * o ich predaji appka nevie nič. Fail-closed drží (nič sa nezapíše), ale
+ * obrazovka, ktorá „nevieme" potrebuje najviac, musí povedať PRAVÝ dôvod.
+ */
+export function emptySelectionText(reason: EmptySelectionReason): string {
+  if (reason.catalogEmpty) return 'Zatiaľ nie je čo zlacniť — katalóg ešte nie je načítaný.';
+  if (!reason.wantsMeasuredZero || !reason.coverageAdmitted) {
+    return 'Zatiaľ nie je čo zlacniť — filtru nevyhovuje ani jeden produkt.';
+  }
+  const head =
+    'Zatiaľ nie je čo zlacniť — filter „0 predaných" vyberá len produkty so ZMERANÝM predajom';
+  const tail = 'Nie je to tak, že by filtru nevyhovoval ani jeden produkt.';
+  // `null` aj `0` znamenajú „koľko ich je, appka nevie" — číslo si nedomýšľa.
+  if (reason.soldUnknown === null || reason.soldUnknown === 0) {
+    return `${head} a za ${formatCountSk(reason.soldWindowDays)} dní ho zmeraný nemá. ${tail}`;
+  }
+  return (
+    `${head} a ${formatCountSk(reason.soldUnknown)} ` +
+    `${pluralSk(reason.soldUnknown, 'produkt ho', 'produkty ho', 'produktov ho')} ` +
+    `za toto okno zmeraný nemá. ${tail}`
+  );
 }
 
 /**
@@ -1305,7 +1417,23 @@ export interface QueueGateState {
  * o vpísanom počte. Ručný počet je posledný, lebo je to posledná brzda.
  */
 export function queueBlockedReason(gate: QueueGateState): string | null {
-  if (gate.itemsCount === 0) return 'Vyberte aspoň jeden produkt.';
+  if (gate.itemsCount === 0) {
+    /*
+     * „Nič si nevybral" a „vybral si, ale predaje nepoznáme" sú dve rôzne veci
+     * (D121, I11). Do 31. 8. 2026 sa zlievali: brána počítala veľkosť výberu,
+     * takže pri 200 označených a nezmeraných predajoch nepovedala nič a
+     * tlačidlo skúšky naprázdno bolo zapnuté, hoci klik neurobil nič.
+     */
+    const unknown = gate.skippedUnknown ?? 0;
+    if (unknown > 0) {
+      return (
+        `Ani jeden z vybraných produktov nemá predaj za toto okno zmeraný ` +
+        `(${formatCountSk(unknown)}), takže pásmo sa im určiť nedá. Zľava sa ` +
+        `z nemeraného predpokladu nezapíše.`
+      );
+    }
+    return 'Vyberte aspoň jeden produkt.';
+  }
   if (gate.writesLocked) {
     const sentence = guardSentence('writes_locked');
     return `${sentence.text} ${sentence.hint ?? ''}`.trim();

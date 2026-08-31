@@ -85,16 +85,20 @@ test.describe('produkty — detail kusu a filtre nad tým, čo máme', () => {
       /* 3. Zamknuté údaje sú VIDIEŤ, prázdne, so zámkom — nie vynechané. */
       const locked = panel.getByTestId('detail-locked');
       for (const label of [
-        'Kód produktu',
-        'Sklad',
-        'Nákupná cena',
-        'Marža',
+        'EAN produktu',
+        'Cena s DPH',
         'Kategórie',
-        'Skutočná zľava v eshope',
+        'Zapnutý v eshope',
+        'Pridané do eshopu',
       ]) {
         await expect(locked).toContainText(label);
       }
-      await expect(locked.locator('.lockcell')).toHaveCount(6);
+      await expect(locked.locator('.lockcell')).toHaveCount(5);
+      /*
+       * A skupina povie, KEDY sa merala (31. 8. 2026). Kým sa nedoťahovala,
+       * je to priznanie, nie dátum — nikdy „asi teraz".
+       */
+      await expect(panel.getByTestId('detail-keyed-measured')).toContainText('eshopu');
 
       /* 4. Okno predajnosti je voliteľné priamo v paneli. */
       await panel.getByTestId('detail-window-360').click();

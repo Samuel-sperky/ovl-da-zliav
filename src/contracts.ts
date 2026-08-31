@@ -206,6 +206,14 @@ export type AuditEventType =
   | 'writes_unlocked'
   | 'reconcile_uncertain'
   | 'migration_applied'
+  // D112 — presety (KONTRAKT-V4-2026-08-28). Preset nič nezapisuje do shopu,
+  // ale nesie percentá, ktoré niekto o mesiac naklikne jedným klikom, takže
+  // I4 („audit každej mutácie", D102) platí aj tu. Použitie presetu sa
+  // NEAUDITUJE — `discount_presets.last_used_at` je samo záznamom o použití
+  // a jeho zápis nemení, čo appka smie (zdôvodnenie v `presets/[presetId]/
+  // mark-used/route.ts`).
+  | 'preset_created'
+  | 'preset_deleted'
   | 'boot'
   | 'shutdown';
 
@@ -1480,12 +1488,13 @@ export type NewDiscountPreset = Pick<
   'name' | 'filterQuery' | 'tiers' | 'durationDays'
 >;
 
-/**
- * Čo sa dá na presete zmeniť. Zmena je VÝSLOVNÁ operácia — ukladanie pod
- * obsadeným menom preset neprepíše (na rozdiel od uložených filtrov
- * v prehliadači, ktoré nič nezapisujú do eshopu).
+/*
+ * `DiscountPresetPatch` tu bol do 31. 8. 2026 a je zmazaný spolu s
+ * `presetsRepo.update()`: preset sa needituje. Uložiť pod obsadeným menom
+ * preset NEPREPÍŠE (409 `preset_name_taken`) a obrazovka ponúka len uložiť,
+ * predplniť a zmazať — zmena presetu sa robí tak, že sa zmaže a uloží znova.
+ * Typ bez jediného volajúceho tvrdil o kontrakte niečo, čo neplatilo.
  */
-export type DiscountPresetPatch = Partial<NewDiscountPreset>;
 
 /* ═══════════════════════ 14. Health (§5, D87, D91) ═══════════════════════ */
 

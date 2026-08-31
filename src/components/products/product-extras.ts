@@ -62,8 +62,9 @@
  *     stojí ≈ 2 dávkové volania z rozpočtu 240 anonymných čítaní na deň. Celý
  *     katalóg (41 220 kusov) by bol 1 649 volaní, teda skoro sedem dní
  *     rozpočtu — a ten istý rozpočet potrebuje synchronizácia katalógu.
- *     Obrazovka preto volá `fetchProductExtras()` raz na stránku a výsledok si
- *     drží; NIKDY to nespúšťa efekt bežiaci pri každom prekreslení.
+ *     Obrazovka preto doťahuje stránku RAZ (`extras-api.ts` →
+ *     `POST /api/catalog/details`) a výsledok si drží; NIKDY to nespúšťa efekt
+ *     bežiaci pri každom prekreslení.
  *  d. **HTML z popisu sa nikdy nevkladá do stránky.** Shop vracia popis ako
  *     HTML; `plainText()` z neho spraví text. `dangerouslySetInnerHTML` sa
  *     v tomto tabe nepoužíva ani raz.
@@ -81,7 +82,7 @@
  */
 import type { KpiGap, SalesDayCoverage } from '@/contracts';
 
-import { formatDateSk, formatEur } from '@/lib/ui/format';
+import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═════════════════ 1. Tri „prázdna", jeden slovník ════════════════════════ */
@@ -489,59 +490,18 @@ export interface ApiErrorView {
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: ApiErrorView };
 
-const UNEXPECTED: ApiErrorView = {
-  code: 'unexpected',
-  message: 'Server odpovedal inak, než sme čakali. Skúste to znova.',
-};
-
-const OFFLINE: ApiErrorView = {
-  code: 'network',
-  message: 'Server neodpovedá. Skúste to znova.',
-};
-
 export const isAbortedExtras = (error: ApiErrorView): boolean => error.code === 'aborted';
 
-/**
- * Cesta k dávkovému doplneniu. Endpoint stavia dátová strana; keď sa cesta
- * zmení, mení sa TU a nikde inde.
+/*
+ * TU STÁL MŔTVY KLIENT `fetchProductExtras()` NA NEEXISTUJÚCU CESTU
+ * ────────────────────────────────────────────────────────────────
+ * `EXTRAS_ENDPOINT = '/api/catalog/extras'` a funkcia pod ním mali NULA
+ * volajúcich a route toho mena v `src/app/api/catalog/` nikdy nevznikla
+ * (sú tam `details`, `enrich`, `reduction-check`, `refresh`, `search`, `sync`).
+ * Živá cesta je `extras-api.ts` → `POST /api/catalog/details`. Kto sa riadil
+ * hlavičkou tohto súboru, dostal 404 na každý fakt o produkte — preto je
+ * odstránené aj to, aj tá veta v hlavičke (31. 8. 2026).
  */
-export const EXTRAS_ENDPOINT = '/api/catalog/extras';
-
-/**
- * Doplní zobrazenú stránku tabuľky.
- *
- * POSIELA SA CELÁ STRÁNKA NARAZ a server si ju rozdelí sám — on jediný vie,
- * koľko čítaní mu z rozpočtu ostáva. Riadky, na ktoré sa nedostalo, vráti
- * v `skippedIds` a zostanú `pending`.
- *
- * MÍŇA ROZPOČET ČÍTANÍ. Volať výhradne pri zmene zobrazenej stránky, nikdy
- * v efekte bez podmienky (bod c hlavičky).
- */
-export async function fetchProductExtras(
-  productIds: readonly number[],
-  signal?: AbortSignal,
-): Promise<Result<ProductExtrasView>> {
-  try {
-    const res = await fetch(EXTRAS_ENDPOINT, {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productIds: [...productIds] }),
-      signal,
-    });
-    try {
-      const body = (await res.json()) as Result<ProductExtrasView>;
-      if (body !== null && typeof body === 'object' && 'ok' in body) return body;
-    } catch {
-      /* neplatné telo — spadne na `UNEXPECTED` nižšie */
-    }
-    return { ok: false, error: UNEXPECTED };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      return { ok: false, error: { code: 'aborted', message: '' } };
-    }
-    return { ok: false, error: OFFLINE };
-  }
-}
 
 /* ═════════════════ 8. KPI, obohatenie na dopyt a uplift (V4) ══════════════
  *
@@ -850,6 +810,62 @@ export function measuredNote(view: ProductKpiView | null | undefined): string {
     return 'Tento produkt sa z eshopu ešte nedoťahoval, takže fakty o ňom appka nemá.';
   }
   return `Fakty z eshopu zmerané ${formatDateSk(view.enrichedAt)} — nie je to stav v tejto sekunde.`;
+}
+
+/**
+ * Veta o tom, KEDY sa zmerali podrobnosti spoza kľúča (`extra`).
+ *
+ * PREČO EXISTUJE. Panel mal dve skupiny z eshopu a čas merania niesla len
+ * jedna: „Fakty z eshopu" (`measuredNote()` vyššie). Druhá — „Podrobnosti
+ * z eshopu" — mlčala o tom, kedy vznikla, takže sa nedalo povedať, ktoré
+ * z dvoch čísel o TOM ISTOM poli je novšie. Duplicitné polia z nej odišli
+ * (rozhodnutie 31. 8. 2026, viď hlavičku `ProductDetailPanel.tsx`), ale to
+ * mlčanie by zostalo aj nad piatimi zvyšnými riadkami: **skupina bez času
+ * merania sa v tejto appke nekreslí.**
+ *
+ * PREČO MINÚTY, KEĎ `measuredNote()` DÁVA LEN DEŇ. Sú to dva rôzne merania
+ * s dvoma rôznymi kadenciami. `enriched_at` je fakt dávky obohacovania (D118 —
+ * priorita, ~150/deň), tam je zmysluplná jednotka DEŇ. `fetched_at` je čas
+ * doťahovania detailu, ktoré sa spúšťa OTVORENÍM panela, takže dva pokusy
+ * v ten istý deň by mali rovnaký dátum a veta by neinformovala o ničom.
+ *
+ * TRI STAVY, TRI VETY — a ani v jednom sa čas nevymyslí:
+ *  · `undefined` — appka sa ešte nepýtala,
+ *  · `keyed === null` — odpoveď prišla bez bloku spoza kľúča (nedovidíme),
+ *  · `at === ''` — blok prišiel, ale bez času; potom sa PRIZNÁ, že sa čas
+ *    nedá povedať. Doplniť ho „asi teraz" by bolo presne to tvrdenie o stave
+ *    v tejto sekunde, ktoré I11 zakazuje.
+ */
+export function keyedMeasuredNote(extra: ProductExtraView | undefined): string {
+  if (extra === undefined) return 'Podrobnosti z eshopu sa načítavajú.';
+  if (extra.keyed === null) {
+    return 'Podrobnosti z eshopu appka zatiaľ nedovidí, takže ani čas ich merania nemá.';
+  }
+  if (extra.at === '') {
+    return 'Podrobnosti z eshopu prišli bez času merania, takže appka nevie povedať, ako sú staré.';
+  }
+  return `Podrobnosti z eshopu zmerané ${formatDateTimeSk(extra.at)} — nie je to stav v tejto sekunde.`;
+}
+
+/**
+ * Veta o tom, KEDY sa zmerali varianty.
+ *
+ * Varianty sú tá istá odpoveď (`extra`) ako podrobnosti spoza kľúča, len ich
+ * dá aj VEREJNÁ cesta `products/get` — chýbajúci kľúč ich teda nezamkne
+ * a stav „nedovidíme" tu neexistuje. Preto dve funkcie a nie jedna
+ * s parametrom: tretí stav `keyedMeasuredNote()` by tu bol nepravdivý.
+ *
+ * Dôvod, prečo veta vôbec je: skupina, ktorá kreslí meranie z eshopu a mlčí
+ * o jeho čase, sa v tomto paneli nekreslí (bod 7 hlavičky
+ * `ProductDetailPanel.tsx`). Kreslí ju `ProductVariants`, teda ten istý
+ * komponent, ktorý kreslí zoznam — tak sa skupina nedá vykresliť bez nej.
+ */
+export function variantsMeasuredNote(extra: ProductExtraView | undefined): string {
+  if (extra === undefined) return 'Varianty sa načítavajú.';
+  if (extra.at === '') {
+    return 'Varianty prišli bez času merania, takže appka nevie povedať, ako sú staré.';
+  }
+  return `Varianty zmerané ${formatDateTimeSk(extra.at)} — nie je to stav v tejto sekunde.`;
 }
 
 /* ───────── 8d. Obohatenie na dopyt (D118) ─────────────────────────────── */

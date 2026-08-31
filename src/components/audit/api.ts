@@ -156,6 +156,14 @@ export const AUDIT_EVENT_LABELS: Readonly<Record<string, string>> = {
   writes_locked: 'zápisy zastavené',
   writes_unlocked: 'zápisy odomknuté',
   /*
+   * Presety (D112). Vety hovoria o PRESETE, nie o zľave — preset len predplní
+   * formulár a v eshope sa ním nič nezmenilo. Použitie presetu sa v Histórii
+   * nezobrazuje, pretože sa neauditovalo (zdôvodnenie v `lib/audit/events.ts`);
+   * kedy bol naposledy použitý, stojí v panele presetov.
+   */
+  preset_created: 'preset uložený',
+  preset_deleted: 'preset zmazaný',
+  /*
    * Vety k HISTORICKÝM udalostiam. Appka ich od 27. 8. 2026 nezapisuje (D99,
    * D100), ale staršie riadky auditu ich nesú a `audit_log` sa nemení (D101).
    * Bez týchto prekladov by o nich História povedala len „iná udalosť appky",

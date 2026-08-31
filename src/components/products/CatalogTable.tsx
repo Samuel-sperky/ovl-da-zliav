@@ -35,9 +35,13 @@
  * ─────────────────────────────────────────────────────────────
  * Zobrazené kusy prichádzajú z `GET /api/insights/product-kpi`, kde je brána
  * `status='complete'`: nedočítaný deň sa NEPOČÍTA a bunka to prizná (`≥`).
- * `unitsSold` z `catalog/search` tú bránu NEMÁ (nedočítaný deň v ňom vyjde ako
- * deň s nulou), takže sa už NEZOBRAZUJE VÔBEC — dve rôzne čísla o tom istom
- * produkte na jednej obrazovke sú horšie než jedno priznane neúplné. Triedenie
+ * `unitsSold` z `catalog/search` tú bránu od 31. 8. 2026 MÁ TIEŽ (D121 —
+ * `JOIN_SALES` gatuje `status='complete'` a nedočítané okno vracia `null`),
+ * takže obe čísla už hovoria to isté pravidlo. V tabuľke sa aj tak
+ * NEZOBRAZUJE — dve cesty k tomu istému číslu na jednej obrazovke sú zbytočná
+ * príležitosť rozísť sa; číslo nesie KPI a `unitsSold` slúži poradiu. (Pozor:
+ * predchádzajúca podoba tejto vety tvrdila, že brána v `catalog/search`
+ * CHÝBA — bola to presne ta veta, podľa ktorej by niekto vrátil `?? 0`.) Triedenie
  * „najmenej predané prvé" ho používa ďalej (inak by sa 41 348 riadkov nedalo
  * usporiadať) a hlavička stĺpca to hovorí v `title`: poradie áno, číslo nie.
  *

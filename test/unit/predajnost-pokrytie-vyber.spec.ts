@@ -42,7 +42,11 @@ vi.mock('@/components/products/sold-coverage', async (importOriginal) => {
   return { ...actual, useSoldCoverage: () => hook.state };
 });
 
-import NewDiscount, { type NewDiscountInitial } from '@/components/campaigns/NewDiscount';
+import NewDiscount, {
+  emptySelectionText,
+  type EmptySelectionReason,
+  type NewDiscountInitial,
+} from '@/components/campaigns/NewDiscount';
 import CatalogPanel from '@/components/products/CatalogPanel';
 import { DEFAULT_CATALOG_FILTER } from '@/components/products/catalog-filter';
 import {
@@ -57,6 +61,7 @@ import {
 const DVA_DNI: SoldCoverage = {
   syncEnabled: true,
   daysCovered: 2,
+  daysPartial: 0,
   from: '2026-08-05',
   to: '2026-08-06',
 };
@@ -106,6 +111,26 @@ describe('A — veta o pokrytí predajnosti', () => {
   it('okno o jeden deň dlhšie než pokrytie sa už priznáva', () => {
     expect(soldCoverageNote(known({ ...DVA_DNI, daysCovered: 179 }), 180)).not.toBeNull();
   });
+
+  it('ČIASTOČNÉ dni sa za pokryté nepočítajú — inak by veta zmlkla nad dolnou hranicou', () => {
+    /*
+     * Nález WIRING (31. 8. 2026): server po D121 sčítava kusy VÝHRADNE z dní so
+     * `status = 'complete'`, kým klient bral `daysCovered`, do ktorého sa
+     * počítal aj čiastočný deň s aspoň jednou objednávkou (`isMeasuredDay`
+     * v `insights.ts`). Okno 30 dní s 25 celými a 5 čiastočnými dňami tak dalo
+     * `30 >= 30`, veta zmlkla a bunka vypísala dolnú hranicu ako celý počet.
+     */
+    const note = soldCoverageNote(known({ ...DVA_DNI, daysCovered: 30, daysPartial: 5 }), 30);
+    expect(note).not.toBeNull();
+    expect(note?.text).toContain('25 z 30');
+  });
+
+  it('samé čiastočné dni sú „ani jeden celý", nie „nestiahlo sa nič"', () => {
+    const note = soldCoverageNote(known({ ...DVA_DNI, daysCovered: 4, daysPartial: 4 }), 30);
+    expect(note?.variant).toBe('warn');
+    expect(note?.text).toContain('Ani jeden deň nie je stiahnutý celý');
+    expect(note?.text).toContain('rozbehnutých je 4');
+  });
 });
 
 /* ═══════════ B. Čítanie odpovede — „nevieme" sa nedopočítava ══════════════ */
@@ -115,7 +140,13 @@ describe('B — čítanie hlavičky o pokrytí', () => {
     expect(
       parseSoldCoverage({
         today: '2026-08-26',
-        coverage: { syncEnabled: true, daysCovered: 2, from: '2026-08-05', to: '2026-08-06' },
+        coverage: {
+          syncEnabled: true,
+          daysCovered: 2,
+          daysPartial: 0,
+          from: '2026-08-05',
+          to: '2026-08-06',
+        },
       }),
     ).toEqual(DVA_DNI);
   });
@@ -126,6 +157,20 @@ describe('B — čítanie hlavičky o pokrytí', () => {
 
   it('chýbajúci počet zmeraných dní je „nevieme", nie nula', () => {
     expect(parseSoldCoverage({ coverage: { syncEnabled: true } })).toBeNull();
+  });
+
+  it('chýbajúci počet ČIASTOČNÝCH dní je „nevieme", nie nula', () => {
+    /*
+     * Dosadená nula by znamenala „všetky zmerané dni sú prečítané celé" — a to
+     * je práve tvrdenie, ktoré server po D121 nerobí (kusy sčítava len z dní
+     * so `status = 'complete'`). Bez tohto by klient z dolnej hranice vyrobil
+     * meranie a veta o pokrytí by pri 25 celých + 5 čiastočných dňoch zmlkla.
+     */
+    expect(
+      parseSoldCoverage({
+        coverage: { syncEnabled: true, daysCovered: 30, from: null, to: null },
+      }),
+    ).toBeNull();
   });
 
   it('odpoveď bez hlavičky je „nevieme"', () => {
@@ -188,5 +233,59 @@ describe('C — Produkty a sprievodca pokrytie priznávajú', () => {
     hook.state = SOLD_COVERAGE_UNASKED;
     expect(produkty()).not.toContain('data-testid="sold-coverage-note"');
     expect(sprievodca()).not.toContain('data-testid="sold-coverage-note"');
+  });
+});
+
+/* ═══════════ D. Prázdny výber Novej zľavy hovorí PRAVÝ dôvod ══════════════ */
+
+/*
+ * Nález z 31. 8. 2026 (I11). Predvolený filter Novej zľavy je „0 predaných za
+ * 180 dní" a vedro `none` znamená po D121 MERANÚ nulu: pri nedočítanom okne
+ * server prepne bránu na `1 = 0` a nevráti ani riadok. Obrazovka z toho
+ * vyrobila vetu „filtru nevyhovuje ani jeden produkt", hoci produktov je
+ * 40 511 a appka o ich predaji nevie nič.
+ */
+describe('D — prázdny výber Novej zľavy rozlišuje „nič" od „nevieme"', () => {
+  const dovod = (over: Partial<EmptySelectionReason> = {}): EmptySelectionReason => ({
+    catalogEmpty: false,
+    wantsMeasuredZero: true,
+    coverageAdmitted: true,
+    soldWindowDays: 180,
+    soldUnknown: 40511,
+    ...over,
+  });
+
+  it('nedočítané okno pri filtri „0 predaných" NEHOVORÍ, že filtru nevyhovuje nič', () => {
+    const text = emptySelectionText(dovod());
+    expect(text).not.toContain('filtru nevyhovuje ani jeden produkt');
+    expect(text).toContain('ZMERANÝM predajom');
+    expect(text).toContain('40 511');
+  });
+
+  it('neznámy počet neznámych sa nedomýšľa číslom, ale povie sa okno', () => {
+    for (const soldUnknown of [null, 0]) {
+      const text = emptySelectionText(dovod({ soldUnknown }));
+      expect(text, String(soldUnknown)).toContain('180 dní');
+      expect(text, String(soldUnknown)).not.toContain('0 produktov');
+      expect(text, String(soldUnknown)).not.toContain('filtru nevyhovuje ani jeden produkt');
+    }
+  });
+
+  it('pri PLNOM pokrytí je prázdny výber naozaj prázdny výber', () => {
+    expect(emptySelectionText(dovod({ coverageAdmitted: false }))).toBe(
+      'Zatiaľ nie je čo zlacniť — filtru nevyhovuje ani jeden produkt.',
+    );
+  });
+
+  it('filter, ktorý meranú nulu nežiada, nemá dôvod hovoriť o pokrytí', () => {
+    expect(emptySelectionText(dovod({ wantsMeasuredZero: false }))).toBe(
+      'Zatiaľ nie je čo zlacniť — filtru nevyhovuje ani jeden produkt.',
+    );
+  });
+
+  it('prázdne zrkadlo katalógu prebíja všetko ostatné', () => {
+    expect(emptySelectionText(dovod({ catalogEmpty: true }))).toContain(
+      'katalóg ešte nie je načítaný',
+    );
   });
 });

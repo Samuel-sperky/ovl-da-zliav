@@ -22,6 +22,9 @@
  *
  * Vlastník: V8.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import type { AuditInput } from '@/contracts';
@@ -37,6 +40,7 @@ import type {
   CatalogCounts,
   CatalogSearchFilter,
   CatalogSearchResult,
+  CatalogSearchRow,
   LockedCatalogFilter,
 } from '@/lib/repo/catalog.repo';
 import { FAIL_CLOSED_SCOPE, PILOT_MAX_PRODUCTS, type ScopeMode } from '@/lib/repo/settings.repo';
@@ -72,6 +76,7 @@ function catalogFake(): {
           soldWindowDays: 180,
           soldFrom: '2026-02-11',
           soldTo: '2026-08-10',
+          soldCoverage: { windowDays: 180, completeDays: 180, unknownDays: 0 },
           lockedFilters: [...LOCKED],
           enrichedOnly: [],
         };
@@ -81,6 +86,7 @@ function catalogFake(): {
         return {
           total: 0,
           sold: { none: 0, low: 0, mid: 0, high: 0 },
+          soldUnknown: 0,
           neverDiscounted: 0,
           discountedNow: 0,
           shopDiscountedNow: 0,
@@ -101,6 +107,94 @@ function catalogFake(): {
     },
   };
 }
+
+/* ═══════════ 1b. D121 — `unitsSold: null` prežije až do odpovede ══════════ */
+
+/*
+ * MEDZERA, KTORÚ TENTO SÚBOR ZAVIERA (31. 8. 2026).
+ *
+ * Serverovú polovicu D121 kryl `predaje-brana-pokrytia.spec.ts`, ale ten meria
+ * REPOZITÁR (`search()`, `factsFor()`). Prepis riadku na odpoveď robí route
+ * (`mirrorRowView()`), a ten testovaný nebol: mutácia `unitsSold: row.unitsSold`
+ * → `row.unitsSold ?? 0` nechala CELÝ balík zelený. Nula pritom znamená vedro
+ * „0 predaných", a z neho 30 % zľavu na produkte, ktorý appka nikdy nezmerala.
+ */
+type CatalogDep = NonNullable<CatalogSearchRouteDeps['catalog']>;
+
+function catalogWithRows(rows: readonly CatalogSearchRow[]): CatalogDep {
+  const base = catalogFake().repo as CatalogDep;
+  return {
+    ...base,
+    async search(filter: CatalogSearchFilter): Promise<CatalogSearchResult> {
+      const result = await base.search(filter);
+      return { ...result, data: [...rows], total: rows.length };
+    },
+  };
+}
+
+function mirrorRow(productId: number, unitsSold: number | null): CatalogSearchRow {
+  return {
+    productId,
+    name: `Produkt ${productId}`,
+    price: '19.90',
+    hasAttributes: false,
+    source: 'list',
+    fetchedAt: new Date('2026-08-30T01:00:00.000Z'),
+    raw: null,
+    shopStatus: 'ok',
+    unitsSold,
+    everDiscounted: false,
+    discountedNow: false,
+  };
+}
+
+describe('GET /api/catalog/search — „nevieme" sa v odpovedi nemení na nulu (D121, I11)', () => {
+  it('`unitsSold: null` z repozitára odchádza ako `null`, nie ako `0`', async () => {
+    const route = createCatalogSearchRoute({
+      catalog: catalogWithRows([mirrorRow(90501, null), mirrorRow(90502, 4), mirrorRow(90503, 0)]),
+      routeDeps: actorRouteDeps(),
+    });
+
+    const res = await parse(
+      await route(makeRequest('GET', '/api/catalog/search?soldWindowDays=180&counts=0')),
+    );
+    expect(res.status).toBe(200);
+
+    const rows = (res.body.data as { data: readonly { productId: number; unitsSold: unknown }[] })
+      .data;
+    const soldOf = (productId: number): unknown =>
+      rows.find((row) => row.productId === productId)?.unitsSold;
+
+    // „Za toto okno to nevieme" — pomlčka na povrchu, `null` na drôte.
+    expect(soldOf(90501)).toBeNull();
+    // Meraná hodnota prejde nezmenená…
+    expect(soldOf(90502)).toBe(4);
+    // …a meraná NULA je tiež fakt, takže sa na `null` nemení ani ona.
+    expect(soldOf(90503)).toBe(0);
+
+    // A explicitne to, čo mutácia `?? 0` spôsobí: nula tam, kde má byť `null`.
+    expect(soldOf(90501)).not.toBe(0);
+  });
+
+  it('v route nestojí ani jedno `?? 0` nad `unitsSold` — brána sa nedá obnoviť ticho', () => {
+    /*
+     * Tvarová závora nad OBOMA miestami prepisu (riadok zrkadla aj riadok
+     * dotiahnutý zo shopu cez `?lookup=1`). Druhé z nich sa integračne dosahuje
+     * len s celou lookup mechanikou, takže tu stojí grep — rovnako, ako repo
+     * grepuje `setReduction`.
+     */
+    const source = readFileSync(
+      fileURLToPath(new URL('../../src/app/api/catalog/search/route.ts', import.meta.url)),
+      'utf8',
+    );
+    const suspicious = source
+      .split(/\r?\n/)
+      // Komentáre o tej mutácii tam stáť SMÚ — práve ony jej bránia vrátiť sa.
+      .filter((line) => !/^\s*(\/\/|\/?\*)/.test(line))
+      .filter((line) => line.includes('unitsSold') && line.includes('?? 0'));
+    expect(suspicious).toEqual([]);
+  });
+});
 
 describe('GET /api/catalog/search — zamknuté filtre (K8)', () => {
   it('vráti `locked: true` za každý filter bez dát a poslaný filter NEAPLIKUJE', async () => {

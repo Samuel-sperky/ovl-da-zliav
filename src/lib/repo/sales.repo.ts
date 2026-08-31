@@ -37,6 +37,24 @@
  * do jedného čísla, preto obrazovka musí pokrytie priznať — a `coverageFor()` je
  * to, čím ho zistí bez druhého zdroja pravdy.
  *
+ * TO ISTÉ PRE TRŽBU (31. 8. 2026, migrácia 0016)
+ * ----------------------------------------------
+ * `shop_revenue_daily` má mena V KĽÚČI, takže deň BEZ jedinej objednávky žiadnu
+ * menu neprinesie a riadok nedostane — čítacia strana ho potom vidí ako
+ * „nevieme", hoci sme ho dočítali. Zatvára to `shop_revenue_read_state` (0016):
+ * jeden riadok NA DEŇ, bez meny, s príznakom `day_complete`. Platí z toho presne
+ * toto a nič iné:
+ *
+ *   · stav `day_complete = 1` a žiadny riadok v `shop_revenue_daily`
+ *     ⇒ prečítali sme celý deň a NEPREDALO SA NIČ (meraná nula),
+ *   · stav `day_complete = 0` ⇒ suma je dolná hranica a o nule netvrdíme nič
+ *     („`≥ 0`" je prázdna veta, nie priznanie),
+ *   · žiadny riadok stavu ani hodnôt ⇒ NEVIEME (pomlčka).
+ *
+ * Deň, ktorý mal riadky v `shop_revenue_daily` ešte pred 0016 (a stav teda nemá),
+ * zostáva „čítaný" — to hovorí jeho vlastný `day_complete`. Preto tu nie je
+ * žiadny backfill: stav sa nedopĺňa dozadu, len sa odteraz zapisuje.
+ *
  * Raw parametrizované SQL, žiadne ORM (rovnaký vzor ako ostatné repozitáre).
  * I4: žiadny prístup k `audit_log`.
  *
@@ -100,6 +118,34 @@ export interface ShopRevenueDayWrite {
 }
 
 /**
+ * Zápis prečítanosti jedného dňa tržby (`shop_revenue_read_state`, 0016).
+ *
+ * Je to STAV DŇA, nie suma — a menu zámerne nepozná. Deň bez jedinej objednávky
+ * žiadnu menu neprinesie, takže v `shop_revenue_daily` nemá ako dostať riadok;
+ * bez tohto stavu ho čítacia strana vidí ako „nevieme", hoci sme ho dočítali.
+ */
+export interface ShopRevenueReadStateWrite {
+  /** `true` = prečítali sme VŠETKY strany zoznamu objednávok tohto dňa. */
+  dayComplete: boolean;
+  /** POČET videných objednávok, nie odkaz na objednávku (I8' bod 3). */
+  ordersSeen: number;
+  pagesRead?: number;
+  /** KÓD chyby, NIKDY obsah odpovede shopu (I1). */
+  lastError?: string | null;
+}
+
+/** Prečítanosť jedného dňa tržby tak, ako je v DB (`0016`). */
+export interface ShopRevenueReadStateRecord {
+  day: DateOnly;
+  dayComplete: boolean;
+  ordersSeen: number;
+  pagesRead: number;
+  lastError: string | null;
+  firstReadAt: Date | null;
+  updatedAt: Date | null;
+}
+
+/**
  * Pokrytie jedného dňa okna (I11). `units` je súčet kusov produktu za ten deň
  * — má význam LEN pri `coverage === 'complete'`.
  */
@@ -150,6 +196,27 @@ export interface SalesRepoContract {
    * strany, ktorá vie, koľko dní graf kreslí.
    */
   listRevenue(from: DateOnly, to: DateOnly, conn?: Queryable): Promise<ShopRevenueDayRecord[]>;
+
+  /**
+   * Upsert prečítanosti dňa (0016). Volá sa LEN pre deň, z ktorého sa naozaj
+   * prečítala aspoň jedna strana zoznamu — riadok tu znamená „tento deň sme
+   * čítali", takže predvyplnenie dní dopredu by z celého okna urobilo
+   * „prečítané, nič sa nepredalo" a to je tá istá lož ako nula (I11).
+   */
+  upsertRevenueReadState(
+    day: DateOnly,
+    write: ShopRevenueReadStateWrite,
+    conn?: Queryable,
+  ): Promise<void>;
+  /**
+   * Prečítanosť dní okna. Vracia LEN dni, ktoré sa naozaj čítali — deň BEZ
+   * riadku je „nevieme" a nedopĺňa sa (I11).
+   */
+  listRevenueReadStates(
+    from: DateOnly,
+    to: DateOnly,
+    conn?: Queryable,
+  ): Promise<ShopRevenueReadStateRecord[]>;
 
   /* ── I11: „0 predaných" verzus „tento deň sa nesťahoval" ─────────────── */
 
@@ -225,6 +292,39 @@ const SQL_REVENUE_RANGE =
 
 /** Strop riadkov jedného čítania tržieb — dva roky a dve meny sa zmestia. */
 const MAX_REVENUE_ROWS = 1500;
+
+/* ── D117 + I11: prečítanosť dňa tržby (`shop_revenue_read_state`, 0016) ── */
+
+const REVENUE_STATE_COLUMNS =
+  'revenue_day, day_complete, orders_seen, pages_read, last_error, first_read_at, updated_at';
+
+/**
+ * Absolútny upsert stavu dňa, nie inkrement — z toho istého dôvodu ako
+ * `SQL_REVENUE_UPSERT`: opakovaný beh nad tým istým dňom musí vrátiť to isté.
+ *
+ * `day_complete` sa PREPÍŠE na to, čo hovorí posledný zápis, vrátane `1 → 0`:
+ * keď sa deň prepočítava a beh sa preruší, dočítaný už NIE JE. To, že neúplné
+ * čítanie neznehodnotí deň, o ktorom sme už vedeli viac, rieši volajúci
+ * (`sales-sync.ts`) — rovnako ako pri menových riadkoch, aby oba zápisy jedného
+ * dňa hovorili to isté.
+ *
+ * `first_read_at` sa NEPREPISUJE (nie je vo `VALUES`): je to prvý raz, kedy sme
+ * o dni vôbec niečo prečítali, a to sa druhým behom nemení.
+ */
+const SQL_REVENUE_STATE_UPSERT =
+  'INSERT INTO shop_revenue_read_state ' +
+  '(revenue_day, day_complete, orders_seen, pages_read, last_error) ' +
+  'VALUES (?, ?, ?, ?, ?) ' +
+  'ON DUPLICATE KEY UPDATE ' +
+  'day_complete = VALUES(day_complete), ' +
+  'orders_seen = VALUES(orders_seen), ' +
+  'pages_read = VALUES(pages_read), ' +
+  'last_error = VALUES(last_error)';
+
+const SQL_REVENUE_STATE_RANGE =
+  `SELECT ${REVENUE_STATE_COLUMNS} FROM shop_revenue_read_state ` +
+  'WHERE revenue_day >= ? AND revenue_day <= ? ' +
+  'ORDER BY revenue_day ASC LIMIT ?';
 
 /** Strop dní jedného okna pokrytia. 400 dní je viac než najdlhšie okno UI. */
 const MAX_COVERAGE_DAYS = 400;
@@ -432,6 +532,46 @@ export function createSalesRepo(deps: SalesRepoDeps = {}): SalesRepoContract {
     }));
   }
 
+  async function upsertRevenueReadState(
+    day: DateOnly,
+    write: ShopRevenueReadStateWrite,
+    conn?: Queryable,
+  ): Promise<void> {
+    if (!isDay(day)) return;
+    // `last_error` je KÓD, nikdy obsah odpovede shopu (I1) — dĺžka stĺpca je
+    // 200 znakov a dlhší vstup by zápis zhodil, nie skrátil.
+    const lastError =
+      write.lastError === undefined || write.lastError === null
+        ? null
+        : String(write.lastError).slice(0, 200);
+
+    await run(conn, SQL_REVENUE_STATE_UPSERT, [
+      day,
+      write.dayComplete ? 1 : 0,
+      Math.max(0, Math.trunc(num(write.ordersSeen))),
+      Math.max(0, Math.trunc(num(write.pagesRead ?? 0))),
+      lastError,
+    ]);
+  }
+
+  async function listRevenueReadStates(
+    from: DateOnly,
+    to: DateOnly,
+    conn?: Queryable,
+  ): Promise<ShopRevenueReadStateRecord[]> {
+    if (!isDay(from) || !isDay(to) || from > to) return [];
+    const rows = await run<DbRow[]>(conn, SQL_REVENUE_STATE_RANGE, [from, to, MAX_STATE_ROWS]);
+    return (Array.isArray(rows) ? rows : []).map((row) => ({
+      day: toDateOnly(row.revenue_day),
+      dayComplete: num(row.day_complete) === 1,
+      ordersSeen: num(row.orders_seen),
+      pagesRead: num(row.pages_read),
+      lastError: row.last_error == null ? null : String(row.last_error),
+      firstReadAt: toDateOrNull(row.first_read_at),
+      updatedAt: toDateOrNull(row.updated_at),
+    }));
+  }
+
   /* ── I11: „0 predaných" verzus „tento deň sa nesťahoval" ──────────────── */
 
   async function coverageFor(
@@ -482,6 +622,8 @@ export function createSalesRepo(deps: SalesRepoDeps = {}): SalesRepoContract {
     saveSyncState,
     upsertRevenueDay,
     listRevenue,
+    upsertRevenueReadState,
+    listRevenueReadStates,
     coverageFor,
   };
 }

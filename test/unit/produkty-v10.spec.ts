@@ -26,6 +26,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import CatalogFilters from '@/components/products/CatalogFilters';
+import type { CatalogCountsView } from '@/components/products/catalog-api';
 import CatalogPanel from '@/components/products/CatalogPanel';
 import CatalogTable, { pageTokens } from '@/components/products/CatalogTable';
 import ProductDetailPanel from '@/components/products/ProductDetailPanel';
@@ -66,9 +67,11 @@ const LOCKED = {
   margin: { locked: true as const, requested: false },
 };
 
-const COUNTS = {
+const COUNTS: CatalogCountsView = {
   total: 40483,
   sold: { none: 11640, low: 7564, mid: 12918, high: 8361 },
+  // Vedrá + `soldUnknown` = `total` (D121). Tu je okno dočítané, teda nula.
+  soldUnknown: 0,
   neverDiscounted: 21049,
   discountedNow: 2380,
   shopDiscountedNow: 311,
@@ -201,6 +204,48 @@ describe('V10 — obrazovka Produkty', () => {
     // Čísla pri možnostiach sú merané, takže bez značky odhadu (P7).
     expect(html).toContain('11 640');
     expect(html).not.toContain('≈');
+  });
+
+  /*
+   * Nález z 31. 8. 2026 (I11). Vedrá Predajnosti hovoria len o produktoch,
+   * ktorých predaj appka ZMERALA. Pri nedočítanom okne je „0 predaných" nula
+   * (server prepne bránu na `1 = 0`), takže súčet vedier je 837 pri `total`
+   * 41 348 — a chýbajúcich 40 511 riadkov zmizlo bez slova: `counts.soldUnknown`
+   * bol na drôte a v paneli sa nevykresľoval nikde.
+   */
+  it('nezmeraný predaj má v paneli Predajnosti vlastný riadok (D121, I11)', () => {
+    const filtre = (counts: typeof COUNTS) =>
+      renderToStaticMarkup(
+        createElement(CatalogFilters, {
+          filter: DEFAULT_CATALOG_FILTER,
+          counts,
+          lockedFilters: LOCKED,
+          saved: [],
+          activeSaved: null,
+          open: false,
+          onChange: () => {},
+          onApplySaved: () => {},
+          onRemoveSaved: () => {},
+        }),
+      );
+
+    const nedocitane = filtre({
+      ...COUNTS,
+      total: 41348,
+      sold: { none: 0, low: 805, mid: 30, high: 2 },
+      soldUnknown: 40511,
+    });
+    expect(nedocitane).toContain('data-testid="filter-sold-unknown"');
+    expect(nedocitane).toContain('40 511');
+    // Súčet vedier je zlomok `total` — a panel to hovorí, nie zamlčí.
+    expect(0 + 805 + 30 + 2 + 40511).toBe(41348);
+
+    // Nečitateľný počet je priznanie, nie nula.
+    const nevieme = filtre({ ...COUNTS, soldUnknown: null });
+    expect(nevieme).toContain('nedalo zistiť');
+
+    // Dočítané okno nemá čo priznávať — riadok mlčí.
+    expect(filtre({ ...COUNTS, soldUnknown: 0 })).not.toContain('NEZNÁMY');
   });
 
   it('tabuľka ukazuje kusy a ceny, nie číslo produktu (P3)', () => {

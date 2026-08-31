@@ -78,6 +78,31 @@ export interface BudgetStatusView {
   day: string;
   budget: number;
   spent: number;
+  /**
+   * Koľko ČÍTANÍ na tom istom kľúči dnes odišlo (dráha `product_read` —
+   * obohacovanie katalógu, D118). Nie sú to zápisy, ale míňajú tú istú dennú
+   * kvótu kľúča ako zápisy zliav, preto sa dá `remaining` bez tohto čísla
+   * vysvetliť len ťažko.
+   *
+   * Zámerne VOLITEĽNÉ, rovnako ako `limits` vyššie: pole pribudlo 31. 8. 2026
+   * a staršia odpoveď ho nemá. Chýbajúce pole znamená NEVIEME — nikdy nulu
+   * (I11); veta o čítaniach sa vtedy nekreslí.
+   */
+  keyedReadsToday?: number;
+  /**
+   * Koľko z tých čítaní sa naozaj odpočítalo od zápisového stropu — teda tá
+   * časť, ktorá sa zmestila NAD rezervu. Rozdiel proti `keyedReadsToday` je
+   * presne to, čo rezerva zápisom zachránila. Bez tohto čísla obrazovka nemá
+   * ako vysvetliť, prečo `budget − spent ≠ remaining`.
+   */
+  keyedReadsCharged?: number;
+  /**
+   * Koľko zo stropu je vyhradené VÝHRADNE zápisom (`writeReserveFor()`).
+   * Čítania sa na túto časť kvóty nedostanú ani pri plnom vyčerpaní, takže
+   * appka neprestane byť schopná zapísať zľavu. `undefined` = nevieme, NIE
+   * „rezerva je nula".
+   */
+  writeReserve?: number;
   remaining: number;
   exhausted: boolean;
 }
@@ -108,6 +133,11 @@ export interface QueueView {
  * Je to iná kvóta než zápisová: čítania idú bez kľúča, počítajú sa na
  * zdrojovú adresu počítača a zo zápisov si neberú nič. Preto sú v Nastaveniach
  * dva prúžky vedľa seba, nie jeden spoločný.
+ *
+ * Pozor na TRETIU dráhu: obohacovanie (`getFull`, dráha `product_read`) číta
+ * SO zápisovým kľúčom, takže míňa kvótu kľúča spolu so zápismi. Tú nájdeš
+ * v `BudgetStatusView.keyedReadsToday`, nie tu — sú to dve rôzne čítania a
+ * zliať ich do jedného čísla znamená tvrdiť o kvóte niečo, čo neplatí.
  */
 export interface CatalogReadsView {
   day: string;

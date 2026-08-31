@@ -65,7 +65,11 @@ import { describe, expect, it } from 'vitest';
 
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import { queueBlockedReason, type QueueGateState } from '@/components/campaigns/NewDiscount';
-import { buildTiers, type SelectableRow } from '@/components/campaigns/discounts-model';
+import {
+  buildTiers,
+  discountWriteRequest,
+  type SelectableRow,
+} from '@/components/campaigns/discounts-model';
 import { previewBlockerText, type BlockerCard } from '@/components/campaigns/queue-model';
 import { PREVIEW_TOKEN_TTL_SECONDS } from '@/lib/crypto/preview-token';
 
@@ -369,6 +373,57 @@ describe('F — ručne vpísaný počet je posledná brzda pred zápisom (I3)', 
 
   it('prázdny výber neodomkne ani prázdne pole — nula nie je „sedí to"', () => {
     expect(blockedFor({ itemsCount: 0, typed: '0' })).not.toBeNull();
+  });
+
+  /*
+   * NÁLEZ Z 31. 8. 2026 — brána potvrdzovala INÚ množinu, než sa zapíše.
+   *
+   * Po D121 nie je veľkosť výberu to isté číslo ako veľkosť zápisu: produkt
+   * s neznámym predajom (`unitsSold === null`) sa do pásma nezaradí a
+   * `discountWriteRequest()` ho do tela zápisu nepustí. Kým brána počítala
+   * `rows.length`, karta pri 200 označených a dvoch dočítaných dňoch hlásila
+   * „Vyberá sa 200", brána žiadala napísať 200 — a do fronty išlo 5.
+   *
+   * Test meria to, čo sa NAOZAJ zapíše: číslo v bráne sa porovnáva s počtom
+   * produktov v tele zápisu, nie s počtom riadkov výberu.
+   */
+  it('brána žiada počet, ktorý sa NAOZAJ zapíše — nie veľkosť výberu (I3, D121)', () => {
+    const mixed: SelectableRow[] = [
+      ...ROWS,
+      { productId: 31001, name: 'Neznámy predaj A', price: '19.90', unitsSold: null, discountedNow: false },
+      { productId: 31002, name: 'Neznámy predaj B', price: '29.90', unitsSold: null, discountedNow: false },
+      { productId: 31003, name: 'Neznámy predaj C', price: '39.90', unitsSold: null, discountedNow: false },
+    ];
+    const partition = buildTiers(mixed, 180, {});
+    const written = discountWriteRequest(partition).productIds;
+
+    expect(mixed.length).toBe(5);
+    expect(written.length).toBe(2);
+    expect(partition.unknownProductIds.length).toBe(3);
+
+    // Brána nad TÝM, čo ide do zápisu: napísať treba 2, nie 5.
+    const gate: QueueGateState = { ...GATE, itemsCount: written.length, typed: '5' };
+    expect(queueBlockedReason(gate)).toBe('Do poľa napíšte 2.');
+    expect(queueBlockedReason({ ...gate, typed: '2' })).toBeNull();
+  });
+
+  it('celý výber s neznámym predajom povie PRAVÝ dôvod, nie „vyberte produkt"', () => {
+    const unknownOnly: SelectableRow[] = [
+      { productId: 31001, name: 'Neznámy predaj A', price: '19.90', unitsSold: null, discountedNow: false },
+      { productId: 31002, name: 'Neznámy predaj B', price: '29.90', unitsSold: null, discountedNow: false },
+    ];
+    const partition = buildTiers(unknownOnly, 180, {});
+    expect(discountWriteRequest(partition).productIds.length).toBe(0);
+
+    const reason = blockedFor({
+      itemsCount: 0,
+      skippedUnknown: partition.unknownProductIds.length,
+      typed: '',
+      previewFresh: false,
+    });
+    expect(reason).not.toBe('Vyberte aspoň jeden produkt.');
+    expect(reason).toContain('nemá predaj za toto okno zmeraný');
+    expect(reason).toContain('2');
   });
 });
 

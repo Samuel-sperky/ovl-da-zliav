@@ -286,12 +286,20 @@ function handleProductGet(input: HandlerInput): MockResponse {
 function productFullBody(product: MockProduct): Record<string, unknown> {
   const purchase = product.price * 0.4;
   const margin = product.price - purchase;
-  const reduction = product.lastReduction ?? null;
+  /*
+   * Stav zľavy v shope. `shopReduction` je nezávislé tvrdenie shopu (`null` =
+   * „nebeží"); kým ho test nenastaví, mock zrkadlí zápisy appky ako predtým.
+   * Porovnáva sa EXPLICITNE — `??` by tvrdenie „nebeží" (`null`) prepísalo
+   * zápisom appky, a `reduction-check` by opäť nemal ako nájsť rozdiel.
+   */
+  const reduction =
+    product.shopReduction !== undefined ? product.shopReduction : (product.lastReduction ?? null);
 
   return {
     ...productDetailBody(product),
     // Stav zľavy — jediné miesto, kde ho mock priznáva (bod B1). `null` = zľava
-    // nebeží; je to MERANÝ fakt, nie „nevieme" (I11).
+    // nebeží; je to MERANÝ fakt, nie „nevieme" (I11). Nastaviť sa dá aj
+    // NEZÁVISLE od appky: `state.setShopReduction(id, …)`.
     reduction_percent: reduction === null ? null : reduction.reduction,
     reduction_from: reduction === null ? null : reduction.from,
     reduction_to: reduction === null ? null : reduction.to,

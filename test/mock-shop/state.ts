@@ -43,6 +43,20 @@ export interface MockProduct {
   attributes?: MockProductAttribute[];
   /** Posledný úspešný `setReduction` — len pre asserty v testoch. */
   lastReduction?: { reduction: number; from: string; to: string; at: number } | null;
+  /**
+   * SKUTOČNÝ stav zľavy v shope, nastaviteľný NEZÁVISLE od zápisov appky
+   * (31. 8. 2026).
+   *
+   * Prečo to nestačilo mať v `lastReduction`: `getFull` z neho odvádzal stav
+   * zľavy, takže shop odpovedal presne to, čo appka predtým zapísala. Proti
+   * takému mocku `GET /api/catalog/reduction-check` nemôže NIKDY nájsť rozdiel
+   * — a nájsť rozdiel je jeho jediná úloha.
+   *
+   * `undefined` = shop zrkadlí zápisy appky (pôvodné správanie).
+   * `null` = shop tvrdí „žiadna zľava nebeží", aj keď appka zapísala.
+   * objekt = shop tvrdí TÚTO zľavu (ruka v admine, flash sale, iné percento).
+   */
+  shopReduction?: { reduction: number; from: string; to: string } | null | undefined;
 }
 
 /** Scope-y podľa `docs/api/sperky-api.md`. Appka smie mať výhradne `product:edit` (I8). */
@@ -227,6 +241,19 @@ export class MockShopState {
     return this;
   }
 
+  /**
+   * Nastaví stav zľavy tak, ako ho hlási shop — bez toho, aby appka čokoľvek
+   * zapísala. `undefined` vráti produkt k zrkadleniu zápisov appky.
+   */
+  setShopReduction(
+    id: number,
+    reduction: { reduction: number; from: string; to: string } | null | undefined,
+  ): this {
+    const product = this.products.get(id);
+    if (product !== undefined) product.shopReduction = reduction;
+    return this;
+  }
+
   getProduct(id: number): MockProduct | undefined {
     return this.products.get(id);
   }
@@ -374,7 +401,11 @@ export class MockShopState {
     this.readCount = 0;
     this.writeCount = 0;
     this.recordedRequests.length = 0;
-    for (const product of this.products.values()) product.lastReduction = null;
+    for (const product of this.products.values()) {
+      product.lastReduction = null;
+      // `undefined`, nie `null`: `null` je platné tvrdenie shopu „zľava nebeží".
+      product.shopReduction = undefined;
+    }
     return this;
   }
 

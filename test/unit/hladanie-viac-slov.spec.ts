@@ -72,10 +72,23 @@ const COLUMNS_PER_WORD = 3;
 
 const countLikes = (sql: string): number => sql.split(NAME_LIKE).length - 1;
 
-/** Dotaz `COUNT(*)` — prvý z dvojice, ktorú `search()` posiela. */
+/**
+ * Dotaz `COUNT(*)` NAD ZRKADLOM. Od D121 posiela `search()` ako prvé pokrytie
+ * okna (`COUNT(*)` nad `sales_sync_state`), takže „prvý počítací dotaz" už nie
+ * je ten, o ktorom tento súbor hovorí — rozhoduje tabuľka, nie poradie.
+ */
 const countCall = (calls: readonly Call[]): Call => {
-  const call = calls.find((item) => item.sql.startsWith('SELECT COUNT(*)'));
-  if (call === undefined) throw new Error('Repozitár neposlal `COUNT(*)` dotaz.');
+  const call = calls.find(
+    (item) => item.sql.startsWith('SELECT COUNT(*)') && item.sql.includes('FROM catalog_cache'),
+  );
+  if (call === undefined) throw new Error('Repozitár neposlal `COUNT(*)` dotaz nad zrkadlom.');
+  return call;
+};
+
+/** Dotaz počtov do bočného panela — ten, ktorý skladá vedrá predajnosti. */
+const countsCall = (calls: readonly Call[]): Call => {
+  const call = calls.find((item) => item.sql.includes('AS sold_none'));
+  if (call === undefined) throw new Error('Repozitár neposlal dotaz počtov.');
   return call;
 };
 
@@ -161,9 +174,11 @@ describe('hľadanie delí text na slová a spája ich cez AND', () => {
       today: '2026-08-19',
     });
 
-    expect(calls).toHaveLength(1);
-    expect(countLikes(calls[0]?.sql ?? '')).toBe(2);
-    expect(termWords(calls[0] as Call, COUNTS_PREFIX)).toEqual(['naramok', 'zirkon']);
+    // Dva dotazy: pokrytie okna (D121) a samotné počty. Nič viac.
+    expect(calls).toHaveLength(2);
+    const counts = countsCall(calls);
+    expect(countLikes(counts.sql)).toBe(2);
+    expect(termWords(counts, COUNTS_PREFIX)).toEqual(['naramok', 'zirkon']);
   });
 });
 

@@ -71,6 +71,22 @@ export const AUDIT_EVENT_TYPES = [
   'writes_unlocked',
   'reconcile_uncertain',
   'migration_applied',
+  /*
+   * presety (D112, KONTRAKT-V4-2026-08-28)
+   *
+   * Preset je pomenovaná kombinácia filtra, pásiem s percentami a dĺžky okna.
+   * Do shopu nezapisuje nič a nič neuvoľňuje — auditujú sa preto, že nesú
+   * PERCENTÁ, ktoré niekto o mesiac naklikne jedným klikom, a I4 (D102) žiada
+   * záznam o každej mutácii. `audit_log.event_type` je `VARCHAR(48)`, nie ENUM
+   * (hlavička 0006), takže tieto dve hodnoty žiadnu migráciu nepotrebovali.
+   *
+   * POUŽITIE presetu tu ZÁMERNE nie je: `discount_presets.last_used_at` je sám
+   * záznamom o použití, je vidieť na obrazovke a zápis toho času nemení, čo
+   * appka smie. Auditovať každé predplnenie formulára by z Histórie — ktorá je
+   * forenzný záznam o zápisoch do PRODUKČNÉHO eshopu — urobilo zoznam klikov.
+   */
+  'preset_created',
+  'preset_deleted',
   'boot',
   'shutdown',
 ] as const satisfies readonly AuditEventType[];
@@ -150,6 +166,8 @@ export const AuditEvent = {
   WRITES_UNLOCKED: 'writes_unlocked',
   RECONCILE_UNCERTAIN: 'reconcile_uncertain',
   MIGRATION_APPLIED: 'migration_applied',
+  PRESET_CREATED: 'preset_created',
+  PRESET_DELETED: 'preset_deleted',
   BOOT: 'boot',
   SHUTDOWN: 'shutdown',
 } as const satisfies Record<string, AuditEventType>;
@@ -227,6 +245,8 @@ export const AUDIT_EVENT_LABEL_SK: Record<AuditEventType, string> = {
   writes_unlocked: 'Zápisy odomknuté',
   reconcile_uncertain: 'Reconciliácia — stav neistý',
   migration_applied: 'Migrácia aplikovaná',
+  preset_created: 'Preset uložený',
+  preset_deleted: 'Preset zmazaný',
   boot: 'Štart aplikácie',
   shutdown: 'Ukončenie aplikácie',
 };

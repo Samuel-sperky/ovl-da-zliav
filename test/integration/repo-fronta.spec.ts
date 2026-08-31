@@ -17,7 +17,9 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { Queryable } from '@/contracts';
+import type { DateOnly, Queryable } from '@/contracts';
+
+import { addDays } from '@/lib/domain/dates';
 
 import { closePool } from '@/db/pool';
 import { campaignItemsRepo } from '@/lib/repo/campaign-items.repo';
@@ -34,6 +36,9 @@ const available = await dbAvailable();
 /** Fixný „dnes" testov — všetky dátumové asserty sú voči tomuto dňu. */
 const TODAY = '2026-08-10';
 
+/** Prvý deň predvoleného okna (180 dní vrátane `TODAY`) — pokrytie ide po ňom. */
+const COVERAGE_FROM = '2026-02-12';
+
 /**
  * Tabuľky, ktoré `test/helpers/db.ts` ešte nepozná (`campaign_tiers` z 0010,
  * `product_sales_daily` z 0009). Bez tohto by riadky prežili `truncateAll()`
@@ -43,6 +48,34 @@ async function cleanV3Tables(): Promise<void> {
   await withMigrationConn(async (conn) => {
     await conn.query('DELETE FROM campaign_tiers');
     await conn.query('DELETE FROM product_sales_daily');
+    // Pokrytie okna (0009) — od D121 rozhoduje o tom, či je súčet kusov číslo
+    // alebo „nevieme", takže zvyšok po inom teste by menil čísla vedier.
+    await conn.query('DELETE FROM sales_sync_state WHERE sale_day >= ? AND sale_day <= ?', [
+      COVERAGE_FROM,
+      TODAY,
+    ]);
+  });
+}
+
+/**
+ * Označí celé 180-dňové okno za DOČÍTANÉ (D121). Bez toho je od 31. 8. 2026
+ * `unitsSold` správne `null` („dni nie sú stiahnuté") a vedrá predajnosti sú
+ * prázdne — nasledujúce testy hovoria o predaji, takže si to musia povedať.
+ */
+async function seedCoverage(): Promise<void> {
+  await withMigrationConn(async (conn) => {
+    const days: string[] = [];
+    let cursor = COVERAGE_FROM;
+    for (let i = 0; i < 180; i += 1) {
+      days.push(cursor);
+      cursor = addDays(cursor as DateOnly, 1);
+    }
+    const values = days.map(() => "(?, 'complete')").join(', ');
+    await conn.query(
+      `INSERT INTO sales_sync_state (sale_day, status) VALUES ${values} ` +
+        'ON DUPLICATE KEY UPDATE status = VALUES(status)',
+      days,
+    );
   });
 }
 
@@ -521,6 +554,7 @@ describe.skipIf(!available)('repozitáre V3 — fronta, pásma, katalóg (V4)', 
         // Starý predaj mimo okna 30 dní — v 30-dňovom okne sa nesmie počítať.
         { productId: 9001, day: '2026-05-01', units: 9 },
       ]);
+      await seedCoverage();
     }
 
     it('upsertMany() vloží aj prepíše a `fetched_at` je meraný fakt (K7, P7)', async () => {

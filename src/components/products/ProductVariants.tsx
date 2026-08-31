@@ -24,6 +24,11 @@
  * 3. **Súčet skladu je celok, alebo nič.** Keď čo i len jeden variant sklad
  *    nepovie, súčet sa NEUKÁŽE — nižšie číslo vydávané za celok je horšie než
  *    priznaná pomlčka. Rovnaké pravidlo má aj repozitár (`variantStock`).
+ * 4. **Čas merania je povinný a kreslí sa TU** (31. 8. 2026). Skupina, ktorá
+ *    ukazuje meranie z eshopu a mlčí o jeho čase, sa v paneli nekreslí — pozri
+ *    bod 7 hlavičky `ProductDetailPanel.tsx`. Vetu skladá `variantsMeasuredNote()`
+ *    a je vo VŠETKÝCH troch vetvách vrátane prázdnych: keby ju kreslil panel,
+ *    dala by sa skupina vykresliť bez nej.
  *
  * Server-safe: žiadne hooky, žiadne `use client`.
  *
@@ -33,6 +38,7 @@ import {
   fieldOf,
   stockText,
   variantLabel,
+  variantsMeasuredNote,
   type ProductExtraView,
   type ProductVariantView,
 } from '@/components/products/product-extras';
@@ -117,10 +123,20 @@ export interface ProductVariantsProps {
  * istom by bola šum.
  */
 export function ProductVariants({ extra }: ProductVariantsProps) {
+  /* Bod 4: čas merania nesie KAŽDÁ vetva, aj tá, v ktorej zoznam nie je. */
+  const measured = (
+    <div className="lvl-3" data-testid="detail-variants-measured">
+      {variantsMeasuredNote(extra)}
+    </div>
+  );
+
   if (extra === undefined) {
     return (
-      <div className="lvl-3" data-testid="detail-variants">
-        <AbsenceValue why="pending" />
+      <div data-testid="detail-variants">
+        <div className="lvl-3">
+          <AbsenceValue why="pending" />
+        </div>
+        {measured}
       </div>
     );
   }
@@ -128,8 +144,11 @@ export function ProductVariants({ extra }: ProductVariantsProps) {
   const variants = extra.variants;
   if (variants.length === 0) {
     return (
-      <div className="lvl-3" data-testid="detail-variants">
-        <AbsenceValue why="none" />
+      <div data-testid="detail-variants">
+        <div className="lvl-3">
+          <AbsenceValue why="none" />
+        </div>
+        {measured}
       </div>
     );
   }
@@ -156,6 +175,7 @@ export function ProductVariants({ extra }: ProductVariantsProps) {
           {note}
         </div>
       )}
+      {measured}
     </div>
   );
 }

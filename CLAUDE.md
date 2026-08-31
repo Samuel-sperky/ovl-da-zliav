@@ -65,6 +65,11 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   DÔVOD: `ip_banned`, `rate_limited`, `daily_budget`, `no_key` — pri odmietnutí
   shopom sa žiadny produkt neoznačí ako obohatený (D118, D120). Cesta „na dopyt"
   (jeden produkt) je `POST /api/catalog/enrich`.
+- `src/lib/scheduler/enrich-runner.ts` — spúšťač obohacovania: rozhoduje „je
+  čas?", drží odstup medzi dávkami a súbežnosť (dve vrstvy — `running` v module
+  a zámok v DB, lebo `instrumentation` má vlastný module graf). `catalog-enrich.ts`
+  sa sám nikdy nespustí; členenie je zámerne to isté ako `catalog-runner.ts`
+  a `lib/sales/sync-runner.ts`.
 - `src/lib/ui/product-label.ts` — JEDINÉ miesto, kde sa produkt pomenúva:
   `productLabel({ productId, reference, name })` → „ref · názov", chýbajúca
   referencia je pomlčka, nikdy nie vymyslené číslo (D116, K6). Používaj ho
@@ -75,14 +80,30 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   presetu **nie je výnimka z I3** — vždy ide nanovo cez dry-run + potvrdenie
   (D112, K7).
 - Čítacie endpointy pre obrazovky V4 (žiadne volanie shopu na render ceste, K8):
-  `src/app/api/insights/{product-kpi,top-products,revenue-daily,sales-daily,timeline,discount-depth,catalog-prices,activity}/route.ts`
-  a `src/app/api/insights/product/[productId]/route.ts`.
+  `src/app/api/insights/{product-kpi,top-products,revenue-daily,sales-daily,timeline,catalog-prices,activity}/route.ts`,
+  `src/app/api/insights/product/[productId]/route.ts` a
+  `src/app/api/insights/campaign/[id]/{performance,items}/route.ts`.
+  `discount-depth` medzi nimi UŽ NIE JE (31. 8. 2026): route nemala konzumenta
+  ani test, jej plánovaný domov (mini bar G2 na `/produkty`) obrazovka vedome
+  odmietla (`products/catalog-api.ts` — značky majú ukazovať naklikaný výber,
+  nie allowlist) a ten istý repozitárny dotaz `insightsRepo.discountDepth()`
+  živí štyri iné routy. Keď ju budeš potrebovať, je to nová obrazovka, nie
+  obnovený súbor.
 - Migrácia `db/migrations/0014_obohatenie_katalogu.sql` (APLIKOVANÁ,
   checksum-uzamknutá — needituj ju, pridaj novú) rozšírila `catalog_cache`
   o obohatené stĺpce (všetky NULLABLE = „nevieme") a `enrich_priority`
   (NOT NULL DEFAULT 3) a pridala dve tabuľky: `catalog_enrich_state` (stav
   dávky obohacovania, dôvod pauzy) a `shop_revenue_daily` (denná tržba
-  eshopu — pozri D117 nižšie).
+  eshopu — pozri D117 nižšie). `0015_presety_zliav.sql` pridala tabuľku
+  `discount_presets` (D112) a `0016_stav_citania_trzby.sql` tabuľku
+  `shop_revenue_read_state` (rozlíši „deň prečítaný a nepredalo sa nič" od „deň
+  sme nečítali"). Všetky tri sú APLIKOVANÉ a checksum-uzamknuté; kontrolný
+  dotaz je `SELECT id, name FROM _migrations` (nie `schema_migrations`, ten tu
+  neexistuje).
+- Rezerva zápisov žije vo `src/lib/engine/budget.ts`: čítania sa z denného
+  rozpočtu odpočítavajú LEN NAD `WRITE_QUOTA_RESERVE` (`min(rozpočet, 40)`,
+  odvodené ako 200 − 160). Rezerva na strane čítaní (`ENRICH_QUOTA_RESERVE`)
+  je iná vec a chráni sondy a canary.
 
 ## Pasce, ktoré tu už raz prežili do produkcie
 
@@ -125,6 +146,25 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   aj na verejné čítanie katalógu bez kľúča. Nikdy nevolaj `sperky-eshop.sk`;
   stavia sa a testuje výhradne proti mock shopu (I6) a fetch guard v
   `test/setup.ts` púšťa len loopback. Odblokovanie je akcia Samuela (`docs/60`).
+- **Čítania a zápisy delia JEDEN kľúč a JEDEN denný strop.** Bez rezervy vedelo
+  čítanie vyžrať kvótu a appka stratila schopnosť ZAPÍSAŤ — `checkDailyBudget()`
+  odmietol celú frontu. Preto `WRITE_QUOTA_RESERVE` = `min(rozpočet, 40)`,
+  odvodené ako 200 − 160 (strop dráhy `product_read`). Nová čítacia cesta MUSÍ
+  ísť cez rezervačnú dráhu; inak `remainingToday()` ohlási plný rozpočet a
+  fronta spadne do 429 uprostred dávky.
+- **Grep nad priečinkom A nepovie nič o diere v priečinku B.** Mutačné overenie
+  K7 (31. 8. 2026) našlo, že dvaja „strážcovia" presetov boli grepy nad
+  `src/app/api/presets/` na `setReduction`, kým brána dry-runu a potvrdenia
+  stojí v `POST /api/campaigns` — skratka `presetId` v tele kampane nechala
+  102 tvrdení zelených. Test, ktorý stráži hranicu, musí siahať na tú stranu,
+  kde brána naozaj je (`test/integration/preset-nie-je-zapisova-cesta.spec.ts`).
+- **Model môže byť správny a dostať nepravdivý vstup.** D121 (produkt
+  s neznámym predajom sa do pásiem nezaradí) fungoval v klientskom modeli, kým
+  server posielal `unitsSold: 0` namiesto `null` — takže `soldBucketOf(0)` dal
+  legitímne vedro `none` s 30 % zľavou na tisícoch produktov. Nenašlo to 3756
+  testov, ale preklik v prehliadači: route `/api/catalog/search` nemala ŽIADNY
+  test a ten, ktorý to „kryl", meral repozitár, nie prepis na odpoveď.
+  Trojstavovosť overuj na TELE ODPOVEDE, nie len na modeli.
 - **`src/db/pool.ts` a UTC.** Docblock tam kedysi tvrdil, že „všetky `DATETIME`
   sú v DB v UTC". Nie sú: `timezone: 'Z'` prekladá hodnoty len na hranici poolu,
   v stĺpcoch sú **lokálne hodiny procesu**. Dotaz, ktorý porovnáva surový stĺpec

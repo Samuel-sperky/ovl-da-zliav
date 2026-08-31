@@ -13,9 +13,10 @@
  *                                      I3; sudo z D70 zrušila D100 27. 8. 2026),
  *   `GET  /api/queue`                — ŽIVÝ stav fronty, rozpočtu a prekážok,
  *   `GET  /api/status`               — celý obraz stavu appky + prekážky,
- *   `GET  /api/campaigns/[id]/retry-failed` — popis toho, čo by zopakovanie urobilo.
+ *   `GET  /api/campaigns/[id]/retry-failed` — popis toho, čo by zopakovanie urobilo,
+ *   `GET  /api/insights/campaign/[id]/items` — rozpad položiek po VŠETKÝCH stavoch.
  *
- * Posledné tri sú neskorší prírastok a majú spoločné jedno: ich odpoveď sa
+ * Posledné štyri sú neskorší prírastok a majú spoločné jedno: ich odpoveď sa
  * NEBERIE naslepo. Parsovanie žije v `queue-model.ts` (čisté, testovateľné) a
  * čokoľvek, čo nesedí, skončí ako chyba obálky — nie ako prázdna fronta. Nula
  * čakajúcich položiek je tvrdenie a to sa z neznalosti povedať nesmie (P7).
@@ -252,7 +253,13 @@ export interface CatalogRowView {
    */
   readonly reference?: string | null;
   readonly price: string | null;
-  readonly unitsSold: number;
+  /**
+   * Predané kusy za okno, alebo `null` = **„za toto okno to nevieme"** (D121).
+   * Toto pole ide priamo do `SelectableRow` a odtiaľ do `buildTiers()`, takže
+   * `?? 0` by z neznámeho predaja spravilo vedro „0 predaných" a 30 % zľavu —
+   * presne to, čo obrazovka Nová zľava do 31. 8. 2026 robila.
+   */
+  readonly unitsSold: number | null;
   readonly everDiscounted: boolean;
   readonly discountedNow: boolean;
   readonly shopStatus: string;
@@ -271,6 +278,11 @@ export interface CatalogPageView {
     readonly total: number;
     readonly sold: Readonly<Record<string, number>>;
     readonly discountedNow: number;
+    /**
+     * Koľko produktov nemá predaj za okno ZMERANÝ (D121). Vedrá + toto = `total`.
+     * `null` = odpoveď to nepovedala, teda „nevieme koľko nevieme" — nie nula.
+     */
+    readonly soldUnknown: number | null;
   } | null;
 }
 
@@ -512,7 +524,8 @@ function parseCatalogRow(raw: unknown): CatalogRowView | null {
     // Chýbajúce pole a `null` sú tu to isté: „appka referenciu nepozná".
     ...(reference === null ? {} : { reference }),
     price: readText(record, 'price'),
-    unitsSold: readCount(record, 'unitsSold') ?? 0,
+    // Bez `?? 0` — chýbajúce aj `null` pole je „nevieme" (D121, doc pri type).
+    unitsSold: readCount(record, 'unitsSold'),
     everDiscounted: readFlag(record, 'everDiscounted'),
     discountedNow: readFlag(record, 'discountedNow'),
     // Fail-closed: netvrdíme, že shop produkt pozná, kým to nepovie.
@@ -534,7 +547,14 @@ function parseCatalogCounts(raw: unknown): CatalogPageView['counts'] {
       if (value !== null) sold[key] = value;
     }
   }
-  return { total, sold, discountedNow: readCount(record, 'discountedNow') ?? 0 };
+  return {
+    total,
+    sold,
+    discountedNow: readCount(record, 'discountedNow') ?? 0,
+    // Chýbajúci počet je „nevieme", nie nula (P7): dosadená nula by na obrazovke
+    // Nová zľava tvrdila, že filtru nevyhovuje nič, hoci predaje sú neznáme.
+    soldUnknown: readCount(record, 'soldUnknown'),
+  };
 }
 
 export function parseCatalogPage(raw: unknown): CatalogPageView | null {
@@ -809,5 +829,82 @@ export async function discountPerformance(id: number): Promise<Envelope<Performa
     await getJson<unknown>(`/api/insights/campaign/${id}/performance`),
     parsePerformance,
     'Predaj produktov zľavy sa nepodarilo prečítať.',
+  );
+}
+
+/* ══════════════ Rozpad položiek po stavoch (G5, nález U6) ═════════════════ */
+
+/**
+ * Odpoveď `GET /api/insights/campaign/[id]/items` — rozpad položiek kampane po
+ * VŠETKÝCH stavoch, nie len po tých štyroch, ktoré majú v Priebehu dlaždicu.
+ *
+ * PREČO TO OBRAZOVKA POTREBUJE
+ * ----------------------------
+ * `campaign.itemsPending` z `/api/campaigns/[id]` je ODČÍTANIE
+ * (`items_total − ok − failed − uncertain`, `api/campaigns/_shared.ts`), takže
+ * do „čaká na zápis" spadne aj preskočená, nenájdená, prerušená a zablokovaná
+ * položka — a tá už nikdy nikam čakať nebude. Dlaždica tak o nich tvrdí niečo
+ * nepravdivé a súčet štyroch čísel nesedí so `spolu` (U6). Tento rozpad je
+ * MERANÝ (`GROUP BY status` nad `campaign_items`), preto sa dlaždica „čaká"
+ * odteraz kreslí z neho.
+ *
+ * `tally` sa preberá ako slovník „kód stavu → počet" a NEDOPĹŇA sa nulami:
+ * dosadená nula za kľúč, ktorý server neposlal, by z medzery urobila meraný
+ * fakt (P7, I11). Preto tu nie je pevný `Record<ItemStatus, number>` s ôsmimi
+ * kľúčmi — deviaty stav z budúcej migrácie by v takom type nemal kam prísť
+ * a na obrazovke by ticho zmizol, presne ako `writing` v `campaigns.status`.
+ */
+export interface ItemBreakdownView {
+  /** Počet položiek kampane VRÁTANE tých, ktorých stav appka nepozná. */
+  readonly total: number;
+  /** Kód stavu → počet. Kľúče sú presne tie, ktoré server poslal. */
+  readonly tally: Readonly<Record<string, number>>;
+  /**
+   * Koľko položiek má stav mimo číselníka. Na povrch patrí POČET, nikdy
+   * samotný kód stavu (K10).
+   */
+  readonly unrecognized: number;
+}
+
+/**
+ * Rozpad sa berie celý, alebo vôbec. Tri dôvody vrátiť `null`:
+ *
+ *  1. chýba `total` / `unrecognized` / `tally` — nie je čo čítať,
+ *  2. niektorý počet sa nedá prečítať (nula by bola tvrdenie),
+ *  3. súčet `tally` + `unrecognized` nesedí s `total` — taký rozpad je horší
+ *     než chýbajúci, lebo vyzerá ako meranie. Route ten súčet zaručuje
+ *     (`total = známe + unrecognized`), takže rozdiel znamená, že odpoveď nie
+ *     je tá, ktorú obrazovka číta.
+ *
+ * `pending` musí byť medzi kľúčmi: bez neho by dlaždica „čaká na zápis"
+ * nemala z čoho kresliť a mlčky by sa vrátila k odčítaniu.
+ */
+export function parseItemBreakdown(raw: unknown): ItemBreakdownView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const total = readCount(record, 'total');
+  const unrecognized = readCount(record, 'unrecognized');
+  const tallyRaw = asRecord(record['tally']);
+  if (total === null || unrecognized === null || tallyRaw === null) return null;
+  if (readCount(tallyRaw, 'pending') === null) return null;
+
+  const tally: Record<string, number> = {};
+  let known = 0;
+  for (const key of Object.keys(tallyRaw)) {
+    const count = readCount(tallyRaw, key);
+    if (count === null) return null;
+    tally[key] = count;
+    known += count;
+  }
+  if (known + unrecognized !== total) return null;
+  return { total, tally, unrecognized };
+}
+
+/** Rozpad položiek zľavy po stavoch. Čisto lokálne čítanie, shop sa nevolá (K8). */
+export async function discountItemBreakdown(id: number): Promise<Envelope<ItemBreakdownView>> {
+  return shaped(
+    await getJson<unknown>(`/api/insights/campaign/${id}/items`),
+    parseItemBreakdown,
+    'Rozpad položiek po stavoch sa nepodarilo prečítať.',
   );
 }

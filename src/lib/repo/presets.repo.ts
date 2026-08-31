@@ -11,6 +11,17 @@
  *    eshopu. Spustenie presetu ide tou istou cestou ako každá zľava: dry-run
  *    → potvrdenie → `POST /api/campaigns` (K7). `markUsed()` len zapíše, že
  *    preset bol použitý — nie je to povolenie na zápis.
+ *  - **„Použitý" znamená „predplnil formulár".** `markUsed()` volá jediná
+ *    cesta: `POST /api/presets/:id/mark-used`, ktorú si vyžiada klik na
+ *    „Predplniť formulár". NEznamená to, že z presetu vznikla zľava — tú appka
+ *    k presetu priradiť ani nedokáže, pretože preset do zápisovej cesty
+ *    NEVSTUPUJE (I3) a kampaň vzniká z dry-runu nad dnešným katalógom. Poradie
+ *    v {@link SQL_LIST} preto sľubuje presne toto a nič viac: zhora ten, po
+ *    ktorom človek naposledy siahol.
+ *  - **`update()` tu NIE JE** a nie je to opomenutie: preset sa needituje.
+ *    Uloženie pod obsadeným menom sa ODMIETNE a obrazovka ponúka uložiť,
+ *    predplniť a zmazať. Metóda bez volajúceho by bola druhá zápisová cesta do
+ *    `discount_presets`, ktorú neprechádza ani jeden preklik.
  *  - **Percentá sú vstup, nie pravda.** Executor berie percento z
  *    `campaign_items.percent`, ktoré padlo pri potvrdení (K3). `tiers` v
  *    presete majú rovnakú úlohu ako `rule` v `campaign_tiers`: zopakovať to,
@@ -32,7 +43,6 @@
 import type {
   DiscountPercent,
   DiscountPreset,
-  DiscountPresetPatch,
   DiscountPresetTier,
   NewDiscountPreset,
   Queryable,
@@ -79,6 +89,16 @@ const MAX_DURATION_DAYS = 90;
 
 const COLUMNS = 'id, name, filter_query, tiers, duration_days, created_at, last_used_at';
 
+/**
+ * Poradie zoznamu: hore ten, ktorým si človek NAPOSLEDY predplnil formulár,
+ * pod nimi ešte nepoužité od najnovšieho.
+ *
+ * `last_used_at` plní VÝHRADNE {@link PresetsRepoContract.markUsed}, ktorú volá
+ * `POST /api/presets/:id/mark-used` pri klikoch na „Predplniť formulár". Sľub
+ * tejto vety a dáta v stĺpci sa teda kryjú — do 31. 8. 2026 nekryli:
+ * `markUsed()` nemala v `src/` ani jedného volajúceho, takže `last_used_at`
+ * zostávalo NULL a SQL radilo podľa stĺpca, ktorý nikto nezapisoval (D112).
+ */
 const SQL_LIST =
   `SELECT ${COLUMNS} FROM discount_presets ORDER BY last_used_at IS NULL ASC, ` +
   'last_used_at DESC, created_at DESC, id DESC';
@@ -123,7 +143,7 @@ export class PresetNameTakenError extends Error {
   constructor(readonly presetName: string) {
     super(
       `Preset s menom „${presetName}" už existuje. Presety sa neprepisujú — ` +
-        'zmeň ten existujúci alebo zvoľ iné meno.',
+        'zmaž ten existujúci alebo zvoľ iné meno.',
     );
     this.name = 'PresetNameTakenError';
   }
@@ -147,14 +167,19 @@ export interface PresetsRepoContract {
    * a {@link PresetLimitError} pri dosiahnutom strope.
    */
   create(input: NewDiscountPreset, conn?: Queryable): Promise<DiscountPreset>;
-  /** Najskôr naposledy použité, potom nepoužité podľa vzniku (zhora najnovšie). */
+  /**
+   * Najskôr naposledy POUŽITÉ (= naposledy predplnili formulár), potom
+   * nepoužité podľa vzniku (zhora najnovšie). Viď {@link SQL_LIST}.
+   */
   list(conn?: Queryable): Promise<DiscountPreset[]>;
   getById(id: number, conn?: Queryable): Promise<DiscountPreset | null>;
   getByName(name: string, conn?: Queryable): Promise<DiscountPreset | null>;
   count(conn?: Queryable): Promise<number>;
-  /** Výslovná zmena presetu. Hádže {@link PresetNotFoundError}. */
-  update(id: number, patch: DiscountPresetPatch, conn?: Queryable): Promise<DiscountPreset>;
-  /** Zapíše čas použitia. Hádže {@link PresetNotFoundError} — fail-closed. */
+  /**
+   * Zapíše čas použitia, teda okamih, kedy preset PREDPLNIL formulár novej
+   * zľavy — nie okamih, kedy z neho vznikla zľava (to appka nevie, I3/I11).
+   * Hádže {@link PresetNotFoundError} — fail-closed.
+   */
   markUsed(id: number, at: Date, conn?: Queryable): Promise<void>;
   /** Zmaže preset. Hádže {@link PresetNotFoundError} — fail-closed. */
   remove(id: number, conn?: Queryable): Promise<void>;
@@ -381,64 +406,22 @@ export function createPresetsRepo(deps: PresetsRepoDeps = {}): PresetsRepoContra
     return created;
   }
 
-  async function update(
-    id: number,
-    patch: DiscountPresetPatch,
-    conn?: Queryable,
-  ): Promise<DiscountPreset> {
-    if (!isValidId(id)) throw new PresetNotFoundError(id);
-
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    let newName: string | null = null;
-    if (patch.name !== undefined) {
-      newName = normalizeName(patch.name);
-      sets.push('name = ?');
-      values.push(newName);
-    }
-    if (patch.filterQuery !== undefined) {
-      sets.push('filter_query = ?');
-      values.push(normalizeQuery(patch.filterQuery));
-    }
-    if (patch.tiers !== undefined) {
-      sets.push('tiers = ?');
-      values.push(JSON.stringify(normalizeTiers(patch.tiers)));
-    }
-    if (patch.durationDays !== undefined) {
-      sets.push('duration_days = ?');
-      values.push(normalizeDuration(patch.durationDays));
-    }
-    if (sets.length === 0) {
-      const current = await getById(id, conn);
-      if (current === null) throw new PresetNotFoundError(id);
-      return current;
-    }
-
-    // Existenciu overujeme ČÍTANÍM, nie z `affectedRows`: MariaDB pri UPDATE
-    // vracia počet SKUTOČNE zmenených riadkov, takže „nastav to isté, čo tam
-    // už je" dá nulu — a z nuly by sa stalo falošné „preset neexistuje".
-    if ((await getById(id, conn)) === null) throw new PresetNotFoundError(id);
-
-    values.push(id);
-    try {
-      await run(conn, `UPDATE discount_presets SET ${sets.join(', ')} WHERE id = ?`, values);
-    } catch (error) {
-      if (isDuplicateKey(error) && newName !== null) throw new PresetNameTakenError(newName);
-      throw error;
-    }
-
-    const after = await getById(id, conn);
-    if (after === null) throw new PresetNotFoundError(id);
-    return after;
-  }
+  /*
+   * `update()` tu bola do 31. 8. 2026 a je zmazaná, nie zakomentovaná: nemala
+   * v `src/` ani jedného volajúceho a preset sa needituje (rozbor v hlavičke).
+   * Kryl ju len test nad DB, takže to bola metóda, ktorú appka nikdy nespustí —
+   * a mŕtva zápisová cesta do `discount_presets` je zavádzajúca práve preto, že
+   * vyzerá ako podporovaná. Zmena presetu = zmazať a uložiť znova.
+   */
 
   async function markUsed(id: number, at: Date, conn?: Queryable): Promise<void> {
     if (!isValidId(id)) throw new PresetNotFoundError(id);
     if (!(at instanceof Date) || Number.isNaN(at.getTime())) {
       throw new Error('Čas použitia presetu musí byť platný Date.');
     }
-    // Ako v `update()`: existencia sa overuje čítaním, pretože „nastav ten istý
-    // čas znova" vráti `affectedRows = 0` a to nie je neexistujúci preset.
+    // Existencia sa overuje ČÍTANÍM, nie z `affectedRows`: MariaDB pri UPDATE
+    // vracia počet SKUTOČNE zmenených riadkov, takže „nastav ten istý čas
+    // znova" dá nulu — a z nuly by sa stalo falošné „preset neexistuje".
     if ((await getById(id, conn)) === null) throw new PresetNotFoundError(id);
     await run(conn, SQL_MARK_USED, [at, id]);
   }
@@ -450,7 +433,7 @@ export function createPresetsRepo(deps: PresetsRepoDeps = {}): PresetsRepoContra
     if (Number(result.affectedRows ?? 0) === 0) throw new PresetNotFoundError(id);
   }
 
-  return { create, list, getById, getByName, count, update, markUsed, remove };
+  return { create, list, getById, getByName, count, markUsed, remove };
 }
 
 /** Singleton pre route-y a UI. */

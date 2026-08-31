@@ -342,7 +342,12 @@ describe('audit (I4) — append-only', () => {
     // rozhodnutie, nie vedľajší efekt. 39. je `queue_resumed` (K2): návrat
     // prepadnutej fronty po odstávke počítača. 40. je `scope_mode_changed`
     // (K1 bod 4): uvoľnenie stropu desiatich produktov musí byť dohľadateľné.
-    expect(AUDIT_EVENT_TYPES.length).toBe(40);
+    // 41. a 42. sú `preset_created` a `preset_deleted` (D112, 31. 8. 2026):
+    // preset nesie percentá, ktoré niekto o mesiac naklikne jedným klikom,
+    // takže jeho uloženie a zmazanie sú mutácie, ktoré I4 (D102) žiada
+    // zaznamenať. POUŽITIE presetu medzi nimi ZÁMERNE nie je — zdôvodnenie je
+    // pri zozname v `src/lib/audit/events.ts`.
+    expect(AUDIT_EVENT_TYPES.length).toBe(42);
     for (const event of AUDIT_EVENT_TYPES) {
       expect(event.length, event).toBeLessThanOrEqual(48);
       expect(isAuditEventType(event)).toBe(true);
