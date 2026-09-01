@@ -39,7 +39,15 @@ describe('READ_LANE_LIMITS — stropy sa preberajú, nie prepočítavajú', () =
     expect(READ_LANE_LIMITS.orders.perUtcDay).toBe(
       Math.floor(SHOP_KEYED_LIMIT.perUtcDay * RATE_SAFETY_FACTOR),
     );
-    expect(READ_LANE_LIMITS.orders.perUtcDay).toBeLessThan(READ_LANE_LIMITS.anon.perUtcDay);
+    /*
+     * Tvrdenie je o ZDROJI stropu, nie o jeho veľkosti. Do 1. 9. 2026 tu stálo
+     * `toBeLessThan(anon)` — bola to pravda (160 < 240), ale iba náhodou: kľúč
+     * mal vtedy nižšiu kvótu než anonymná vetva. Po zdvihnutí kvóty na
+     * 1000/deň je kľúčová dráha VOĽNEJŠIA (800 > 240) a tá nerovnosť by test
+     * zhodila, hoci kód je správny. Čo naozaj musí platiť: dráha si strop
+     * PREBERÁ z kľúča a nie z anonymnej vetvy.
+     */
+    expect(READ_LANE_LIMITS.orders.perUtcDay).not.toBe(READ_LANE_LIMITS.anon.perUtcDay);
   });
 });
 

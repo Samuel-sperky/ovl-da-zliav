@@ -85,11 +85,24 @@ export const SHOP_ANON_LIMIT = {
  *
  * **Toto je ZÁLOHA, nie pravda.** Skutočný rozpočet vracia `whoami.remaining`;
  * tieto čísla sa použijú výhradne vtedy, keď sa `whoami` nedá prečítať
- * (`resolveKeyedBudget`). Ich jediný zdroj je stará v4 dokumentácia.
+ * (`resolveKeyedBudget`).
+ *
+ * ZDVIHNUTÉ 1. 9. 2026 z `20/min · 200/deň` na `150/min · 1000/deň` — správca
+ * shopu na žiadosť (`docs/64-ZIADOST-LIMITY-2026-09-01.md`) zvýšil politiku
+ * kľúča „Discount handler" a ohlásil, že pri bezproblémovom behu ju zdvihne
+ * znova. Ban po prekročení zostáva 10 minút, takže `RATE_SAFETY_FACTOR` platí
+ * ďalej.
+ *
+ * Čo z týchto dvoch čísel vychádza (nič z toho neprepisuj ručne — je to
+ * odvodené a pri ďalšom zdvihnutí sa prepočíta samo): `KEYED_FALLBACK_PER_*`
+ * nižšie · `MAX_DAILY_WRITE_BUDGET` a `WRITE_QUOTA_RESERVE`
+ * (`lib/engine/budget.ts`) · `READ_LANE_LIMITS.product_read` a `.orders`
+ * (`lib/shop/read-budget.ts`) · `MIN_ENRICH_READ_PAUSE_MS`
+ * a `DEFAULT_ENRICH_DAILY_TARGET`.
  */
 export const SHOP_KEYED_LIMIT = {
-  perMinute: 20,
-  perUtcDay: 200,
+  perMinute: 150,
+  perUtcDay: 1000,
 } as const;
 
 /**
@@ -118,8 +131,10 @@ export const ANON_READS_PER_UTC_DAY = Math.floor(SHOP_ANON_LIMIT.perUtcDay * RAT
 export const MIN_ANON_READ_PAUSE_MS = Math.ceil(60_000 / ANON_READS_PER_MINUTE);
 
 /**
- * Záloha pre vetvu s kľúčom, už po odrátaní rezervy (20 × 0,8 = 16
- * a 200 × 0,8 = 160). Platí VÝHRADNE vtedy, keď `whoami` nevie povedať zostatok.
+ * Záloha pre vetvu s kľúčom, už po odrátaní rezervy (150 × 0,8 = 120
+ * a 1000 × 0,8 = 800). Platí VÝHRADNE vtedy, keď `whoami` nevie povedať
+ * zostatok. Čísla sú ODVODENÉ zo `SHOP_KEYED_LIMIT` — pri ďalšom zdvihnutí
+ * limitov sa prepočítajú samy.
  */
 export const KEYED_FALLBACK_PER_MINUTE = Math.floor(
   SHOP_KEYED_LIMIT.perMinute * RATE_SAFETY_FACTOR,

@@ -22,6 +22,7 @@ import { createCatalogRepo } from '@/lib/repo/catalog.repo';
 import {
   createSettingsRepo,
   effectiveMaxProducts,
+  MAX_DAILY_WRITE_BUDGET,
   PILOT_MAX_PRODUCTS,
 } from '@/lib/repo/settings.repo';
 
@@ -174,11 +175,17 @@ describe('settings.repo — zápisy nastavení sa nedajú prestreliť', () => {
     await expect(repo.setScopeMode('plne' as never)).rejects.toThrow(/Neznámy režim/);
   });
 
-  it('setDailyWriteBudget() drží 1–200 (strop shopu, nie náš)', async () => {
+  it('setDailyWriteBudget() drží 1…strop shopu (nie náš)', async () => {
+    /*
+     * Hranica je ODVODENÁ od `MAX_DAILY_WRITE_BUDGET`, nie napísaná. Do
+     * 1. 9. 2026 tu stálo `201`/`200`; po zdvihnutí kvóty na 1000/deň by test
+     * tvrdil strop, ktorý už neplatí — a `settings.repo` mal dovtedy vlastnú
+     * kópiu toho čísla, takže sa s `budget.ts` rozišli.
+     */
     const repo = createSettingsRepo({ defaultConn: connWith([]) });
     await expect(repo.setDailyWriteBudget(0)).rejects.toThrow();
-    await expect(repo.setDailyWriteBudget(201)).rejects.toThrow();
-    await expect(repo.setDailyWriteBudget(200)).resolves.toBeUndefined();
+    await expect(repo.setDailyWriteBudget(MAX_DAILY_WRITE_BUDGET + 1)).rejects.toThrow();
+    await expect(repo.setDailyWriteBudget(MAX_DAILY_WRITE_BUDGET)).resolves.toBeUndefined();
   });
 
   it('setMaxProductsPerCampaign() drží 1–10 000 (K1 bod 3)', async () => {

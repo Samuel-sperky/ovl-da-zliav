@@ -141,8 +141,14 @@ describe.skipIf(!available)('0013 — pokrok katalógu a zdieľaný rozpočet č
       expect(orders.used).toBe(7);
       // `anon` je z predchádzajúceho testu na 15 — dôležité je, že sa nezmenil.
       expect(anon.used).toBe(15);
-      // Stropy sú rôzne: 240 anonymne, 160 s kľúčom.
-      expect(orders.limit).toBeLessThan(anon.limit);
+      /*
+       * Stropy sú RÔZNE — to je celé tvrdenie. Do 1. 9. 2026 tu stálo
+       * `toBeLessThan` a bola to pravda (160 < 240) len náhodou: kľúč mal vtedy
+       * nižšiu kvótu než anonymná vetva. Po zdvihnutí kvóty na 1000/deň je
+       * kľúčová dráha voľnejšia (800 > 240), a poradie stropov nikdy nebolo to,
+       * čo tento test stráži.
+       */
+      expect(orders.limit).not.toBe(anon.limit);
     });
   });
 

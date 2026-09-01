@@ -42,9 +42,12 @@ describe('posledné známe limity sedia s dokumentáciou v4', () => {
     expect(SHOP_ANON_LIMIT.perUtcDay).toBe(300);
   });
 
-  it('záloha pre volania s kľúčom je 20/min a 200/UTC deň', () => {
-    expect(SHOP_KEYED_LIMIT.perMinute).toBe(20);
-    expect(SHOP_KEYED_LIMIT.perUtcDay).toBe(200);
+  it('záloha pre volania s kľúčom je 150/min a 1000/UTC deň (zdvihnuté 1. 9. 2026)', () => {
+    // Do 1. 9. 2026 to bolo 20/200. Správca shopu kvótu kľúča „Discount
+    // handler" zdvihol na 150/1000 a ohlásil ďalšie zdvihnutie — keď príde,
+    // menia sa TIETO dve čísla a všetko ostatné sa prepočíta samo.
+    expect(SHOP_KEYED_LIMIT.perMinute).toBe(150);
+    expect(SHOP_KEYED_LIMIT.perUtcDay).toBe(1_000);
   });
 
   it('denný strop NIE JE minútový — na tejto zámene padol celý katalóg', () => {
@@ -58,15 +61,29 @@ describe('posledné známe limity sedia s dokumentáciou v4', () => {
 describe('odvodené hodnoty držia rezervu pod stropom', () => {
   it('rezerva je 20 % a plánované tempo je pod stropom, nie na ňom', () => {
     expect(RATE_SAFETY_FACTOR).toBe(0.8);
-    expect(ANON_READS_PER_MINUTE).toBe(24);
-    expect(ANON_READS_PER_UTC_DAY).toBe(240);
+    expect(ANON_READS_PER_MINUTE).toBe(
+      Math.floor(SHOP_ANON_LIMIT.perMinute * RATE_SAFETY_FACTOR),
+    );
+    expect(ANON_READS_PER_UTC_DAY).toBe(
+      Math.floor(SHOP_ANON_LIMIT.perUtcDay * RATE_SAFETY_FACTOR),
+    );
     expect(ANON_READS_PER_MINUTE).toBeLessThan(SHOP_ANON_LIMIT.perMinute);
     expect(ANON_READS_PER_UTC_DAY).toBeLessThan(SHOP_ANON_LIMIT.perUtcDay);
   });
 
-  it('záloha pre kľúčovú vetvu je tiež pod stropom (16 z 20, 160 z 200)', () => {
-    expect(KEYED_FALLBACK_PER_MINUTE).toBe(16);
-    expect(KEYED_FALLBACK_PER_UTC_DAY).toBe(160);
+  it('záloha pre kľúčovú vetvu je tiež pod stropom, a je ODVODENÁ', () => {
+    /*
+     * Tvrdenie je o VZŤAHU, nie o čísle: záloha musí byť presne `strop × 0,8`
+     * a nesmie na strop dosiahnuť. Keď správca shopu kvótu zdvihne znova, tento
+     * test prejde bez úpravy — dovtedy tu stálo `16` a `160` a zdvihnutie
+     * limitov ho zhodilo, hoci kód bol správny.
+     */
+    expect(KEYED_FALLBACK_PER_MINUTE).toBe(
+      Math.floor(SHOP_KEYED_LIMIT.perMinute * RATE_SAFETY_FACTOR),
+    );
+    expect(KEYED_FALLBACK_PER_UTC_DAY).toBe(
+      Math.floor(SHOP_KEYED_LIMIT.perUtcDay * RATE_SAFETY_FACTOR),
+    );
     expect(KEYED_FALLBACK_PER_MINUTE).toBeLessThan(SHOP_KEYED_LIMIT.perMinute);
     expect(KEYED_FALLBACK_PER_UTC_DAY).toBeLessThan(SHOP_KEYED_LIMIT.perUtcDay);
   });
@@ -183,8 +200,13 @@ describe('rozpočet s kľúčom sa číta zo `whoami`, záloha je len záchrann�
   });
 
   it('to isté platí, keď je denné číslo zo zálohy a minútové živé', () => {
-    // 200 živých za minútu proti zálohe 160 na deň — minútové číslo sa zastropuje.
-    const budget = resolveKeyedBudget({ perMinute: 200, perUtcDay: null });
+    // Živé minútové číslo NAD dennou zálohou sa zastropuje na dennú hodnotu.
+    // Musí byť odvodené: pri zdvihnutí kvóty by pevné „200" prestalo byť nad
+    // zálohou (800) a test by tvrdil niečo iné, než čo má v názve.
+    const budget = resolveKeyedBudget({
+      perMinute: KEYED_FALLBACK_PER_UTC_DAY + 40,
+      perUtcDay: null,
+    });
     expect(budget.perMinute).toBe(KEYED_FALLBACK_PER_UTC_DAY);
     expect(budget.perMinute).toBeLessThanOrEqual(budget.perUtcDay);
   });

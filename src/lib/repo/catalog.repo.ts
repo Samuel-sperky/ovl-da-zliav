@@ -133,6 +133,7 @@ import type {
 import { query as poolQuery } from '@/db/pool';
 import { addDays, todayInZone } from '@/lib/domain/dates';
 import { anonReadBudget } from '@/lib/repo/read-budget.repo';
+import { KEYED_FALLBACK_PER_UTC_DAY } from '@/lib/shop/rate-limits';
 import {
   readDaysNeeded,
   type ReadBudget,
@@ -853,12 +854,26 @@ export const ENRICH_PRIORITY_CAMPAIGN = 2;
 export const ENRICH_PRIORITY_REST = 3;
 
 /**
- * Koľko produktov obohatí dávka za deň (D118). Kvóta kľúča je ~200/deň a
- * `getFull` NIE JE batchovateľný (25 položiek = 25 hitov), takže zvyšok (~50)
- * zostáva na canary, sondy a obohatenie NA DOPYT. Je to len default pre prázdny
- * riadok — platná hodnota žije v `catalog_enrich_state.daily_target`.
+ * Podiel dennej kľúčovej kvóty, ktorý smie minúť DÁVKA obohacovania na pozadí.
+ * Zvyšok (25 %) zostáva na canary, sondy, overenie zliav a obohatenie NA DOPYT
+ * — dávka si nesmie vzať všetko, inak by detail produktu, ktorý človek otvorí,
+ * nemal z čoho dotiahnuť dáta.
  */
-export const DEFAULT_ENRICH_DAILY_TARGET = 150;
+export const ENRICH_DAILY_SHARE = 0.75;
+
+/**
+ * Koľko produktov obohatí dávka za deň (D118). ODVODENÉ z kvóty kľúča —
+ * `getFull` NIE JE batchovateľný (25 položiek = 25 hitov), takže je to priamo
+ * počet produktov. Je to len default pre prázdny riadok; platná hodnota žije
+ * v `catalog_enrich_state.daily_target`.
+ *
+ * Pri kvóte zdvihnutej 1. 9. 2026 (1000/deň → 800 použiteľných) je to **600
+ * produktov denne**, teda celý katalóg (41 348) za ~69 dní namiesto ~276.
+ * Nepíš sem číslo ručne: pri ďalšom zdvihnutí limitov sa prepočíta samo.
+ */
+export const DEFAULT_ENRICH_DAILY_TARGET = Math.floor(
+  KEYED_FALLBACK_PER_UTC_DAY * ENRICH_DAILY_SHARE,
+);
 
 /** Strop jednej dávky výberu z fronty — poistka proti `LIMIT` bez rozumu. */
 const MAX_ENRICH_BATCH = 500;

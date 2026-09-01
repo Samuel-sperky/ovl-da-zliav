@@ -32,6 +32,7 @@
  *
  * Vlastník: V4.
  */
+import { SHOP_KEYED_LIMIT } from '@/lib/shop/rate-limits';
 import type { Queryable, SettingsRecord, SettingsRepo, UtcDate } from '@/contracts';
 
 import { query as poolQuery } from '@/db/pool';
@@ -47,8 +48,21 @@ export const PILOT_MAX_PRODUCTS = 10;
 /** Tvrdý DB strop (`ck_settings_max_products`, `ck_campaigns_items_total`). */
 export const HARD_MAX_PRODUCTS = 10_000;
 
-/** Denný strop shopu, nie náš (`ck_settings_daily_budget`). */
-export const MAX_DAILY_WRITE_BUDGET = 200;
+/**
+ * Denný strop shopu, nie náš (`ck_settings_daily_budget`).
+ *
+ * ODVODENÉ zo `SHOP_KEYED_LIMIT` (1. 9. 2026). Do vtedy tu stálo `200` ako
+ * literál — a bol to DRUHÝ zdroj pravdy vedľa `MAX_DAILY_WRITE_BUDGET`
+ * v `lib/engine/budget.ts`. Kým bola kvóta 200, dve kópie sa nemali ako
+ * rozísť; po jej zdvihnutí na 1000 sa rozišli okamžite: `budget.ts` prijal
+ * hodnotu 1000 ako platnú a tento repozitár ju odmietol hláškou „musí byť
+ * 1–200". Rovnaké číslo na dvoch miestach je rovnaká chyba ako dvakrát
+ * napísané pravidlo — preto sa teraz odvodzuje z jediného zdroja.
+ *
+ * Zhoda s DB je vynútená migráciou `0017_zdvihnuty_strop_zapisov.sql`; tam je
+ * horná hranica literál, lebo SQL si túto konštantu naimportovať nevie.
+ */
+export const MAX_DAILY_WRITE_BUDGET = SHOP_KEYED_LIMIT.perUtcDay;
 
 /** Nastavenia rozsahu a rýchlosti fronty (K1, K2). */
 export interface ScopeSettings {

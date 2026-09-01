@@ -24,6 +24,7 @@ import {
   WRITE_QUOTA_RESERVE,
   auditWriteAttemptCounter,
   budgetDay,
+  MAX_DAILY_WRITE_BUDGET,
   createBudget,
 } from '@/lib/engine/budget';
 import { checkDailyBudget } from '@/lib/engine/guards';
@@ -119,13 +120,21 @@ describe.skipIf(!available)('K2 — spotreba rozpočtu zo skutočného audit_log
     for (const productId of [601, 602]) {
       await appendAudit({ actor: 'scheduler', eventType: 'write_attempt', productId });
     }
+    /*
+     * Rozpočet musí byť NAD rezervou, inak sa čítania neúčtujú vôbec a test by
+     * meral opačnú vetvu, než má v názve. Do 1. 9. 2026 na to stačil default
+     * 200 (rezerva bola 40); po zdvihnutí kvóty je rezerva 200, takže default
+     * je presne na jej úrovni. Hodnota je odvodená od stropu shopu.
+     */
+    await settingsRepo.setDailyWriteBudget(MAX_DAILY_WRITE_BUDGET);
+
     const reserved = await productReadBudget.reserve(10);
     expect(reserved.granted).toBe(10);
 
     const status = await createBudget({ settingsRepo }).remainingToday();
     expect(status.spent).toBe(2);
     expect(status.keyedReadsToday).toBe(10);
-    expect(status.remaining).toBe(188);
+    expect(status.remaining).toBe(MAX_DAILY_WRITE_BUDGET - 2 - 10);
   });
 
   /**

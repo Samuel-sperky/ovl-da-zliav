@@ -21,6 +21,10 @@
  *
  * Vlastník: A11.
  */
+import {
+  KEYED_FALLBACK_PER_MINUTE,
+  KEYED_FALLBACK_PER_UTC_DAY,
+} from '@/lib/shop/rate-limits';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Queryable } from '@/contracts';
@@ -622,7 +626,8 @@ describe('PUT /api/key — rozpočet sa hlási aj so svojím pôvodom (bod D2)',
       await route(makeRequest({ method: 'PUT', body: { apiKey: FAKE_KEY } })),
     );
     const budget = body.data?.budget as { perUtcDay: number; measured: boolean; note: string };
-    expect(budget.perUtcDay).toBe(160);
+    // Odvodené od zálohy — pri zdvihnutí kvóty sa prepočíta samo.
+    expect(budget.perUtcDay).toBe(KEYED_FALLBACK_PER_UTC_DAY);
     expect(budget.measured).toBe(false);
     expect(budget.note).toContain('odhad');
   });
@@ -643,7 +648,11 @@ describe('PUT /api/key — rozpočet sa hlási aj so svojím pôvodom (bod D2)',
     const body = await readBody(
       await route(makeRequest({ method: 'PUT', body: { apiKey: FAKE_KEY } })),
     );
-    expect(body.data?.budget).toMatchObject({ perMinute: 16, perUtcDay: 160, measured: false });
+    expect(body.data?.budget).toMatchObject({
+      perMinute: KEYED_FALLBACK_PER_MINUTE,
+      perUtcDay: KEYED_FALLBACK_PER_UTC_DAY,
+      measured: false,
+    });
   });
 });
 

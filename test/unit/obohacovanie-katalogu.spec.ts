@@ -12,8 +12,9 @@
  *  2. **Preklikávanie nesmie stáť kvótu.** Druhé otvorenie toho istého produktu
  *     nesmie poslať ANI JEDEN request. Overuje sa počítadlom volaní fake
  *     klienta, nie tvrdením o kóde.
- *  3. **Dávka nechá rezervu.** Z ~200 čítaní na deň si dávka nesmie vzať
- *     posledných ~50 — tie patria canary, sonde kľúča a obohateniu na dopyt.
+ *  3. **Dávka nechá rezervu.** Z použiteľnej dennej kvóty si dávka nesmie vzať
+ *     posledných 25 % — tie patria canary, sonde kľúča a obohateniu na dopyt.
+ *     Konkrétne čísla sú odvodené (`ENRICH_DAILY_SHARE`), nie napísané.
  *     Keby si vzala všetko, obrazovka by po noci hlásila „nevieme" a nedalo by
  *     sa to obísť ani kliknutím.
  *  4. **`ip_banned` je DÔVOD PAUZY, nie zahodená chyba (D120).** Dávka stojí,
@@ -69,7 +70,10 @@ import {
 } from '@/lib/repo/catalog.repo';
 import type { ShopScope } from '@/lib/shop/client';
 import { makeShopError, ShopRequestError } from '@/lib/shop/errors';
-import { KEYED_FALLBACK_PER_MINUTE } from '@/lib/shop/rate-limits';
+import {
+  KEYED_FALLBACK_PER_MINUTE,
+  KEYED_FALLBACK_PER_UTC_DAY,
+} from '@/lib/shop/rate-limits';
 import {
   createMemoryReadBudgetStore,
   createReadBudget,
@@ -863,21 +867,27 @@ describe('dávka obohacovania (D118 bod 2)', () => {
 
 describe('plošné obohatenie neexistuje — a cena je povedaná číslom', () => {
   it('`enrichDaysNeeded` povie, koľko dní by trval celý katalóg', () => {
-    // 41 348 produktov je meraný fakt sondy z 28. 8. 2026; 276 dní pri cieli 150.
-    expect(enrichDaysNeeded(41_348, DEFAULT_ENRICH_DAILY_TARGET)).toBe(276);
+    /*
+     * 41 348 produktov je meraný fakt sondy z 28. 8. 2026. Počet dní je
+     * ODVODENÝ od denného cieľa — po zdvihnutí kvóty 1. 9. 2026 (200 → 1000/deň,
+     * teda cieľ 150 → 600) padol z 276 na 69 dní. Práve to je zmysel toho
+     * zdvihnutia, takže test tvrdí aritmetiku, nie zapamätané číslo.
+     */
+    expect(enrichDaysNeeded(41_348, DEFAULT_ENRICH_DAILY_TARGET)).toBe(
+      Math.ceil(41_348 / DEFAULT_ENRICH_DAILY_TARGET),
+    );
+    expect(enrichDaysNeeded(41_348, DEFAULT_ENRICH_DAILY_TARGET)).toBe(69);
     expect(enrichDaysNeeded(0)).toBe(0);
     /*
-     * Kontrakt §2b uvádza ~207 dní a je to správna aritmetika nad HRUBOU kvótou
-     * (41 348 / 200). Funkcia vráti viac (259) a je to zámerné: rýchlosť si
-     * zastropuje na `KEYED_FALLBACK_PER_UTC_DAY` (200 × 0,8 = 160), teda na to,
-     * čo appka naozaj minie — 20 % je rezerva, ktorú si zo stropu nikdy neberie.
-     * Sľubovať 207 dní tempom, ktorým sa nikdy nepôjde, by bol optimistický
-     * odhad vydávaný za plán.
+     * Rýchlosť si funkcia zastropuje na `KEYED_FALLBACK_PER_UTC_DAY`, teda na
+     * to, čo appka naozaj minie — 20 % zo stropu je rezerva, ktorú si nikdy
+     * neberie. Sľubovať dni tempom, ktorým sa nikdy nepôjde, by bol
+     * optimistický odhad vydávaný za plán.
      */
-    expect(Math.ceil(41_348 / 200)).toBe(207);
-    expect(enrichDaysNeeded(41_348, 200)).toBe(259);
+    const stropRychlosti = Math.ceil(41_348 / KEYED_FALLBACK_PER_UTC_DAY);
+    expect(enrichDaysNeeded(41_348, KEYED_FALLBACK_PER_UTC_DAY)).toBe(stropRychlosti);
     // Nikto nedostane „nula dní" tým, že si vyžiada nekonečnú rýchlosť.
-    expect(enrichDaysNeeded(41_348, 10_000)).toBe(259);
+    expect(enrichDaysNeeded(41_348, 10_000_000)).toBe(stropRychlosti);
   });
 
   it('jeden beh dávky má tvrdý strop, aj keď si volajúci vyžiada viac', async () => {
@@ -901,8 +911,13 @@ describe('plošné obohatenie neexistuje — a cena je povedaná číslom', () =
   });
 
   it('rezerva dávky a denný cieľ sa spolu zmestia do kvóty kľúča', () => {
-    // ~200/deň je meraná kvóta. Cieľ 150 + rezerva 50 = 200 a ani o jeden viac.
-    expect(DEFAULT_ENRICH_DAILY_TARGET + ENRICH_QUOTA_RESERVE).toBeLessThanOrEqual(200);
+    /*
+     * Cieľ dávky + rezerva sa musia zmestiť do POUŽITEĽNEJ kvóty a ani o jeden
+     * viac. Odvodené: do 1. 9. 2026 to bolo 150 + 50 = 200, dnes 600 + 200 = 800.
+     */
+    expect(DEFAULT_ENRICH_DAILY_TARGET + ENRICH_QUOTA_RESERVE).toBeLessThanOrEqual(
+      KEYED_FALLBACK_PER_UTC_DAY,
+    );
     expect(ENRICH_PRIORITY_ALLOWLIST).toBeLessThan(ENRICH_PRIORITY_REST);
   });
 });

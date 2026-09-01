@@ -17,6 +17,7 @@ import {
   DEFAULT_DAILY_WRITE_BUDGET,
   FAIL_CLOSED_DAILY_BUDGET,
   MAX_DAILY_WRITE_BUDGET,
+  WRITE_QUOTA_RESERVE,
   budgetDay,
   createBudget,
   describeWriteBudgetLimits,
@@ -105,28 +106,52 @@ describe('jeden kľúč, jedna kvóta — čítania míňajú strop zápisov (31
    * nevedel — takže hlásil „ostáva 200" v deň, keď kľúč mal minutých 160,
    * fronta sa rozbehla a shop ju uprostred kampane odmietol (429).
    */
+  /*
+   * Vstupy sú ODVODENÉ od stropov, nie napísané. Do 1. 9. 2026 tu stálo
+   * `dailyBudget: 200` a `used: 160` — po zdvihnutí kvóty na 1000/deň je 200
+   * pod rezervou (`WRITE_QUOTA_RESERVE` = 200), takže by sa čítania neúčtovali
+   * vôbec a test by meral opačnú vetvu, než má v názve.
+   */
+  const PLNY_ROZPOCET = MAX_DAILY_WRITE_BUDGET;
+  const ZDIELANE = PLNY_ROZPOCET - WRITE_QUOTA_RESERVE;
+
   it('minuté čítania sa od stropu odpočítajú', async () => {
     const status = await remainingToday({
       counter: counterOf({ '2026-08-10': 20 }),
-      dailyBudget: 200,
-      keyedReads: { status: async () => ({ used: 160, known: true }) },
+      dailyBudget: PLNY_ROZPOCET,
+      keyedReads: { status: async () => ({ used: ZDIELANE, known: true }) },
       now,
     });
     expect(status.spent).toBe(20);
-    expect(status.keyedReadsToday).toBe(160);
-    expect(status.remaining).toBe(20);
+    expect(status.keyedReadsToday).toBe(ZDIELANE);
+    // Čítania zjedli celú zdieľanú časť; zostáva rezerva mínus zapísané.
+    expect(status.remaining).toBe(WRITE_QUOTA_RESERVE - 20);
     expect(status.exhausted).toBe(false);
   });
 
-  it('čítania samé môžu rozpočet vyčerpať — a je to informácia, nie chyba', async () => {
-    const status = await remainingToday({
-      counter: counterOf({ '2026-08-10': 40 }),
-      dailyBudget: 200,
-      keyedReads: { status: async () => ({ used: 160, known: true }) },
+  it('čítania samé rozpočet NEVYČERPAJÚ — rezerva zápisov ostane (D 31. 8. 2026)', async () => {
+    /*
+     * Toto je celý zmysel `WRITE_QUOTA_RESERVE`: aj keď čítania zjedia celú
+     * zdieľanú časť, zápisom zostane rezerva. Vyčerpá ju až to, čo sa NAOZAJ
+     * zapísalo. Test to preto tvrdí v dvoch krokoch.
+     */
+    const poCitaniach = await remainingToday({
+      counter: counterOf({ '2026-08-10': 0 }),
+      dailyBudget: PLNY_ROZPOCET,
+      keyedReads: { status: async () => ({ used: ZDIELANE, known: true }) },
       now,
     });
-    expect(status.remaining).toBe(0);
-    expect(status.exhausted).toBe(true);
+    expect(poCitaniach.remaining).toBe(WRITE_QUOTA_RESERVE);
+    expect(poCitaniach.exhausted).toBe(false);
+
+    const ajSoZapismi = await remainingToday({
+      counter: counterOf({ '2026-08-10': WRITE_QUOTA_RESERVE }),
+      dailyBudget: PLNY_ROZPOCET,
+      keyedReads: { status: async () => ({ used: ZDIELANE, known: true }) },
+      now,
+    });
+    expect(ajSoZapismi.remaining).toBe(0);
+    expect(ajSoZapismi.exhausted).toBe(true);
   });
 
   it('nečitateľné počítadlo čítaní je fail-closed, nie nula', async () => {
@@ -135,11 +160,11 @@ describe('jeden kľúč, jedna kvóta — čítania míňajú strop zápisov (31
     // domnienku si tu nevyrába, ale ani ju neprepisuje na nulu.
     const status = await remainingToday({
       counter: counterOf({ '2026-08-10': 0 }),
-      dailyBudget: 200,
-      keyedReads: { status: async () => ({ used: 160, known: false }) },
+      dailyBudget: PLNY_ROZPOCET,
+      keyedReads: { status: async () => ({ used: ZDIELANE, known: false }) },
       now,
     });
-    expect(status.remaining).toBe(40);
+    expect(status.remaining).toBe(WRITE_QUOTA_RESERVE);
   });
 
   it('`keyedReads: null` znamená „nesledujem" — nie „nič sa neminulo naslepo"', async () => {
@@ -261,7 +286,8 @@ describe('describeWriteBudgetLimits — dva stropy, nie jeden (K2)', () => {
   });
 
   it('rozpočet na úrovni stropu shopu nie je „pribrzdené"', () => {
-    expect(describeWriteBudgetLimits(200, now).belowShopCap).toBe(false);
+    // Odvodené: „na úrovni stropu" je strop shopu, nie číslo 200.
+    expect(describeWriteBudgetLimits(MAX_DAILY_WRITE_BUDGET, now).belowShopCap).toBe(false);
   });
 
   it('hodnota mimo 1…strop shopu je „neviem", nie platné číslo (fail-closed)', () => {

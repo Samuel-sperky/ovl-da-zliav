@@ -4,7 +4,8 @@
  *
  * Čo tento test stráži:
  *  1. **`product_read` má strop KĽÚČA, nie IP.** `getFull` je čítanie s kľúčom
- *     a shop ho účtuje na kľúč (~20/min, ~200/deň) — nie na anonymných 30/300.
+ *     a shop ho účtuje na kľúč (od 1. 9. 2026 150/min, 1000/deň) — nie na
+ *     anonymných 30/300.
  *     Čísla sa NEPÍŠU ručne, porovnávajú sa s `@/lib/shop/rate-limits`.
  *  2. **Tri dráhy, tri počítadlá.** Spotreba obohacovania nesmie ukrojiť
  *     z rozpočtu katalógovej synchronizácie (`anon`, beží dni) ani z rozpočtu
@@ -80,7 +81,14 @@ describe('tri dráhy, tri počítadlá', () => {
       now: () => new Date('2026-08-31T09:00:00.000Z'),
     });
 
-    const all = await product.reserve(ANON_READS_PER_UTC_DAY);
+    /*
+     * Žiadame VIAC, než dráha dovolí, a čakáme, že sa zastaví na SVOJOM strope.
+     * Do 1. 9. 2026 sa tu žiadal `ANON_READS_PER_UTC_DAY` (240) a fungovalo to,
+     * lebo kľúčová dráha bola vtedy nižšia (160). Po zdvihnutí kvóty je
+     * kľúčová dráha 800, takže 240 by ju nevyčerpalo — žiadosť musí byť
+     * odvodená od stropu tej dráhy, nie od anonymného čísla.
+     */
+    const all = await product.reserve(READ_LANE_LIMITS.product_read.perUtcDay + 1);
     expect(all.granted).toBe(READ_LANE_LIMITS.product_read.perUtcDay);
     expect(all.status.exhausted).toBe(true);
   });

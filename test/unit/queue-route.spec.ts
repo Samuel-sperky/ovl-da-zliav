@@ -325,7 +325,7 @@ describe('GET /api/queue — kde je fronta', () => {
 /* ═══════════ 3. Dva stropy: shop vs. naše nastavenie (K2, bod 5) ══════════ */
 
 describe('GET /api/queue — strop shopu a náš rozpočet sa nezlievajú', () => {
-  it('odpoveď uvádza OBOJE: 200/UTC deň shopu aj náš nastavený strop', async () => {
+  it('odpoveď uvádza OBOJE: denný strop shopu aj náš nastavený strop', async () => {
     const body = await callQueue({
       budget: { day: '2026-08-12', budget: 120, spent: 45, remaining: 75, exhausted: false },
     });
@@ -338,8 +338,24 @@ describe('GET /api/queue — strop shopu a náš rozpočet sa nezlievajú', () =
   });
 
   it('nastavený strop na úrovni shopu nie je „pribrzdené"', async () => {
-    const body = await callQueue();
-    expect(record(body.data.limits).configuredPerDay).toBe(200);
+    /*
+     * Strop nastavíme PRESNE na strop shopu — inak test nemeria, čo má v názve.
+     * Do 1. 9. 2026 sa spoliehal na to, že predvolený rozpočet (200) strop
+     * shopu je; po zdvihnutí kvóty na 1000 to prestalo platiť a `belowShopCap`
+     * správne hlásilo `true`. Hodnota je odvodená, takže ďalšie zdvihnutie ju
+     * nezhodí.
+     */
+    const naUrovniShopu = SHOP_KEYED_LIMIT.perUtcDay;
+    const body = await callQueue({
+      budget: {
+        day: '2026-08-12',
+        budget: naUrovniShopu,
+        spent: 0,
+        remaining: naUrovniShopu,
+        exhausted: false,
+      },
+    });
+    expect(record(body.data.limits).configuredPerDay).toBe(naUrovniShopu);
     expect(record(body.data.limits).belowShopCap).toBe(false);
   });
 

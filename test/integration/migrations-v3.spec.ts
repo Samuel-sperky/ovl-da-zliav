@@ -17,6 +17,7 @@
  *
  * Vlastník: V1.
  */
+import { MAX_DAILY_WRITE_BUDGET } from '@/lib/repo/settings.repo';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Connection } from 'mariadb';
@@ -324,13 +325,21 @@ describe.skipIf(!available)('migrácie V3 (0010–0012) — fronta, pásma, rozs
     });
   });
 
-  it('K2 — rozpočet sa dá znížiť, ale nie zdvihnúť nad 200 ani na 0', async () => {
+  it('K2 — rozpočet sa dá znížiť, ale nie zdvihnúť nad strop shopu ani na 0', async () => {
     await withMigrationConn(async (conn) => {
       expect(await rejectionOf(conn, 'UPDATE settings SET daily_write_budget = 50 WHERE id = 1')).toBe(
         '',
       );
+      /*
+       * Horná hranica `CHECK`-u je 1000 od migrácie 0017 (1. 9. 2026, zdvihnutá
+       * kvóta kľúča). Dovtedy tu stálo 201; hodnota sa berie z konštanty, aby
+       * test hovoril o tom istom strope ako kód a DB.
+       */
       expect(
-        await rejectionOf(conn, 'UPDATE settings SET daily_write_budget = 201 WHERE id = 1'),
+        await rejectionOf(
+          conn,
+          `UPDATE settings SET daily_write_budget = ${MAX_DAILY_WRITE_BUDGET + 1} WHERE id = 1`,
+        ),
       ).toContain('ck_settings_daily_budget');
       expect(
         await rejectionOf(conn, 'UPDATE settings SET daily_write_budget = 0 WHERE id = 1'),
@@ -338,7 +347,9 @@ describe.skipIf(!available)('migrácie V3 (0010–0012) — fronta, pásma, rozs
       expect(
         await rejectionOf(conn, 'UPDATE settings SET max_products_per_campaign = 10001 WHERE id = 1'),
       ).toContain('ck_settings_max_products');
-      await conn.query('UPDATE settings SET daily_write_budget = 200 WHERE id = 1');
+      await conn.query(
+        `UPDATE settings SET daily_write_budget = ${MAX_DAILY_WRITE_BUDGET} WHERE id = 1`,
+      );
     });
   });
 

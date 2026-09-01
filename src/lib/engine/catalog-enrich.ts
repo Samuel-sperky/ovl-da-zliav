@@ -108,17 +108,22 @@ import {
 /**
  * Koľko z dennej kvóty kľúča dávka NESMIE minúť.
  *
- * Kvóta je ~200/deň a dávka má cieľ ~150 (`DEFAULT_ENRICH_DAILY_TARGET`).
- * Rozdiel nie je nevyužitá rezerva, ale rozpočet troch vecí, ktoré musia ísť
- * KEDYKOĽVEK: canary (stav dosiahnuteľnosti shopu), sonda kľúča a obohatenie
- * NA DOPYT, keď človek otvorí produkt. Keby si dávka vzala všetko, obrazovka by
- * po noci hlásila „nevieme" a nedalo by sa to obísť ani kliknutím.
+ * Rozdiel medzi použiteľnou kvótou a cieľom dávky
+ * (`DEFAULT_ENRICH_DAILY_TARGET`) nie je nevyužitá rezerva, ale rozpočet troch
+ * vecí, ktoré musia ísť KEDYKOĽVEK: canary (stav dosiahnuteľnosti shopu), sonda
+ * kľúča a obohatenie NA DOPYT, keď človek otvorí produkt. Keby si dávka vzala
+ * všetko, obrazovka by po noci hlásila „nevieme" a nedalo by sa to obísť ani
+ * kliknutím.
  *
- * Stráži sa to DVAKRÁT a zámerne: cieľom dávky (150 < 200) a týmto podlažím nad
- * zdieľaným počítadlom. Prvé chráni kvótu kľúča, druhé zdieľaný denný rozpočet,
- * z ktorého číta aj synchronizácia katalógu — a ten môže byť minutý skôr.
+ * Stráži sa to DVAKRÁT a zámerne: cieľom dávky (75 % kvóty) a týmto podlažím
+ * nad zdieľaným počítadlom. Prvé chráni kvótu kľúča, druhé zdieľaný denný
+ * rozpočet, z ktorého číta aj synchronizácia katalógu — a ten môže byť minutý
+ * skôr.
+ *
+ * ODVODENÉ (1. 9. 2026): pri kvóte 1000/deň → 800 použiteľných a cieli 600 je
+ * rezerva 200. Nepíš sem číslo ručne.
  */
-export const ENRICH_QUOTA_RESERVE = 50;
+export const ENRICH_QUOTA_RESERVE = KEYED_FALLBACK_PER_UTC_DAY - DEFAULT_ENRICH_DAILY_TARGET;
 
 /**
  * Ako dlho je obohatenie „dosť svieže" na to, aby sa `getFull` NEVOLAL.

@@ -51,6 +51,7 @@ import {
   type EnrichBatchDeps,
   type EnrichBatchOutcome,
   type EnrichBatchResult,
+  MIN_ENRICH_READ_PAUSE_MS,
 } from '@/lib/engine/catalog-enrich';
 
 /* ═══════════════════════════ konštanty ════════════════════════════════════ */
@@ -61,14 +62,25 @@ import {
  * Denný cieľ je ~150 (`catalog_enrich_state.daily_target`, D118) a strop jedného
  * behu engine je 150; toto je zrnitosť, nie strop kvóty. Prečo tak nízko: tick
  * na dávku ČAKÁ (`tick.ts` ju `await`-uje) a engine drží medzi dvoma `getFull`
- * pauzu 3 750 ms (minútový strop kľúča). Osem produktov je teda ~30 sekúnd,
- * teda polovica tick-u pri predvolenom `SCHEDULER_TICK_MS` (60 s); dávka 150 by
- * jeden tick natiahla na deväť minút a zdržala by zľavy, ktoré majú prednosť.
+ * pauzu `MIN_ENRICH_READ_PAUSE_MS` (minútový strop kľúča). Dávka má preto držať
+ * ~30 sekúnd, teda polovicu tick-u pri predvolenom `SCHEDULER_TICK_MS` (60 s);
+ * dlhšia by tick natiahla a zdržala zľavy, ktoré majú prednosť.
  *
- * Denný cieľ sa tým dosiahnuť dá s rezervou: 150 / 8 je 19 dávok a pri odstupe
- * `ENRICH_RESUME_MS` sa ich do dňa zmestí stovky.
+ * ODVODENÉ z pauzy (1. 9. 2026), nie napísané ručne. Dovtedy tu stála osmička,
+ * ktorá zodpovedala pauze 3 750 ms pri kvóte 20/min. Po zdvihnutí kvóty na
+ * 150/min pauza padla na 500 ms, takže osem produktov by bolo 4 sekundy —
+ * dávka by stála a denný cieľ by sa nedosiahol. Pri 500 ms je to 60 produktov.
+ *
+ * Denný cieľ (`DEFAULT_ENRICH_DAILY_TARGET`) zostáva skutočným regulátorom:
+ * dávka sa zastaví na ňom, nie na tomto čísle.
  */
-export const ENRICH_PRODUCTS_PER_BATCH = 8;
+/** Ako dlho má jedna dávka držať — polovica predvoleného tick-u. */
+export const ENRICH_BATCH_TARGET_MS = 30_000;
+
+export const ENRICH_PRODUCTS_PER_BATCH = Math.max(
+  1,
+  Math.floor(ENRICH_BATCH_TARGET_MS / MIN_ENRICH_READ_PAUSE_MS),
+);
 
 /** Odstup medzi dvoma dávkami toho istého dňa. */
 export const ENRICH_RESUME_MS = 60 * 1000;
