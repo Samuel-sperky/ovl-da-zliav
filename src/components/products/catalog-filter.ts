@@ -10,16 +10,21 @@
  *
  *  1. **Mená parametrov sú tie isté ako v API.** `q`, `soldWindowDays`,
  *     `soldBuckets`, `priceFrom`, `priceTo`, `neverDiscounted`,
- *     `currentlyDiscounted`, `shopDiscounted`, `page`, `perPage`. Jeden slovník
+ *     `currentlyDiscounted`, `shopDiscounted`, `marginPercentFrom`,
+ *     `marginPercentTo`, `stock`, `orderedTotalFrom`, `orderedTotalTo`,
+ *     `lastSaleOlderDays`, `page`, `perPage`. Jeden slovník
  *     pre adresu obrazovky, pre volanie API aj pre odovzdanie do novej zľavy —
  *     takže
  *     `/produkty?soldWindowDays=180&soldBuckets=none` funguje ako odkaz
  *     z Prehľadu a ten istý reťazec sa dá poslať ďalej.
- *  2. **Zamknuté filtre tu NEEXISTUJÚ.** Kategória, kov, typ šperku, marža,
- *     obrátkovosť ani sklad nie sú súčasťou stavu — appka na ne nemá dáta
- *     (K8) a stav, ktorý sa nedá odoslať, by bol len tichý sľub. Zoznam
- *     zamknutých filtrov prichádza z odpovede API (`lockedFilters`), takže keď
- *     dáta zo shopu pribudnú, obrazovka ich prestane kresliť sivé sama.
+ *  2. **Je tu LEN to, čo sa dá naplniť** (D125, K4, 1. 9. 2026). Kategória, kov
+ *     a typ šperku nie sú súčasťou stavu a NIE SÚ ani na obrazovke: appka na
+ *     ne nemá zdroj (kategórie sú v zrkadle len ID bez slovníka názvov) a
+ *     filter, ktorý sa nedá naplniť, je sľub, ktorý appka nedodrží. Do 1. 9.
+ *     2026 sa kreslili sivé („Zatiaľ nedostupné") — už sa NEKRESLIA vôbec.
+ *     Marža, sklad, celkovo objednané kusy a posledný predaj naopak od
+ *     migrácie 0014 zdroj MAJÚ (`getFull`), takže v stave sú — a platia nad
+ *     OBOHATENÝMI riadkami, čo panel priznáva jednou vetou (I11).
  *  3. **Predvolené okno je 30 dní** (architektúra §1, odpoveď 53). Repozitár
  *     má vlastný default 180, preto sa okno posiela VŽDY explicitne.
  *
@@ -98,6 +103,33 @@ export const SHOP_PRESENCE_STATUSES: Readonly<Record<ShopPresence, readonly stri
 };
 
 /**
+ * Sklad z obohatenia (D125). Tri vylučujúce sa možnosti, nie dve políčka:
+ * „nič nezaškrtnuté" by muselo znamenať „všetko" a to sa v paneli nedá prečítať.
+ *
+ *  · `any` — bez filtra (predvolené, do adresy sa NEPOSIELA),
+ *  · `in`  — sklad viac než nula,
+ *  · `out` — nula a menej (shop vie viesť aj zápornú zásobu).
+ *
+ * Neobohatený produkt (`qty IS NULL`) nespadne ani do jednej z posledných dvoch:
+ * „nevieme" nie je „vypredané" (I11).
+ */
+export type CatalogStock = 'any' | 'in' | 'out';
+
+export const CATALOG_STOCKS: readonly CatalogStock[] = ['any', 'in', 'out'];
+
+/**
+ * Hranice pre „posledný predaj starší než" (D125). Deň sa počíta na serveri
+ * v `Europe/Bratislava` (D31); tu je len počet dní.
+ *
+ * Pozor, čo tento filter ZÁMERNE zahŕňa: aj produkty, o ktorých shop nevie
+ * ŽIADNY predaj (obohatené, `last_time_in_order` prázdne). Sú to tie najhoršie
+ * ležiaky a filter by bez nich klamal — preto to hovorí aj popis v paneli.
+ */
+export const LAST_SALE_WINDOWS = [90, 180, 360] as const;
+
+export type LastSaleWindow = (typeof LAST_SALE_WINDOWS)[number];
+
+/**
  * Odkiaľ je riadok, ako sa na to dá filtrovať (kontrakt produktov A3).
  *
  * POZOR — toto NIE JE parameter API a nesmie sa doň dostať. `origin` vzniká až
@@ -153,6 +185,26 @@ export interface CatalogFilterState {
    * Koľko riadkov je obohatených, hovorí `counts.enrichedRows`.
    */
   readonly shopDiscounted: boolean;
+  /**
+   * ── Štyri filtre nad OBOHATENÍM (D125, migrácia 0014) ──────────────────────
+   *
+   * Všetky platia len pre riadky, ktoré appka obohatila z `getFull`; o ostatných
+   * tie údaje nepozná a NEVRÁTI ich (fail-closed „nevieme", nie nula — I11).
+   */
+  /** Marža v PERCENTÁCH ako text z poľa; prázdne = bez hranice. Zápor je platný. */
+  readonly marginPercentFrom: string;
+  readonly marginPercentTo: string;
+  /** Sklad (`qty`) — pozri `CatalogStock`. */
+  readonly stock: CatalogStock;
+  /**
+   * CELKOVO objednané kusy (`qty_in_orders`) za celú históriu shopu, NIE za
+   * okno (R3 kontraktu V5) — okno sa z tohto stĺpca odvodiť nedá a názov to
+   * preto nesľubuje.
+   */
+  readonly orderedTotalFrom: string;
+  readonly orderedTotalTo: string;
+  /** Posledný predaj starší než N dní; `null` = bez filtra. */
+  readonly lastSaleOlderDays: LastSaleWindow | null;
   /** Čo eshop o produkte povedal pri poslednom načítaní (kontrakt produktov A3). */
   readonly shopPresence: ShopPresence;
   /** Poradie riadkov. Nie je to podmienka otázky — pozri hlavičku modulu. */
@@ -170,6 +222,12 @@ export const DEFAULT_CATALOG_FILTER: CatalogFilterState = {
   currentlyDiscounted: false,
   neverDiscounted: false,
   shopDiscounted: false,
+  marginPercentFrom: '',
+  marginPercentTo: '',
+  stock: 'any',
+  orderedTotalFrom: '',
+  orderedTotalTo: '',
+  lastSaleOlderDays: null,
   shopPresence: 'known',
   /**
    * NAJHORŠIE LEŽIAKY PRVÉ (kontrakt V4 §5 K4, 31. 8. 2026).
@@ -232,6 +290,33 @@ export function priceParam(raw: string): string | null {
   return PRICE_RE.test(text) ? text.replace(',', '.') : null;
 }
 
+/**
+ * Marža v percentách z poľa. Rovnaký tvar ako cena, ale ZÁPOR JE PLATNÝ —
+ * produkt sa dá predávať pod nákupnou cenou a nájsť práve tie kusy má zmysel.
+ */
+const PERCENT_RE = /^-?\d{1,5}([.,]\d{1,2})?$/;
+
+export function percentParam(raw: string): string | null {
+  const text = raw.trim();
+  if (text === '') return null;
+  return PERCENT_RE.test(text) ? text.replace(',', '.') : null;
+}
+
+/** Celé nezáporné číslo z poľa (kusy). Nezmysel → `null`, filter odpadne. */
+const COUNT_RE = /^\d{1,9}$/;
+
+export function countParam(raw: string): string | null {
+  const text = raw.trim();
+  if (text === '') return null;
+  return COUNT_RE.test(text) ? text : null;
+}
+
+const isLastSaleWindow = (value: number): value is LastSaleWindow =>
+  (LAST_SALE_WINDOWS as readonly number[]).includes(value);
+
+const isCatalogStock = (value: string): value is CatalogStock =>
+  (CATALOG_STOCKS as readonly string[]).includes(value);
+
 /* ═══════════════════════ 3. Filter → query string ═════════════════════════ */
 
 export interface CatalogQueryOptions {
@@ -269,6 +354,24 @@ export function catalogSearchParams(
   if (from !== null) params.set('priceFrom', from);
   const to = priceParam(filter.priceTo);
   if (to !== null) params.set('priceTo', to);
+
+  /*
+   * Filtre nad obohatením (D125). Predvolený stav sa NEPOSIELA — prázdne polia
+   * a `stock: 'any'` znamenajú „bez hranice", takže adresa zostáva krátka a
+   * staršie uložené filtre platné (nový parameter v nich chýba a to je v poriadku).
+   */
+  const marginFrom = percentParam(filter.marginPercentFrom);
+  if (marginFrom !== null) params.set('marginPercentFrom', marginFrom);
+  const marginTo = percentParam(filter.marginPercentTo);
+  if (marginTo !== null) params.set('marginPercentTo', marginTo);
+  if (filter.stock !== 'any') params.set('stock', filter.stock);
+  const orderedFrom = countParam(filter.orderedTotalFrom);
+  if (orderedFrom !== null) params.set('orderedTotalFrom', orderedFrom);
+  const orderedTo = countParam(filter.orderedTotalTo);
+  if (orderedTo !== null) params.set('orderedTotalTo', orderedTo);
+  if (filter.lastSaleOlderDays !== null) {
+    params.set('lastSaleOlderDays', String(filter.lastSaleOlderDays));
+  }
 
   if (filter.currentlyDiscounted) params.set('currentlyDiscounted', '1');
   if (filter.neverDiscounted) params.set('neverDiscounted', '1');
@@ -339,6 +442,8 @@ export function parseCatalogFilter(params: RawParams): CatalogFilterState {
   const perPage = Number(first(params, 'perPage'));
   const page = Number(first(params, 'page'));
   const sort = first(params, 'sort') ?? '';
+  const stock = first(params, 'stock') ?? '';
+  const olderDays = Number(first(params, 'lastSaleOlderDays'));
 
   const bucketsRaw = first(params, 'soldBuckets') ?? '';
   const buckets = bucketsRaw
@@ -355,6 +460,12 @@ export function parseCatalogFilter(params: RawParams): CatalogFilterState {
     currentlyDiscounted: flag(params, 'currentlyDiscounted'),
     neverDiscounted: flag(params, 'neverDiscounted'),
     shopDiscounted: flag(params, 'shopDiscounted'),
+    marginPercentFrom: first(params, 'marginPercentFrom') ?? '',
+    marginPercentTo: first(params, 'marginPercentTo') ?? '',
+    stock: isCatalogStock(stock) ? stock : DEFAULT_CATALOG_FILTER.stock,
+    orderedTotalFrom: first(params, 'orderedTotalFrom') ?? '',
+    orderedTotalTo: first(params, 'orderedTotalTo') ?? '',
+    lastSaleOlderDays: isLastSaleWindow(olderDays) ? olderDays : null,
     shopPresence: parseShopPresence(first(params, 'shopStatus') ?? ''),
     sort: isCatalogSort(sort) ? sort : DEFAULT_CATALOG_FILTER.sort,
     page: Number.isInteger(page) && page >= 1 ? page : 1,
@@ -399,4 +510,61 @@ export function newDiscountHref(
     params.set('pocet', String(selection.total));
   }
   return `/zlavy/nova?${params.toString()}`;
+}
+
+/**
+ * Filter ako čipy — JEDNO miesto pre Produkty aj pre výber do zľavy (D125).
+ *
+ * PREČO TO STOJÍ TU A NIE V SPRIEVODCOVI: sprievodca novej zľavy si filter
+ * neprekresľuje, dostane ho hotový a pošle ho `searchCatalog()` — teda ZAPÍŠE
+ * presne tú množinu, ktorú filter vyberie. Kým bol tento zoznam v `NewDiscount`,
+ * poznal sedem podmienok z pätnástich: zľava zúžená maržou alebo skladom sa
+ * v zhrnutí ohlásila ako „celý katalóg" a rozdiel by človek uvidel až na
+ * produkčnom eshope. Podmienka, ktorá zužuje ZÁPIS, musí byť v zhrnutí vidieť.
+ *
+ * Vracia sa PRÁZDNY zoznam pre predvolený stav a volajúci si doplní vlastnú
+ * vetu („celý katalóg"): čo znamená „bez podmienok", vie obrazovka, nie slovník.
+ */
+export function describeCatalogFilter(filter: CatalogFilterState): string[] {
+  const chips: string[] = [];
+
+  if (filter.query.trim() !== '') chips.push(`„${filter.query.trim()}"`);
+
+  if (filter.soldBuckets.includes('none')) chips.push('0 predaných');
+  if (filter.soldBuckets.includes('low')) chips.push('1–2 predané');
+  if (filter.soldBuckets.includes('mid')) chips.push('3–9 predaných');
+  if (filter.soldBuckets.includes('high')) chips.push('10 a viac predaných');
+
+  if (filter.priceFrom.trim() !== '') chips.push(`cena od ${filter.priceFrom}`);
+  if (filter.priceTo.trim() !== '') chips.push(`cena do ${filter.priceTo}`);
+
+  if (filter.currentlyDiscounted) chips.push('práve v zľave');
+  if (filter.neverDiscounted) chips.push('nikdy nezlacnené');
+  if (filter.shopDiscounted) chips.push('zlacnené v shope');
+
+  /*
+   * Štyri filtre nad obohatením (D125). Menujú sa TAK ISTO ako v paneli —
+   * „celkovo objednané" nesľubuje okno, lebo `qty_in_orders` je celkové
+   * množstvo za históriu shopu (R3 kontraktu V5).
+   */
+  if (filter.marginPercentFrom.trim() !== '') chips.push(`marža od ${filter.marginPercentFrom} %`);
+  if (filter.marginPercentTo.trim() !== '') chips.push(`marža do ${filter.marginPercentTo} %`);
+  if (filter.stock === 'in') chips.push('na sklade');
+  if (filter.stock === 'out') chips.push('vypredané');
+  if (filter.orderedTotalFrom.trim() !== '') {
+    chips.push(`celkovo objednané od ${filter.orderedTotalFrom} ks`);
+  }
+  if (filter.orderedTotalTo.trim() !== '') {
+    chips.push(`celkovo objednané do ${filter.orderedTotalTo} ks`);
+  }
+  if (filter.lastSaleOlderDays !== null) {
+    chips.push(`posledný predaj starší než ${filter.lastSaleOlderDays} dní`);
+  }
+
+  // Predvolený stav („ktoré eshop pozná") čip NEDOSTÁVA — je to východisko,
+  // nie podmienka, ktorú si niekto naklikal.
+  if (filter.shopPresence === 'withMissing') chips.push('aj tie, ktoré eshop už nevracia');
+  if (filter.shopPresence === 'onlyMissing') chips.push('len tie, ktoré eshop už nevracia');
+
+  return chips;
 }

@@ -30,6 +30,7 @@ import type { CatalogCountsView } from '@/components/products/catalog-api';
 import CatalogPanel from '@/components/products/CatalogPanel';
 import CatalogTable, { pageTokens } from '@/components/products/CatalogTable';
 import ProductDetailPanel from '@/components/products/ProductDetailPanel';
+import { productColumn } from '@/lib/ui/product-columns';
 import SelectionBar from '@/components/products/SelectionBar';
 import {
   catalogFilterKey,
@@ -58,15 +59,8 @@ const ROW = {
   origin: 'mirror' as const,
 };
 
-const LOCKED = {
-  stock: { locked: true as const, requested: false },
-  turnover: { locked: true as const, requested: false },
-  category: { locked: true as const, requested: false },
-  metal: { locked: true as const, requested: false },
-  jewelryType: { locked: true as const, requested: false },
-  margin: { locked: true as const, requested: false },
-};
-
+/* D125 — panel zamknuté filtre nedostáva ani nekreslí (K4), pozri
+ * `test/unit/filtre-podla-dat.spec.ts`. */
 const COUNTS: CatalogCountsView = {
   total: 40483,
   sold: { none: 11640, low: 7564, mid: 12918, high: 8361 },
@@ -182,12 +176,19 @@ describe('V10 — odovzdanie výberu do novej zľavy', () => {
 /* ═══════════════════════ C–E. Čo obrazovka ukáže ══════════════════════════ */
 
 describe('V10 — obrazovka Produkty', () => {
-  it('zamknuté filtre sú viditeľné a sivé, nie skryté (K8)', () => {
+  /*
+   * ZMENA 1. 9. 2026 (D125, K4). Do V4 tento test overoval, že šesť zamknutých
+   * filtrov je v paneli VIDITEĽNÝCH a sivých. Odvtedy platí opak: filter bez
+   * dátového zdroja na obrazovke NEEXISTUJE. Kategória, kov a typ šperku zdroj
+   * nemajú, takže zmizli celé; marža, sklad a obrátkovosť ho majú (migrácia
+   * 0014), takže sú NORMÁLNE filtre — a to overuje
+   * `test/unit/filtre-podla-dat.spec.ts`.
+   */
+  it('filter bez dátového zdroja v paneli NEEXISTUJE (D125, K4)', () => {
     const html = renderToStaticMarkup(
       createElement(CatalogFilters, {
         filter: DEFAULT_CATALOG_FILTER,
         counts: COUNTS,
-        lockedFilters: LOCKED,
         saved: [],
         activeSaved: null,
         open: false,
@@ -196,11 +197,11 @@ describe('V10 — obrazovka Produkty', () => {
         onRemoveSaved: () => {},
       }),
     );
-    for (const label of ['Kategória', 'Kov', 'Typ šperku', 'Marža', 'Obrátkovosť', 'Sklad']) {
-      expect(html, `zamknutý filter ${label}`).toContain(label);
+    for (const label of ['Kategória', 'Kov', 'Typ šperku']) {
+      expect(html, `filter ${label} sa nesmie kresliť`).not.toContain(label);
     }
-    expect(html).toContain('fopt locked');
-    expect(html).toContain('Čaká na dáta zo shopu');
+    expect(html).not.toContain('fopt locked');
+    expect(html).not.toContain('Čaká na dáta zo shopu');
     // Čísla pri možnostiach sú merané, takže bez značky odhadu (P7).
     expect(html).toContain('11 640');
     expect(html).not.toContain('≈');
@@ -219,7 +220,6 @@ describe('V10 — obrazovka Produkty', () => {
         createElement(CatalogFilters, {
           filter: DEFAULT_CATALOG_FILTER,
           counts,
-          lockedFilters: LOCKED,
           saved: [],
           activeSaved: null,
           open: false,
@@ -316,6 +316,11 @@ describe('V10 — obrazovka Produkty', () => {
     // Hranica z architektúry §1: tržby eshopu sem nepatria. Ceny áno — cena je
     // vlastnosť produktu, tržba je súčet za eshop a ten patrí do Prehľadu.
     expect(html).not.toMatch(/tržb/i);
-    expect(html).not.toMatch(/objednáv/i);
+    /* Slovo „objednávky" smie padnúť LEN v priznaní R3 (história objednávok
+       appke chýba, takže pomer predaných k skladu nie je obrátkovosť za okno).
+       Veta sa berie z definície stĺpca, nie ako literál. */
+    const priznanieR3 = productColumn('soldPerStock').headTitle;
+    expect(html).toContain(priznanieR3);
+    expect(html.split(priznanieR3).join('')).not.toMatch(/objednáv/i);
   });
 });

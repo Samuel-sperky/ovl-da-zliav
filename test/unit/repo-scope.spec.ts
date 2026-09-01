@@ -442,7 +442,12 @@ describe('catalog.repo — dávkový upsert a parametrizované SQL (K7)', () => 
     const { conn } = recordingConn();
     const repo = createCatalogRepo({ defaultConn: conn });
     const result = await repo.search({});
-    expect(result.lockedFilters).toContain('stock');
-    expect(result.lockedFilters).toContain('margin');
+    expect(result.lockedFilters).toContain('category');
+    expect(result.lockedFilters).toContain('metal');
+    // D125 — sklad a marža zamknuté UŽ NIE SÚ: pole v schéme majú (0014) a
+    // filtrujú sa nad obohatenými riadkami.
+    expect(result.lockedFilters).not.toContain('stock');
+    expect(result.lockedFilters).not.toContain('margin');
+    expect(result.enrichedOnly).toContain('marginPercent');
   });
 });

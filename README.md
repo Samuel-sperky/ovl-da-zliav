@@ -24,9 +24,11 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
 > K1–K12) ich v menovaných bodoch mení.
 
 > **ZÁPIS NIE JE AKCIA, ZÁPIS JE FRONTA.** `setReduction` je jeden request na
-> produkt, nedá sa dávkovať a shop dovolí 200 zápisov na UTC deň. Zľava na
-> 8 000 produktoch teda beží 40 dní a zadáva sa s **budúcim** dátumom štartu,
-> aby fronta stihla dobehnúť skôr, než okno platnosti nabehne (K2, K5).
+> produkt a nedá sa dávkovať. Od 1. 9. 2026 dovolí shop **1000 volaní na UTC
+> deň** (predtým 200) a appka si z toho berie 80 %, teda 800 — o zvyšok sa delia
+> zápisy a čítania cez jeden kľúč. Zľava na 8 000 produktoch teda ďalej beží
+> viac dní a zadáva sa s **budúcim** dátumom štartu, aby fronta stihla dobehnúť
+> skôr, než okno platnosti nabehne (K2, K5).
 
 ## Čo appka robí
 
@@ -48,9 +50,10 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
   Sú to **kusy, nikdy tržby** — cenu, za ktorú sa produkt naozaj predal, shop
   nevracia, a dopočítať ju z cenníka by bol výmysel (K8). Nie je to ani
   obrátkovosť ani obrat, dôvody sú v `docs/21-RUNBOOKY.md` → R1s,
-- **priznáva, čo nemá**: filtre Kategória, Kov, Typ šperku, Marža a
-  Obrátkovosť sú viditeľne zamknuté so štítkom „čaká na dáta zo shopu" —
-  nie skryté a nie predstierané (K8, backlog B5/B6/B8).
+- **priznáva, čo nemá**: filtre Kategória, Kov a Typ šperku sú viditeľne
+  zamknuté — nie skryté a nie predstierané (K8, backlog B5/B6/B8). Marža
+  a sklad zamknuté už nie sú: dáta na ne appka má z obohateného katalógu
+  a naozaj podľa nich filtruje (D125).
 
 ## Čo pridala V4 (28.–31. 8. 2026)
 
@@ -63,8 +66,9 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
   referencia, cena, marža € aj %, sklad, celkovo predané, posledný predaj,
   dodávateľ, kategórie. Marža sa **nepočíta** — shop ju dáva hotovú.
   Obohacovanie je prioritizované a na dopyt (`src/lib/engine/catalog-enrich.ts`,
-  D118): otvorený produkt sa dotiahne hneď, na pozadí ide dávka do ~150/deň
-  v poradí povolený zoznam → produkty v kampaniach → zvyšok.
+  D118): otvorený produkt sa dotiahne hneď, na pozadí ide dávka
+  v poradí povolený zoznam → produkty v kampaniach → zvyšok (denný cieľ dávky
+  sa odvodzuje z kvóty; po jej zdvihnutí je 600 — viď V5 nižšie).
 - **Presety zliav** (D112): pomenovaný filter + pásma + trvanie, spustenie na
   klik — ale **vždy** nanovo cez skúšku naprázdno a potvrdenie. Preset nie je
   výnimka z I3.
@@ -75,8 +79,43 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
   podľa názvu.
 - **Rezerva zápisov proti vyhladovaniu čítaniami**: čítania sa z denného
   rozpočtu odpočítavajú len nad rezervou (`WRITE_QUOTA_RESERVE`, odvodená ako
-  200 − 160), takže obohacovanie ani sondy nevedia appke zobrať schopnosť
-  zapísať zľavu.
+  denný strop mínus strop čítacej dráhy), takže obohacovanie ani sondy nevedia
+  appke zobrať schopnosť zapísať zľavu.
+
+## Čo pridala V5 (1. 9. 2026)
+
+Kontrakt: `KONTRAKT-V5-2026-09-01.md` (D122–D128, kritériá K1–K12).
+
+- **Zdvihnutá kvóta kľúča.** Správca shopu zdvihol limit z `20/min · 200/deň`
+  na **`150/min · 1000/deň`** (`docs/64-ZIADOST-LIMITY-2026-09-01.md`; appka to
+  hlási na `GET /api/queue` ako `shopPerUtcDay: 1000`, `shopPerMinute: 150`).
+  Appka si berie 80 %, teda 120/min a 800/deň. Denný strop v databáze posunula
+  migrácia `0017_zdvihnuty_strop_zapisov.sql`.
+- **Obohacuje sa strana, na ktorú sa pozeráš** (D123): otvorenie strany
+  Produktov pošle jej riadky (do 100) na obohatenie — pri novej kvóte je to
+  ~50 s — a tabuľka sa doplní bez prelistovania. **Strop je povedaný číslom:**
+  denný cieľ je 600 obohatení, teda ~6 strán po 100; kto preklikne desiatu,
+  dostane pomlčky a pod tabuľkou vetu, koľko z cieľa zostáva a prečo. Je to
+  aritmetika kvóty, nie chyba.
+- **Referencia je samostatný prvý stĺpec** každej tabuľky produktov (D122),
+  nie pomlčka pred názvom. Chýbajúca referencia zostáva pomlčkou.
+- **Jednotná sada stĺpcov** pre všetky tabuľky produktov (D124,
+  `src/lib/ui/product-columns.ts`): referencia · názov · cena · zľava v shope ·
+  predané za okno · predané/sklad · marža · sklad. Kde sa stĺpec nehodí,
+  **vynechá sa** — nikdy sa nepremenuje ani nenaplní inou veličinou.
+- **Filtre podľa toho, čo appka naozaj má** (D125): marža a sklad sa odomkli,
+  kategória, kov a typ šperku zostávajú zamknuté. Zoznam zamknutých rozmerov
+  je na jednom mieste a je odvodený od repozitára, takže obrazovky si už
+  nemôžu protirečiť.
+- **Jeden jazyk grafov** (D126, `src/components/ui/chart-language.ts`): čiara =
+  vývoj v čase, stĺpec = porovnanie medzi položkami, koláč = rozdelenie
+  katalógu alebo výberu. Jedna os, jedna paleta, jeden spôsob, ako sa kreslí
+  „toto sme nemerali" — koláč sa nakreslí aj vtedy, keď je celý katalóg
+  v diele „nevieme".
+- **Zľavy sa dajú rozkliknúť** (D127): zoznam produktov v zľave, história
+  „ktorý produkt bol v ktorých zľavách" a naopak, a vytvorenie zľavy priamo
+  odtiaľ. **Dry-run a potvrdenie sú nedotknuté** — nová cesta ide cez tú istú
+  bránu (I3).
 
 ### Čo appka NEVIE — povedané nahlas
 
@@ -86,9 +125,24 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
   s dôvodom `ip_banned` a žiadny produkt neoznačí ako obohatený) a **KPI
   neobohatených produktov sú prázdne — pomlčka**, nie nula a nie odhad.
   Odblokovanie je akcia mimo appky (`docs/60` → správca shopu).
-- **Celý katalóg sa obohatiť nedá.** Kvóta kľúča je ~20/min a ~200/deň, katalóg
-  má 41 348 produktov → plošné `getFull` by trvalo ~207 dní. Batch to nerieši:
-  25 položiek = 25 hitov a `getFull` medzi batchovateľnými akciami nie je.
+- **Bez zapísaného `shop_write` kľúča appka NEZAPÍŠE zľavu a ani neobohacuje.**
+  Dnes kľúč chýba (`present: false`). `product:read`, z ktorého sa berie
+  `getFull`, ide práve z tohto kľúča — takže kým ho Samuel nevloží,
+  **tabuľky Produktov zostanú prázdne** (samé pomlčky) bez ohľadu na to, ako
+  dobre je UX navrhnuté, a obohatenie strany (D123) sa ani nespustí. Nie je to
+  chyba obrazovky; obrazovka to povie.
+- **`orders_read` kľúč je NEOVERENÝ a koľko objednávok denne eshop má, sa
+  nezmeralo** (bráni tomu ban IP). Priamy dôsledok, povedaný nahlas:
+  **obrátkovosť za okno sa vypočítať nedá** — `qty_in_orders` z `getFull` je
+  CELKOVÉ objednané množstvo, nie za 30 dní, a stĺpec to musí priznať, nie sa
+  tváriť ako trend; **porovnanie účinnosti zliav sa spočítať nedá** — bez
+  histórie objednávok nemá z čoho počítať a dostane priznanie namiesto čísla
+  (I11). Rozsah okna histórie sa vedome NEROZHODOL (D128): najprv meranie,
+  potom plán.
+- **Celý katalóg sa obohatiť nedá.** Aj po zdvihnutí kvóty (1000/deň, appka
+  berie 800) je katalóg 41 348 produktov → plošné `getFull` je **~69 dní**
+  (predtým ~276). Batch to nerieši: 25 položiek = 25 hitov a `getFull` medzi
+  batchovateľnými akciami nie je.
 - **Predajové okná 30/90 d ukazujú len dni, ktoré sú naozaj stiahnuté** a
   medzeru priznávajú (D119). Číslo bez plného pokrytia je dolná hranica, nie
   fakt; kde chýba všetko, je pomlčka.
@@ -103,7 +157,9 @@ skriptom. Riziko a dôvod, prečo ho Samuel 27. 8. 2026 prijal:
   značky. Smer je bezpečný (appka netvrdí nič navyše), dokresliť ho je
   otvorené rozhodnutie o vzhľade.
 - Zoznam vedome vynechaných vecí (mobil, notifikácie, CSV export, druhý
-  používateľ…) je v `KONTRAKT-V4-2026-08-28.md` §3.
+  používateľ…) je v `KONTRAKT-V4-2026-08-28.md` §3 a pre V5
+  v `KONTRAKT-V5-2026-09-01.md` §4 — tam pribudol **drill-down** (klik do grafu
+  prefiltruje tabuľku) a pivot/vlastné metriky, prvý kandidát na V6.
 
 ## Stack
 
@@ -219,6 +275,12 @@ rozbehnúť).
 - `docs/10-KONTRAKT.md` — rozhodnutia R1–R10, D1–D100, D98–D105 z 27. 8. 2026
   (čísla D98–D100 sú obsadené dvakrát, kolízia je opísaná v úvode dokumentu)
   a **INVARIANTY I1–I14**
+- `KONTRAKT-V5-2026-09-01.md` — **kontrakt V5** (D122–D128, kritériá K1–K12):
+  zdvihnutá kvóta a čo umožnila, obohatenie strany, jednotné stĺpce, filtre
+  podľa dostupných dát, jeden jazyk grafov, rozkliknuteľné Zľavy. §5 hovorí
+  nahlas, čo chýba (`shop_write` kľúč, neoverený `orders_read`)
+- `docs/64-ZIADOST-LIMITY-2026-09-01.md` — žiadosť o zdvihnutie limitov
+  a `docs/63-API-LIMITY-2026-09-01.md` — zmerané limity kľúča
 - `KONTRAKT-V4-2026-08-28.md` — **kontrakt V4** (D108–D120, akceptačné kritériá
   K1–K11, po revízii D121): predaje na Prehľade, KPI produktov, presety. §2b je
   revízia po sonde API — zmerané fakty o kvóte, bane a o tom, čo API nevracia,

@@ -60,12 +60,32 @@ interface LockedRow {
   readonly missing: string;
 }
 
-/** Presne štyri riadky z architektúry §5. Piaty sa sem nevymýšľa. */
+/**
+ * Zoznam sa 1. 9. 2026 skrátil zo ŠTYROCH riadkov na DVA (D125, K4).
+ *
+ * Migrácia 0014 a obohacovanie z `getFull` (D118) doniesli maržu, sklad aj
+ * celkovo objednané do zrkadla katalógu a obrazovka Produkty podľa nich NAOZAJ
+ * filtruje (`CatalogFilters.tsx`, `LOCKED_FILTERS` v `catalog.repo.ts` schudol
+ * na tri rozmery). Riadky „Marža a odhad dopadu" a „Sklad nevariantných
+ * produktov" preto odišli: nechať ich by znamenalo, že si človek na Produktoch
+ * vyfiltruje maržu od 40 % a o obrazovku ďalej si prečíta, že marža nie je
+ * dostupná, lebo appka nemá nákupné ceny. Dve protirečivé vety o tej istej
+ * schopnosti.
+ *
+ * OBRÁTKOVOSŤ ZOSTÁVA — a nie je to prehliadnutie (R3 kontraktu V5).
+ * `qty_in_orders / qty` je pomer „koľkokrát sa aktuálna zásoba už predala" za
+ * CELÚ históriu; účtovná obrátkovosť za obdobie potrebuje priemernú zásobu
+ * a nákupné ceny, a ani jedno appka nemá. Preto má stĺpec meno „Predané / sklad"
+ * a tento riadok zostáva zamknutý.
+ *
+ * Piaty riadok sa sem nevymýšľa; ubrať sa smie len vtedy, keď dáta naozaj sú.
+ */
 export const LOCKED_FEATURES: readonly LockedRow[] = [
-  { feature: 'Filter podľa kategórie a kovu', missing: 'zoznam kategórií a kovov' },
-  { feature: 'Marža a odhad dopadu', missing: 'nákupné ceny' },
-  { feature: 'Obrátkovosť', missing: 'nákupné ceny' },
-  { feature: 'Sklad nevariantných produktov', missing: 'stavy skladu' },
+  {
+    feature: 'Filter podľa kategórie, kovu a typu šperku',
+    missing: 'zoznam kategórií, kovov a typov',
+  },
+  { feature: 'Obrátkovosť', missing: 'nákupné ceny a história objednávok' },
 ];
 
 /**

@@ -134,9 +134,33 @@ const num = (value: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-/** `DATE` chodí z drivera ako `Date` aj ako string — chceme vždy `YYYY-MM-DD`. */
+/**
+ * `DATE` chodí z drivera ako `Date` aj ako string — chceme vždy `YYYY-MM-DD`.
+ *
+ * ČÍTAJÚ SA **LOKÁLNE** ZLOŽKY, NIE `toISOString()`
+ * ------------------------------------------------
+ * `DATE` je kalendárny deň bez zóny a pool ho dáva ako LOKÁLNU polnoc
+ * (`2026-08-31` → `2026-08-30T22:00:00.000Z` v Európe/Bratislave, `timezone: 'Z'`
+ * to nemení — pozri docblock v `src/db/pool.ts`). `toISOString().slice(0, 10)`
+ * z toho preto urobí `2026-08-30` a KAŽDÝ deň predajov sa posunie o jeden
+ * dozadu — v pásme východne od UTC vždy, západne nikdy.
+ *
+ * Kým to tu bolo takto, `syncDays()` hlásil pokrytie o deň skôr, než sa naozaj
+ * stiahlo: posledný dočítaný deň každého okna vychádzal ako `missing`, takže
+ * `upliftFor()` odpovedal `coverage_gap` na okno, ktoré pokryté BOLO. Číslo sa
+ * nepokazilo — appka priznávala nevedomosť, ktorú nemala (I11 v opačnom smere),
+ * a pri ktoromkoľvek posune okna by to isté zaokrúhlenie mohlo padnúť aj na
+ * stranu tvrdenia.
+ *
+ * Rovnaký prepis (a rovnaký dôvod) je v `repo/sales.repo.ts`,
+ * `repo/campaigns.repo.ts` a `repo/catalog.repo.ts`. Tento súbor bol jediný,
+ * ktorý ho nemal.
+ */
 function toDay(value: unknown): DateOnly {
-  if (value instanceof Date) return value.toISOString().slice(0, 10) as DateOnly;
+  if (value instanceof Date) {
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    return `${String(value.getFullYear())}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}` as DateOnly;
+  }
   return String(value ?? '').slice(0, 10) as DateOnly;
 }
 
@@ -198,6 +222,30 @@ const SQL_CAMPAIGN_UNITS =
   'FROM product_sales_daily s ' +
   'JOIN campaign_items i ON i.product_id = s.product_id AND i.campaign_id = ? ' +
   'WHERE s.sale_day BETWEEN ? AND ?';
+
+/**
+ * DENNÉ kusy VŠETKÝCH produktov jednej zľavy (D127 bod 4).
+ *
+ * Prečo denne a nie jedným súčtom ako `SQL_CAMPAIGN_UNITS`: účinnosť zľavy sa
+ * počíta nad DVOMA oknami a to, či sa vôbec smie spočítať, rozhoduje pokrytie
+ * po dňoch. Jeden súčet za okno by tú otázku už neuniesol — z okna, ktorému
+ * chýbajú tri dni, by vyšlo číslo, ktoré vyzerá ako súčet okna.
+ *
+ * `JOIN campaign_items` nemôže zdvojiť riadok: `uq_items_campaign_product`
+ * (migrácia 0005) drží jeden produkt v jednej zľave najviac raz.
+ *
+ * Stav sťahovania sa TU nefiltruje ZÁMERNE — o tom, ktoré dni sú dočítané,
+ * rozhoduje `upliftFor()` cez `sales_sync_state`, a to na jednom mieste. Keby
+ * sa nedočítané dni odrezali už tu, vyzerali by ako dni s nulou.
+ *
+ * A ako všade v tomto module: sú to KUSY, nie eurá (D117, I11).
+ */
+const SQL_CAMPAIGN_DAILY_UNITS =
+  'SELECT s.sale_day, COALESCE(SUM(s.units_sold), 0) AS units ' +
+  'FROM product_sales_daily s ' +
+  'JOIN campaign_items i ON i.product_id = s.product_id AND i.campaign_id = ? ' +
+  'WHERE s.sale_day BETWEEN ? AND ? ' +
+  'GROUP BY s.sale_day ORDER BY s.sale_day ASC LIMIT ?';
 
 const SQL_DAILY_UNITS_PREFIX =
   'SELECT product_id, sale_day, units_sold FROM product_sales_daily ' +
@@ -325,6 +373,47 @@ export async function campaignUnits(
   const first = Array.isArray(rows) ? rows[0] : undefined;
   if (first === undefined) return null;
   return Math.max(0, Math.trunc(num(first.units)));
+}
+
+/** Jeden deň zľavy: kalendárny deň a kusy VŠETKÝCH jej produktov spolu. */
+export interface CampaignDayUnits {
+  day: DateOnly;
+  units: number;
+}
+
+/**
+ * Denná krivka kusov pre celú zľavu — podklad účinnosti (D127 bod 4).
+ *
+ * Vracia LEN dni, v ktorých sa niečo predalo. Deň, ktorý v odpovedi CHÝBA, nie
+ * je „nula": môže to byť dočítaný deň bez predaja aj deň, ktorý sa nesťahoval,
+ * a rozdiel medzi nimi vie povedať výhradne `sales_sync_state`. Preto sa tie
+ * dve veci rozlišujú až tam, kde je pokrytie po ruke (`upliftFor()`), a nikdy
+ * sa tu nedopĺňa rad nulami.
+ *
+ * Nezmyselný rozsah alebo ID dotaz vôbec nespustí (fail-closed).
+ */
+export async function campaignDailyUnits(
+  campaignId: number,
+  from: DateOnly,
+  to: DateOnly,
+  conn?: Queryable,
+): Promise<CampaignDayUnits[]> {
+  if (!isValidId(campaignId)) return [];
+  if (!isDateOnly(from) || !isDateOnly(to) || from > to) return [];
+
+  const rows = await run<DbRow[]>(conn, SQL_CAMPAIGN_DAILY_UNITS, [
+    campaignId,
+    from,
+    to,
+    MAX_SYNC_DAYS,
+  ]);
+  const out: CampaignDayUnits[] = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const day = toDay(row.sale_day);
+    if (!isDateOnly(day)) continue;
+    out.push({ day, units: Math.max(0, Math.trunc(num(row.units))) });
+  }
+  return out;
 }
 
 /* ══════════════════ 5. Čisté funkcie — pokrytie a metriky ═════════════════ */

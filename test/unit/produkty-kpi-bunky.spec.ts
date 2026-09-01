@@ -573,9 +573,9 @@ describe('V4 — obrátkovosť podľa D119 stojí na meraných faktoch', () => {
   });
 });
 
-/* ═════════════ 6. Pomenovanie produktu na povrchu (D116) ══════════════════ */
+/* ═════════ 6. Pomenovanie produktu na povrchu (D116 → stĺpce D122) ═══════ */
 
-describe('V4 — `referencia · názov` a priznaná pomlčka', () => {
+describe('V5 — referencia je vlastný stĺpec s vlastným priznaním (D122)', () => {
   it('referencia z medzery sa NEPOUŽIJE ako hodnota', () => {
     expect(kpiReference(obohateny())).toBe('NAU-1042');
     expect(kpiReference(neobohateny())).toBeNull();
@@ -583,24 +583,34 @@ describe('V4 — `referencia · názov` a priznaná pomlčka', () => {
     expect(kpiReference(undefined)).toBeNull();
   });
 
-  it('obohatený riadok má na povrchu `referencia · názov`', () => {
+  it('obohatený riadok má referenciu vo VLASTNOM stĺpci, nie zlepenú s názvom', () => {
     const html = render(page(obohateny()));
-    expect(html).toContain(`NAU-1042 · ${ROW.name}`);
+    expect(html).toContain('data-l="Referencia"');
+    expect(html).toContain('>NAU-1042<');
+    /* Do 1. 9. 2026 tu stálo `NAU-1042 · názov` v jednej bunke. D122 to
+       rozdelil: podľa referencie sa kus hľadá v sklade, názvy sa opakujú.
+       Poradie stĺpcov stráži `produkty-referencia-stlpec.spec.ts`. */
+    expect(html).not.toContain(`NAU-1042 · ${ROW.name}`);
     // `id` patrí do technického detailu — na povrchu ako stĺpec nie je.
     expect(html).not.toContain('>18342<');
   });
 
   it('neobohatený riadok prizná pomlčku, ale NETVRDÍ, že referencia neexistuje', () => {
     const html = render(page(neobohateny()));
-    expect(html).toContain(`row-reference-unknown-${ROW.productId}`);
-    expect(html).toContain('Referenciu appka zatiaľ nemá');
-    expect(html).toContain('Neznamená to, že produkt referenciu nemá');
+    expect(html).toContain(`row-reference-${ROW.productId}`);
+    expect(html).toContain('Produkt ešte nie je obohatený');
+    expect(html).toContain('Nie je to nula ani prázdna hodnota v shope');
   });
 
-  it('kým odpoveď KPI neprišla, pomlčka pri referencii sa NEKRESLÍ', () => {
-    // Tretí stav: appka sa ešte nespýtala, takže nemá čo priznávať.
+  it('kým odpoveď KPI neprišla, pomlčka priznáva TRETÍ stav, nie neobohatenie', () => {
+    /* Bunka v stĺpci stojí na každom riadku, takže mlčať nemôže — ale to, čo
+       prizná, je „ešte sme sa nespýtali", nie „produkt nie je obohatený".
+       Zliať tie dve vety by znamenalo vyčítať produktu niečo, o čom appka
+       zatiaľ nevie nič. */
     const html = render(null);
-    expect(html).not.toContain(`row-reference-unknown-${ROW.productId}`);
+    expect(html).toContain(`row-reference-${ROW.productId}`);
+    expect(html).toContain('KPI tohto riadku sa ešte nenačítali');
+    expect(html).not.toContain('Produkt ešte nie je obohatený');
     expect(html).toContain(ROW.name);
   });
 });

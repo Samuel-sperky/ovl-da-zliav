@@ -49,7 +49,6 @@ import {
   readCount,
   readFlag,
   readText,
-  type JsonRecord,
 } from '@/components/dashboard/json';
 import { parseStatusPayload } from '@/components/dashboard/status-payload';
 import {
@@ -605,43 +604,6 @@ export function parseScope(raw: unknown): ScopeView | null {
   };
 }
 
-function parsePerformanceWindow(raw: JsonRecord | null): PerformanceWindow {
-  if (raw === null) return { from: '', to: '', units: null };
-  return {
-    from: readText(raw, 'from') ?? '',
-    to: readText(raw, 'to') ?? '',
-    // `null` = za toto obdobie nemáme dáta. NIE JE to nula predaných kusov.
-    units: readCount(raw, 'units'),
-  };
-}
-
-export function parsePerformance(raw: unknown): PerformanceView | null {
-  const record = asRecord(raw);
-  if (record === null) return null;
-  const coverage = asRecord(record['coverage']);
-  const locked = asRecord(record['locked']);
-  return {
-    available: readFlag(record, 'available'),
-    // Chýbajúce `started` = staršia odpoveď; nepredstierame priznanie, ktoré
-    // server neposlal, ale ani neblokujeme sekciu, ktorá fungovala.
-    started: record['started'] === undefined ? true : readFlag(record, 'started'),
-    startsOn: readText(record, 'startsOn'),
-    unit: 'ks',
-    spanDays: readCount(record, 'spanDays') ?? 0,
-    recent: parsePerformanceWindow(asRecord(record['recent'])),
-    prior: parsePerformanceWindow(asRecord(record['prior'])),
-    coverage: {
-      from: coverage === null ? null : readText(coverage, 'from'),
-      to: coverage === null ? null : readText(coverage, 'to'),
-      syncEnabled: coverage !== null && readFlag(coverage, 'syncEnabled'),
-    },
-    locked: {
-      revenue: locked === null ? '' : (readText(locked, 'revenue') ?? ''),
-      lastYear: locked === null ? '' : (readText(locked, 'lastYear') ?? ''),
-    },
-  };
-}
-
 /* ═══════════════════════════ 6. Volania ═══════════════════════════════════ */
 
 /** Zoznam zliav aj s pásmami, odhadom a rozpočtom. */
@@ -792,45 +754,18 @@ export async function scopeLimits(): Promise<Envelope<ScopeView>> {
   );
 }
 
-/* ═══════════════════════ Výkon výberu (architektúra §1 TAB 3) ═════════════ */
-
-export interface PerformanceWindow {
-  readonly from: string;
-  readonly to: string;
-  /** `null` = za toto obdobie nemáme dáta. NIE JE to nula. */
-  readonly units: number | null;
-}
-
-export interface PerformanceView {
-  readonly available: boolean;
-  /**
-   * `false` = zľava sa ešte NEZAČALA, takže čísla nižšie nie sú jej výkon.
-   * Chýbajúce pole (staršia odpoveď) sa berie ako `true`, aby sa obrazovka
-   * nezmenila spätne — je to priznanie navyše, nie nová podmienka.
-   */
-  readonly started: boolean;
-  /** Odkedy zľava platí (`YYYY-MM-DD`), aby veta mohla povedať KEDY. */
-  readonly startsOn: string | null;
-  readonly unit: 'ks';
-  readonly spanDays: number;
-  readonly recent: PerformanceWindow;
-  readonly prior: PerformanceWindow;
-  readonly coverage: { from: string | null; to: string | null; syncEnabled: boolean };
-  readonly locked: { revenue: string; lastYear: string };
-}
-
-/**
- * Predaj produktov zľavy v kusoch — dve rovnako dlhé okná vedľa seba.
- * Tržby v eurách appka nemá (shop ich cez API nevracia), preto ich tu
- * nehľadaj: sú medzi zamknutými panelmi.
+/*
+ * VÝKON VÝBERU (`PerformanceView`, `discountPerformance()`) TU BOL DO 1. 9. 2026.
+ *
+ * D127 bod 4 presunul účinnosť zľavy na `GET /api/insights/campaign/[id]/effectiveness`
+ * (`DiscountPerformance.tsx` to hovorí vo svojej hlavičke) a starý reťazec —
+ * klient, jeho parser aj routa `.../performance` — zostal bez jediného
+ * volajúceho A BEZ TESTU. Bol by to druhý, nestrážený výpočet tej istej veci:
+ * kto ho o pol roka nájde a zapojí, dostane iné čísla než `/effectiveness`
+ * a nikto nezistí, ktoré sú správne. Repo to raz už riešilo rovnako
+ * (`discount-depth`, 31. 8. 2026): mŕtvy súbor sa NEUCHOVÁVA, keď ho bude
+ * treba, je to nová obrazovka.
  */
-export async function discountPerformance(id: number): Promise<Envelope<PerformanceView>> {
-  return shaped(
-    await getJson<unknown>(`/api/insights/campaign/${id}/performance`),
-    parsePerformance,
-    'Predaj produktov zľavy sa nepodarilo prečítať.',
-  );
-}
 
 /* ══════════════ Rozpad položiek po stavoch (G5, nález U6) ═════════════════ */
 
@@ -906,5 +841,175 @@ export async function discountItemBreakdown(id: number): Promise<Envelope<ItemBr
     await getJson<unknown>(`/api/insights/campaign/${id}/items`),
     parseItemBreakdown,
     'Rozpad položiek po stavoch sa nepodarilo prečítať.',
+  );
+}
+
+/* ═══════════ Produkty jednej zľavy — rozklik (D127 bod 1) ════════════════ */
+
+/**
+ * Odkiaľ je „cena pred". Zápis a náhľad sú DVE rôzne merania a rozdiel medzi
+ * nimi je D39c, takže sa nezlievajú do jedného poľa bez mena.
+ */
+export type PriceBeforeSourceView = 'write' | 'preview';
+
+/**
+ * Jeden produkt v zľave tak, ako ho vracia
+ * `GET /api/insights/campaign/[id]/products`.
+ *
+ * Tri veci, ktoré sú tu ZÁMERNE oddelené a nesmú sa zliať:
+ *
+ *  · `inCatalog: false` = produkt v zrkadle katalógu VÔBEC nie je (zmizol),
+ *    `enriched: false` = v zrkadle JE, ale appka sa shopu na podrobnosti
+ *    nepýtala (D118). Obe končia pomlčkou v referencii, ale z iného dôvodu —
+ *    a dôvod je to jediné, čo z pomlčky robí priznanie a nie prázdno.
+ *  · `priceAfter` je ORIENTAČNÉ číslo, ktoré appka vypočítala (D4). Skutočnú
+ *    zľavnenú cenu cez API nikdy nevidela, preto k nej UI pripája
+ *    `DISCOUNTED_PRICE_DISCLAIMER_SK` (I11).
+ *  · `catalogName` je názov v zrkadle DNES, `nameAtWrite` názov v čase zápisu.
+ *    História zápisu sa neprepisuje (I4).
+ */
+export interface CampaignProductRowView {
+  readonly itemId: number;
+  readonly productId: number;
+  /** `null` = nevieme (I11), nikdy „produkt referenciu nemá". */
+  readonly reference: string | null;
+  readonly catalogName: string | null;
+  readonly nameAtWrite: string | null;
+  readonly inCatalog: boolean;
+  readonly enriched: boolean;
+  readonly percent: number;
+  readonly status: string;
+  readonly priceBefore: string | null;
+  readonly priceBeforeSource: PriceBeforeSourceView | null;
+  readonly priceAfter: string | null;
+  readonly priceAfterEstimated: boolean;
+  readonly priceMismatch: boolean;
+  readonly reductionUnverifiable: boolean;
+  /** KÓD chyby, nikdy telo odpovede shopu (I1). */
+  readonly errorCode: string | null;
+}
+
+/** Hlavička zľavy z tej istej odpovede. `null` = kampaň neexistuje. */
+export interface CampaignProductsHeadView {
+  readonly name: string;
+  readonly status: string;
+  readonly percent: number;
+  readonly dateFrom: string;
+  readonly dateTo: string;
+}
+
+export interface CampaignProductsView {
+  readonly campaignId: number;
+  readonly campaign: CampaignProductsHeadView | null;
+  readonly page: number;
+  readonly perPage: number;
+  /** Koľko položiek má zľava SPOLU, nie koľko ich prišlo na tejto strane. */
+  readonly total: number;
+  readonly items: readonly CampaignProductRowView[];
+}
+
+/**
+ * Jeden riadok. `null` = riadok sa prečítať NEDÁ.
+ *
+ * Volajúci ho preto nesmie zahodiť: rozklik existuje na otázku „ktorých 21",
+ * a zoznam, z ktorého ticho vypadol riadok, na ňu odpovedá nepravdivo. Preto
+ * jeden nečitateľný riadok zhodí celú odpoveď (`parseCampaignProducts`).
+ */
+function parseCampaignProductRow(raw: unknown): CampaignProductRowView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const itemId = readCount(record, 'itemId');
+  const productId = readCount(record, 'productId');
+  const percent = readCount(record, 'percent');
+  const status = readText(record, 'status');
+  if (itemId === null || productId === null || percent === null || status === null) return null;
+
+  const source = readText(record, 'priceBeforeSource');
+  return {
+    itemId,
+    productId,
+    reference: readText(record, 'reference'),
+    catalogName: readText(record, 'catalogName'),
+    nameAtWrite: readText(record, 'nameAtWrite'),
+    // Fail-closed: kým odpoveď nepovie „je v katalógu", netvrdíme, že je.
+    inCatalog: readFlag(record, 'inCatalog'),
+    enriched: readFlag(record, 'enriched'),
+    percent,
+    status,
+    priceBefore: readText(record, 'priceBefore'),
+    priceBeforeSource: source === 'write' || source === 'preview' ? source : null,
+    priceAfter: readText(record, 'priceAfter'),
+    priceAfterEstimated: readFlag(record, 'priceAfterEstimated'),
+    priceMismatch: readFlag(record, 'priceMismatch'),
+    reductionUnverifiable: readFlag(record, 'reductionUnverifiable'),
+    errorCode: readText(record, 'errorCode'),
+  };
+}
+
+/** Hlavička zľavy; chýbajúca alebo nečitateľná je `null`, nie vymyslená. */
+function parseCampaignProductsHead(raw: unknown): CampaignProductsHeadView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const name = readText(record, 'name');
+  const status = readText(record, 'status');
+  const percent = readCount(record, 'percent');
+  const dateFrom = readText(record, 'dateFrom');
+  const dateTo = readText(record, 'dateTo');
+  if (
+    name === null ||
+    status === null ||
+    percent === null ||
+    dateFrom === null ||
+    dateTo === null
+  ) {
+    return null;
+  }
+  return { name, status, percent, dateFrom, dateTo };
+}
+
+/**
+ * Celá strana, alebo nič. `total` sa nedosadzuje z dĺžky poľa: to by pri
+ * stránkovaní tvrdilo, že zľava má práve toľko položiek, koľko ich prišlo.
+ */
+export function parseCampaignProducts(raw: unknown): CampaignProductsView | null {
+  const record = asRecord(raw);
+  if (record === null) return null;
+  const campaignId = readCount(record, 'campaignId');
+  const total = readCount(record, 'total');
+  const rows = record['items'];
+  if (campaignId === null || total === null || !Array.isArray(rows)) return null;
+
+  const items: CampaignProductRowView[] = [];
+  for (const row of rows) {
+    const parsed = parseCampaignProductRow(row);
+    if (parsed === null) return null;
+    items.push(parsed);
+  }
+
+  return {
+    campaignId,
+    campaign: parseCampaignProductsHead(record['campaign']),
+    page: readCount(record, 'page') ?? 1,
+    perPage: readCount(record, 'perPage') ?? items.length,
+    total,
+    items,
+  };
+}
+
+/**
+ * Produkty jednej zľavy — strana zoznamu. Čisto lokálne čítanie, shop sa
+ * nevolá (K8) a k zápisu odtiaľto cesta nevedie (I3).
+ */
+export async function campaignProducts(
+  id: number,
+  page = 1,
+  perPage = 100,
+): Promise<Envelope<CampaignProductsView>> {
+  return shaped(
+    await getJson<unknown>(
+      `/api/insights/campaign/${id}/products?page=${page}&perPage=${perPage}`,
+    ),
+    parseCampaignProducts,
+    'Zoznam produktov zľavy sa nepodarilo prečítať.',
   );
 }

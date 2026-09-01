@@ -75,6 +75,12 @@ import {
 import type { RevenueDailyView } from '@/components/dashboard/window-api';
 import { fetchJson } from '@/components/layout/health';
 import { useRefreshable } from '@/components/layout/refresh';
+/*
+ * Slovo pre nesťahované obdobie je JEDNO — to isté kreslí graf do pásu a to
+ * isté píše tabuľka pod ním (D126). Kým to boli dva literály, mohla tabuľka
+ * dieru pomenovať inak než graf, a tabuľka je pritom jeho doslovný prepis.
+ */
+import { CHART_KINDS, GAP_WORD } from '@/components/ui/chart-language';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import { NEVIEME } from '@/lib/ui/product-label';
@@ -221,7 +227,7 @@ export function tableRows(
   for (const gap of geometry.gaps) {
     const label =
       gap.days === 1 ? axisDay(gap.fromDay) : `${axisDay(gap.fromDay)} – ${axisDay(gap.toDay)}`;
-    rows.push({ key: gap.fromDay, cells: [label, '', `nesťahované, ${dayCount(gap.days)}`] });
+    rows.push({ key: gap.fromDay, cells: [label, '', `${GAP_WORD}, ${dayCount(gap.days)}`] });
   }
 
   rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
@@ -447,7 +453,10 @@ export function SalesSection({
                 caption={`${range ?? 'Denný predaj'} · ${dayCount(measured.length)} s údajmi · povolené produkty${
                   bands.length === 0 ? '' : ' · podfarbené sú okná našich zliav'
                 }`}
-                label="Predané kusy povolených produktov po dňoch; nestiahnutý deň nie je nula"
+                /* Forma sa pomenúva NAHLAS (D126): čítačka obrazovky vidí jeden
+                   obrázok, takže vetu „čo je to za graf a na akú otázku
+                   odpovedá" nemá odkiaľ vziať. */
+                label={`Čiarový graf, ${CHART_KINDS.line} — predané kusy povolených produktov po dňoch; nestiahnutý deň nie je nula`}
               />
               <ChartTable
                 caption="predané kusy po dňoch"

@@ -9,10 +9,37 @@
  *
  * Stĺpce a čo v nich NIE JE
  * ─────────────────────────
- * `Názov · Predané 30 d · Predané 90 d · Predané / sklad · Posledný predaj ·
- * Cena · Zľava teraz · Zľava v shope · Marža`. Číslo produktu hlavný stĺpec NIE JE
- * (P3) — žije v „Technickom detaile" bočného panela; na povrchu je
- * `referencia · názov` (D116, `lib/ui/product-label.ts`).
+ * `Referencia · Názov · Cena · Zľava v shope · Zľava teraz · Predané 30 d ·
+ * Predané 90 d · Predané / sklad · Posledný predaj · Marža · Sklad`. Osem
+ * z nich je JEDNOTNÁ SADA (D124, `lib/ui/product-columns.ts`) a idú v jej
+ * záväznom poradí; tri stĺpce mimo sady (druhé okno predajnosti, posledný
+ * predaj a zľava podľa vlastných zápisov appky) stoja pri svojom súrodencovi.
+ * Číslo produktu hlavný stĺpec NIE JE (P3) — žije v „Technickom detaile"
+ * bočného panela a v `title` názvu.
+ *
+ * REFERENCIA JE PRVÝ STĹPEC, NIE PREDPONA NÁZVU (D122, 1. 9. 2026)
+ * ────────────────────────────────────────────────────────────────
+ * Do 1. 9. 2026 bola referencia zlepená s názvom (`referencia · názov`, D116)
+ * a neobohatený riadok začínal pomlčkou: „— · Náramok z chirurgickej…". To je
+ * najhoršie z oboch — miesto zaberie, nič nepovie a názov, podľa ktorého sa
+ * kus poznáva, sa o tú predponu skráti. Podľa referencie sa pritom produkt
+ * hľadá v sklade aj v administrácii eshopu, takže dostala VLASTNÝ prvý stĺpec:
+ *
+ *  · **Nikdy sa neskracuje.** Je to identifikátor; orezaný identifikátor je iný
+ *    identifikátor. Bunka preto nemá `text-overflow` ani `overflow: hidden` —
+ *    keby prišla referencia širšia než stĺpec, radšej pretečie (a je to vidieť),
+ *    než by z nej ticho zostala polovica.
+ *  · **Tri stavy ako každá iná bunka KPI** (I11): hodnota · „produkt nie je
+ *    obohatený" · „KPI riadku sa ešte nenačítali". Text sa TU nevyrába —
+ *    prichádza z `sold-coverage.ts` (`kpiCell`), aby tabuľka a bočný panel
+ *    nemohli o tej istej medzere povedať dve rôzne veci. Pomlčka teda NIKDY
+ *    netvrdí, že produkt referenciu v shope nemá; to hovorí len meraný
+ *    `shop_has_none`.
+ *  · **`productLabel()` sa v tabuľke NEPOUŽÍVA.** Zostáva pre miesta, kde je na
+ *    produkt jeden riadok textu (audit, položky kampane, nadpis panela); rozdiel
+ *    medzi vetou a stĺpcami je v hlavičke `lib/ui/product-label.ts`. Tabuľka
+ *    berie z toho modulu `productNameCell()` — teda len názov a `#id` ako
+ *    posledné východisko.
  *
  * Do 31. 8. 2026 tu boli štyri stĺpce s vysvetlením, že na viac appka nemá
  * dáta. To vysvetlenie prestalo platiť s migráciou 0014 a obohacovaním
@@ -25,7 +52,8 @@
  *
  * DVA STĹPCE O ZĽAVE SÚ ZÁMER (I11)
  * ─────────────────────────────────
- * `Zľava teraz` je VŽDY podľa vlastného zápisu appky. `Zľava v shope` je to,
+ * `Zľava teraz` je VŽDY podľa vlastného zápisu appky a v jednotnej sade
+ * ZÁMERNE NIE JE. `Zľava v shope` je jednotný stĺpec `discountNow` a je to to,
  * čo o produkte povedal SHOP pri obohatení (`reduction_*` z `getFull`), a nesie
  * čas merania. Sú to dve rôzne vety — appka mohla zľavu zapísať a shop ju
  * medzitým zrušiť, alebo naopak. Zliať ich do jedného stĺpca by z dvoch
@@ -107,6 +135,12 @@
  *      panel otvorený, 317 px → názov 185 px, orezaných 50 z 50
  *      panel otvorený, 400 px → názov 102 px, orezaných 50 z 50
  *
+ *    (Tie tri čísla sú z čias PIATICH stĺpcov. Odvtedy pribudlo šesť KPI
+ *    stĺpcov (D114) a referencia (D122), takže platí ich POMER, nie hodnota:
+ *    kto ich chce citovať, nech premeria dnešnú mriežku. Referencia si berie
+ *    120 px, ale názvu nič neuberá — je to presne tá predpona, ktorú z neho
+ *    D122 vybral, a `COL_NAME` pritom vyrástol z 220 na 260 px.)
+ *
  *    Výpustka teda ZÁMER JE — chvost sa dá prečítať v `title` aj v paneli
  *    vedľa a mriežka drží. Pri OTVORENOM paneli to však už nie je „oreže sa
  *    chvost najdlhších", ale „z každého mena zostane začiatok": 886 px sa
@@ -127,7 +161,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
-import type { CatalogRowView, ProductKpiPageView } from '@/components/products/catalog-api';
+import type {
+  CatalogRowView,
+  ProductKpiPageView,
+  ProductKpiRowView,
+} from '@/components/products/catalog-api';
 import { PRODUCT_DETAIL_ID } from '@/components/products/ProductDetailPanel';
 import { CodeLine } from '@/components/products/ProductFacts';
 import { codeLine, EMPTY_EXTRAS, type ExtrasStore } from '@/components/products/product-extras';
@@ -137,17 +175,19 @@ import { DEFAULT_CATALOG_FILTER, PER_PAGE_CHOICES } from '@/components/products/
 import type { KpiCellView } from '@/components/products/sold-coverage';
 import {
   KPI_DASH,
-  kpiCell,
-  kpiDiscountCell,
   kpiLastSaleCell,
   kpiNoSaleMark,
   kpiPriceWithVatCell,
-  kpiReference,
-  kpiSoldPerStockCell,
   kpiUnitsCell,
 } from '@/components/products/sold-coverage';
-import { formatEur } from '@/lib/ui/format';
-import { productLabel } from '@/lib/ui/product-label';
+import { productNameCell } from '@/lib/ui/product-label';
+import type {
+  ProductCellView,
+  ProductColumn,
+  ProductColumnId,
+  ProductRowValues,
+} from '@/lib/ui/product-columns';
+import { productColumn, productMarginCells, valueOrGap } from '@/lib/ui/product-columns';
 import Icon from '@/components/ui/Icon';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatCountSk } from '@/lib/ui/vocabulary';
@@ -195,9 +235,31 @@ const NAME_BUTTON: CSSProperties = {
  * navzájom obsah. Stlačiť desať stĺpcov do 886 px sa nedá bez toho, aby sa
  * čísla zlomili na dva riadky — a tabuľka sa skenuje po zvislej osi.
  */
-const COLUMNS: CSSProperties = { tableLayout: 'fixed', minWidth: '1120px' };
+/**
+ * Od 1. 9. 2026 (D122) je stĺpcov jedenásť: pribudla REFERENCIA ako prvý.
+ * `minWidth` rástol presne o ňu (1120 + 120 = 1240) — pod tou šírkou sa tabuľka
+ * posúva vodorovne, nestláča sa.
+ *
+ * 120 px je šírka nadpisu `REFERENCIA` (verzálky, `--ovl-fs-eyebrow`) plus
+ * odsadenie bunky; referencie samotné sú v katalógu krátke („C16.19",
+ * „NAU-1042"), stĺpec `catalog_cache.reference` je `VARCHAR(64)`. Skracovať sa
+ * NESMIE ani tá najdlhšia — pozri hlavičku modulu.
+ */
+/**
+ * Od 1. 9. 2026 (D124) je stĺpcov dvanásť: pribudol SKLAD, ktorý jednotná sada
+ * menuje a Produkty ho dovtedy jediné nemali. `minWidth` rástol presne o neho
+ * (1240 + 92 = 1332).
+ */
+const COLUMNS: CSSProperties = { tableLayout: 'fixed', minWidth: '1332px' };
 const COL_SELECT: CSSProperties = { width: '34px' };
-const COL_NAME: CSSProperties = { minWidth: '220px' };
+const COL_REFERENCE: CSSProperties = { width: '120px' };
+const COL_STOCK: CSSProperties = { width: '92px' };
+/**
+ * Názov dostal +40 px (220 → 260): predpona „referencia · " z neho odišla do
+ * vlastného stĺpca (D122), takže celá bunka je odteraz meno. Je to jediný
+ * pružný stĺpec — zvyšok mriežky je pevný.
+ */
+const COL_NAME: CSSProperties = { minWidth: '260px' };
 const COL_SOLD: CSSProperties = { width: '104px' };
 const COL_SOLD_PER_STOCK: CSSProperties = { width: '112px' };
 const COL_LAST_SALE: CSSProperties = { width: '124px' };
@@ -207,7 +269,92 @@ const COL_SHOP_DISCOUNT: CSSProperties = { width: '112px' };
 const COL_MARGIN: CSSProperties = { width: '132px' };
 
 /** Koľko stĺpcov má riadok — pre `colSpan` prázdneho stavu. */
-const COLUMN_COUNT = 10;
+const COLUMN_COUNT = 12;
+
+/* ───────────────── Jednotná sada stĺpcov (D124) na tejto tabuľke ──────────── */
+
+/**
+ * PRODUKTY POUŽÍVAJÚ JEDNOTNÚ SADU, NIE VLASTNÚ KÓPIU (D124, K3; 1. 9. 2026).
+ *
+ * Do tejto opravy si najväčšia z troch tabuliek produktov písala hlavičky aj
+ * bunky sama, kým výber do zľavy a položky kampane už boli na
+ * `lib/ui/product-columns.ts`. Bol to presne ten tvar zlyhania, ktorý má repo
+ * zapísaný ako pascu: kto zmení vetu `PRODUCT_GAP_REASON` alebo meno stĺpca,
+ * zmení dve tabuľky z troch a nikto to nezachytí. Odteraz sú mená, vety `title`
+ * aj bunky VŠETKÝCH ôsmich jednotných stĺpcov z definície.
+ *
+ * PORADIE JE PODPOSTUPNOSŤ, NIE ZOZNAM
+ * ────────────────────────────────────
+ * `PRODUCT_COLUMN_IDS` je záväzné poradie sady. Produkty majú navyše tri
+ * stĺpce, ktoré sada nepozná (druhé okno predajnosti, posledný predaj a zľava
+ * podľa VLASTNÝCH zápisov appky) — tie stoja pri svojom súrodencovi, takže
+ * jednotné stĺpce v hlavičke idú v poradí sady, len prekladané. Stráži to
+ * `produkty-jednotne-stlpce.spec.ts`, ktorý číta `data-col` z hlavičky.
+ *
+ * DVA STĹPCE O ZĽAVE MAJÚ ODTERAZ DVE RÔZNE MENÁ
+ * ──────────────────────────────────────────────
+ * `Zľava v shope` je jednotný stĺpec `discountNow` — čo o produkte povedal SHOP
+ * pri obohatení. `Zľava teraz` je stĺpec TEJTO tabuľky a hovorí o vlastných
+ * zápisoch appky; v jednotnej sade zámerne NIE JE. Do 1. 9. 2026 sa jednotný
+ * stĺpec volal tiež „Zľava teraz", takže dve tabuľky mali pod jedným menom
+ * opačný zdroj.
+ */
+const UNIFIED_IDS: readonly ProductColumnId[] = [
+  'reference',
+  'name',
+  'price',
+  'discountNow',
+  'soldWindow',
+  'soldPerStock',
+  'margin',
+  'stock',
+];
+
+type UnifiedColumns = Readonly<Record<ProductColumnId, ProductColumn>>;
+
+/** Jednotné stĺpce pre túto tabuľku; okno predajnosti pomenúva odpoveď KPI. */
+function unifiedColumns(soldWindowDays: number): UnifiedColumns {
+  const out = {} as Record<ProductColumnId, ProductColumn>;
+  for (const id of UNIFIED_IDS) out[id] = productColumn(id, { soldWindowDays });
+  return out;
+}
+
+/**
+ * Riadok tabuľky → hodnoty jednotných stĺpcov.
+ *
+ * Chýbajúce `k` (KPI riadku ešte nedobehli) sa NEDOPĹŇA prázdnymi poľami:
+ * vynechané pole znamená v definícii `not_asked`, teda „ešte sa nenačítali",
+ * kým vyplnené pole s `null` by znamenalo „pýtali sme sa a nevieme". Sú to dve
+ * rôzne vety a zliať ich je presne to, čo I11 zakazuje.
+ */
+function rowValues(
+  row: CatalogRowView,
+  k: ProductKpiRowView | undefined,
+): ProductRowValues {
+  return {
+    productId: row.productId,
+    /* Názov a cena sú zo ZRKADLA katalógu, nie z obohatenia — appka ich pozná
+       pre každý riadok, takže ich prázdno je „shop o tom nič nevie". */
+    name: valueOrGap(row.name, 'shop_has_none'),
+    price: valueOrGap(row.price, 'shop_has_none'),
+    ...(k === undefined
+      ? {}
+      : {
+          reference: k.reference,
+          discountNow: {
+            state: k.discount.state,
+            percent: k.discount.activePercent,
+            from: k.discount.from,
+            to: k.discount.to,
+            measuredAt: k.discount.measuredAt,
+          },
+          soldWindow: k.units30,
+          soldPerStock: { ratio: k.soldPerStock, soldTotal: k.soldTotal, stock: k.stock },
+          margin: { eur: k.margin, percent: k.marginPercent },
+          stock: k.stock,
+        }),
+  };
+}
 
 /** Pod týmto počtom strán stránkovač vypisuje všetky čísla — skok netreba. */
 const JUMP_FROM_PAGES = 8;
@@ -222,7 +369,16 @@ const JUMP_FROM_PAGES = 8;
  * Text sa TU nevyrába. Prichádza z `sold-coverage.ts`, aby o tej istej medzere
  * nemohla tabuľka povedať niečo iné než panel detailu.
  */
-function KpiText({ cell, testId }: { cell: KpiCellView; testId?: string }) {
+function KpiText({
+  cell,
+  testId,
+}: {
+  /* `ProductCellView` (jednotné stĺpce) a `KpiCellView` (`sold-coverage.ts`)
+     majú ten istý tvar — tabuľka kreslí obe rovnako, aby priznanie z jednotného
+     stĺpca vyzeralo presne ako priznanie zo stĺpca mimo sady. */
+  cell: KpiCellView | ProductCellView;
+  testId?: string;
+}) {
   return (
     <span
       className={cell.unknown ? 'lvl-3' : undefined}
@@ -419,6 +575,10 @@ export function CatalogTable({
   const shortDays = kpi === null ? 30 : kpi.shortWindowDays;
   const longDays = kpi === null ? 90 : kpi.longWindowDays;
 
+  /* Jednotná sada (D124). Okno pomenúva odpoveď KPI, nie filter — nadpis sa
+     nesmie rozísť s číslom pod ním. */
+  const col = unifiedColumns(shortDays);
+
   /**
    * Nadpis stĺpca. Bez `onSort` je to len text — hlavička, ktorá vyzerá
    * klikateľne a nič nerobí, je horšia než hlavička bez šípky.
@@ -470,15 +630,17 @@ export function CatalogTable({
               neuplatní, čo je správne: karta má jeden stĺpec. */}
           <colgroup>
             <col style={COL_SELECT} />
+            <col style={COL_REFERENCE} />
             <col style={COL_NAME} />
+            <col style={COL_PRICE} />
+            <col style={COL_SHOP_DISCOUNT} />
+            <col style={COL_DISCOUNT} />
             <col style={COL_SOLD} />
             <col style={COL_SOLD} />
             <col style={COL_SOLD_PER_STOCK} />
             <col style={COL_LAST_SALE} />
-            <col style={COL_PRICE} />
-            <col style={COL_DISCOUNT} />
-            <col style={COL_SHOP_DISCOUNT} />
             <col style={COL_MARGIN} />
+            <col style={COL_STOCK} />
           </colgroup>
           <thead>
             <tr>
@@ -494,15 +656,56 @@ export function CatalogTable({
                   data-testid="select-page"
                 />
               </th>
-              <th aria-sort={sortDirection('name', sort)}>{columnHead('name', 'Názov')}</th>
-              <th className="n" aria-sort={sortDirection('sold', sort)}>
+              {/* D122 — referencia PRVÁ a bez triedenia: API triedi katalóg
+                  podľa mena, ceny a predaných, referenciu medzi nimi nemá
+                  (`CatalogSort`). Hlavička, ktorá vyzerá klikateľne a nič
+                  nerobí, je horšia než hlavička bez šípky.
+                  Meno aj veta `title` sú z jednotnej sady (D124) — tabuľka si
+                  ich nedrží vo vlastnej kópii. */}
+              <th title={col.reference.headTitle} data-col="reference">
+                {col.reference.label}
+              </th>
+              <th
+                aria-sort={sortDirection('name', sort)}
+                title={col.name.headTitle}
+                data-col="name"
+              >
+                {columnHead('name', col.name.label)}
+              </th>
+              <th
+                className="n"
+                aria-sort={sortDirection('price', sort)}
+                title={col.price.headTitle}
+                data-col="price"
+              >
+                {columnHead('price', col.price.label)}
+              </th>
+              <th className="n" title={col.discountNow.headTitle} data-col="discountNow">
+                {col.discountNow.label}
+              </th>
+              {/* MIMO SADY — vlastné zápisy appky. Sada takýto stĺpec nemá
+                  a mať nemôže: je to účtovníctvo appky, nie stav v shope. */}
+              <th
+                className="n"
+                title="Podľa vlastných zápisov appky — nie je to stav v shope, ten hovorí stĺpec „Zľava v shope“."
+              >
+                Zľava teraz
+              </th>
+              <th
+                className="n"
+                aria-sort={sortDirection('sold', sort)}
+                title={col.soldWindow.headTitle}
+                data-col="soldWindow"
+              >
                 {columnHead(
                   'sold',
-                  `Predané ${shortDays} d`,
+                  col.soldWindow.label,
                   `poradie počíta server zo súčtu za ${soldWindowDays} dní vrátane ` +
                     'nedočítaných dní, kým číslo v stĺpci je len za dočítané dni',
                 )}
               </th>
+              {/* MIMO SADY — druhé okno predajnosti. Sada pozná JEDNO okno
+                  (`soldWindow`); druhé je vlastnosť tejto obrazovky. */}
               <th
                 className="n"
                 title={`Predané kusy za ${longDays} dní — len za dni, ktoré má appka naozaj stiahnuté.`}
@@ -513,29 +716,18 @@ export function CatalogTable({
                   „Ako rýchlo sa predáva" to nie je a pomenovať ho tak sa nesmie:
                   `getFull` dáva zásobu ako jednu momentku, nie priemer za
                   obdobie (I11, stráži to `sales-insights.spec.ts`). */}
-              <th
-                className="n"
-                title="Koľkokrát sa aktuálna zásoba už predala: celkovo predané / sklad."
-              >
-                Predané / sklad
+              <th className="n" title={col.soldPerStock.headTitle} data-col="soldPerStock">
+                {col.soldPerStock.label}
               </th>
+              {/* MIMO SADY — posledný predaj podľa shopu. */}
               <th className="n" title="Posledný predaj podľa shopu, zmerané pri obohatení produktu.">
                 Posledný predaj
               </th>
-              <th className="n" aria-sort={sortDirection('price', sort)}>
-                {columnHead('price', 'Cena')}
+              <th className="n" title={col.margin.headTitle} data-col="margin">
+                {col.margin.label}
               </th>
-              <th className="n" title="Podľa vlastných zápisov appky">
-                Zľava teraz
-              </th>
-              <th
-                className="n"
-                title="Podľa shopu, k času obohatenia produktu — iná veta než „Zľava teraz“, ktorá hovorí o našich zápisoch."
-              >
-                Zľava v shope
-              </th>
-              <th className="n" title="Marža tak, ako ju poslal shop. Appka ju nepočíta.">
-                Marža
+              <th className="n" title={col.stock.headTitle} data-col="stock">
+                {col.stock.label}
               </th>
             </tr>
           </thead>
@@ -560,18 +752,29 @@ export function CatalogTable({
                    (ešte nedobehla, alebo ju stránka nedostala) — bunky z toho
                    spravia „nevieme", nikdy nulu. */
                 const k = kpi === null ? undefined : kpi.byId.get(row.productId);
-                /* D116 — na povrchu `referencia · názov`. Referencia sa berie
-                   VÝHRADNE ako meraná hodnota (`kpiReference`): keby sa vzala
-                   aj z medzery, appka by tvrdila, že produkt referenciu nemá. */
-                const label = productLabel({
+                /* D124 — hodnoty jednotných stĺpcov. Bunky si tabuľka NEskladá:
+                   `gap` sa v definícii vyhodnocuje PRED hodnotou, takže
+                   z nekonzistentnej odpovede nikdy nevznikne číslo, ktoré shop
+                   nepotvrdil. */
+                const values = rowValues(row, k);
+                const reference = col.reference.cell(values);
+                /* D122 — názov stojí sám. Text a priznanie berie z jednotného
+                   stĺpca, `#id` do `title` z `product-label.ts`: identifikátor
+                   patrí do detailu (D116), ale musí byť dosiahnuteľný bez
+                   otvorenia panela. */
+                const nameCell = col.name.cell(values);
+                const technical = productNameCell({
                   productId: row.productId,
-                  reference: kpiReference(k),
                   name: row.name,
-                });
+                }).technical;
                 const noSale = kpiNoSaleMark(k?.noSale);
                 const priceWithVat = kpiPriceWithVatCell(k);
-                const marginEur = kpiCell(k?.margin, (value) => formatEur(value));
-                const marginPercent = kpiCell(k?.marginPercent, (value) => `${value} %`);
+                /* Marža po polovičkách — každá polovica má vlastnú medzeru,
+                   takže vlastnú pomlčku aj vlastný `title` (exportuje to tá
+                   istá definícia, nie kópia). */
+                const { eur: marginEur, percent: marginPercent } = productMarginCells(
+                  values.margin,
+                );
                 /* Otvorený a označený je to isté dvakrát len zdanlivo: výber
                    je „pôjde do zľavy", otvorenie je „toto teraz čítam vpravo".
                    Preto sa triedy skladajú, nie vylučujú. */
@@ -590,12 +793,18 @@ export function CatalogTable({
                         className="cb"
                         type="checkbox"
                         checked={checked}
-                        aria-label={`Označiť ${label.text}`}
+                        aria-label={`Označiť ${nameCell.text}`}
                         onChange={(event) => onToggleRow(row.productId, event.target.checked)}
                         data-testid={`select-row-${row.productId}`}
                       />
                     </td>
-                    <td className="name" data-l="Produkt">
+                    {/* REFERENCIA — PRVÝ STĹPEC (D122). Bez `overflow: hidden`
+                        a bez výpustky: identifikátor sa neskracuje. `.num` dá
+                        tabuľkové číslice, aby sa stĺpec dal skenovať zvisle. */}
+                    <td className="num" data-l="Referencia" data-col="reference">
+                      <KpiText cell={reference} testId={`row-reference-${row.productId}`} />
+                    </td>
+                    <td className="name" data-l="Produkt" data-col="name">
                       {/* `title` je celý názov — orezaný chvost sa dá prečítať
                           bez otvorenia panela (D10, bod 2 v hlavičke). */}
                       {/* Tlačidlo názvu otvára panel detailu vedľa tabuľky,
@@ -610,33 +819,26 @@ export function CatalogTable({
                         /* `title` nesie celé pomenovanie AJ `id`: technický
                            identifikátor patrí do detailu (D116), ale musí byť
                            dosiahnuteľný bez otvorenia panela. */
-                        title={`${label.text} · ${label.technical}`}
+                        title={
+                          nameCell.unknown ? technical : `${nameCell.text} · ${technical}`
+                        }
                         aria-expanded={open}
                         aria-controls={PRODUCT_DETAIL_ID}
                         onClick={() => onOpenDetail(row.productId)}
                         data-testid={`open-detail-${row.productId}`}
                       >
-                        {/* NEOBOHATENÝ PRODUKT SA PRIZNÁ, NIE ZAMLČÍ (D116).
-                            Pomlčka na mieste referencie znamená „zatiaľ
-                            nevieme"; kreslí sa až KEĎ odpoveď KPI prišla —
-                            pred ňou by to bolo priznanie niečoho, na čo sa
-                            appka ešte nespýtala (tretí stav). */}
-                        {label.referenceUnknown && k !== undefined ? (
-                          <span
-                            className="lvl-3"
-                            title="Referenciu appka zatiaľ nemá — produkt nie je obohatený. Neznamená to, že produkt referenciu nemá."
-                            data-testid={`row-reference-unknown-${row.productId}`}
-                          >
-                            {KPI_DASH}{' · '}
-                          </span>
-                        ) : null}
-                        {label.text}
+                        {/* Názov stojí SÁM (D122). Keď ho zrkadlo nemá, je tu
+                            `#id` — stlmené, aby sa nečítalo ako meno. */}
+                        <span className={nameCell.unknown ? 'lvl-3' : undefined}>
+                          {nameCell.text}
+                        </span>
                       </button>
-                      {/* Kód a EAN — tichý druhý riadok. Pri prázdne nesie
-                          SLOVO, nie len pomlčku: „ešte sa doťahuje",
-                          „vyžaduje kľúč" a „shop ho nevedie" sú tri rôzne veci
-                          a zliať ich by zahodilo jedinú informáciu, ktorá pri
-                          prázdnej bunke niekoho zaujíma. */}
+                      {/* EAN — tichý druhý riadok. Pri prázdne nesie SLOVO, nie
+                          len pomlčku: „ešte sa doťahuje", „vyžaduje kľúč" a
+                          „shop ho nevedie" sú tri rôzne veci a zliať ich by
+                          zahodilo jedinú informáciu, ktorá pri prázdnej bunke
+                          niekoho zaujíma. Kód v ňom po D122 UŽ NIE JE — má
+                          vlastný stĺpec (dôvod je v `product-extras.ts`). */}
                       <CodeLine line={codeLine(row, extras.byId.get(row.productId))} />
                       {reason === null ? null : (
                         // `.flag` nesie glyf aj farbu; text je tretí kanál —
@@ -677,57 +879,73 @@ export function CatalogTable({
                         </div>
                       ) : null}
                     </td>
-                    <td className="n" data-l={`Predané ${shortDays} d`}>
+                    {/* Cena je zo zoznamového prechodu katalógu, teda BEZ
+                        obohatenia — pozná ju appka pre každý riadok. Cena
+                        s DPH z `getFull` je v `title`, nie na povrchu: dva
+                        peňažné stĺpce vedľa seba by sa čítali ako jedna cena
+                        a druhý by vyzeral ako chyba. */}
+                    <td
+                      className="n"
+                      data-l="Cena"
+                      data-col="price"
+                      title={`S DPH: ${priceWithVat.text}`}
+                    >
+                      <KpiText cell={col.price.cell(values)} />
+                    </td>
+                    <td className="n" data-l="Zľava v shope" data-col="discountNow">
                       <KpiText
-                        cell={kpiUnitsCell(k?.units30)}
+                        cell={col.discountNow.cell(values)}
+                        testId={`kpi-shop-discount-${row.productId}`}
+                      />
+                    </td>
+                    {/* MIMO SADY — vlastné zápisy appky (`row.discountedNow`).
+                        Pomlčka tu neznamená „shop nič nehlási", ale „appka si
+                        na tento produkt zľavu nezapísala". */}
+                    <td className="n" data-l="Zľava teraz">
+                      {row.discountedNow ? 'v zľave' : KPI_DASH}
+                    </td>
+                    <td className="n" data-l={`Predané ${shortDays} d`} data-col="soldWindow">
+                      <KpiText
+                        cell={col.soldWindow.cell(values)}
                         testId={`kpi-units30-${row.productId}`}
                       />
                     </td>
+                    {/* MIMO SADY — druhé okno predajnosti. */}
                     <td className="n" data-l={`Predané ${longDays} d`}>
                       <KpiText
                         cell={kpiUnitsCell(k?.units90)}
                         testId={`kpi-units90-${row.productId}`}
                       />
                     </td>
-                    <td className="n" data-l="Predané / sklad">
+                    <td className="n" data-l="Predané / sklad" data-col="soldPerStock">
                       <KpiText
-                        cell={kpiSoldPerStockCell(k)}
+                        cell={col.soldPerStock.cell(values)}
                         testId={`kpi-sold-per-stock-${row.productId}`}
                       />
                     </td>
+                    {/* MIMO SADY — posledný predaj podľa shopu. */}
                     <td className="n" data-l="Posledný predaj">
                       <KpiText
                         cell={kpiLastSaleCell(k)}
                         testId={`kpi-last-sale-${row.productId}`}
                       />
                     </td>
-                    {/* Cena je zo zoznamového prechodu katalógu, teda BEZ
-                        obohatenia — pozná ju appka pre každý riadok. Cena
-                        s DPH z `getFull` je v `title`, nie na povrchu: dva
-                        peňažné stĺpce vedľa seba by sa čítali ako jedna cena
-                        a druhý by vyzeral ako chyba. */}
-                    <td className="n" data-l="Cena" title={`S DPH: ${priceWithVat.text}`}>
-                      {formatEur(row.price)}
-                    </td>
-                    <td className="n" data-l="Zľava teraz">
-                      {row.discountedNow ? 'v zľave' : KPI_DASH}
-                    </td>
-                    <td className="n" data-l="Zľava v shope">
-                      <KpiText
-                        cell={kpiDiscountCell(k?.discount)}
-                        testId={`kpi-shop-discount-${row.productId}`}
-                      />
-                    </td>
                     {/* Marža v EUR a v % sú DVE hodnoty z `getFull` a každá má
                         vlastnú medzeru — preto dve bunky v jednom stĺpci a nie
                         jeden reťazec, ktorý by pri jednej chýbajúcej polovici
                         musel zmiznúť celý. */}
-                    <td className="n" data-l="Marža">
+                    <td className="n" data-l="Marža" data-col="margin">
                       <KpiText cell={marginEur} testId={`kpi-margin-${row.productId}`} />
                       {' · '}
                       <KpiText
                         cell={marginPercent}
                         testId={`kpi-margin-percent-${row.productId}`}
+                      />
+                    </td>
+                    <td className="n" data-l="Sklad" data-col="stock">
+                      <KpiText
+                        cell={col.stock.cell(values)}
+                        testId={`kpi-stock-${row.productId}`}
                       />
                     </td>
                   </tr>

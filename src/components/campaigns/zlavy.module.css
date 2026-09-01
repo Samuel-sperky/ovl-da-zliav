@@ -1290,8 +1290,16 @@
   text-overflow: clip;
 }
 
+/* Referencia ako samostatný PRVÝ stĺpec (D122, 1. 9. 2026). Miesto naň dal
+   výhradne stĺpec názvu (46 % → 32 %): kód má jednotky znakov, kým názov sa
+   v tejto tabuľke smie lámať, takže pretečenia odmerané v UX2 sa nevracajú.
+   „Cena pri príprave", „Zľava" ani „Zapísané" o percento neprišli. */
+.colRef {
+  width: 14%;
+}
+
 .colName {
-  width: 46%;
+  width: 32%;
 }
 
 .colPrice {

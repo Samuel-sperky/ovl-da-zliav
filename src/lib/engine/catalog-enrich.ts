@@ -15,14 +15,21 @@
  * dávka kvótu nešetrí). Katalóg má 41 348 produktov, teda jeden plošný prechod
  * = **~207 dní**.
  *
- * Preto tu NEEXISTUJE a nesmie vzniknúť funkcia „obohať všetko". Sú len dve
- * cesty, obe rozpočtované:
+ * Preto tu NEEXISTUJE a nesmie vzniknúť funkcia „obohať všetko". Sú len tri
+ * cesty, všetky rozpočtované:
  *
- *   1. **NA DOPYT** (`enrichProductOnDemand`) — používateľ otvoril produkt.
- *      Idempotentné a lacné: keď je riadok dosť svieži, `getFull` sa NEVOLÁ.
- *   2. **DÁVKA NA POZADÍ** (`runEnrichBatch`) — ~150 produktov/deň v poradí
- *      priority (povolený zoznam → kampaňové → zvyšok). Zvyšok kvóty (~50)
- *      zostáva na canary, sondy a práve na cestu (1); dávka si ho vzať NESMIE.
+ *   1. **NA DOPYT — JEDEN PRODUKT** (`enrichProductOnDemand`) — používateľ
+ *      otvoril panel. Idempotentné a lacné: keď je riadok dosť svieži, `getFull`
+ *      sa NEVOLÁ.
+ *   2. **NA DOPYT — STRANA TABUĽKY** (`enrichPageOnDemand`, D123, 1. 9. 2026) —
+ *      až 100 ID naraz, `getFull` len za nesvieže riadky. Umožnila to kvóta
+ *      zdvihnutá 1. 9. 2026 na 150/min a 1000/deň: strana po 100 produktoch je
+ *      ~50 s namiesto 6,3 min. Dnešný cieľ obohacovania je jej strop a pri
+ *      naplnenom cieli NEOBOHACUJE — povie to číslom (R2 kontraktu V5).
+ *   3. **DÁVKA NA POZADÍ** (`runEnrichBatch`) — `DEFAULT_ENRICH_DAILY_TARGET`
+ *      produktov/deň v poradí priority (povolený zoznam → kampaňové → zvyšok).
+ *      `ENRICH_QUOTA_RESERVE` zostáva na canary, sondy a práve na cesty (1) a
+ *      (2); dávka si ju vzať NESMIE.
  *
  * Kto by aj tak chcel vedieť, „kedy to bude celé", má na to
  * `enrichDaysNeeded()` — vráti počet DNÍ, nie sľub.
@@ -74,6 +81,7 @@
  * Vlastník: V4 (obohacovanie).
  */
 import type {
+  CatalogEnrichmentRecord,
   Logger,
   ProductFullDetail,
   SecretRef,
@@ -705,6 +713,486 @@ export async function enrichProductOnDemand(
       reads: slot.status,
       error: code,
     });
+  }
+}
+
+/* ═══════ 6b. Obohatenie STRANY na dopyt (D123, 1. 9. 2026) ════════════════ */
+
+/**
+ * Koľko produktov smie pokryť JEDNO volanie „obohať stranu".
+ *
+ * Je to STRANA TABUĽKY, nie kus katalógu: obrazovka Produktov ukazuje 100
+ * riadkov a viac ich naraz nikto nevidí. Pri pauze 500 ms na produkt
+ * (`MIN_ENRICH_READ_PAUSE_MS` po zdvihnutí kvóty na 120/min) je to ~50 s.
+ *
+ * PREČO TO STÁLE NIE JE „OBOHAŤ VŠETKO": plošný prechod 41 348 produktov je aj
+ * pri kvóte 1000/deň ~69 dní (`enrichDaysNeeded()` to povie číslom). Strana je
+ * to, na čo sa človek práve pozerá — a to je celý rozdiel medzi D118 a D123.
+ */
+export const ENRICH_PAGE_MAX_PRODUCTS = 100;
+
+/**
+ * Wall-clock strop JEDNÉHO volania.
+ *
+ * ODVODENÉ: 100 produktov × 500 ms pauza + 15 s na samotné odpovede shopu
+ * (~150 ms na request). Keď sa beh do stropu nezmestí, vráti sa to, čo sa
+ * STIHLO, a zvyšok ID ide von v `skipped` — obrazovka má dostať odpoveď
+ * a dopýtať sa znova, nie visieť na otvorenom spojení.
+ */
+export const ENRICH_PAGE_MAX_MS = ENRICH_PAGE_MAX_PRODUCTS * MIN_ENRICH_READ_PAUSE_MS + 15_000;
+
+/** Ako dopadlo obohatenie strany. */
+export type EnrichPageOutcome =
+  /** Prešli všetky nesvieže ID (aj keď niektoré skončili `not_found`). */
+  | 'done'
+  /** Všetko bolo dosť svieže — `getFull` sa NEVOLAL ani raz. Nie je to chyba. */
+  | 'fresh_only'
+  /** Po očistení nezostalo ani jedno použiteľné ID. */
+  | 'no_ids'
+  /** Iná strana sa obohacuje práve teraz; dve dávky naraz by rozbili tempo. */
+  | 'busy'
+  /** Dnešný cieľ obohacovania je naplnený (R2 kontraktu) — čísla sú v `day`. */
+  | 'target_reached'
+  /** Shop nás odmietol už predtým a pauza ešte platí (`ip_banned`, `429`). */
+  | 'paused'
+  /** Došel čas jedného volania; zvyšok ID je v `skipped`. */
+  | 'deadline'
+  | EnrichGateBlock
+  | 'ip_banned'
+  | 'rate_limited'
+  /** Čítanie alebo zápis spadli; čo sa stihlo uložiť, zostáva uložené. */
+  | 'failed';
+
+/**
+ * Čísla dňa — to, čo obrazovka MUSÍ povedať namiesto mlčania (R2 kontraktu).
+ *
+ * Sú tu DVE nezávislé počítadlá a zámerne sa nesčítavajú:
+ *
+ *  - `enrichedTodayByBatch` / `dailyTarget` / `targetLeft` — cieľ DÁVKY
+ *    (`catalog_enrich_state`). Táto cesta ho RESPEKTUJE, ale NEMÍŇA: progres
+ *    dávky prepisuje výhradne `runEnrichBatch()` (dva zapisovatelia jedného
+ *    riadku by si číslo prepisovali).
+ *  - `readsUsedToday` / `readsLeftToday` / `readsLimitToday` — dráha
+ *    `product_read` zdieľaného rozpočtu. Toto počítadlo počíta KAŽDÉ čítanie:
+ *    dávku, canary, sondu aj túto stranu. Je to jediné číslo, ktoré o dnešnej
+ *    spotrebe hovorí celú pravdu, preto je v odpovedi vždy.
+ *
+ * `null` znamená VÝHRADNE „nevieme" (I11), nikdy nulu.
+ */
+export interface EnrichPageDayNumbers {
+  /** Koľko obohatila dnešná DÁVKA. `null` = dnes nebežala, nie nula. */
+  readonly enrichedTodayByBatch: number | null;
+  readonly dailyTarget: number | null;
+  /** Koľko z dnešného cieľa zostáva. `null` = stav dávky sa nedal prečítať. */
+  readonly targetLeft: number | null;
+  readonly readsUsedToday: number | null;
+  readonly readsLeftToday: number | null;
+  readonly readsLimitToday: number | null;
+}
+
+export interface EnrichPageResult {
+  readonly outcome: EnrichPageOutcome;
+  /** Stav oprávnenia `product:read`. */
+  readonly capability: ShopCapability;
+  /** Koľko ID prišlo (po očistení o neplatné a duplikáty). */
+  readonly requested: number;
+  /** Koľko ID sa zahodilo ako neplatné alebo duplicitné. */
+  readonly dropped: number;
+  /** Koľko riadkov bolo dosť svieže — `getFull` sa pre ne NEVOLAL. */
+  readonly fresh: number;
+  /** Koľko riadkov obohatenie potrebovalo. */
+  readonly stale: number;
+  readonly attempted: number;
+  readonly enriched: number;
+  readonly notInMirror: number;
+  readonly reductionUnknown: number;
+  readonly notFound: number;
+  /** Nesvieže ID, na ktoré sa NEDOSTALO (čas, kvóta, pauza). Nie je to chyba. */
+  readonly skipped: readonly number[];
+  readonly readsUsed: number;
+  readonly reads: ReadBudgetStatus | null;
+  readonly day: EnrichPageDayNumbers;
+  readonly resumeAt: UtcDate | null;
+  readonly startedAt: UtcDate;
+  readonly finishedAt: UtcDate;
+  readonly durationMs: number;
+  /** KÓD chyby (I1), nikdy telo odpovede shopu. */
+  readonly error: string | null;
+}
+
+export interface EnrichPageDeps extends CatalogEnrichDeps {
+  /** Strop produktov na toto volanie. Strop stropu je `ENRICH_PAGE_MAX_PRODUCTS`. */
+  readonly maxProducts?: number;
+  /** Pauza medzi volaniami. Podlaha `MIN_ENRICH_READ_PAUSE_MS`. */
+  readonly pausePerReadMs?: number;
+  /** Wall-clock strop volania. Strop stropu je `ENRICH_PAGE_MAX_MS`. */
+  readonly maxMs?: number;
+  readonly sleepFn?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Beží už jedna strana? Modulová premenná, presne ako `running` v
+ * `lib/scheduler/enrich-runner.ts`: dve strany naraz by rozbili tempo (pauza
+ * medzi čítaniami platí na beh, nie globálne) a minútový strop kľúča by padol
+ * na 429 uprostred oboch. Je to obrana v rámci procesu — druhú vrstvu drží
+ * rozpočet čítaní, ktorý je v DB.
+ */
+let pageInFlight = false;
+
+/**
+ * Obohatí STRANU tabuľky na dopyt (D123): až `ENRICH_PAGE_MAX_PRODUCTS` ID,
+ * z toho `getFull` odíde LEN pre tie, ktoré nie sú svieže.
+ *
+ * Poradie brán je to isté ako pri jednom produkte (zadarmo → drahé), len
+ * vyhodnotené RAZ na celú stranu:
+ *   1. jedna strana naraz (`pageInFlight`),
+ *   2. očistenie ID (zadarmo),
+ *   3. **sviežosť JEDNÝM dotazom** (`enrichmentFor`) — žiadne N+1 nad vlastnou
+ *      DB a hlavne žiadny request za už obohatený riadok. Toto je jediná brána,
+ *      ktorá drží kvótu pri preklikávaní tabuľky,
+ *   4. pauza, ktorú povedal SHOP (`ip_banned`, `429`),
+ *   5. dnešný cieľ obohacovania — pri naplnenom sa NEOBOHACUJE a čísla idú von,
+ *   6. oprávnenie, kľúč, rozpočet (`openGate` s rezervou 0 — táto cesta je ten,
+ *      pre koho sa `ENRICH_QUOTA_RESERVE` drží),
+ *   7. sekvenčné čítanie s pauzou a s wall-clock stropom.
+ *
+ * @returns report; NIKDY nehádže.
+ */
+export async function enrichPageOnDemand(
+  productIds: readonly number[],
+  deps: EnrichPageDeps,
+): Promise<EnrichPageResult> {
+  const now = deps.now ?? ((): UtcDate => new Date());
+  const log = deps.logger;
+  const sleepFn = deps.sleepFn ?? defaultSleep;
+  const capability = shopCapability(recalledScopes(deps.apiKey), 'product:read');
+  const freshMs = Math.max(MIN_ENRICH_FRESH_MS, Math.trunc(deps.freshMs ?? ENRICH_FRESH_MS));
+  const pauseMs = Math.max(
+    MIN_ENRICH_READ_PAUSE_MS,
+    Math.trunc(deps.pausePerReadMs ?? MIN_ENRICH_READ_PAUSE_MS),
+  );
+  const maxMs = Math.min(
+    ENRICH_PAGE_MAX_MS,
+    Math.max(1, Math.trunc(deps.maxMs ?? ENRICH_PAGE_MAX_MS)),
+  );
+  const take = Math.min(
+    ENRICH_PAGE_MAX_PRODUCTS,
+    Math.max(0, Math.trunc(deps.maxProducts ?? ENRICH_PAGE_MAX_PRODUCTS)),
+  );
+  const startedAt = now();
+
+  let fresh = 0;
+  let attempted = 0;
+  let enriched = 0;
+  let notInMirror = 0;
+  let reductionUnknown = 0;
+  let notFound = 0;
+  let readsUsed = 0;
+  const stale: number[] = [];
+  let done = 0;
+
+  const noNumbers: EnrichPageDayNumbers = {
+    enrichedTodayByBatch: null,
+    dailyTarget: null,
+    targetLeft: null,
+    readsUsedToday: null,
+    readsLeftToday: null,
+    readsLimitToday: null,
+  };
+
+  /* ── 1. očistenie ID: platné, bez duplikátov, po strop (zadarmo) ────────── */
+
+  const unique: number[] = [];
+  const seen = new Set<number>();
+  for (const raw of productIds) {
+    if (!Number.isInteger(raw) || raw <= 0) continue;
+    if (seen.has(raw)) continue;
+    seen.add(raw);
+    if (unique.length < take) unique.push(raw);
+  }
+  const dropped = productIds.length - unique.length;
+  const requested = unique.length;
+
+  const report = (
+    outcome: EnrichPageOutcome,
+    patch: Partial<EnrichPageResult> = {},
+  ): EnrichPageResult => {
+    const finishedAt = now();
+    return {
+      outcome,
+      capability,
+      requested,
+      dropped,
+      fresh,
+      stale: stale.length,
+      attempted,
+      enriched,
+      notInMirror,
+      reductionUnknown,
+      notFound,
+      skipped: stale.slice(done),
+      readsUsed,
+      reads: null,
+      day: noNumbers,
+      resumeAt: null,
+      startedAt,
+      finishedAt,
+      durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+      error: null,
+      ...patch,
+    };
+  };
+
+  if (requested === 0) return report('no_ids');
+
+  /* ── 2. jedna strana naraz ─────────────────────────────────────────────── */
+
+  if (pageInFlight) {
+    log?.info('catalog_enrich_page_busy', { requested });
+    return report('busy');
+  }
+  pageInFlight = true;
+  try {
+    /* ── 3. sviežosť JEDNÝM dotazom (žiadne N+1) ─────────────────────────── */
+
+    let records: Map<number, CatalogEnrichmentRecord>;
+    try {
+      records = await deps.catalog.enrichmentFor(unique);
+    } catch (cause) {
+      // Rovnaký dôvod ako pri jednom produkte: nečitateľné zrkadlo nie je dôvod
+      // volať shop naslepo. Radšej sa nepošle nič a povie sa kód chyby.
+      return report('failed', { error: errorCode(cause) });
+    }
+
+    const at = now();
+    for (const productId of unique) {
+      const record = records.get(productId) ?? null;
+      // Turbopack tu už raz zahodil `if (!record)` ako compile-time falsy.
+      const enrichedAt = record === null ? null : record.enrichedAt;
+      if (enrichedAt !== null && at.getTime() - enrichedAt.getTime() < freshMs) fresh += 1;
+      else stale.push(productId);
+    }
+
+    /* ── 4. stav dávky: pauza od shopu a dnešný cieľ ─────────────────────── */
+
+    let state: CatalogEnrichState | null = null;
+    try {
+      state = await deps.catalog.loadEnrichState();
+    } catch (cause) {
+      // Stav je diagnostika, nie brána bezpečnosti (rovnako ako pri jednom
+      // produkte): keď sa nedá prečítať, čísla dňa budú `null` a ide sa ďalej.
+      log?.warn('catalog_enrich_state_unreadable', { error: errorCode(cause) });
+    }
+
+    // Deň v zóne ROZPOČTU (UTC) a cez `Intl` — kvótu resetuje shop o polnoci
+    // UTC, nie appka o polnoci v Bratislave (D31).
+    const today = todayInZone(startedAt, READ_BUDGET_TIME_ZONE);
+    const spentByBatch = state !== null && state.batchDay === today ? state.enrichedToday : 0;
+    const enrichedTodayByBatch =
+      state !== null && state.batchDay === today ? state.enrichedToday : null;
+    const dailyTarget = state === null ? null : state.dailyTarget;
+    const targetLeft = state === null ? null : Math.max(0, state.dailyTarget - spentByBatch);
+
+    const numbers = (budget: ReadBudgetStatus | null): EnrichPageDayNumbers => ({
+      enrichedTodayByBatch,
+      dailyTarget,
+      targetLeft,
+      // Fail-closed domnienka NIE JE meraný fakt: pri `known: false` je to `null`.
+      readsUsedToday: budget !== null && budget.known ? budget.used : null,
+      readsLeftToday: budget !== null && budget.known ? budget.remaining : null,
+      readsLimitToday: budget === null ? null : budget.limit,
+    });
+
+    /* ── 5. všetko svieže? Potom sa nič nevolá a nič sa neplatí ──────────── */
+
+    if (stale.length === 0) {
+      const budget = await deps.reads.status().catch(() => null);
+      return report('fresh_only', { reads: budget, day: numbers(budget) });
+    }
+
+    if (state !== null && shopSaidStop(state, now())) {
+      return report('paused', {
+        day: numbers(null),
+        resumeAt: state.pausedUntil,
+        error: state.pauseReason,
+      });
+    }
+
+    /*
+     * Dnešný cieľ (R2 kontraktu). Kto preklikne desiatu stranu, dostane pomlčky
+     * — a TU sa hovorí prečo, číslom. Cieľ sa touto cestou NEMÍŇA (progres
+     * dávky prepisuje výhradne `runEnrichBatch`), ale respektuje sa: je to jediné
+     * číslo, ktoré hovorí, koľko obohatení dnešný deň ešte znesie.
+     */
+    if (targetLeft === 0) {
+      const budget = await deps.reads.status().catch(() => null);
+      log?.info('catalog_enrich_page_target_reached', {
+        enrichedToday: enrichedTodayByBatch,
+        dailyTarget,
+      });
+      return report('target_reached', {
+        reads: budget,
+        day: numbers(budget),
+        resumeAt: budget?.resetAt ?? null,
+      });
+    }
+
+    /* ── 6. oprávnenie, kľúč, rozpočet ─ rezerva je TU nulová ────────────── */
+
+    const gate = await openGate(deps, capability, 0);
+    if (gate.blocked !== null) {
+      return report(gate.blocked, {
+        reads: gate.budget,
+        day: numbers(gate.budget),
+        error: gate.error,
+        resumeAt: gate.blocked === 'budget_day' ? (gate.budget?.resetAt ?? null) : null,
+      });
+    }
+
+    /* ── 7. sekvenčné čítanie s pauzou a s wall-clock stropom ────────────── */
+
+    // Cieľ dňa je strop aj pre túto stranu: viac ako `targetLeft` produktov sa
+    // dnes neobohatí ani kliknutím. Zvyšok ide von ako `skipped`, nie ako chyba
+    // — a výsledok sa potom menuje `target_reached`, aby obrazovka vedela, že
+    // to nie je porucha, ale dnešný strop (R2 kontraktu).
+    const plan = stale.slice(0, Math.min(stale.length, targetLeft ?? stale.length));
+    const cutByTarget = plan.length < stale.length;
+    const deadline = startedAt.getTime() + maxMs;
+    const ctx: ShopCtx = { operationId: deps.operationId ?? newOperationId() };
+    let lastBudget: ReadBudgetStatus = gate.budget;
+    let stopped: EnrichPageOutcome | null = null;
+    let pause: PausePatch | null = null;
+    let resumeAt: UtcDate | null = null;
+    let error: string | null = null;
+
+    for (const productId of plan) {
+      if (lastBudget.known && lastBudget.usedThisMinute >= lastBudget.minuteLimit) {
+        stopped = 'budget_minute';
+        break;
+      }
+
+      const waitMs = attempted > 0 ? pauseMs : 0;
+      // Wall-clock strop sa kontroluje PRED pauzou, nie po nej: inak by sa
+      // o pauzu prekročil a odpoveď by prišla neskôr, než volajúci čaká.
+      if (now().getTime() + waitMs >= deadline) {
+        stopped = 'deadline';
+        break;
+      }
+      if (waitMs > 0) await sleepFn(waitMs);
+
+      const slot = await deps.reads.reserve(1).catch(() => null);
+      if (slot === null || slot.granted < 1) {
+        stopped = slot === null || !slot.status.known ? 'budget_unknown' : 'budget_day';
+        if (slot !== null) lastBudget = slot.status;
+        if (stopped === 'budget_day') resumeAt = lastBudget.resetAt;
+        break;
+      }
+      lastBudget = slot.status;
+      readsUsed += slot.granted;
+      attempted += 1;
+
+      let full: ProductFullDetail;
+      try {
+        full = await deps.shop.getProductFull(productId, gate.key, ctx);
+      } catch (cause) {
+        const code = errorCode(cause);
+
+        if (isBannedAddress(cause)) {
+          /*
+           * D120 — `ip_banned` platí pre CELÚ cestu k shopu, nie pre tento
+           * produkt: nič sa neoznačí ako obohatené ANI ako pokus, dôvod sa
+           * zapíše do stavu (dozvie sa ho aj nočná dávka) a strana sa vzdá.
+           */
+          stopped = 'ip_banned';
+          error = code;
+          pause = { reason: 'ip_banned', until: null, error: code };
+          log?.error('catalog_enrich_address_banned', { productId, error: code });
+          break;
+        }
+
+        if (isRateLimited(cause)) {
+          const until = new Date(now().getTime() + rateLimitPauseMs(cause));
+          stopped = 'rate_limited';
+          error = code;
+          resumeAt = until;
+          pause = { reason: 'rate_limited', until, error: code };
+          log?.warn('catalog_enrich_rate_limited', { productId, error: code });
+          break;
+        }
+
+        // Chyba, ktorá patrí TOMUTO produktu: pokus sa zaznačí, aby jeden
+        // padajúci `getFull` nezjedol dennú kvótu opakovaním.
+        await markAttemptQuietly(deps, productId, log);
+        done += 1;
+
+        if (isNotFound(cause)) {
+          notFound += 1;
+          log?.info('catalog_enrich_not_found', { productId });
+          continue;
+        }
+
+        stopped = 'failed';
+        error = code;
+        log?.warn('catalog_enrich_page_read_failed', { productId, error: code });
+        break;
+      }
+
+      if (!isReductionStorable(full)) {
+        // Bod 2 doc-bloku modulu: radšej neobohatené než nepravdivé.
+        reductionUnknown += 1;
+        await markAttemptQuietly(deps, productId, log);
+        done += 1;
+        log?.warn('catalog_enrich_reduction_unknown', { productId });
+        continue;
+      }
+
+      try {
+        const saved = await deps.catalog.saveEnrichment(productId, toEnrichWrite(full, now()));
+        if (saved) enriched += 1;
+        else notInMirror += 1;
+        done += 1;
+      } catch (cause) {
+        stopped = 'failed';
+        error = errorCode(cause);
+        log?.error('catalog_enrich_save_failed', { productId, error });
+        break;
+      }
+    }
+
+    /*
+     * Pauzu, ktorú povedal SHOP, zapíše aj táto cesta: `ip_banned` a `429` sú
+     * výrok o ceste k shopu, nie o strane, a nočná dávka sa o nich má dozvedieť
+     * aj vtedy, keď ich prvý našiel človek kliknutím. Progres dávky
+     * (`enriched_today`, `enriched_total`) sa NEMENÍ — to je číslo dávky.
+     */
+    if (pause !== null) await pauseQuietly(deps, state, pause, log);
+    else if (enriched > 0) await clearBanPauseQuietly(deps, state, log);
+
+    const outcome: EnrichPageOutcome =
+      stopped ?? (cutByTarget && done < stale.length ? 'target_reached' : 'done');
+
+    log?.info('catalog_enrich_page_done', {
+      outcome,
+      requested,
+      fresh,
+      stale: stale.length,
+      attempted,
+      enriched,
+      notInMirror,
+      reductionUnknown,
+      notFound,
+      readsUsed,
+      error: error ?? undefined,
+    });
+
+    return report(outcome, {
+      reads: lastBudget,
+      day: numbers(lastBudget),
+      resumeAt,
+      error,
+    });
+  } finally {
+    pageInFlight = false;
   }
 }
 

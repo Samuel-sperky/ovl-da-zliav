@@ -134,6 +134,17 @@ const csvQuery = z
     return parts.flatMap((part) => part.split(',')).map((s) => s.trim()).filter((s) => s.length > 0);
   });
 
+/**
+ * Celé nezáporné číslo z query (`orderedTotal*`, `lastSaleOlderDays`).
+ * `null` = nezmysel alebo nič neprišlo, a filter potom ODPADNE — nespadne.
+ */
+function countParam(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const text = raw.trim();
+  if (!/^\d{1,9}$/.test(text)) return null;
+  return Number(text);
+}
+
 const SOLD_BUCKETS: readonly SoldBucket[] = ['none', 'low', 'mid', 'high'];
 const SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'not_found', 'unknown'];
 const SORTS: readonly CatalogSort[] = ['name', 'price_asc', 'price_desc', 'sold_asc', 'sold_desc', 'id'];
@@ -142,15 +153,13 @@ const SORTS: readonly CatalogSort[] = ['name', 'price_asc', 'price_desc', 'sold_
  * Filtre, na ktoré appka nemá dáta (K8). Zoznam je zámerne v repozitári
  * (`LOCKED_FILTERS`) — tu sú len názvy, na ktoré sa počúva v query, aby route
  * vedela povedať „tento si poslal a ja som ho NEPOUŽILA".
+ *
+ * D125 (1. 9. 2026) — `stock`, `margin` a `turnover` z tohto zoznamu ODIŠLI,
+ * lebo sa filtrovať DAJÚ (`stock`, `marginPercentFrom/To`,
+ * `orderedTotalFrom/To`, `lastSaleOlderDays` nižšie). Zostali tri, ktoré nemajú
+ * zdroj vôbec; na obrazovke sa už nekreslia ani sivé (K4).
  */
-const LOCKED_QUERY_KEYS: readonly LockedCatalogFilter[] = [
-  'stock',
-  'category',
-  'metal',
-  'jewelryType',
-  'margin',
-  'turnover',
-];
+const LOCKED_QUERY_KEYS: readonly LockedCatalogFilter[] = ['category', 'metal', 'jewelryType'];
 
 const searchQuerySchema = z.object({
   /** Názov, ID alebo SKU — jedno pole nad tabuľkou (odpoveď 71). */
@@ -171,6 +180,33 @@ const searchQuerySchema = z.object({
    * povedať, čie tvrdenie práve ukazuje.
    */
   shopDiscounted: boolQuery,
+  /*
+   * ── Filtre nad obohatením (D125, K4) ──────────────────────────────────────
+   *
+   * Štyri veci, ktoré `getFull` naozaj dáva a migrácia 0014 drží v zrkadle.
+   * Mená sú tie isté ako v `catalog-filter.ts`, aby sa adresa obrazovky dala
+   * poslať ďalej bez prekladu — a hovoria PRESNE to, čo stĺpec vie:
+   *
+   *  · `marginPercentFrom/To` — `margin_percent` zo shopu (appka maržu nepočíta),
+   *  · `stock=in|out`         — `qty`; `NULL` nespadne ani do jednej možnosti,
+   *  · `orderedTotalFrom/To`  — `qty_in_orders`, teda CELKOVO objednané kusy
+   *                             za celú históriu shopu, NIE za okno (R3),
+   *  · `lastSaleOlderDays`    — `last_time_in_order` starší než N dní.
+   *
+   * Všetky štyri platia LEN nad obohatenými riadkami; odpoveď to priznáva
+   * v `enrichedOnly` a číslom `counts.enrichedRows` (I11).
+   *
+   * Prečo sú tu SAMÉ REŤAZCE a čísla sa parsujú až v handleri: `z.coerce.number()`
+   * by z nezmyslu urobil `NaN` a z celej odpovede 400. Uložený filter ani starší
+   * odkaz nesmú obrazovku zhodiť — nezmysel má FILTER ODPADNÚŤ, nie požiadavka
+   * spadnúť (tá istá zásada ako pri `priceFrom`/`priceTo`).
+   */
+  marginPercentFrom: z.string().max(20).optional(),
+  marginPercentTo: z.string().max(20).optional(),
+  stock: z.string().max(10).optional(),
+  orderedTotalFrom: z.string().max(10).optional(),
+  orderedTotalTo: z.string().max(10).optional(),
+  lastSaleOlderDays: z.string().max(10).optional(),
   productIds: csvQuery,
   sort: z.string().max(20).optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -476,6 +512,18 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
         if (q.priceFrom !== undefined) filter.priceFrom = q.priceFrom;
         if (q.priceTo !== undefined) filter.priceTo = q.priceTo;
         if (q.soldWindowDays !== undefined) filter.soldWindowDays = q.soldWindowDays;
+
+        /* D125 — filtre nad obohatením. Nezmyselná hodnota tu ODPADNE (filter sa
+         * neaplikuje); repozitár si ju rovnako neprevezme. */
+        if (q.marginPercentFrom !== undefined) filter.marginPercentFrom = q.marginPercentFrom;
+        if (q.marginPercentTo !== undefined) filter.marginPercentTo = q.marginPercentTo;
+        if (q.stock === 'in' || q.stock === 'out') filter.stock = q.stock;
+        const orderedFrom = countParam(q.orderedTotalFrom);
+        if (orderedFrom !== null) filter.orderedTotalFrom = orderedFrom;
+        const orderedTo = countParam(q.orderedTotalTo);
+        if (orderedTo !== null) filter.orderedTotalTo = orderedTo;
+        const olderDays = countParam(q.lastSaleOlderDays);
+        if (olderDays !== null && olderDays > 0) filter.lastSaleOlderDays = olderDays;
 
         const buckets = q.soldBuckets.filter((v): v is SoldBucket =>
           (SOLD_BUCKETS as readonly string[]).includes(v),

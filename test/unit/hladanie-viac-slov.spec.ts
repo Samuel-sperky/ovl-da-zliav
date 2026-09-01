@@ -278,23 +278,23 @@ describe('tvar odpovede a zamknuté filtre zostávajú', () => {
       today: '2026-08-19',
     });
 
-    expect([...result.lockedFilters].sort()).toEqual([
-      'category',
-      'jewelryType',
-      'margin',
-      'metal',
-      'stock',
-      'turnover',
-    ]);
+    // D125 (1. 9. 2026) — zamknuté sú už len tri: kategória (v zrkadle sú len
+    // ID bez slovníka názvov), kov a typ šperku (`getFull` také pole nemá).
+    expect([...result.lockedFilters].sort()).toEqual(['category', 'jewelryType', 'metal']);
     expect(result.total).toBe(0);
     expect(result.data).toEqual([]);
-    // I11 — hľadanie podľa kódu a EAN-u a filter „zľava v shope" platia LEN
-    // pre obohatené riadky a odpoveď to musí priznať. Zamknuté nie sú:
+    // I11 — hľadanie podľa kódu a EAN-u, filter „zľava v shope" a štyri filtre
+    // z obohatenia (marža, sklad, celkovo objednané, posledný predaj) platia
+    // LEN pre obohatené riadky a odpoveď to musí priznať. Zamknuté nie sú:
     // aplikujú sa a vracajú pravdivé riadky, len nad časťou katalógu.
     expect([...result.enrichedOnly].sort()).toEqual([
       'ean13Search',
+      'lastSale',
+      'marginPercent',
+      'orderedTotal',
       'referenceSearch',
       'shopDiscounted',
+      'stock',
     ]);
   });
 

@@ -46,8 +46,10 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { PerformanceCard } from '@/components/campaigns/DiscountPerformance';
-import type { PerformanceView } from '@/components/campaigns/zlavy-api';
+import {
+  PerformanceCard,
+  type EffectivenessView,
+} from '@/components/campaigns/DiscountPerformance';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
@@ -186,22 +188,21 @@ describe('B — dôvody stoja v jednom ráme (D16)', () => {
  * Odpoveď servera s NAOZAJ nameranými číslami. Bez nej sa sekcia vykreslila
  * v stave „Načítavam…" a všetky tvrdenia o nej boli prázdne.
  */
-const VIEW: PerformanceView = {
-  available: true,
-  started: true,
-  startsOn: null,
-  unit: 'ks',
+const VIEW: EffectivenessView = {
+  state: 'measured',
+  reason: null,
   spanDays: 14,
-  recent: { from: '2026-08-06', to: '2026-08-19', units: 128 },
-  prior: { from: '2026-07-23', to: '2026-08-05', units: 74 },
-  coverage: { from: '2026-05-01', to: '2026-08-19', syncEnabled: true },
-  locked: {
-    revenue: 'shop ich cez API nevracia',
-    lastYear: 'dáta zatiaľ tak ďaleko nesiahajú',
-  },
+  startsOn: '2026-08-06',
+  duringTruncated: false,
+  /* Okno PRED zľavou končí deň pred jej začiatkom — nie dneškom (d00e081). */
+  before: { from: '2026-07-23', to: '2026-08-05', units: 74 },
+  during: { from: '2026-08-06', to: '2026-08-19', units: 128 },
+  missingBefore: [],
+  missingDuring: [],
+  locked: { revenue: 'shop ich cez API nevracia' },
 };
 
-const cardOf = (view: PerformanceView | null, failed = false): string =>
+const cardOf = (view: EffectivenessView | null, failed = false): string =>
   renderToStaticMarkup(createElement(PerformanceCard, { view, failed }));
 
 /** Sekcia s dátami — stav, v ktorom človek sekciu naozaj číta. */
@@ -288,11 +289,27 @@ describe('C — výkon výberu nie sú tri karty s tou istou správou (D17)', ()
     expect(Math.max(...widths)).toBe(100);
   });
 
-  it('neznáme porovnávacie okno je pomlčka a bez pruhu — nikdy nula', () => {
-    const html = cardOf({ ...VIEW, prior: { from: '2026-07-23', to: '2026-08-05', units: null } });
-    expect(html).toContain('—');
+  /*
+   * Do 1. 9. 2026 sa nedočítané okno kreslilo ako pomlčka VEDĽA druhého,
+   * známeho čísla — teda ako polovica porovnania. Odpoveď `effectiveness`
+   * takú kombináciu nepozná: keď niektorý deň niektorého okna chýba, stav je
+   * `coverage_gap` a NEVRACIA sa ani jedno číslo. Tvrdenie sa tým sprísnilo,
+   * neoslabilo: nie je tam pomlčka namiesto čísla, nie je tam číslo vôbec.
+   */
+  it('nedočítané okno nedostane číslo ani pruh — dostane priznanie', () => {
+    const html = cardOf({
+      ...VIEW,
+      state: 'coverage_gap',
+      reason: 'coverage_gap',
+      before: { from: '2026-07-23', to: '2026-08-05', units: null },
+      during: { from: '2026-08-06', to: '2026-08-19', units: null },
+      missingBefore: ['2026-07-24'],
+    });
+    expect(html).toContain('data-testid="performance-unavailable"');
+    expect(html).toContain('nedá sa spočítať');
     expect(html).not.toContain('0 ks');
-    expect([...html.matchAll(/width:\s*\d+%/g)]).toHaveLength(1);
+    expect(html).not.toContain('128 ks');
+    expect([...html.matchAll(/width:\s*\d+%/g)]).toHaveLength(0);
   });
 
   it('neúspešné načítanie sa povie vetou, nepredstiera sa číslom', () => {
@@ -350,7 +367,14 @@ describe('Výkon výberu — zľava, ktorá sa ešte nezačala (U5)', () => {
   it('nekreslí stĺpce a povie, že výkon ešte neexistuje', () => {
     const html = renderToStaticMarkup(
       createElement(PerformanceCard, {
-        view: { ...VIEW, started: false, startsOn: '2026-09-01' },
+        view: {
+          ...VIEW,
+          state: 'too_young',
+          reason: 'not_started',
+          startsOn: '2026-09-01',
+          before: null,
+          during: null,
+        },
         failed: false,
       }),
     );

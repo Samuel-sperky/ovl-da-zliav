@@ -28,6 +28,11 @@
  */
 import type { SalesDayCoverage } from '@/contracts';
 
+import type {
+  EnrichDayNumbers,
+  EnrichPageOutcomeKind,
+  EnrichPageView,
+} from '@/components/products/enrich-note';
 import {
   absent,
   fieldOf,
@@ -689,6 +694,107 @@ export async function enrichProduct(
           : 'failed',
       fresh: readBool(body['fresh']) === true,
       enrichedAt: enrichment === null ? null : readText(enrichment['enrichedAt']),
+    },
+  };
+}
+
+/* ───────── Obohatenie STRANY: `POST /api/catalog/enrich` s `productIds` ─── */
+
+const ENRICH_PAGE_OUTCOMES: readonly string[] = [
+  'done',
+  'fresh_only',
+  'no_ids',
+  'busy',
+  'target_reached',
+  'paused',
+  'deadline',
+  'locked',
+  'unknown_scope',
+  'no_key',
+  'budget_day',
+  'budget_minute',
+  'budget_unknown',
+  'ip_banned',
+  'rate_limited',
+  'failed',
+];
+
+/** Počet z odpovede. Chýbajúce číslo je NULA POKUSOV, nie „nevieme". */
+const readTally = (value: unknown): number => readNumber(value) ?? 0;
+
+/**
+ * Dnešné počty. Tu sa `?? 0` NESMIE použiť: `null` znamená „stav dávky sa
+ * nedal prečítať" alebo „dnes dávka nebežala", a nula by z toho urobila
+ * tvrdenie, že sa dnes neobohatilo nič (I11).
+ */
+function readDayNumbers(raw: unknown): EnrichDayNumbers {
+  const day = asRecord(raw);
+  return {
+    enrichedTodayByBatch: readNumber(day?.['enrichedTodayByBatch']),
+    dailyTarget: readNumber(day?.['dailyTarget']),
+    targetLeft: readNumber(day?.['targetLeft']),
+    readsUsedToday: readNumber(day?.['readsUsedToday']),
+    readsLeftToday: readNumber(day?.['readsLeftToday']),
+    readsLimitToday: readNumber(day?.['readsLimitToday']),
+  };
+}
+
+/**
+ * Obohatí RIADKY PRÁVE ZOBRAZENEJ STRANY (D123, K2) — do 100 ID naraz.
+ *
+ * Toto je konzument, ktorý ceste `enrichPageOnDemand()` do 1. 9. 2026 chýbal:
+ * engine aj routa boli hotové a otestované, ale z prehliadača ich nevolal
+ * NIKTO, takže tabuľka zostávala plná pomlčiek bez ohľadu na kvótu. Volá sa
+ * raz na otvorenie strany; o sviežosť (6 h), poradie priority, denný cieľ
+ * a pauzy sa stará engine — klient si tu žiadnu vlastnú bránu nestavia, inak
+ * by boli dve pravidlá o tom istom.
+ *
+ * NIKDY nehádže: aj odmietnutie shopu je `outcome`, teda meraný výsledok.
+ */
+export async function enrichPage(
+  productIds: readonly number[],
+  signal?: AbortSignal,
+): Promise<Result<EnrichPageView>> {
+  let raw: unknown;
+  try {
+    const res = await fetch('/api/catalog/enrich', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productIds: [...productIds] }),
+      signal,
+    });
+    raw = await bodyOf(res);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return { ok: false, error: ABORTED };
+    }
+    return { ok: false, error: OFFLINE };
+  }
+
+  const envelope = envelopeOf(raw);
+  if (!envelope.ok) return envelope;
+  const body = asRecord(envelope.data);
+  if (body === null) return { ok: false, error: UNREADABLE };
+  const outcome = body['outcome'];
+  const skipped = body['skipped'];
+  return {
+    ok: true,
+    data: {
+      /* Neznámy výsledok je `failed`, nie `done`: „obohatilo sa" je tvrdenie,
+         ktoré sa z nečitateľnej odpovede urobiť nesmie. */
+      outcome:
+        typeof outcome === 'string' && ENRICH_PAGE_OUTCOMES.includes(outcome)
+          ? (outcome as EnrichPageOutcomeKind)
+          : 'failed',
+      requested: readTally(body['requested']),
+      fresh: readTally(body['fresh']),
+      stale: readTally(body['stale']),
+      attempted: readTally(body['attempted']),
+      enriched: readTally(body['enriched']),
+      skipped: Array.isArray(skipped) ? skipped.length : 0,
+      day: readDayNumbers(body['day']),
+      resumeAt: readText(body['resumeAt']),
+      error: readText(body['error']),
     },
   };
 }

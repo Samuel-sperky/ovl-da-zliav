@@ -68,9 +68,16 @@
  *
  * Vlastník: V1.
  */
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import styles from '@/components/charts/charts.module.css';
+/*
+ * Značka „nevieme" (šrafovanie) a jej id sa berú zo SPOLOČNÉHO jazyka grafov
+ * (D126). Kým ich mal graf predaja vlastné, mohol ten istý vzor znamenať
+ * v koláči niečo iné — a človek si návyk prenáša z obrazovky na obrazovku.
+ */
+import { ChartHatchPattern, useChartPatternId } from '@/components/ui/Charts';
+import { GAP_WORD } from '@/components/ui/chart-language';
 /*
  * Podfarbené okná zliav sú prvok PREHĽADU, nie grafu ako takého — zľava je
  * pojem prístrojovej dosky a nie každý graf v appke ju má čo kresliť. Ich
@@ -126,8 +133,7 @@ export function SalesChart({ geometry, caption, label, bands = [] }: SalesChartP
   const frame = useRef<HTMLDivElement | null>(null);
   const [hot, setHot] = useState<HotPoint | null>(null);
 
-  // `useId()` vracia znaky, ktoré sa v odkaze `url(#…)` čítajú zle.
-  const hatchId = `sales-hatch-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  const hatchId = useChartPatternId('sales-hatch');
 
   const onMove = useCallback(
     (event: { clientX: number }) => {
@@ -193,10 +199,9 @@ export function SalesChart({ geometry, caption, label, bands = [] }: SalesChartP
         onPointerLeave={onLeave}
       >
         <defs>
-          {/* Šrafovanie nesťahovaného obdobia — nikdy plná výplň. */}
-          <pattern id={hatchId} width="6" height="6" patternUnits="userSpaceOnUse">
-            <path className={styles.gapHatch} d="M0,6 L6,0" />
-          </pattern>
+          {/* Šrafovanie nesťahovaného obdobia — nikdy plná výplň. Jedna
+              definícia pre čiaru aj koláč (`ui/Charts.tsx`). */}
+          <ChartHatchPattern id={hatchId} />
         </defs>
 
         {geometry.gridLines.map((grid, index) => (
@@ -282,7 +287,7 @@ export function SalesChart({ geometry, caption, label, bands = [] }: SalesChartP
                 y={CHART.top + 12}
                 textAnchor="middle"
               >
-                nesťahované
+                {GAP_WORD}
               </text>
             )}
           </g>

@@ -383,9 +383,10 @@ describe('História a technický detail', () => {
 /* ═══════════════════════ Zamknuté funkcie ═════════════════════════════════ */
 
 describe('Zamknuté funkcie', () => {
-  it('sú vidieť všetky štyri aj s tým, čo im chýba', () => {
+  it('sú vidieť všetky zamknuté funkcie aj s tým, čo im chýba', () => {
     const markup = renderToStaticMarkup(createElement(LockedFeatures));
-    expect(LOCKED_FEATURES).toHaveLength(4);
+    /* Dva, nie štyri — D125 vyradilo maržu a sklad (dôvod v `LockedFeatures.tsx`). */
+    expect(LOCKED_FEATURES).toHaveLength(2);
     for (const row of LOCKED_FEATURES) {
       expect(markup).toContain(row.feature);
       expect(markup).toContain(row.missing);

@@ -28,7 +28,6 @@ import type {
   DiscountDetailData,
   DiscountItemView,
   DiscountRow,
-  PerformanceView,
 } from '@/components/campaigns/zlavy-api';
 import type { QueueSnapshotView, RetryPlanView } from '@/components/campaigns/queue-model';
 import type { CatalogSearchView, ProductWritesView } from '@/components/products/catalog-api';
@@ -493,20 +492,11 @@ function historia(pocet: number): readonly AuditRow[] {
 
 const HISTORIA = historia(40);
 
-const VYKON: PerformanceView = {
-  available: true,
-  started: true,
-  startsOn: null,
-  unit: 'ks',
-  spanDays: 14,
-  recent: { from: den(-14), to: DNES, units: 214 },
-  prior: { from: den(-28), to: den(-14), units: 168 },
-  coverage: { from: den(-92), to: DNES, syncEnabled: true },
-  locked: {
-    revenue: 'Tržby v eurách appka nečíta — kľúč na objednávky ich neposkytuje.',
-    lastYear: 'Porovnanie s vlaňajškom appka nemá — história siaha 92 dní dozadu.',
-  },
-};
+/*
+ * `VYKON` (odpoveď `.../performance`) TU BOL DO 1. 9. 2026 — routa aj jej
+ * klient zanikli spolu s ním. Účinnosť zľavy dnes číta
+ * `GET /api/insights/campaign/[id]/effectiveness` (D127 bod 4).
+ */
 
 /* ═══════════════════════════ 6. Predaj ════════════════════════════════════ */
 
@@ -701,7 +691,6 @@ function odpoved(url: URL, method: string): Response | null {
   const zapisy = /^\/api\/insights\/product\/(\d+)$/.exec(cesta);
   if (zapisy !== null) return ok(zapisyProduktu(Number(zapisy[1])));
 
-  if (/^\/api\/insights\/campaign\/\d+\/performance$/.test(cesta)) return ok(VYKON);
   if (/^\/api\/insights\/campaign\/\d+\/items$/.test(cesta)) return ok({ data: [], total: 0 });
 
   // Zápisové cesty snímkovač neobsluhuje — na snímkach sa nič neodosiela.

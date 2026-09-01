@@ -40,6 +40,7 @@ import CatalogPanel from '@/components/products/CatalogPanel';
 import CatalogStatusPanel from '@/components/products/CatalogStatusPanel';
 import CatalogTable from '@/components/products/CatalogTable';
 import ProductDetailPanel from '@/components/products/ProductDetailPanel';
+import { productColumn } from '@/lib/ui/product-columns';
 import { DEFAULT_CATALOG_FILTER } from '@/components/products/catalog-filter';
 import type { CatalogStatusView } from '@/components/products/catalog-status';
 import {
@@ -574,8 +575,9 @@ describe('V10 — dôvod pri konkrétnom produkte', () => {
     expect(html).toContain('shop ho nenašiel');
     /* Dôvod je PRI MENE, nie ako nový stĺpec — o to v tomto teste ide.
        Počet stĺpcov je od kontraktu V4 D114 deväť plus zaškrtávacie políčko
-       (KPI riadku); dôvod medzi nimi ani teraz nie je. */
-    expect(html.match(/<th[\s>]/g)?.length ?? 0).toBe(10);
+       (KPI riadku), od D122 (1. 9. 2026) navyše referencia ako prvý stĺpec
+       a od D124 sklad z jednotnej sady; dôvod medzi nimi ani teraz nie je. */
+    expect(html.match(/<th[\s>]/g)?.length ?? 0).toBe(12);
     expect(html).not.toContain('<th class="n">Dôvod');
     expect(html).not.toContain('>18342<');
   });
@@ -642,6 +644,16 @@ describe('V10 — obrazovka Produkty po doplnení stavu katalógu', () => {
 
   it('tržby eshopu sem stále nepatria (architektúra §1)', () => {
     expect(html).not.toMatch(/tržb/i);
-    expect(html).not.toMatch(/objednáv/i);
+    /*
+     * Slovo „objednávky" smie na tejto obrazovke padnúť LEN v priznaní R3 — že
+     * históriu objednávok appka NEMÁ, a preto sa pomer predaných k skladu nedá
+     * čítať ako obrátkovosť za okno. Veta sa berie z definície stĺpca, nie ako
+     * literál: keby sa preformulovala, `not.toMatch` by nad starým znením
+     * prešiel naprázdno. Mimo nej sa slovo objaviť nesmie — číslo o objednávkach
+     * je súčet za eshop a patrí do Prehľadu.
+     */
+    const priznanieR3 = productColumn('soldPerStock').headTitle;
+    expect(html).toContain(priznanieR3);
+    expect(html.split(priznanieR3).join('')).not.toMatch(/objednáv/i);
   });
 });

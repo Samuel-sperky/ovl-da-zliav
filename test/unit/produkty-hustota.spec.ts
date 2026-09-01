@@ -35,7 +35,6 @@ import CatalogFilters from '@/components/products/CatalogFilters';
 import CatalogStatusPanel from '@/components/products/CatalogStatusPanel';
 import CatalogTable, { PageJump } from '@/components/products/CatalogTable';
 import CatalogTiles from '@/components/products/CatalogTiles';
-import type { LockedFilterView } from '@/components/products/catalog-api';
 import {
   DEFAULT_CATALOG_FILTER,
   PER_PAGE_CHOICES,
@@ -90,14 +89,7 @@ const STATUS: CatalogStatusView = {
 
 const PRAZDNY: CatalogStatusView = { ...STATUS, loadedProducts: 0, pagesDone: 0, percent: 0 };
 
-const LOCKED: Readonly<Record<string, LockedFilterView>> = {
-  stock: { label: 'Sklad', reason: 'stavy skladu' },
-  turnover: { label: 'Obrátkovosť', reason: 'nákupné ceny' },
-  category: { label: 'Kategória', reason: 'zoznam kategórií' },
-  metal: { label: 'Kov', reason: 'zoznam kovov' },
-  jewelryType: { label: 'Typ šperku', reason: 'zoznam typov' },
-  margin: { label: 'Marža', reason: 'nákupné ceny' },
-} as unknown as Readonly<Record<string, LockedFilterView>>;
+/* D125 (1. 9. 2026) — panel zamknuté filtre nedostáva ani nekreslí (K4). */
 
 /** Prekážky pre prázdny katalóg — `catalog_incomplete` medzi nimi JE. */
 function prekazkyPrePrazdnyKatalog() {
@@ -130,7 +122,6 @@ function panelFiltrov(): string {
     createElement(CatalogFilters, {
       filter: DEFAULT_CATALOG_FILTER,
       counts: null,
-      lockedFilters: LOCKED,
       saved: [],
       activeSaved: null,
       open: false,
@@ -236,38 +227,42 @@ describe('D8 — dlaždice stavu katalógu', () => {
   });
 });
 
-/* ═════════════════ D9 — zamknuté filtre na jednom mieste ══════════════════ */
+/* ══════ D125 — filter bez dátového zdroja v paneli NEEXISTUJE (K4) ════════ */
 
-describe('D9 — zamknuté filtre sú v paneli práve raz', () => {
+/*
+ * Do 1. 9. 2026 tu žil test „D9 — zamknuté filtre sú v paneli práve raz": šesť
+ * sivých riadkov plus „Skutočná zľava v eshope" v jednej skupine s jedným
+ * vysvetlením. D125 to celé RUŠÍ, lebo tie riadky boli dve rôzne veci:
+ *
+ *  · marža, sklad a obrátkovosť dátový zdroj MAJÚ (migrácia 0014) — sú to teraz
+ *    NORMÁLNE filtre a stráži ich `test/unit/filtre-podla-dat.spec.ts`,
+ *  · kategória, kov a typ šperku zdroj nemajú — a filter bez zdroja na
+ *    obrazovke podľa K4 neexistuje, ani sivý.
+ *
+ * Zásada, ktorú D9 zaviedol, tým NEZANIKÁ: jednu vec hovorí panel na jedinom
+ * mieste, a preto sa tu naďalej počíta, koľkokrát čo v paneli je.
+ */
+describe('D125 — zamknuté filtre panel nekreslí vôbec', () => {
   const html = panelFiltrov();
 
-  it('všetkých sedem zamknutých vecí je v JEDNEJ skupine', () => {
-    expect(kolkokrat(html, 'fopt locked')).toBe(7);
-    expect(kolkokrat(html, 'filter-locked')).toBe(1);
-    expect(kolkokrat(html, 'Zatiaľ nedostupné')).toBe(1);
+  it('sivý riadok, jeho skupina ani odkaz do Nastavení už v paneli nie sú', () => {
+    expect(kolkokrat(html, 'fopt locked')).toBe(0);
+    expect(kolkokrat(html, 'filter-locked')).toBe(0);
+    expect(kolkokrat(html, 'Zatiaľ nedostupné')).toBe(0);
+    expect(kolkokrat(html, '/nastavenia#zamknute')).toBe(0);
+    expect(kolkokrat(html, 'Čaká na dáta zo shopu')).toBe(0);
   });
 
-  it('žiadna z nich už nevisí pri svojej pôvodnej skupine', () => {
-    const skupina = html.slice(html.indexOf('Zatiaľ nedostupné'));
-    for (const label of [
-      'Kategória',
-      'Kov',
-      'Typ šperku',
-      'Obrátkovosť',
-      'Sklad',
-      'Marža',
-      'Skutočná zľava v eshope',
-    ]) {
-      expect(html, label).toContain(label);
-      expect(skupina, `${label} patrí do jedinej skupiny`).toContain(label);
+  it('filtre bez zdroja zmizli, filtre so zdrojom sú v paneli raz', () => {
+    for (const label of ['Kategória', 'Kov', 'Typ šperku', 'Skutočná zľava v eshope']) {
+      expect(html, `${label} sa nesmie kresliť`).not.toContain(label);
     }
-    // Skupina „Sklad" s jediným sivým riadkom zanikla.
-    expect(html).not.toContain('<h3>Sklad</h3>');
-  });
-
-  it('vysvetlenie a odkaz sú raz — `LockedFeatures.tsx` sa nerozširuje (bod 18)', () => {
-    expect(kolkokrat(html, '/nastavenia#zamknute')).toBe(1);
-    expect(kolkokrat(html, 'Čaká na dáta zo shopu ·')).toBe(1);
+    // Marža a sklad majú vlastný nadpis — práve jeden, nie dva tvary tej istej veci.
+    expect(kolkokrat(html, '<h3>Marža</h3>')).toBe(1);
+    expect(kolkokrat(html, '<h3>Sklad</h3>')).toBe(1);
+    // Obrátkovosť sa tak UŽ NEMENUJE: `qty_in_orders` je celkové množstvo (R3).
+    expect(html).not.toContain('Obrátkovosť');
+    expect(kolkokrat(html, '<h3>Celkovo objednané</h3>')).toBe(1);
   });
 
   it('rozdiel „vlastný zápis vs. eshop" drží ďalej SÁM nadpis skupiny', () => {
@@ -279,23 +274,6 @@ describe('D9 — zamknuté filtre sú v paneli práve raz', () => {
     expect(html).not.toContain('Appka vidí len to, čo sama zapísala.');
   });
 
-  it('keď API prestane hlásiť zamknuté filtre, skupina zostane len so zľavou', () => {
-    const bezZamku = renderToStaticMarkup(
-      createElement(CatalogFilters, {
-        filter: DEFAULT_CATALOG_FILTER,
-        counts: null,
-        lockedFilters: {},
-        saved: [],
-        activeSaved: null,
-        open: false,
-        onChange: () => {},
-        onApplySaved: () => {},
-        onRemoveSaved: () => {},
-      }),
-    );
-    expect(kolkokrat(bezZamku, 'fopt locked')).toBe(1);
-    expect(bezZamku).toContain('Skutočná zľava v eshope');
-  });
 });
 
 /* ═══════════════ D10 — hustota pre 41 220 riadkov ═════════════════════════ */
@@ -341,11 +319,22 @@ describe('D10 — tabuľka znesie 41 220 riadkov a 117-znakový názov', () => {
   it('mriežka stĺpcov je pevná, aby sa čísla medzi stránkami nehýbali', () => {
     expect(html).toContain('table-layout:fixed');
     expect(html).toContain('<colgroup>');
-    /* Desať, nie päť: kontrakt V4 D114 (31. 8. 2026) pridal KPI stĺpce
-       (predané 30 d, predané 90 d, predané / sklad, posledný predaj,
-       zľava v shope, marža). Mriežka musí zostať PEVNÁ aj pri desiatich — o to
-       v tomto teste ide, nie o ich počet. */
-    expect(kolkokrat(html, '<col') - kolkokrat(html, '<colgroup')).toBe(10);
+    /* Dvanásť, nie päť: kontrakt V4 D114 (31. 8. 2026) pridal KPI stĺpce,
+       D122 (1. 9. 2026) referenciu ako PRVÝ stĺpec a D124 sklad z jednotnej
+       sady. Mriežka musí zostať PEVNÁ aj pri dvanástich — o to v tomto teste
+       ide, nie o ich počet; poradie a obsah stĺpca referencie stráži
+       `produkty-referencia-stlpec.spec.ts`, jednotnú sadu
+       `produkty-jednotne-stlpce.spec.ts`.
+
+       Počet sa NEPÍŠE ako literál dvakrát: `<col>` sa porovnáva s počtom
+       `<th>` v hlavičke. Pevná mriežka, ktorej chýba jeden `col`, je práve tá
+       chyba, pri ktorej sa čísla medzi stránkami hýbu — a literál v teste by
+       ju prepustil, lebo by sa opravil spolu s tabuľkou. */
+    const hlavicka = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
+    // `'<th '` s medzerou zámerne: `'<th'` by započítalo aj `<thead>`.
+    const stlpcov = kolkokrat(hlavicka, '<th ');
+    expect(stlpcov).toBe(12);
+    expect(kolkokrat(html, '<col') - kolkokrat(html, '<colgroup')).toBe(stlpcov);
   });
 
   it('celý názov je v `title`, aj keď sa orezal — a s ním technické `id` (D116)', () => {

@@ -19,9 +19,12 @@
  *    backlog B1). „Práve v zľave" a „nikdy nezlacnené" sa počítajú výhradne
  *    z VLASTNÝCH úspešných zápisov (`campaign_items.status = 'ok'`) a tak sa
  *    to musí aj pomenovať na povrchu.
- *  - **K8** — sklad, kategória, kov, typ šperku a marža v schéme NIE SÚ.
- *    `search()` ich preto nepredstiera: vráti ich v `lockedFilters` a filter
- *    NEAPLIKUJE. Tichá „nula" alebo ignorovanie filtra bez slova by bolo
+ *  - **K8 / D125** — kategória, kov a typ šperku v schéme NIE SÚ (kategórie sú
+ *    len ID bez slovníka názvov). `search()` ich preto nepredstiera: vráti ich
+ *    v `lockedFilters` a filter NEAPLIKUJE. Sklad, marža, celkovo objednané a
+ *    posledný predaj sa naopak od migrácie 0014 filtrovať DAJÚ — sú v
+ *    `ENRICHED_ONLY_FEATURES`, teda platia nad obohatenými riadkami a odpoveď
+ *    to priznáva. Tichá „nula" alebo ignorovanie filtra bez slova by bolo
  *    presne to klamstvo, ktoré K8 zakazuje.
  *
  * `raw` MUSÍ prísť už redigované volajúcim (I1, D66) — repozitár ho len
@@ -357,15 +360,28 @@ export type CatalogSort =
 
 /**
  * Filtre, ktoré appka NEVIE splniť, lebo shop API dáta nevracia (K8).
- * Vracajú sa v odpovedi, aby ich UI ukázalo ako zamknuté — nie skryté.
+ *
+ * ČO SA 1. 9. 2026 ZMENILO (D125, K4)
+ * ───────────────────────────────────
+ * Zoznam schudol zo šiestich na tri. `stock`, `margin` a `turnover` už majú
+ * v schéme svoje pole (migrácia 0014: `qty`, `margin_percent`, `qty_in_orders`)
+ * a filtrujú sa naozaj — sú v `ENRICHED_ONLY_FEATURES`, nie tu. Zostali tri,
+ * ktoré NEMAJÚ zdroj vôbec:
+ *
+ *  · `category`   — `catalog_cache.categories` je pole ID bez slovníka názvov,
+ *                   takže z neho nemá UI čo ponúknuť (výber „12345"),
+ *  · `metal`      — také pole `getFull` nevracia,
+ *  · `jewelryType`— to isté.
+ *
+ * Tento zoznam UŽ NIE JE zoznamom sivých riadkov v paneli: podľa K4 filter bez
+ * dátového zdroja na obrazovke NEEXISTUJE (`CatalogFilters.tsx` ho nekreslí).
+ * Ostáva ako priznanie na úrovni API — „tento parameter si poslal a ja som ho
+ * NEPOUŽILA" — aby cudzí odkaz s `?category=…` nevracal ticho iné riadky.
  */
-export type LockedCatalogFilter =
-  | 'stock'
-  | 'category'
-  | 'metal'
-  | 'jewelryType'
-  | 'margin'
-  | 'turnover';
+export type LockedCatalogFilter = 'category' | 'metal' | 'jewelryType';
+
+/** Sklad ako filter (D125). `NULL` v `qty` je „nevieme" a nespadne ani sem, ani tam. */
+export type CatalogStockFilter = 'in' | 'out';
 
 /**
  * Čo appka vie LEN o OBOHATENÝCH riadkoch zrkadla (`enriched_at IS NOT NULL`).
@@ -376,12 +392,28 @@ export type LockedCatalogFilter =
  * bez referencie za neexistujúci (I11) — presne tá tichá nula, ktorú K8 zakazuje.
  * Koľko riadkov je obohatených, hovorí `CatalogCounts.enrichedRows`.
  */
-export type EnrichedOnlyFeature = 'referenceSearch' | 'ean13Search' | 'shopDiscounted';
+export type EnrichedOnlyFeature =
+  | 'referenceSearch'
+  | 'ean13Search'
+  | 'shopDiscounted'
+  /* D125 (1. 9. 2026) — štyri filtre nad stĺpcami z `getFull`. Zdroj MAJÚ,
+   * takže zamknuté nie sú; platia ale len nad obohatenými riadkami a `NULL`
+   * v nich znamená „nevieme", nie nulu (I11). Preto sú tu, nie v
+   * `LOCKED_FILTERS` — a preto ich panel kreslí pod jednou vetou o tom,
+   * z koľkých obohatených riadkov odpoveď je. */
+  | 'marginPercent'
+  | 'stock'
+  | 'orderedTotal'
+  | 'lastSale';
 
 export const ENRICHED_ONLY_FEATURES: readonly EnrichedOnlyFeature[] = [
   'referenceSearch',
   'ean13Search',
   'shopDiscounted',
+  'marginPercent',
+  'stock',
+  'orderedTotal',
+  'lastSale',
 ];
 
 export interface CatalogSearchFilter {
@@ -407,6 +439,38 @@ export interface CatalogSearchFilter {
    * NEVRÁTI: o ňom appka stav shopu nepozná (`ENRICHED_ONLY_FEATURES`).
    */
   shopDiscounted?: boolean;
+  /**
+   * Marža v PERCENTÁCH z obohatenia (`catalog_cache.margin_percent`, D117).
+   *
+   * Číslo je TAK, AKO HO POSLAL SHOP — appka maržu nepočíta (0014, bod 2
+   * hlavičky migrácie). Neobohatený riadok má `NULL`, takže sem NESPADNE: je to
+   * fail-closed „nevieme", nie „marža nula" (I11, `ENRICHED_ONLY_FEATURES`).
+   * Záporná hodnota je platná — predaj pod nákupnou cenou existuje.
+   */
+  marginPercentFrom?: MoneyString | number | null;
+  marginPercentTo?: MoneyString | number | null;
+  /**
+   * Sklad z obohatenia (`catalog_cache.qty`, D119). `in` = viac než nula,
+   * `out` = nula a menej (shop vie viesť aj zápornú zásobu). `NULL` nespadne
+   * ani do jednej možnosti — „nevieme" nie je „vypredané".
+   */
+  stock?: CatalogStockFilter;
+  /**
+   * CELKOVO objednané kusy (`catalog_cache.qty_in_orders`, D119) — za celú
+   * históriu shopu, NIE za okno (R3 kontraktu V5). Okno sa z tohto stĺpca
+   * odvodiť NEDÁ a meno filtra to preto nesľubuje.
+   */
+  orderedTotalFrom?: number;
+  orderedTotalTo?: number;
+  /**
+   * Posledný predaj starší než N dní (`catalog_cache.last_time_in_order`, D119).
+   *
+   * Zámerne sem patria aj riadky, o ktorých shop NEVIE ŽIADNY predaj
+   * (`last_time_in_order IS NULL` pri OBOHATENOM riadku) — to sú tie najhoršie
+   * ležiaky a filter „posledný predaj starší než pol roka" by bez nich klamal.
+   * Neobohatený riadok (`enriched_at IS NULL`) je naopak „nevieme" a von.
+   */
+  lastSaleOlderDays?: number;
   /** Stavy v shope. Default `['ok','unknown']` — `not_found` von (K1 bod 2). */
   shopStatus?: CatalogShopStatus[];
   /** Konkrétne produkty (napr. hromadný výber z UI). */
@@ -750,17 +814,10 @@ const DEFAULT_SOLD_WINDOW_DAYS = 180;
 export const ALLOWED_SOLD_WINDOWS: readonly number[] = [30, 60, 90, 180, 360];
 
 /**
- * Filtre bez dát v schéme (K8). Zoznam je ZÁMERNE tu a nie v UI: keď dáta
- * pribudnú, zmizne filter odtiaľto a UI ho prestane kresliť zamknutý.
+ * Filtre bez dát v schéme (K8, po D125 už len tri — pozri `LockedCatalogFilter`).
+ * Zoznam je ZÁMERNE tu a nie v UI: keď dáta pribudnú, zmizne filter odtiaľto.
  */
-const LOCKED_FILTERS: readonly LockedCatalogFilter[] = [
-  'stock',
-  'category',
-  'metal',
-  'jewelryType',
-  'margin',
-  'turnover',
-];
+const LOCKED_FILTERS: readonly LockedCatalogFilter[] = ['category', 'metal', 'jewelryType'];
 
 const KNOWN_SHOP_STATUSES: readonly CatalogShopStatus[] = ['ok', 'not_found', 'unknown'];
 
@@ -823,6 +880,26 @@ const SQL_SHOP_DISCOUNT_ACTIVE =
 function shopDiscountDayValues(day: DateOnly): [string, string] {
   return [`${day} 23:59:59`, `${day} 00:00:00`];
 }
+
+/**
+ * Posledný predaj starší než hranica (D125, R3 kontraktu V5).
+ *
+ * Druhá polovica podmienky NIE JE ozdoba: `last_time_in_order IS NULL` pri
+ * OBOHATENOM riadku znamená „shop nevie o žiadnej objednávke", teda najhorší
+ * možný ležiak. Bez nej by filter „posledný predaj starší než pol roka"
+ * vynechal práve tie kusy, ktoré sa nepredali NIKDY. Neobohatený riadok
+ * (`enriched_at IS NULL`) je naopak „nevieme" a von (I11).
+ *
+ * Hranica je DEŇ (D31), nie okamih: `<= '<deň> 23:59:59'` znamená „naposledy sa
+ * predal najneskôr v ten deň". Deň sa počíta v `Europe/Bratislava` cez
+ * `dates.ts`, nikdy v UTC — stĺpec je `DATETIME` v lokálnych hodinách procesu
+ * (pozri docblock `src/db/pool.ts`).
+ */
+const SQL_LAST_SALE_OLDER =
+  '(c.last_time_in_order <= ? OR (c.enriched_at IS NOT NULL AND c.last_time_in_order IS NULL))';
+
+/** Najdlhšia hranica „posledný predaj starší než" — poistka proti nezmyslu. */
+const MAX_LAST_SALE_OLDER_DAYS = 3650;
 
 /**
  * Veľkosť stránky, s ktorou sa počíta, kým pokrok neexistuje. Zhoda
@@ -1770,6 +1847,17 @@ function toPriceParam(value: MoneyString | number | null | undefined): string | 
   return DECIMAL_RE.test(text) ? text : null;
 }
 
+/**
+ * Celé kladné číslo do `?` parametra (kusy skladu, celkovo objednané). Nezmysel
+ * sa ticho IGNORUJE a filter odpadne — rovnaká zásada ako pri cene: odkaz
+ * z uloženého filtra nesmie obrazovku zhodiť.
+ */
+function toCountParam(value: number | null | undefined): number | null {
+  if (value == null) return null;
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 /** Escapuje `LIKE` wildcardy, aby `%` vo vyhľadávaní neznamenal „všetko". */
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
@@ -1960,6 +2048,63 @@ function buildWhere(
   if (priceTo !== null) {
     where.push('c.price <= ?');
     values.push(priceTo);
+  }
+
+  /*
+   * ── Filtre nad obohatením (D125, K4) ──────────────────────────────────────
+   *
+   * Stoja TU, mimo `includeFacets`, teda platia aj v `counts()`. Je to zámer:
+   * bočný panel nemá pri nich vlastné číslo, ktoré by si vynulovali, a čísla
+   * vedier majú hovoriť o tom istom výbere, aký je v tabuľke.
+   *
+   * Všetky štyri sú fail-closed nad `NULL`: neobohatený riadok NEVYHOVIE ani
+   * jednej podmienke, takže výsledok je „toľko, koľko vieme", nie „toľko ich
+   * je" (I11). Že je to zlomok katalógu, priznáva `enrichedOnly` v odpovedi
+   * a číslo `counts.enrichedRows` v paneli.
+   *
+   * VÝKON (zmerané `EXPLAIN`-om nad `ovl_zliav`, 41 348 riadkov): plán zostáva
+   * `range` nad `ix_catalog_shop_status` ako bez týchto podmienok; `stock` si
+   * navyše siahne na `ix_catalog_qty` a `lastSaleOlderDays` na `sort_union`
+   * (`ix_catalog_last_order`, `ix_catalog_enrich_queue`). Žiadny nový full scan
+   * ani filesort — `Using temporary; Using filesort` je z `ORDER BY` nad
+   * pripojenou predajnosťou a bol tam aj predtým.
+   */
+  const marginFrom = toPriceParam(filter.marginPercentFrom);
+  if (marginFrom !== null) {
+    where.push('c.margin_percent >= ?');
+    values.push(marginFrom);
+  }
+  const marginTo = toPriceParam(filter.marginPercentTo);
+  if (marginTo !== null) {
+    where.push('c.margin_percent <= ?');
+    values.push(marginTo);
+  }
+
+  if (filter.stock === 'in') {
+    // `> 0` samo vylučuje `NULL` (porovnanie s `NULL` nie je pravda) — a to je
+    // správne: o neobohatenom produkte appka sklad nepozná.
+    where.push('c.qty > 0');
+  } else if (filter.stock === 'out') {
+    // Nula a menej. `IS NOT NULL` je tu VÝSLOVNE, hoci `<= 0` by NULL zahodilo
+    // samo: „nevieme" sa nesmie čítať ako „vypredané" ani po budúcej úprave.
+    where.push('(c.qty IS NOT NULL AND c.qty <= 0)');
+  }
+
+  const orderedFrom = toCountParam(filter.orderedTotalFrom);
+  if (orderedFrom !== null) {
+    where.push('c.qty_in_orders >= ?');
+    values.push(orderedFrom);
+  }
+  const orderedTo = toCountParam(filter.orderedTotalTo);
+  if (orderedTo !== null) {
+    where.push('c.qty_in_orders <= ?');
+    values.push(orderedTo);
+  }
+
+  const olderDays = toCountParam(filter.lastSaleOlderDays);
+  if (olderDays !== null && olderDays > 0 && olderDays <= MAX_LAST_SALE_OLDER_DAYS) {
+    where.push(SQL_LAST_SALE_OLDER);
+    values.push(`${addDays(day, -olderDays)} 23:59:59`);
   }
 
   if (includeFacets) {

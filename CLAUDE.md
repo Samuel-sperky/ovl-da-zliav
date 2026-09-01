@@ -61,7 +61,9 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   dodávateľ, kategórie). `runEnrichBatch()` beží v poradí priority
   (`catalog_cache.enrich_priority`: 1 = povolený zoznam, 2 = produkty
   v kampaniach, 3 = zvyšok), strop `ENRICH_MAX_PER_RUN = 150`, rezerva kvóty
-  `ENRICH_QUOTA_RESERVE = 50`, sviežosť `ENRICH_FRESH_MS = 6 h`. Pauzy majú
+  rezerva kvóty `ENRICH_QUOTA_RESERVE` (odvodená ako
+  `KEYED_FALLBACK_PER_UTC_DAY − DEFAULT_ENRICH_DAILY_TARGET`, po 1. 9. 2026
+  800 − 600), sviežosť `ENRICH_FRESH_MS = 6 h`. Pauzy majú
   DÔVOD: `ip_banned`, `rate_limited`, `daily_budget`, `no_key` — pri odmietnutí
   shopom sa žiadny produkt neoznačí ako obohatený (D118, D120). Cesta „na dopyt"
   (jeden produkt) je `POST /api/catalog/enrich`.
@@ -73,7 +75,9 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
 - `src/lib/ui/product-label.ts` — JEDINÉ miesto, kde sa produkt pomenúva:
   `productLabel({ productId, reference, name })` → „ref · názov", chýbajúca
   referencia je pomlčka, nikdy nie vymyslené číslo (D116, K6). Používaj ho
-  všade, kde predtým stálo samotné `product_id`.
+  všade, kde predtým stálo samotné `product_id`. **V TABUĽKÁCH ho nepoužívaj** —
+  tam je referencia samostatný PRVÝ stĺpec (D122); `productLabel()` zostáva pre
+  miesta, kde je na produkt jeden riadok textu (audit, položky kampane).
 - `src/lib/repo/presets.repo.ts` — pomenované presety zliav (filter + pásma +
   trvanie, `MAX_PRESETS = 20`), UI v `src/components/campaigns/DiscountPresets.tsx`,
   routy `src/app/api/presets/route.ts` a `.../[presetId]/route.ts`. Spustenie
@@ -82,7 +86,8 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
 - Čítacie endpointy pre obrazovky V4 (žiadne volanie shopu na render ceste, K8):
   `src/app/api/insights/{product-kpi,top-products,revenue-daily,sales-daily,timeline,catalog-prices,activity}/route.ts`,
   `src/app/api/insights/product/[productId]/route.ts` a
-  `src/app/api/insights/campaign/[id]/{performance,items}/route.ts`.
+  `src/app/api/insights/campaign/[id]/items/route.ts` (route `performance`
+  medzi nimi UŽ NIE JE, zmazaná vo V5 — viď zoznam endpointov V5 vyššie).
   `discount-depth` medzi nimi UŽ NIE JE (31. 8. 2026): route nemala konzumenta
   ani test, jej plánovaný domov (mini bar G2 na `/produkty`) obrazovka vedome
   odmietla (`products/catalog-api.ts` — značky majú ukazovať naklikaný výber,
@@ -97,12 +102,50 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   eshopu — pozri D117 nižšie). `0015_presety_zliav.sql` pridala tabuľku
   `discount_presets` (D112) a `0016_stav_citania_trzby.sql` tabuľku
   `shop_revenue_read_state` (rozlíši „deň prečítaný a nepredalo sa nič" od „deň
-  sme nečítali"). Všetky tri sú APLIKOVANÉ a checksum-uzamknuté; kontrolný
+  sme nečítali"). `0017_zdvihnuty_strop_zapisov.sql` posunula `CHECK` na
+  `settings.daily_write_budget` z „1–200" na nový strop shopu (V5, viď pascu
+  o dvoch kópiách čísla nižšie). Všetky štyri sú APLIKOVANÉ a
+  checksum-uzamknuté; kontrolný
   dotaz je `SELECT id, name FROM _migrations` (nie `schema_migrations`, ten tu
   neexistuje).
+- `src/lib/ui/product-columns.ts` — JEDNA definícia stĺpcov produktových tabuliek
+  (D124, V5). `PRODUCT_COLUMN_IDS` = referencia · názov · cena · zľava v shope ·
+  predané za okno · predané/sklad · marža · sklad; poradie hlavičky je záväzné.
+  Pravidlo: **kde sa stĺpec nehodí, VYNECHÁ sa** — nikdy sa nepremenuje ani
+  nenaplní inou veličinou (premenované „Cena pri príprave" bolo presne to, čo
+  tabuľky rozišlo). Trojstavovosť je vlastnosť stĺpca, nie tabuľky. Stĺpec sa
+  volá `soldPerStock`, nie `turnover` — z `getFull` je zásoba momentka, nie
+  priemer za obdobie. Používajú ho `CatalogTable.tsx`, výber v `NewDiscount.tsx`
+  a položky zľavy.
+- `src/lib/ui/locked-dimensions.ts` — JEDEN zoznam zamknutých rozmerov (D125, K4).
+  Odvodzuje sa cez `Record<LockedCatalogFilter, …>` od typu v `catalog.repo.ts`,
+  takže pridanie/odobranie rozmeru **prestane sa kompilovať** — nie je to grep.
+  Dnes sú zamknuté tri: kategória, kov, typ šperku. Marža a sklad zamknuté UŽ
+  NIE SÚ (dáta na ne appka po migrácii 0014 má a Produkty podľa nich filtrujú).
+- `src/components/ui/chart-language.ts` — JEDEN jazyk grafov (D126): čiara =
+  vývoj v čase, stĺpec = porovnanie medzi položkami, koláč = rozdelenie
+  katalógu alebo výberu. `CHART_KINDS` je uzavretý zoznam, `chartScaleMax()`
+  jediné pravidlo hornej hranice osi (základňa vždy nula). Modul je SLOVNÍK
+  a čisté funkcie; kreslenie je v `Charts.tsx`. Šrafovaná plocha znamená vo
+  všetkých troch formách to isté — „toto sme nemerali".
+- `src/components/products/enrich-note.ts` + `enrichPage()` v
+  `src/components/products/extras-api.ts` — obohatenie STRANY, na ktorú sa človek
+  pozerá (D123, R2). `CatalogPanel.tsx` pošle ID zobrazenej strany na
+  `POST /api/catalog/enrich` a po doplnení si znovu vypýta KPI. `enrichPageNote()`
+  vyrába vetu pod tabuľkou: pri vyčerpanom dennom cieli povie ČÍSLOM, koľko
+  z cieľa zostáva a prečo majú zvyšné riadky pomlčky; keď niet čo povedať, mlčí.
+- Čítacie endpointy pridané vo V5:
+  `src/app/api/insights/catalog-distribution/route.ts` (rozdelenie katalógu pre
+  koláč), `src/app/api/insights/campaign/[id]/products/route.ts` a
+  `src/app/api/insights/product/[productId]/campaigns/route.ts` (história
+  produkt ↔ zľava, D127) a `.../campaign/[id]/effectiveness/route.ts`. Route
+  `.../campaign/[id]/performance` bola ZMAZANÁ (druhý, mŕtvy výpočet účinnosti
+  bez konzumenta a bez testu) — účinnosť číta výhradne `effectiveness`.
 - Rezerva zápisov žije vo `src/lib/engine/budget.ts`: čítania sa z denného
-  rozpočtu odpočítavajú LEN NAD `WRITE_QUOTA_RESERVE` (`min(rozpočet, 40)`,
-  odvodené ako 200 − 160). Rezerva na strane čítaní (`ENRICH_QUOTA_RESERVE`)
+  rozpočtu odpočítavajú LEN NAD `WRITE_QUOTA_RESERVE` (`min(rozpočet, rezerva)`,
+  odvodená ako `MAX_DAILY_WRITE_BUDGET − READ_LANE_LIMITS.product_read.perUtcDay`
+  — po zdvihnutí kvóty 1. 9. 2026 je to 1000 − 800 = 200; nepíš to číslo ručne,
+  prepočíta sa samo). Rezerva na strane čítaní (`ENRICH_QUOTA_RESERVE`)
   je iná vec a chráni sondy a canary.
 
 ## Pasce, ktoré tu už raz prežili do produkcie
@@ -129,10 +172,36 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   INSERT INTO settings (id) VALUES (1)`. Nie je to race v kóde a nie je to pád
   tvrdenia. **Žiadny report z `npm test` nie je dôkaz, ak súčasne beží iný
   vitest** — over `ps | grep vitest` a beh zopakuj v izolácii.
-- **Kvóta kľúča je ~20/min a ~200/deň, katalóg má 41 348 produktov.** Celoplošné
-  `getFull` je teda **~207 dní** — plošné obohacovanie sa NEDÁ a nikdy ho
-  nenavrhuj. Preto je prioritizované a na dopyt (D118), a neobohatený produkt má
+- **Kvóta kľúča je od 1. 9. 2026 `150/min` a `1000/deň`** (predtým 20/200;
+  zdvihol ju správca shopu na `docs/64-ZIADOST-LIMITY-2026-09-01.md`, potvrdené
+  v appke — `GET /api/queue` hlási `shopPerUtcDay: 1000`, `shopPerMinute: 150`).
+  Appka si z toho berie 80 % (`RATE_SAFETY_FACTOR`), teda **120/min a 800/deň**.
+  Čo to mení: obohatiť **jednu stranu tabuľky (100 produktov) trvá ~50 s**
+  (pauza 500 ms/produkt) — preto sa od V5 obohacuje strana, na ktorú sa človek
+  pozerá (D123), nie len jeden produkt na klik. Denný cieľ dávky je
+  `DEFAULT_ENRICH_DAILY_TARGET` = **600**, teda **~6 strán po 100 denne**;
+  kto preklikne desiatu, dostane pomlčky a obrazovka mu to MUSÍ povedať
+  číslom (R2), nie zamlčať. Celý katalóg (41 348) je ďalej **~69 dní** —
+  plošné obohacovanie sa NEDÁ a nikdy ho nenavrhuj. Neobohatený produkt má
   pomlčku, nie nulu ani odhad.
+- **To isté číslo nesmie žiť na dvoch miestach.** `MAX_DAILY_WRITE_BUDGET`
+  existoval dvakrát — v `lib/engine/budget.ts` a ako literál `200`
+  v `lib/repo/settings.repo.ts`. Kým bola kvóta 200, kópie sa nemali ako
+  rozísť; pri jej zdvihnutí sa rozišli **okamžite**: `budget.ts` prijal 1000
+  ako platnú hodnotu a repozitár ju odmietol hláškou „musí byť 1–200". Obe sa
+  teraz odvodzujú zo `SHOP_KEYED_LIMIT`. Jedna kópia zostáva a je vedomá:
+  horná hranica v `CHECK (daily_write_budget …)` je LITERÁL v migrácii
+  `0017_zdvihnuty_strop_zapisov.sql`, lebo **SQL si TS konštantu naimportovať
+  nevie**. Pri ďalšom zdvihnutí kvóty sa musí zmeniť RUČNE spolu so
+  `SHOP_KEYED_LIMIT` (novou migráciou — 0017 je aplikovaná a uzamknutá), inak
+  appka znova začne prijímať hodnotu, ktorú DB odmietne.
+- **Filter bez dátového zdroja je sľub, ktorý appka nedodrží** (D125, K4).
+  Sprievodca novej zľavy kreslil zámok „Čaká na dáta zo shopu" nad maržou
+  a obrátkovosťou, kým Produkty podľa marže naozaj filtrovali — tá istá appka
+  na jednej obrazovke merala a na druhej tvrdila, že nemá čím. Zamknuté
+  rozmery preto žijú na JEDNOM mieste (`src/lib/ui/locked-dimensions.ts`)
+  a sú odvodené od typu v repozitári, takže rozchod neprejde kompiláciou.
+  Nový filter buď má stĺpec v zrkadle, alebo v UI NEEXISTUJE.
 - **Batch NEZNIŽUJE kvótu.** 25 položiek = 25 hitov (plus 1 za samotné batch
   volanie), a `getFull` medzi batchovateľnými akciami vôbec **nie je**
   (opted-in sú len `products/get` a `order/get`). Dôkaz:
@@ -148,8 +217,8 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   `test/setup.ts` púšťa len loopback. Odblokovanie je akcia Samuela (`docs/60`).
 - **Čítania a zápisy delia JEDEN kľúč a JEDEN denný strop.** Bez rezervy vedelo
   čítanie vyžrať kvótu a appka stratila schopnosť ZAPÍSAŤ — `checkDailyBudget()`
-  odmietol celú frontu. Preto `WRITE_QUOTA_RESERVE` = `min(rozpočet, 40)`,
-  odvodené ako 200 − 160 (strop dráhy `product_read`). Nová čítacia cesta MUSÍ
+  odmietol celú frontu. Preto je `WRITE_QUOTA_RESERVE` = denný strop mínus
+  strop dráhy `product_read` (po 1. 9. 2026: 1000 − 800 = 200). Nová čítacia cesta MUSÍ
   ísť cez rezervačnú dráhu; inak `remainingToday()` ohlási plný rozpočet a
   fronta spadne do 429 uprostred dávky.
 - **Grep nad priečinkom A nepovie nič o diere v priečinku B.** Mutačné overenie

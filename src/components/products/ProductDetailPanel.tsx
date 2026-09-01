@@ -53,6 +53,16 @@
  *  · Prázdna z KPI majú VLASTNÝ slovník (`KpiGapKind`), lebo „produkt nie je
  *    obohatený" a „dni chýbajú" sú dve rôzne vety a ani jedna nie je nula.
  *
+ * ČO PRIBUDLO VO V5 (D127 bod 3 — 1. 9. 2026)
+ * ───────────────────────────────────────────
+ *  · **Kedy sme tento kus už zlacnili** (rozklik) — zoznam ZLIAV, do ktorých
+ *    bol kus zaradený: meno zľavy, percento pásma, okno, cena pred/po a stav
+ *    NÁŠHO zápisu. Nie je to druhý opis „Všetkých našich zápisov": ten log
+ *    kreslí `productWrites()`, ktorý `pending` zahadzuje, a meno zľavy ani
+ *    cenu nemá. Vykresľuje `ProductDiscountHistory.tsx`, kde je aj dôvod.
+ *    Prázdna história je ODPOVEĎ, nie chyba, a zlyhané načítanie je tretia
+ *    veta — nikdy prázdny zoznam.
+ *
  * ČO JE NA POVRCHU A ČO POD ROZKLIKOM (24. 8. 2026, UX3)
  * ──────────────────────────────────────────────────────
  * Panel mal 1 148 px obsahu v stĺpci, ktorý má 620 px (`max-height:
@@ -65,7 +75,7 @@
  *   povrch  · hlavička (názov, cena, výhrady) · DOMINANTA: predané kusy
  *           · prekážky · zľavy podľa vlastných zápisov (šesť riadkov)
  *   rozklik · údaje o produkte · varianty · podrobnosti z eshopu
- *           · všetky naše zápisy · technický detail
+ *           · všetky naše zápisy · história zliav · technický detail
  *
  * Zavretá skupina NIE JE chýbajúca skupina: nesie svoj vlastný nadpis v tom
  * istom tvare ako otvorená a vedľa neho POČET riadkov, ktorý sa počíta z
@@ -185,6 +195,13 @@ import {
   type UpliftView,
 } from '@/components/products/product-extras';
 import { FieldValue, KpiValueText } from '@/components/products/ProductFacts';
+import {
+  DiscountHistoryList,
+  fetchProductCampaigns,
+  historyHint,
+  isHistoryAborted,
+  type ProductCampaignsWire,
+} from '@/components/products/ProductDiscountHistory';
 import ProductVariants from '@/components/products/ProductVariants';
 import type { KpiCellView, SoldCoverageState } from '@/components/products/sold-coverage';
 import { SOLD_COVERAGE_UNASKED, soldUnitsViaCoverage } from '@/components/products/sold-coverage';
@@ -838,6 +855,13 @@ export function ProductDetailPanel({
   const [enriched, setEnriched] = useState<EnrichOutcomeKind | null>(null);
   /** Krivka, okná zliav a uplift. `null` = zatiaľ nenačítané. */
   const [insights, setInsights] = useState<ProductInsightsView | null>(null);
+  /**
+   * História zliav tohto kusu (D127 bod 3). `null` = zatiaľ nenačítané, a to
+   * NIE JE prázdna história: prázdny zoznam je odpoveď, `null` je nevedomosť.
+   */
+  const [history, setHistory] = useState<ProductCampaignsWire | null>(null);
+  /** Načítanie histórie zlyhalo — vlastná veta, nikdy prázdny zoznam. */
+  const [historyFailed, setHistoryFailed] = useState(false);
 
   const panelRef = useRef<HTMLElement | null>(null);
   /**
@@ -988,6 +1012,33 @@ export function ProductDetailPanel({
       const res = await fetchProductInsights(row.productId, DETAIL_CURVE_DAYS, controller.signal);
       if (!live || !res.ok) return;
       setInsights(res.data);
+    })();
+
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [row.productId]);
+
+  /*
+   * HISTÓRIA ZĽIAV TOHTO KUSU (D127 bod 3).
+   *
+   * Čisto čítacie, z lokálnej DB (K8) — táto cesta shop nevolá, takže sa smie
+   * spustiť pri každom otvorení bez ohľadu na kvótu. Neúspech NIE JE prázdna
+   * história: `history` zostane `null` a `historyFailed` povie vetu, inak by
+   * výpadok siete tvrdil, že produkt nikdy v zľave nebol.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    let live = true;
+    setHistory(null);
+    setHistoryFailed(false);
+
+    void (async () => {
+      const res = await fetchProductCampaigns(row.productId, controller.signal);
+      if (!live) return;
+      if (res.ok) setHistory(res.data);
+      else if (!isHistoryAborted(res.error)) setHistoryFailed(true);
     })();
 
     return () => {
@@ -1414,6 +1465,33 @@ export function ProductDetailPanel({
         <div className="lvl-3" style={{ marginTop: '4px' }}>
           Appka vidí len to, čo sama zapísala — nie stav eshopu.
         </div>
+      </DetailGroup>
+
+      {/*
+       * HISTÓRIA ZĽIAV — „kedy sme toto už zlacnili?" (D127 bod 3).
+       *
+       * Pod rozklikom, a to zámerne: je to LOG, a log patrí pod rozklik (P6).
+       * Čo z neho človek potrebuje na povrchu, už povedala skupina nad ním —
+       * čo platí teraz, kedy sa naposledy zlacňovalo a o koľko. Nadpis nesie
+       * POČET zliav, takže sa dá zistiť, že história je, aj koľko toho v nej
+       * je, bez otvorenia. Prázdna história tam má vlastnú vetu („zatiaľ
+       * v žiadnej"), nie nulu — a zlyhané načítanie tretiu, aby sa výpadok
+       * nečítal ako odpoveď.
+       *
+       * PREČO TO NIE JE DRUHÝ ZOZNAM TOHO ISTÉHO: „Všetky naše zápisy" vyššie
+       * je log DOKONČENÝCH pokusov o zápis (`productWrites()` zahadzuje
+       * `pending`). Táto skupina je zoznam ZLIAV, do ktorých bol kus zaradený
+       * — vrátane tých, ktoré sa ešte nezapisovali — a nesie meno zľavy a cenu
+       * pred/po, teda dva údaje, ktoré ten log nemá. Rozdiel je napísaný aj na
+       * obrazovke (`HISTORY_SCOPE_NOTE`), nie len tu.
+       */}
+      <DetailGroup
+        title="Kedy sme tento kus už zlacnili"
+        hint={historyHint(history, historyFailed)}
+        fold
+        testId="detail-history-fold"
+      >
+        <DiscountHistoryList view={history} failed={historyFailed} />
       </DetailGroup>
 
       {/*

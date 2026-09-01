@@ -7,7 +7,8 @@
  *  - **GET** — KDE STOJÍ DÁVKA obohacovania a PREČO: pokrok, dnešný diel
  *    a hlavne dôvod pauzy (`catalog_enrich_state`, migrácia 0014). Nič
  *    nespúšťa, na shop neodošle ani jeden request (K8).
- *  - **POST** — obohatenie JEDNÉHO produktu na dopyt (nižšie).
+ *  - **POST** — obohatenie NA DOPYT: jedného produktu (`productId`) alebo celej
+ *    STRANY tabuľky (`productIds`, až `ENRICH_PAGE_MAX_PRODUCTS` — D123).
  *
  * PREČO GET PRIBUDOL AŽ 31. 8. 2026
  * ---------------------------------
@@ -42,12 +43,15 @@
  *
  * PREČO JE TO IDEMPOTENTNÉ A LACNÉ
  * --------------------------------
- * Kvóta kľúča je ~200 volaní na UTC deň a `getFull` je volanie NA PRODUKT.
- * Keby každé otvorenie panela znamenalo request, preklikanie päťdesiatich
- * riadkov by minulo štvrtinu dennej kvóty a nočná dávka by nestihla nič. Route
- * preto NIČ NEVOLÁ, keď je riadok dosť svieži — hranicu (a jej odôvodnenie)
- * drží `ENRICH_FRESH_MS` v `@/lib/engine/catalog-enrich`. Výsledok `fresh` NIE
- * JE chyba: znamená „v DB máš platné čísla a nezaplatil si za ne".
+ * Kvóta kľúča je od 1. 9. 2026 1000 volaní na UTC deň (appka si berie 800) a
+ * `getFull` je volanie NA PRODUKT. Keby každé otvorenie panela znamenalo
+ * request, preklikanie tabuľky by kvótu vyžralo a nočná dávka by nestihla nič.
+ * Route preto NIČ NEVOLÁ za riadok, ktorý je dosť svieži — hranicu (a jej
+ * odôvodnenie) drží `ENRICH_FRESH_MS` v `@/lib/engine/catalog-enrich`. Výsledok
+ * `fresh` NIE JE chyba: znamená „v DB máš platné čísla a nezaplatil si za ne".
+ * Pri STRANE je to tá istá brána, len vyhodnotená JEDNÝM dotazom nad celou
+ * stranou: už obohatené riadky nevolajú `getFull` VÔBEC, a to je jediná vec,
+ * ktorá drží kvótu pri preklikávaní tabuľky.
  *
  * PREČO `POST`, KEĎ JE TO ČÍTANIE ZO SHOPU
  * ----------------------------------------
@@ -64,10 +68,16 @@
  *     v eshope nemení nič a nemá čím. `confirmed: true` sa tu preto NEVYŽADUJE
  *     a jeho pridanie by bránu I3 len rozmazalo na cesty, ktoré ju nepotrebujú
  *     (D106 menuje štyri uvoľňujúce mutácie a táto medzi nimi nie je).
- *  2. **Nie je to hromadné obohatenie.** Telo prijme JEDEN `productId` a pole
- *     neprijme vôbec. Katalóg má 41 348 produktov; plošný prechod je ~207 dní
- *     (`enrichDaysNeeded()` to povie číslom). Dávku na pozadí vlastní
- *     `runEnrichBatch()`, nie táto cesta.
+ *  2. **Nie je to plošné obohatenie.** Telo prijme JEDEN `productId` alebo
+ *     `productIds` po `ENRICH_PAGE_MAX_PRODUCTS` — teda STRANU tabuľky, na
+ *     ktorú sa človek pozerá (D123, 1. 9. 2026). Do 1. 9. 2026 tu bola veta
+ *     „pole neprijme vôbec"; zmenila sa preto, že zdvihnutá kvóta (150/min,
+ *     1000/deň) skrátila stranu po 100 produktoch zo 6,3 min na ~50 s.
+ *     Katalóg má 41 348 produktov, takže plošný prechod je aj tak ~69 dní
+ *     (`enrichDaysNeeded()` to povie číslom) — a viac ako 100 ID naraz route
+ *     odmietne so 400. Dávku na pozadí vlastní `runEnrichBatch()`, nie táto
+ *     cesta, a jej dnešný cieľ je pre stranu STROP: pri naplnenom cieli sa
+ *     neobohacuje a odpoveď to povie ČÍSLOM (R2 kontraktu V5), nie mlčaním.
  *  3. **Nie je to obchádzka rezervy kvóty.** Dávka do posledných ~50 čítaní dňa
  *     nesmie — táto route smie, pretože ona je ten, pre koho sa rezerva drží
  *     (spolu s canary a sondou kľúča).
@@ -76,7 +86,7 @@
  */
 import { z } from 'zod';
 
-import type { CatalogEnrichmentRecord } from '@/contracts';
+import type { CatalogEnrichmentRecord, Logger } from '@/contracts';
 
 /*
  * `readBudgetView` sa ZÁMERNE dováža z `/api/catalog/search` a neopisuje sa:
@@ -95,10 +105,14 @@ import type { ShopCapability } from '@/lib/catalog/product-codes';
 import { todayInZone } from '@/lib/domain/dates';
 import {
   ENRICH_FRESH_MS,
+  ENRICH_PAGE_MAX_PRODUCTS,
   enrichDaysNeeded,
+  enrichPageOnDemand,
   enrichProductOnDemand,
   type EnrichCatalogRepo,
   type EnrichOneOutcome,
+  type EnrichPageDayNumbers,
+  type EnrichPageOutcome,
 } from '@/lib/engine/catalog-enrich';
 import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/define-route';
 import { apiKeyRepo as defaultApiKeyRepo, type ApiKeyRepository } from '@/lib/repo/api-key.repo';
@@ -115,15 +129,25 @@ import { READ_BUDGET_TIME_ZONE, type ReadBudget } from '@/lib/shop/read-budget';
 /* ═══════════════════════════ 1. Zod pre telo ═════════════════════════════ */
 
 /**
- * JEDEN produkt, nikdy pole.
+ * JEDEN produkt (`productId`) ALEBO jedna STRANA (`productIds`) — nikdy oboje.
  *
- * `z.number().int().positive()` a nič viac: zoznam by z tejto cesty urobil
- * hromadné čítanie, ktoré si `getFull` pri 41 348 produktoch nemôže dovoliť
- * (bod 2 doc-bloku). Kto potrebuje viac riadkov, dostane ich z dávky.
+ * `z.union` dvoch STRIKTNÝCH objektov, a to zámerne: telo s oboma poľami naraz
+ * neprejde ani jednou vetvou a skončí so 400. Kto pošle oboje, nevie, čo chce,
+ * a route si to nemá domýšľať.
+ *
+ * Strop `ENRICH_PAGE_MAX_PRODUCTS` je STRANA TABUĽKY, nie kus katalógu (D123).
+ * 101 ID je 400, nie tichá orezaná strana: prišlo by iné číslo, než volajúci
+ * poslal, a tabuľka by pri zvyšku ukazovala pomlčky bez vysvetlenia.
  */
-const enrichBodySchema = z.object({
+const enrichOneSchema = z.strictObject({
   productId: z.number().int().positive(),
 });
+
+const enrichPageSchema = z.strictObject({
+  productIds: z.array(z.number().int().positive()).min(1).max(ENRICH_PAGE_MAX_PRODUCTS),
+});
+
+const enrichBodySchema = z.union([enrichPageSchema, enrichOneSchema]);
 
 /* ═══════════════════════════ 2. Závislosti ════════════════════════════════ */
 
@@ -145,6 +169,12 @@ export interface EnrichRouteDeps {
   reads?: Pick<ReadBudget, 'reserve' | 'status'>;
   /** Sviežosť v ms. Slúži testom; podlahu drží samotný engine. */
   freshMs?: number;
+  /** Pauza medzi čítaniami STRANY. Slúži testom; podlahu drží engine. */
+  pausePerReadMs?: number;
+  /** Wall-clock strop obohatenia strany. Slúži testom; strop drží engine. */
+  maxMs?: number;
+  /** Spánok medzi čítaniami. Testy si podsúvajú `async () => {}`. */
+  sleepFn?: (ms: number) => Promise<void>;
   now?: () => Date;
   routeDeps?: RouteDeps;
 }
@@ -184,6 +214,8 @@ export interface EnrichmentView {
 }
 
 export interface EnrichResponse {
+  /** Rozlíšenie dvoch tvarov odpovede tej istej routy (`productId` vs `productIds`). */
+  mode: 'one';
   outcome: EnrichOneOutcome;
   productId: number;
   /**
@@ -201,6 +233,50 @@ export interface EnrichResponse {
   reads: ReadBudgetView | null;
   /** Kedy sa smie skúsiť znova. `null` = hneď / nevieme. */
   resumeAt: string | null;
+  at: string;
+  /** KÓD chyby (I1), nikdy telo odpovede shopu. */
+  error: string | null;
+}
+
+/**
+ * Odpoveď na obohatenie STRANY (D123).
+ *
+ * Nesie TRI druhy vecí a žiadna z nich nesmie chýbať:
+ *   1. **riadky** (`enrichments`) — pre KAŽDÉ platné poslané ID, aj pre to,
+ *      ktoré sa neobohatilo. Prázdne obohatenie je priznaná medzera (samé
+ *      `null`), nie nula (I11), a tabuľka ho kreslí ako pomlčku.
+ *   2. **počty** — čo bolo svieže, čo sa obohatilo, na čo sa nedostalo
+ *      (`skipped`). `fresh` NIE JE chyba: je to nezaplatená kvóta.
+ *   3. **čísla dňa** (`day`) — koľko dnešný cieľ ešte znesie a koľko čítaní
+ *      zo dňa už odišlo. Toto je to, čo obrazovka MUSÍ povedať namiesto
+ *      mlčania, keď sú riadky pomlčkami (R2 kontraktu V5).
+ */
+export interface EnrichPageResponse {
+  mode: 'page';
+  outcome: EnrichPageOutcome;
+  capability: ShopCapability;
+  /** Koľko ID sa naozaj spracovalo (po očistení o neplatné a duplikáty). */
+  requested: number;
+  /** Koľko ID sa zahodilo ako neplatné alebo duplicitné. */
+  dropped: number;
+  fresh: number;
+  stale: number;
+  attempted: number;
+  enriched: number;
+  notInMirror: number;
+  reductionUnknown: number;
+  notFound: number;
+  /** Nesvieže ID, na ktoré sa NEDOSTALO (čas, kvóta, cieľ dňa, pauza). */
+  skipped: number[];
+  readsUsed: number;
+  reads: ReadBudgetView | null;
+  day: EnrichPageDayNumbers;
+  /** Riadky pre celú stranu — jedným dotazom, nikdy dotaz na produkt. */
+  enrichments: EnrichmentView[];
+  freshMs: number;
+  /** Kedy sa smie skúsiť znova. `null` = hneď / nevieme. */
+  resumeAt: string | null;
+  durationMs: number;
   at: string;
   /** KÓD chyby (I1), nikdy telo odpovede shopu. */
   error: string | null;
@@ -232,7 +308,90 @@ export function enrichmentView(record: CatalogEnrichmentRecord): EnrichmentView 
   };
 }
 
-/* ═══════════════════════════ 4. Route ═════════════════════════════════════ */
+/* ═══════════ 4. Strana na dopyt: engine → odpoveď (D123) ══════════════════ */
+
+interface PageHandlerDeps {
+  shop: Pick<ShopClientV5, 'getProductFull'>;
+  apiKey: Pick<ApiKeyRepository, 'loadForUse' | 'recallScopes'>;
+  catalog: EnrichCatalogRepo;
+  reads: Pick<ReadBudget, 'reserve' | 'status'>;
+  log: Logger;
+  now: () => Date;
+  freshMs: number | undefined;
+  pausePerReadMs: number | undefined;
+  maxMs: number | undefined;
+  sleepFn: ((ms: number) => Promise<void>) | undefined;
+}
+
+/**
+ * Obohatí stranu a poskladá odpoveď.
+ *
+ * Riadky sa čítajú AŽ TU a JEDNÝM dotazom nad všetkými poslanými ID — zámerne
+ * aj pri neúspechu a aj za tie ID, ktoré sa neobohatili: tabuľka má ukázať to,
+ * čo v DB naozaj leží (typicky staršie obohatenie alebo samé `null`), nie
+ * prázdno. Prázdno by sa na obrazovke ľahko nakreslilo ako nula — presne to,
+ * čo I11 zakazuje. Dotaz na produkt (N+1) by z jednej strany urobil sto
+ * dotazov, preto sa `enrichmentFor()` volá RAZ.
+ */
+async function enrichPageResponse(
+  productIds: readonly number[],
+  deps: PageHandlerDeps,
+): Promise<EnrichPageResponse> {
+  const result = await enrichPageOnDemand(productIds, {
+    shop: deps.shop,
+    apiKey: deps.apiKey,
+    catalog: deps.catalog,
+    reads: deps.reads,
+    logger: deps.log,
+    now: deps.now,
+    ...(deps.freshMs !== undefined ? { freshMs: deps.freshMs } : {}),
+    ...(deps.pausePerReadMs !== undefined ? { pausePerReadMs: deps.pausePerReadMs } : {}),
+    ...(deps.maxMs !== undefined ? { maxMs: deps.maxMs } : {}),
+    ...(deps.sleepFn !== undefined ? { sleepFn: deps.sleepFn } : {}),
+  });
+
+  const enrichments: EnrichmentView[] = [];
+  try {
+    const records = await deps.catalog.enrichmentFor(productIds);
+    for (const productId of productIds) {
+      const record = records.get(productId) ?? null;
+      // Turbopack tu už raz zahodil `if (!record)` ako compile-time falsy.
+      if (record !== null) enrichments.push(enrichmentView(record));
+    }
+  } catch (cause) {
+    deps.log.warn('catalog_enrich_page_read_back_failed', {
+      requested: productIds.length,
+      error: cause instanceof Error ? cause.name : 'unknown',
+    });
+  }
+
+  return {
+    mode: 'page',
+    outcome: result.outcome,
+    capability: result.capability,
+    requested: result.requested,
+    dropped: result.dropped,
+    fresh: result.fresh,
+    stale: result.stale,
+    attempted: result.attempted,
+    enriched: result.enriched,
+    notInMirror: result.notInMirror,
+    reductionUnknown: result.reductionUnknown,
+    notFound: result.notFound,
+    skipped: [...result.skipped],
+    readsUsed: result.readsUsed,
+    reads: readBudgetView(result.reads),
+    day: result.day,
+    enrichments,
+    freshMs: deps.freshMs ?? ENRICH_FRESH_MS,
+    resumeAt: iso(result.resumeAt),
+    durationMs: result.durationMs,
+    at: result.finishedAt.toISOString(),
+    error: result.error,
+  };
+}
+
+/* ═══════════════════════════ 5. Route ═════════════════════════════════════ */
 
 export function createCatalogEnrichRoute(deps: EnrichRouteDeps = {}): NextRouteHandler {
   const apiKey = deps.apiKey ?? defaultApiKeyRepo;
@@ -250,12 +409,40 @@ export function createCatalogEnrichRoute(deps: EnrichRouteDeps = {}): NextRouteH
       body: enrichBodySchema,
       /*
        * Okenný limit per IP. Nie je to obrana proti používateľovi, ale proti
-       * obrazovke, ktorá by panel otvárala v cykle: brána sviežosti volania
-       * do shopu utne, ale KAŽDÉ volanie stále znamená dotaz do vlastnej DB.
-       * 30/min je viac, než sa dá naklikať rukou.
+       * obrazovke, ktorá by panel alebo stranu otvárala v cykle: brána sviežosti
+       * volania do shopu utne, ale KAŽDÉ volanie stále znamená dotaz do vlastnej
+       * DB.
+       *
+       * PREČO 60/min (prehodnotené 1. 9. 2026, D123). Číslo je odvodené od
+       * minútového stropu kľúča: `KEYED_FALLBACK_PER_MINUTE` je po 20 % rezerve
+       * 120, takže 60 requestov za minútu nedokáže minútovú kvótu vyčerpať ani
+       * vtedy, keby KAŽDÝ z nich niesol práve jeden nesvieži produkt — druhá
+       * polovica minúty zostáva dávke, canary a sonde kľúča. Smerom nahor to
+       * strop shopu drží sám (rozpočet čítaní odmieta nad `usedThisMinute`),
+       * smerom dolu by to zhasínalo legitímne preklikávanie: strana po 100
+       * produktoch trvá ~50 s, takže kto ju obnoví a medzitým otvorí pár panelov,
+       * sa do 30/min (pôvodné číslo pri kvóte 20/min) nezmestil.
+       *
+       * Súbežné strany limit NEDRŽÍ a nemá: to je `pageInFlight` v engine —
+       * jedna strana v procese naraz, inak by sa pauzy medzi čítaniami prekryli.
        */
-      rateLimit: { limit: 30, windowMs: 60_000, bucket: 'catalog-enrich' },
+      rateLimit: { limit: 60, windowMs: 60_000, bucket: 'catalog-enrich' },
       handler: async (ctx) => {
+        if ('productIds' in ctx.body) {
+          return await enrichPageResponse(ctx.body.productIds, {
+            shop: shop(),
+            apiKey,
+            catalog,
+            reads,
+            log: ctx.log,
+            now,
+            freshMs: deps.freshMs,
+            pausePerReadMs: deps.pausePerReadMs,
+            maxMs: deps.maxMs,
+            sleepFn: deps.sleepFn,
+          });
+        }
+
         const productId = ctx.body.productId;
 
         const result = await enrichProductOnDemand(productId, {
@@ -287,6 +474,7 @@ export function createCatalogEnrichRoute(deps: EnrichRouteDeps = {}): NextRouteH
         }
 
         const response: EnrichResponse = {
+          mode: 'one',
           outcome: result.outcome,
           productId: result.productId,
           fresh: result.outcome === 'fresh',
@@ -306,7 +494,7 @@ export function createCatalogEnrichRoute(deps: EnrichRouteDeps = {}): NextRouteH
   );
 }
 
-/* ═════════════════ 5. GET — kde stojí dávka a PREČO (D118 bod 2) ══════════ */
+/* ═════════════════ 6. GET — kde stojí dávka a PREČO (D118 bod 2) ══════════ */
 
 export interface EnrichStateRouteDeps {
   /**

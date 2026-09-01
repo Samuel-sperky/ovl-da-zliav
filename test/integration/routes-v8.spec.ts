@@ -49,14 +49,13 @@ import { makeRequest, parse, actorRouteDeps } from './routes-harness';
 
 /* ═══════════════════════ 1. `/api/catalog/search` (K8) ════════════════════ */
 
-const LOCKED: LockedCatalogFilter[] = [
-  'stock',
-  'category',
-  'metal',
-  'jewelryType',
-  'margin',
-  'turnover',
-];
+/*
+ * D125 (1. 9. 2026) — zamknuté sú UŽ LEN tri. `stock`, `margin` a `turnover`
+ * z tohto zoznamu odišli, lebo sa filtrovať DAJÚ (`stock`, `marginPercentFrom`,
+ * `orderedTotalFrom`, `lastSaleOlderDays`) — že naozaj filtrujú, dokazuje nad
+ * skutočnou DB `test/integration/filtre-podla-dat.spec.ts`.
+ */
+const LOCKED: LockedCatalogFilter[] = ['category', 'metal', 'jewelryType'];
 
 function catalogFake(): {
   repo: CatalogSearchRouteDeps['catalog'];
@@ -226,8 +225,10 @@ describe('GET /api/catalog/search — zamknuté filtre (K8)', () => {
     }
     // Poslané zamknuté filtre sú označené ako poslané…
     expect(data.lockedFilters.category?.requested).toBe(true);
-    expect(data.lockedFilters.margin?.requested).toBe(true);
     expect(data.lockedFilters.metal?.requested).toBe(false);
+    // …a `margin` medzi nimi UŽ NIE JE: od D125 je to skutočný filter nad
+    // `margin_percent`, takže sa v `lockedFilters` nesmie objaviť vôbec.
+    expect(data.lockedFilters.margin).toBeUndefined();
 
     // …a do repozitára sa NEDOSTALI. Kľúč `category` v filtri neexistuje ani
     // ako `undefined`; keby sa filter aplikoval, výsledok by bol iný než ten,

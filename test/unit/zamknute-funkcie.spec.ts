@@ -167,13 +167,16 @@ describe('dôvod na obrazovke sa mení s tým, čo appka o kľúči vie', () => 
 /* ══════════ 4. Odomknutie je fail-closed a priznané ═══════════════════════ */
 
 describe('oprávnenie samo filtre neodomkne', () => {
-  it('všetky štyri funkcie zostávajú na povrchu aj v stave `available`', () => {
+  it('všetky zamknuté funkcie zostávajú na povrchu aj v stave `available`', () => {
     const ma = surface(true);
     for (const row of LOCKED_FEATURES) {
       expect(ma, `funkcia „${row.feature}" zmizla z povrchu`).toContain(row.feature);
       expect(ma).toContain(`chýba ${row.missing}`);
     }
-    expect(LOCKED_FEATURES).toHaveLength(4);
+    /* Dva, nie štyri: D125 (1. 9. 2026) vyradilo maržu a sklad — dáta na ne
+       appka po migrácii 0014 MÁ a Produkty podľa nich filtrujú. Dôvod aj
+       zoznam sú v `LockedFeatures.tsx`. */
+    expect(LOCKED_FEATURES).toHaveLength(2);
   });
 
   it('P2 — v žiadnom stave nie je na povrchu blok nad 90 znakov', () => {

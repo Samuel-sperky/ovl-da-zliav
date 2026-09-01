@@ -45,6 +45,7 @@ import { env } from '@/env';
 import { addCalendarMonths, addDays, diffDays, isDateOnly, todayInZone } from '@/lib/domain/dates';
 import { insightsRepo as defaultInsightsRepo } from '@/lib/repo/insights.repo';
 import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
+import { campaignItemsRepo as defaultCampaignItemsRepo } from '@/lib/repo/campaign-items.repo';
 
 /* ═══════════════════════ 1. Závislosti route-ov ═══════════════════════════ */
 
@@ -52,6 +53,15 @@ export interface InsightsDeps {
   insightsRepo?: typeof defaultInsightsRepo;
   /** Okno platnosti zľavy pre sekciu „Výkon" — jediné, čo z nej treba. */
   campaignsRepo?: Pick<typeof defaultCampaignsRepo, 'getById'>;
+  /**
+   * História produkt ↔ zľava (D127 bod 3). Vyberajú sa VÝHRADNE čítacie
+   * funkcie — `createMany()` ani `update()` sa do čítacej route nemajú ako
+   * dostať, a tým je celá táto vrstva mimo brány I3 (viď hlavičku súboru).
+   */
+  campaignItemsRepo?: Pick<
+    typeof defaultCampaignItemsRepo,
+    'historyPage' | 'historyForProduct' | 'countByCampaign'
+  >;
   now?: () => Date;
   timeZone?: string;
 }
@@ -64,6 +74,7 @@ export function resolveInsightsDeps(overrides: InsightsDeps = {}): ResolvedInsig
   return {
     insightsRepo: overrides.insightsRepo ?? defaultInsightsRepo,
     campaignsRepo: overrides.campaignsRepo ?? defaultCampaignsRepo,
+    campaignItemsRepo: overrides.campaignItemsRepo ?? defaultCampaignItemsRepo,
     now: overrides.now ?? (() => new Date()),
     // LAZY: route moduly volajú resolve na module scope, takže eager čítanie
     // `env.*` by spustilo validáciu ENV už počas `next build` (rovnaký dôvod

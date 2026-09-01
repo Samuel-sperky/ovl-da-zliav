@@ -1,29 +1,39 @@
 /**
- * Aura Zľavy — „REFERENCIA · NÁZOV" V POLOŽKÁCH ZĽAVY, VO VÝBERE A V HISTÓRII
- * (D116, K6; KONTRAKT-V4-2026-08-28).
+ * Aura Zľavy — POMENOVANIE PRODUKTU V POLOŽKÁCH ZĽAVY, VO VÝBERE A V HISTÓRII
+ * (D116, K6; D122/D124, kontrakt V5).
  *
  * Do 28. 8. 2026 hovorili obrazovky o produkte číslom `product_id`. Pre appku je
  * to správny identifikátor, pre človeka slepé číslo — v sklade ani v eshope
- * podľa neho produkt nenájde. `productLabel()` (`src/lib/ui/product-label.ts`)
- * je jediné miesto, ktoré pomenovanie skladá; tento test drží, že ho tri
- * obrazovky NAOZAJ používajú a že sa pri chýbajúcej referencii nerozídu.
+ * podľa neho produkt nenájde. Odvtedy je na povrchu referencia a názov.
+ *
+ * ČO SA ZMENILO 1. 9. 2026 (D122)
+ * -------------------------------
+ * Povrch má DVA tvary a nie sú zameniteľné:
+ *
+ *  · **veta** `referencia · názov` (`productLabel()`) — tam, kde je na produkt
+ *    JEDEN RIADOK TEXTU, teda v Histórii,
+ *  · **dva stĺpce** — v TABUĽKÁCH. Referencia má vlastný prvý stĺpec (D122)
+ *    a názov vlastný (`productNameCell()`), lebo tabuľka má na priznanie dve
+ *    miesta a zliať ich by znamenalo vyhodiť informáciu, na ktorú má miesto.
+ *    Meno oboch stĺpcov nesie jednotná sada (`@/lib/ui/product-columns`, D124).
  *
  * ČO SA MERIA A PREČO PRÁVE TO
  * ----------------------------
- *  A. **Položky zľavy** (`ItemsTable`) — vykreslené, nie zo zdroja.
- *  B. **História** (`AuditTable`) — vykreslená. Referencia sa k riadku DOPĹŇA
+ *  A. **Položky zľavy** (`ItemsTable`) — vykreslené, nie zo zdroja: dva stĺpce,
+ *     `#id` v technickom detaile, chýbajúca referencia ako priznanie.
+ *  B. **História** (`AuditTable`) — vykreslená. Riadok histórie je UDALOSŤ, nie
+ *     tabuľka produktov, takže tam ostáva veta. Referencia sa k riadku DOPĹŇA
  *     pri zobrazení; audit sa neprepisuje (I4), takže riadok bez doplnenia
  *     musí zostať čitateľný a `product_id` zostáva v technickom detaile.
- *  C. **Výber vo formulári novej zľavy** — vzorku appka kreslí až z riadkov,
- *     ktoré prišli z katalógu, takže `renderToStaticMarkup` ju nezastihne.
- *     Meria sa preto pomenovanie nad tou istou funkciou a k tomu JEDEN
- *     zdrojový test na tú konkrétnu bunku. Kto tam vráti `row.name`, padne
- *     tu — a keď sa vzorka raz dá vykresliť bez siete, tento zdrojový test
- *     má zmiznúť v prospech vykresleného.
+ *  C. **Vzorka výberu vo formulári novej zľavy** — od 1. 9. 2026 vykreslená.
+ *     Dovtedy sa kreslila až z riadkov stiahnutých z katalógu a strážil ju
+ *     JEDEN zdrojový test; ako samostatný komponent (`SampleTable`) sa dá
+ *     vykresliť s hotovými riadkami, takže sa meria SPRÁVANIE. Zdrojový test
+ *     preto zmizol, presne ako sľuboval.
  *  D. **I11** — chýbajúca referencia je „nevieme", nikdy prázdno a nikdy
  *     vymyslený kód.
  *
- * Vlastník: V4 (obrazovka Zľavy).
+ * Vlastník: V4 (obrazovka Zľavy); stĺpce V5 (D122, D124).
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -35,8 +45,10 @@ import { describe, expect, it } from 'vitest';
 import AuditTable from '@/components/audit/AuditTable';
 import { auditProductLabel, parseAuditRow, type AuditRow } from '@/components/audit/api';
 import { ItemsTable } from '@/components/campaigns/DiscountDetail';
+import { SampleTable } from '@/components/campaigns/NewDiscount';
 import { spreadSample, buildTiers, type SelectableRow } from '@/components/campaigns/discounts-model';
 import type { DiscountItemView } from '@/components/campaigns/zlavy-api';
+import { SOLD_COVERAGE_UNASKED } from '@/components/products/sold-coverage';
 import { NEVIEME, productLabel } from '@/lib/ui/product-label';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
@@ -85,10 +97,20 @@ const render = (rows: readonly DiscountItemView[]) =>
 
 /* ═════════ A. Položky zľavy ═══════════════════════════════════════════════ */
 
-describe('A. položka zľavy sa pomenúva „referencia · názov" (D116)', () => {
-  it('s referenciou je na povrchu kód aj názov', () => {
+/** Obsah bunky daného stĺpca. `null` = stĺpec sa v tabuľke vôbec nekreslí. */
+function bunka(html: string, id: 'reference' | 'name'): string | null {
+  const found = new RegExp(`<td[^>]*data-col="${id}"[^>]*>([\\s\\S]*?)</td>`).exec(html);
+  return found === null ? null : found[1]!;
+}
+
+describe('A. položka zľavy má referenciu a názov v DVOCH stĺpcoch (D122)', () => {
+  it('s referenciou je na povrchu kód aj názov — každý vo svojej bunke', () => {
     const html = render([item({ reference: 'NAU-0031' })]);
-    expect(html).toContain('NAU-0031 · Náušnice Lumen');
+    expect(bunka(html, 'reference')).toContain('NAU-0031');
+    expect(bunka(html, 'name')).toContain('Náušnice Lumen');
+    /* Veta „kód · názov" do tabuľky nepatrí: pomlčka pred názvom je najhoršie
+       z oboch — miesto zaberie a nič nepovie (D122). */
+    expect(html).not.toContain('NAU-0031 · Náušnice Lumen');
   });
 
   it('`#id` zostáva dosiahnuteľné, ale v technickom detaile (`title`)', () => {
@@ -98,17 +120,22 @@ describe('A. položka zľavy sa pomenúva „referencia · názov" (D116)', () =
     expect(html).not.toContain('>#18342<');
   });
 
-  it('bez referencie zostáva názov — appka kód NEVYMÝŠĽA (I11)', () => {
+  it('bez referencie zostáva názov a bunka kódu PRIZNÁ medzeru (I11)', () => {
     const html = render([item()]);
-    expect(html).toContain('Náušnice Lumen');
+    expect(bunka(html, 'name')).toContain('Náušnice Lumen');
+    // Appka kód NEVYMÝŠĽA.
     expect(html).not.toContain('NAU-');
-    // Prázdny reťazec ani pomlčka pred názvom: „nevieme" nie je „ · názov".
+    // Prázdna bunka by znamenala „produkt kód nemá"; je tam pomlčka a dôvod.
+    const kod = bunka(html, 'reference');
+    expect(kod).toContain(NEVIEME);
+    expect(kod).toContain('lvl-3');
+    // A rozhodne nie predpona pred názvom.
     expect(html).not.toContain(`${NEVIEME} · Náušnice Lumen`);
   });
 
   it('bez referencie a bez názvu ostáva jediná identifikácia, ktorú appka má', () => {
     const html = render([item({ nameAtWrite: null })]);
-    expect(html).toContain('#18342');
+    expect(bunka(html, 'name')).toContain('#18342');
   });
 });
 
@@ -167,44 +194,65 @@ describe('B. História pomenuje produkt JOIN-om, audit sa neprepisuje (I4)', () 
 
 /* ═════════ C. Výber vo formulári novej zľavy ══════════════════════════════ */
 
-describe('C. vzorka výberu pomenúva produkt tou istou funkciou', () => {
+describe('C. vzorka výberu má tie isté dva stĺpce ako položky zľavy (D124)', () => {
   const ROWS: SelectableRow[] = [
     { productId: 18342, name: 'Náušnice Lumen', reference: 'NAU-0031', price: '34.90', unitsSold: 0, discountedNow: false },
     { productId: 21170, name: 'Prsteň Aurora', price: '49.00', unitsSold: 1, discountedNow: false },
   ];
 
-  it('riadok s referenciou dá „kód · názov", riadok bez nej len názov', () => {
-    const sample = spreadSample(ROWS, buildTiers(ROWS, 180).tiers, 6);
-    const labels = sample.map((row) =>
-      productLabel({ productId: row.productId, reference: row.reference ?? null, name: row.name }),
+  /**
+   * Vzorka sa od 1. 9. 2026 dá vykresliť: `SampleTable` je samostatný komponent
+   * práve preto, aby sa nemerala v zdroji. Pásma sa počítajú tou istou funkciou
+   * ako v sprievodcovi, takže riadky prejdú rovnakým rozdelením.
+   */
+  const vzorka = (rows: readonly SelectableRow[]) => {
+    const tiers = buildTiers(rows, 180).tiers;
+    const sample = spreadSample(rows, tiers, 6);
+    const tierOfProduct = new Map<number, (typeof tiers)[number]>();
+    for (const tier of tiers) for (const id of tier.productIds) tierOfProduct.set(id, tier);
+    return renderToStaticMarkup(
+      createElement(SampleTable, {
+        sample,
+        total: rows.length,
+        soldWindowDays: 180,
+        coverage: SOLD_COVERAGE_UNASKED,
+        tierOfProduct,
+      }),
     );
-    const byId = new Map(labels.map((label) => [label.technical, label]));
-    expect(byId.get('#18342')!.text).toBe('NAU-0031 · Náušnice Lumen');
-    expect(byId.get('#18342')!.referenceUnknown).toBe(false);
-    expect(byId.get('#21170')!.text).toBe('Prsteň Aurora');
-    expect(byId.get('#21170')!.referenceUnknown).toBe(true);
+  };
+
+  it('riadok s referenciou má kód vo VLASTNOM stĺpci, nie pred názvom', () => {
+    const html = vzorka([ROWS[0]!]);
+    expect(bunka(html, 'reference')).toContain('NAU-0031');
+    expect(bunka(html, 'name')).toContain('Náušnice Lumen');
+    expect(html).not.toContain('NAU-0031 · Náušnice Lumen');
   });
 
-  it('bunka vzorky kreslí pomenovanie, nie surový názov', () => {
-    /*
-     * ZDROJOVÝ test, a je to výnimka s menom: vzorku appka skladá až z riadkov
-     * stiahnutých z katalógu, takže `renderToStaticMarkup` ju zastihne v stave
-     * „Načítavam výber…". Kým to tak je, túto jednu bunku nestráži nikto iný —
-     * e2e preklik ide cez zoznam zliav, nie cez vzorku. Keď sa vzorka bude dať
-     * vykresliť bez siete, tento test má zmiznúť v prospech vykresleného.
-     */
-    const src = read('../../src/components/campaigns/NewDiscount.tsx');
-    expect(src).toContain("import { productLabel } from '@/lib/ui/product-label';");
-    expect(src).toContain('{label.text}');
-    expect(src).not.toContain("<td className=\"name\">{row.name ?? 'bez názvu'}</td>");
-  });
-
-  it('referencia sa nesie z odpovede katalógu, keď ju odpoveď má', () => {
+  it('riadok bez referencie prizná medzeru — appka kód NEVYMÝŠĽA (I11, D118)', () => {
     /* `SelectableRow.reference` je voliteľné pole: `/api/catalog/search` ho
        zatiaľ nemusí posielať pri každom riadku a chýbajúca hodnota je
-       „nevieme" (D118), nie „produkt kód nemá". */
-    const withRef: SelectableRow = { ...ROWS[0]!, reference: 'NAU-0031' };
-    expect(productLabel({ productId: withRef.productId, reference: withRef.reference ?? null, name: withRef.name }).reference).toBe('NAU-0031');
+       „nevieme" (produkt nie je obohatený), nie „produkt kód nemá". */
+    const html = vzorka([ROWS[1]!]);
+    const kod = bunka(html, 'reference');
+    expect(kod).toContain(NEVIEME);
+    expect(kod).toContain('lvl-3');
+    expect(html).not.toContain('NAU-');
+    expect(bunka(html, 'name')).toContain('Prsteň Aurora');
+  });
+
+  it('vzorka a položky zľavy volajú tie isté stĺpce rovnako', () => {
+    /* Keby si každá tabuľka meno stĺpca písala sama, práve tu by sa rozišli. */
+    const zVzorky = /<th[^>]*data-col="reference"[^>]*>([^<]*)</.exec(vzorka(ROWS));
+    const zPoloziek = /<th[^>]*data-col="reference"[^>]*>([^<]*)</.exec(render([item()]));
+    expect(zVzorky).not.toBeNull();
+    expect(zPoloziek).not.toBeNull();
+    expect(zVzorky![1]).toBe(zPoloziek![1]);
+  });
+
+  it('veta „kód · názov" zostáva pre HISTÓRIU, nie pre tabuľky (D122)', () => {
+    /* Modul `productLabel()` sa neruší — mení sa len to, kde patrí. */
+    expect(productLabel({ productId: 18342, reference: 'NAU-0031', name: 'Náušnice Lumen' }).text)
+      .toBe('NAU-0031 · Náušnice Lumen');
     expect(productLabel({ productId: 1, reference: null, name: null }).reference).toBe(NEVIEME);
   });
 });

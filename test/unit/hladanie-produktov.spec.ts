@@ -666,8 +666,18 @@ function routeDepsFor(world: RouteWorld): {
     soldFrom: '2026-02-18',
     soldTo: '2026-08-17',
     soldCoverage: { windowDays: 180, completeDays: 180, unknownDays: 0 },
-    lockedFilters: ['stock', 'category', 'metal', 'jewelryType', 'margin', 'turnover'],
-    enrichedOnly: ['referenceSearch', 'ean13Search', 'shopDiscounted'],
+    // D125 — zamknuté sú už len tri; sklad, marža, celkovo objednané a
+    // posledný predaj sa filtrujú a priznávajú sa v `enrichedOnly`.
+    lockedFilters: ['category', 'metal', 'jewelryType'],
+    enrichedOnly: [
+      'referenceSearch',
+      'ean13Search',
+      'shopDiscounted',
+      'marginPercent',
+      'stock',
+      'orderedTotal',
+      'lastSale',
+    ],
   });
 
   return {

@@ -187,6 +187,15 @@ export const AUDIT_EVENT_LABELS: Readonly<Record<string, string>> = {
  * kľúča) ALEBO „appka o ňom nevie ani referenciu, ani názov". V druhom prípade
  * by na povrchu stálo len `#id`, teda slepé číslo, ktoré D116 z povrchu práve
  * sťahuje — patrí do rozkliku Technický detail, kde `productId` stojí ďalej.
+ *
+ * PREČO TU NIE SÚ JEDNOTNÉ STĹPCE (D124, 1. 9. 2026)
+ * --------------------------------------------------
+ * História NIE JE tabuľka produktov: jej riadok je UDALOSŤ a produkt je v ňom
+ * jedna vec z piatich (čas, čo sa stalo, kto, výsledok). Na produkt tu pripadá
+ * JEDEN RIADOK TEXTU, takže sa referencia a názov musia zmestiť do vety —
+ * a preto tu ostáva `productLabel()`, nie `productColumns()` z
+ * `@/lib/ui/product-columns` (D122: stĺpec nie je veta). Keby história niekedy
+ * dostala vlastnú tabuľku produktov, jednotná sada platí aj pre ňu.
  */
 export function auditProductLabel(row: AuditRow): ProductLabel | null {
   if (row.productId === null) return null;

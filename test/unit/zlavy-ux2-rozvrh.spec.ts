@@ -255,20 +255,47 @@ describe('3 — tabuľka POLOŽIEK nepreteká von z karty', () => {
     }),
   );
 
-  it('stĺpce sú štyri a šírku im dáva colgroup, nie odhad prehliadača', () => {
+  it('stĺpce sú päť a šírku im dáva colgroup, nie odhad prehliadača', () => {
+    /*
+     * Od 1. 9. 2026 je stĺpcov päť, nie štyri: pribudla „Referencia" ako
+     * samostatný PRVÝ stĺpec (D122, D124 — jednotná sada). NIE JE to návrat
+     * „Poznámky", ktorá tabuľku kedysi vytlačila z karty: poznámka bola voľný
+     * text naťahujúci sa podľa najdlhšej vety, referencia je kód o jednotkách
+     * znakov. Že sa piaty stĺpec nesmie vrátiť ako široký text, drží test
+     * o dôvode v bunke stavu nižšie.
+     */
     const hlavicky = html.match(/<th\b/g) ?? [];
-    expect(hlavicky).toHaveLength(4);
+    expect(hlavicky).toHaveLength(5);
     const stlpce = html.match(/<col\b/g) ?? [];
-    expect(stlpce).toHaveLength(4);
+    expect(stlpce).toHaveLength(5);
+    expect(html).toContain('data-col="reference"');
   });
 
   it('šírky stĺpcov dávajú presne 100 % — inak sa pevný rozvrh nezmestí', () => {
-    const sirky = ['.colName {', '.colPrice {', '.colPct {', '.colState {'].map((selektor) => {
-      const hodnota = deklaracia(selektor, 'width');
-      expect(hodnota, `${selektor} nemá width`).not.toBeNull();
-      return Number(hodnota!.replace('%', ''));
-    });
+    const sirky = ['.colRef {', '.colName {', '.colPrice {', '.colPct {', '.colState {'].map(
+      (selektor) => {
+        const hodnota = deklaracia(selektor, 'width');
+        expect(hodnota, `${selektor} nemá width`).not.toBeNull();
+        return Number(hodnota!.replace('%', ''));
+      },
+    );
     expect(sirky.reduce((a, b) => a + b, 0)).toBe(100);
+  });
+
+  it('miesto na referenciu dal VÝHRADNE názov — merané stĺpce sa nezúžili', () => {
+    /*
+     * Toto je tá poistka, ktorá drží nález UX2 zavretý. Pretiekol vtedy stĺpec
+     * názvu (td.name o 112 px) a odmerané minimá „Cena pri príprave", „Zľava"
+     * a „Zapísané" boli presne to, čo tie nadpisy potrebujú. Keby si niekto na
+     * ďalší stĺpec vzal percento z nich, pretečenie sa vráti — kým názov sa
+     * v tejto tabuľke smie lámať (`white-space: normal` nižšie).
+     */
+    expect(deklaracia('.colPrice {', 'width')).toBe('16%');
+    expect(deklaracia('.colPct {', 'width')).toBe('10%');
+    expect(deklaracia('.colState {', 'width')).toBe('28%');
+    // 46 % − 14 % pre referenciu.
+    expect(deklaracia('.colName {', 'width')).toBe('32%');
+    expect(deklaracia('.colRef {', 'width')).toBe('14%');
   });
 
   it('rozvrh je pevný a bunky sa smú lámať', () => {

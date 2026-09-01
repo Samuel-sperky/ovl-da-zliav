@@ -719,11 +719,16 @@ describe.skipIf(!available)('repozitáre V3 — fronta, pásma, katalóg (V4)', 
       expect(cheap.total).toBe(2);
     });
 
-    it('zamknuté filtre sa priznávajú aj v counts() (K8)', async () => {
+    it('zamknuté filtre sa priznávajú aj v counts() (K8, po D125 už len tri)', async () => {
       const counts = await catalogRepo.counts({ today: TODAY });
-      expect(counts.lockedFilters).toContain('stock');
-      expect(counts.lockedFilters).toContain('category');
-      expect(counts.lockedFilters).toContain('turnover');
+      expect([...counts.lockedFilters].sort()).toEqual(['category', 'jewelryType', 'metal']);
+      // D125 — sklad a obrátkovosť sa filtrovať DAJÚ (migrácia 0014), takže
+      // medzi zamknutými nesmú byť; platia nad obohatenými riadkami a to
+      // priznáva `enrichedOnly`.
+      expect(counts.lockedFilters).not.toContain('stock');
+      expect(counts.lockedFilters).not.toContain('turnover');
+      expect(counts.enrichedOnly).toContain('stock');
+      expect(counts.enrichedOnly).toContain('orderedTotal');
     });
 
     it('triedenie podľa predajnosti a ceny je stabilné', async () => {

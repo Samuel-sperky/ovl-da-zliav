@@ -296,7 +296,14 @@ export function mergeExtras(store: ExtrasStore, batch: ProductExtrasView): Extra
 
 /* ═════════════════ 4. Odvodenie: hodnota, alebo ktoré z troch prázdien ════ */
 
-/** Kód, ktorý appka o kuse pozná — najprv produktový, potom z variantov. */
+/**
+ * Kód, ktorý appka o kuse pozná — najprv produktový, potom z variantov.
+ *
+ * Riadok pod názvom v tabuľke ho od D122 (1. 9. 2026) NEPOUŽÍVA: referencia má
+ * vlastný prvý stĺpec a berie sa z obohatenia, nie odtiaľto (dôvod je nad
+ * `codeLine()`). Funkcia zostáva ako jediné miesto, kde je zapísané poradie
+ * „produkt → variant → kľúč" pre povrchy, ktoré kód variantu ukazujú.
+ */
 export function referenceField(
   extra: ProductExtraView | undefined,
   hasAttributes: boolean,
@@ -374,11 +381,9 @@ export function codedVariants(extra: ProductExtraView | undefined): number {
 /**
  * Jeden riadok pod názvom produktu — hotový na vykreslenie.
  *
- * `kind: 'value'` znamená, že aspoň jedna z dvoch hodnôt je známa. Chýbajúca
- * DRUHÁ hodnota sa v tabuľke píše holou pomlčkou, nie tretím slovom: keď sa
- * appka na kus pozrela, je jasné, že chýba preto, že ho shop nevedie. Celý
- * príbeh (aj rozdiel medzi variantom a produktom) je v bočnom paneli — tabuľka
- * má 41 220 riadkov a tri slová navyše na každom z nich sú šum, nie priznanie.
+ * `kind: 'value'` znamená, že EAN je známy. Celý príbeh (aj rozdiel medzi
+ * variantom a produktom) je v bočnom paneli — tabuľka má 41 220 riadkov a tri
+ * slová navyše na každom z nich sú šum, nie priznanie.
  */
 export interface CodeLineView {
   readonly kind: 'value' | AbsenceKind;
@@ -392,29 +397,44 @@ export interface CodeLineView {
 
 const DASH = '—';
 
+/**
+ * KÓD Z TOHTO RIADKU ODIŠIEL DO VLASTNÉHO STĹPCA (D122, 1. 9. 2026).
+ *
+ * Do 1. 9. 2026 tu stálo „kód X · EAN Y" a pri prázdne „kód a EAN — zamknuté".
+ * Odkedy má referencia v tabuľke VLASTNÝ prvý stĺpec, sú obe podoby zlé:
+ *
+ *  1. **Dvakrát to isté.** Riadok by ukazoval kód v stĺpci aj pod názvom —
+ *    a zožral by šírku, ktorú D122 názvu práve dal.
+ *  2. **Dva hlasy o jednej medzere.** Kód v stĺpci je z obohatenia
+ *    (`getFull.reference`, `catalog_cache`), kód v tomto riadku bol z inej
+ *    cesty (`products/get` a kódy variantov). Tie dve cesty sa BEŽNE rozchádzajú:
+ *    kus s variantmi dá kód variantu aj bez kľúča, kým obohatený ešte nie je —
+ *    takže riadok tvrdil „kód C16.19" pod stĺpcom, v ktorom stála pomlčka.
+ *    A po D123 (obohacuje sa celá zobrazená strana) by naopak veta „kód a EAN
+ *    — zamknuté" stála vedľa vypísanej referencie. Obe je appka, ktorá si
+ *    protirečí na jednom riadku.
+ *
+ * Riadok preto hovorí len o EAN — o poli, ktoré stĺpec nenesie a ktoré má
+ * vlastnú medzeru s vlastným dôvodom. Kódy variantov zostávajú v detaile kusu
+ * (`ProductVariants`), kde je na ne miesto aj vysvetlenie.
+ */
 export function codeLine(
   row: { readonly hasAttributes: boolean },
   extra: ProductExtraView | undefined,
 ): CodeLineView {
-  const reference = referenceField(extra, row.hasAttributes);
   const ean = eanField(extra, row.hasAttributes);
 
-  if (!reference.known && !ean.known) {
-    // Obidve chýbajú z toho istého dôvodu — vezme sa dôvod kódu, lebo obidva
-    // idú tou istou cestou (variant → produkt → kľúč).
-    const why = reference.why;
+  if (!ean.known) {
+    const why = ean.why;
     return {
       kind: why,
-      text: `kód a EAN ${DASH} ${ABSENCE_WORD[why]}`,
+      text: `EAN ${DASH} ${ABSENCE_WORD[why]}`,
       icon: ABSENCE_ICON[why],
       title: ABSENCE_TITLE[why],
     };
   }
 
-  const parts = [
-    `kód ${reference.known ? reference.value : DASH}`,
-    `EAN ${ean.known ? ean.value : DASH}`,
-  ];
+  const parts = [`EAN ${ean.value}`];
   const coded = codedVariants(extra);
   if (coded > 1) {
     parts.push(`${coded} ${pluralSk(coded, 'variant', 'varianty', 'variantov')}`);
@@ -423,7 +443,7 @@ export function codeLine(
     kind: 'value',
     text: parts.join(' · '),
     icon: null,
-    title: 'Kód a EAN zo shopu. Podrobnosti po variantoch sú v detaile kusu.',
+    title: 'EAN zo shopu. Kód kusu je v prvom stĺpci, podrobnosti po variantoch v detaile kusu.',
   };
 }
 

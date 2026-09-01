@@ -148,20 +148,31 @@ import {
   SOLD_WINDOWS,
   catalogFilterKey,
   catalogSearchQuery,
+  describeCatalogFilter,
   type CatalogFilterState,
 } from '@/components/products/catalog-filter';
 import SoldCoverageNote from '@/components/products/SoldCoverageNote';
 import {
+  fullyReadDays,
   soldCoverageNote,
-  soldUnitsViaCoverage,
   useSoldCoverage,
+  type SoldCoverageState,
 } from '@/components/products/sold-coverage';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
 import { collectOperationBlockers } from '@/lib/status/blockers';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { statusSnapshotFromPayload } from '@/lib/status/snapshot';
 import { formatDateSk, formatEur } from '@/lib/ui/format';
-import { productLabel } from '@/lib/ui/product-label';
+import { LOCKED_DIMENSION_REASON, lockedDimensionLabels } from '@/lib/ui/locked-dimensions';
+import {
+  knownValue,
+  missingValue,
+  productColumns,
+  valueOrGap,
+  type ProductColumnId,
+  type ProductRowValues,
+  type ProductSoldWindow,
+} from '@/lib/ui/product-columns';
 import { formatCountSk, guardSentence, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ konštanty ════════════════════════════════════ */
@@ -771,7 +782,17 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
 
   /* ── 6. Vykreslenie ──────────────────────────────────────────────────── */
 
-  const lockedChips = ['kategória', 'kov', 'typ šperku', 'marža', 'obrátkovosť'];
+  /*
+   * ZAMKNUTÉ ROZMERY Z JEDNÉHO ZOZNAMU (D125, K4; 1. 9. 2026).
+   *
+   * Do zelenej brány V5 tu stál literál `['kategória', 'kov', 'typ šperku',
+   * 'marža', 'obrátkovosť']` s vetou „Čaká na dáta zo shopu". Marža a celkovo
+   * objednané pritom na Produktoch NORMÁLNE FILTRUJÚ (`CatalogFilters.tsx`,
+   * `catalog.repo.ts` po D125) — takže tá istá appka na jednej obrazovke podľa
+   * marže filtrovala a na druhej tvrdila, že na ňu dáta nemá. Zoznam je odteraz
+   * odvodený od `LockedCatalogFilter`, teda od jediného vlastníka tej otázky.
+   */
+  const lockedChips = lockedDimensionLabels();
 
   /** Veta o predplnení z presetu / zo zopakovanej zľavy; `null` = nič také. */
   const prefillNote = prefillNoteText(initial.prefillFrom ?? null);
@@ -781,15 +802,6 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
   /** Z koľkých sa vyberá. Neznáme je pomlčka, nikdy nula (kontrakt UI, bod 5). */
   const matchingUnknown = matching === null || (source === 'filter' && catalogEmpty);
 
-  /*
-   * Predané kusy vo vzorke — TOU ISTOU bránou ako tabuľka Produktov a bočný
-   * panel (`sold-coverage.ts`), aby o tej istej medzere nehovorili tri
-   * obrazovky tri rôzne veci. Vysvetlivka nad tabuľkou (`SoldCoverageNote`)
-   * zostáva; toto je to isté priznanie NA RIADKU, kde sa podľa čísla vyberá
-   * pásmo.
-   */
-  const soldCell = (units: number | null) =>
-    soldUnitsViaCoverage(units, filter.soldWindowDays, soldCoverage);
   const emptySelection = rows !== null && itemsCount === 0 && busy !== 'loading';
 
   /*
@@ -881,7 +893,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                 </span>
               ))}
               {lockedChips.map((chip) => (
-                <span key={chip} className="chip lock" title="Čaká na dáta zo shopu">
+                <span key={chip} className="chip lock" title={LOCKED_DIMENSION_REASON}>
                   {chip}
                 </span>
               ))}
@@ -1177,75 +1189,17 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                   </div>
                 )}
 
-                {/* Vzorka sa kreslí, až keď je z čoho — prázdna tabuľka nie je stav. */}
-                {sample.length === 0 ? null : (
-                <div className="tbl-frame gap-t">
-                  <table className="tbl">
-                    <thead>
-                      <tr>
-                        <th>
-                          Vzorka — {formatCountSk(sample.length)} z{' '}
-                          {formatCountSk(discountedCount)}
-                        </th>
-                        <th className="n">Cena</th>
-                        <th className="n">Predané {filter.soldWindowDays} d</th>
-                        <th className="n">Pásmo</th>
-                        <th className="n">Nová cena</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sample.map((row) => {
-                        const tier = tierOfProduct.get(row.productId);
-                        const newPrice = discountedPriceOf(row.price, tier?.percent ?? 0);
-                        const label = productLabel({
-                          productId: row.productId,
-                          reference: row.reference ?? null,
-                          name: row.name,
-                        });
-                        return (
-                          <tr key={row.productId}>
-                            {/* D116 — na povrchu „referencia · názov"; `#id`
-                                zostáva v `title`, teda v technickom detaile. */}
-                            <td className="name" title={label.technical}>
-                              {label.text}
-                            </td>
-                            <td className="n" data-l="Cena">
-                              {formatEur(row.price)}
-                            </td>
-                            {/*
-                              I11 — číslo z `catalog/search` bránu pokrytia
-                              nemá, takže sa vypisuje cez `soldUnitsViaCoverage()`:
-                              pri neúplnom pokrytí `≥ N`, pri nule pomlčka
-                              s dôvodom v `title`. Nula tu totiž rozhoduje
-                              o PÁSME (0 predaných → najhlbšia zľava), takže
-                              „nevieme" vydané za nulu je cesta k −30 % na
-                              tisícoch kusov (31. 8. 2026).
-                            */}
-                            <td
-                              className="n"
-                              data-l="Predané"
-                              title={soldCell(row.unitsSold).title ?? undefined}
-                            >
-                              {soldCell(row.unitsSold).text}
-                            </td>
-                            <td className="n" data-l="Pásmo">
-                              {tier === undefined ? '—' : `${tier.letter} · ${tier.percent} %`}
-                            </td>
-                            <td className="n" data-l="Nová cena">
-                              <b>{newPrice === null ? '—' : formatEur(newPrice)}</b>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  <div className="tbl-foot">
-                    <span className="lvl-3">
-                      Orientačný prepočet, zaokrúhlenie shopu sa môže líšiť
-                    </span>
-                  </div>
-                </div>
-                )}
+                {/* Vzorka je vlastný komponent zámerne: rozvrh a bunky sa
+                    tak dajú overiť bez siete aj bez prehliadača — tabuľka
+                    z tejto obrazovky sa inak vykresliť nedá, lebo riadky
+                    prichádzajú až z katalógu. */}
+                <SampleTable
+                  sample={sample}
+                  total={discountedCount}
+                  soldWindowDays={filter.soldWindowDays}
+                  coverage={soldCoverage}
+                  tierOfProduct={tierOfProduct}
+                />
               </>
             </section>
           )}
@@ -1463,6 +1417,186 @@ export function selectionPrintOf(rows: readonly SelectableRow[]): string {
   return rows.map((row) => `${row.productId}:${row.unitsSold}:${row.price ?? ''}`).join(',');
 }
 
+/**
+ * Stĺpce jednotnej sady, ktoré má vzorka ČÍM naplniť (D124).
+ *
+ * Riadky výberu prichádzajú z `/api/catalog/search`, ktoré obohatené polia
+ * (marža, sklad, obrátkovosť, stav zľavy v shope) nenesie — tie štyri stĺpce sa
+ * preto VYNECHÁVAJÚ. Nepremenúvajú sa a nedopĺňajú sa iným číslom; to je celé
+ * pravidlo D124 a jediný spôsob, ako sa táto tabuľka nerozíde s Produktmi.
+ */
+export const SAMPLE_COLUMN_IDS = [
+  'reference',
+  'name',
+  'price',
+  'soldWindow',
+] as const satisfies readonly ProductColumnId[];
+
+/**
+ * VZORKA VÝBERU — vlastný komponent zámerne (D124, 1. 9. 2026).
+ *
+ * Do 1. 9. 2026 bola vzorka vpletená do `NewDiscount` a `renderToStaticMarkup`
+ * ju nikdy nezastihol (riadky prichádzajú až z katalógu), takže jej bunky
+ * strážil jediný ZDROJOVÝ test — teda test, ktorý hľadá reťazec v súbore
+ * a pri prepísaní tej istej chyby inými slovami zostane zelený. Ako samostatný
+ * komponent sa dá vykresliť s hotovými riadkami a merať sa dá SPRÁVANIE.
+ *
+ * „Pásmo" a „Nová cena" sú stĺpce SPRIEVODCU: patria k rozhodovaniu o zľave,
+ * nie k popisu produktu, takže v jednotnej sade nie sú a v tabuľke Produktov
+ * nemajú čo hľadať.
+ */
+export function SampleTable({
+  sample,
+  total,
+  soldWindowDays,
+  coverage,
+  tierOfProduct,
+}: {
+  readonly sample: readonly SelectableRow[];
+  /** Z koľkých produktov je vzorka vybraná — teda veľkosť ZÁPISU. */
+  readonly total: number;
+  readonly soldWindowDays: number;
+  readonly coverage: SoldCoverageState;
+  readonly tierOfProduct: ReadonlyMap<number, TierPlan>;
+}) {
+  /* Prázdna tabuľka nie je stav — kreslí sa, až keď je z čoho. */
+  if (sample.length === 0) return null;
+  const columns = productColumns(SAMPLE_COLUMN_IDS, { soldWindowDays });
+  return (
+    <>
+      {/* Popis vzorky stál v prvom `<th>`. Po D124 tam stojí MENO STĹPCA
+          („Referencia"), lebo hlavička jednotnej sady musí byť v každej
+          tabuľke rovnaká — popis tabuľky sa preto presunul nad ňu. */}
+      <div className="hint gap-t" data-testid="sample-caption">
+        Vzorka — {formatCountSk(sample.length)} z {formatCountSk(total)}
+      </div>
+      <div className="tbl-frame">
+        <table className="tbl">
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th
+                  key={column.id}
+                  className={column.numeric ? 'n' : undefined}
+                  title={column.headTitle}
+                  data-col={column.id}
+                >
+                  {column.label}
+                </th>
+              ))}
+              <th className="n">Pásmo</th>
+              <th className="n">Nová cena</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sample.map((row) => {
+              const tier = tierOfProduct.get(row.productId);
+              const newPrice = discountedPriceOf(row.price, tier?.percent ?? 0);
+              /*
+               * Trojstavovosť si NEKRESLÍ táto tabuľka — kreslí si ju STĹPEC
+               * (D124). Nula v „Predané za okno" tu totiž rozhoduje o PÁSME
+               * (0 predaných → najhlbšia zľava), takže „nevieme" vydané za nulu
+               * je cesta k −30 % na tisícoch kusov (31. 8. 2026). Keď o tom
+               * rozhoduje definícia stĺpca, nedá sa to tu obísť dosadenou nulou.
+               */
+              const values = sampleRowValues(row, soldWindowDays, coverage);
+              return (
+                <tr key={row.productId}>
+                  {columns.map((column) => {
+                    const cell = column.cell(values);
+                    const cellClass = column.numeric
+                      ? 'n'
+                      : column.id === 'name'
+                        ? 'name'
+                        : undefined;
+                    return (
+                      <td
+                        key={column.id}
+                        className={cellClass}
+                        data-col={column.id}
+                        data-l={column.label}
+                        title={cell.title ?? undefined}
+                      >
+                        {/* Priznanie sa STLMÍ, hodnota nie — inak sa pomlčka
+                            číta ako údaj. */}
+                        {cell.unknown ? <span className="lvl-3">{cell.text}</span> : cell.text}
+                      </td>
+                    );
+                  })}
+                  <td className="n" data-l="Pásmo">
+                    {tier === undefined ? '—' : `${tier.letter} · ${tier.percent} %`}
+                  </td>
+                  <td className="n" data-l="Nová cena">
+                    <b>{newPrice === null ? '—' : formatEur(newPrice)}</b>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="tbl-foot">
+          <span className="lvl-3">Orientačný prepočet, zaokrúhlenie shopu sa môže líšiť</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Pokrytie predajnosti → vstup jednotného stĺpca „Predané za okno" (D124, I11).
+ *
+ * Vzorka dostáva z `/api/catalog/search` len jedno číslo (`unitsSold`) a to,
+ * za koľko dní má appka objednávky NAOZAJ stiahnuté, vie iba pokrytie. Bez
+ * tohto preloženia by stĺpec nemal ako rozlíšiť „nula sa predala" od „okno nie
+ * je dočítané" — a práve podľa tej nuly sa v sprievodcovi vyberá pásmo.
+ *
+ * `daysPartial` sa do dočítaných dní NERÁTA (`fullyReadDays`): server po D121
+ * sčítava kusy výhradne z dní so `status = 'complete'`, takže čiastočný deň je
+ * pre číslo predajov medzera. Nezistené pokrytie (`asked: false`, alebo
+ * nečitateľná odpoveď) je nula dočítaných dní — teda dolná hranica, nie plné
+ * okno; opačná voľba by z neznalosti spravila meranie.
+ */
+function soldWindowOf(
+  units: number | null,
+  windowDays: number,
+  coverage: SoldCoverageState,
+): ProductSoldWindow {
+  const complete =
+    coverage.asked && coverage.coverage !== null
+      ? Math.min(fullyReadDays(coverage.coverage), windowDays)
+      : 0;
+  const unknownDays = Math.max(windowDays - complete, 0);
+  return {
+    windowDays,
+    completeDays: complete,
+    unknownDays,
+    /* `null` je po D121 odpoveď servera „za toto okno to nevieme", nie nula. */
+    units: units === null ? missingValue<number>('days_missing') : knownValue(units),
+    lowerBound: unknownDays > 0,
+  };
+}
+
+/**
+ * Riadok výberu → hodnoty jednotných stĺpcov (D124).
+ *
+ * Každá medzera dostáva DÔVOD, lebo odpoveď katalógu ho nenesie a bez neho by
+ * bunka nevedela, čo prizná. Referencia chýba preto, že produkt nie je
+ * obohatený (D118) — nikdy preto, že by ju shop nemal.
+ */
+function sampleRowValues(
+  row: SelectableRow,
+  windowDays: number,
+  coverage: SoldCoverageState,
+): ProductRowValues {
+  return {
+    productId: row.productId,
+    reference: valueOrGap(row.reference ?? null, 'not_enriched'),
+    name: valueOrGap(row.name, 'shop_has_none'),
+    price: valueOrGap(row.price, 'shop_has_none'),
+    soldWindow: soldWindowOf(row.unitsSold, windowDays, coverage),
+  };
+}
+
 /** Dĺžka okna v dňoch. Nedopočítaný ani rozpísaný dátum nesmie zhodiť render. */
 function safeWindowDays(from: string, to: string): number {
   const shape = /^\d{4}-\d{2}-\d{2}$/;
@@ -1478,19 +1612,17 @@ function defaultName(tiers: readonly TierPlan[], from: string, to: string): stri
   return percent === 0 ? `Zľava${window}` : `Zľava do ${percent} %${window}`;
 }
 
-/** Filter ako čipy — to isté, čo vidno v tabe Produkty. Zamknuté sem nepatria. */
+/**
+ * Filter ako čipy — to isté, čo vidno v tabe Produkty (D125, 1. 9. 2026).
+ *
+ * Slovník je JEDEN a žije v `catalog-filter.ts`; tu zostáva len veta pre stav
+ * „nič sa neobmedzilo". Dovtedy tu bola vlastná kópia, ktorá poznala sedem
+ * podmienok z pätnástich — zľava zúžená maržou či skladom sa v zhrnutí hlásila
+ * ako „celý katalóg", hoci sa zapisovala úplne iná množina.
+ */
 function describeFilter(filter: CatalogFilterState): string[] {
-  const chips: string[] = [];
-  if (filter.query.trim() !== '') chips.push(`„${filter.query.trim()}"`);
-  if (filter.soldBuckets.includes('none')) chips.push('0 predaných');
-  if (filter.soldBuckets.includes('low')) chips.push('1–2 predané');
-  if (filter.soldBuckets.includes('mid')) chips.push('3–9 predaných');
-  if (filter.soldBuckets.includes('high')) chips.push('10 a viac predaných');
-  if (filter.priceFrom.trim() !== '') chips.push(`cena od ${filter.priceFrom}`);
-  if (filter.priceTo.trim() !== '') chips.push(`cena do ${filter.priceTo}`);
-  if (filter.neverDiscounted) chips.push('nikdy nezlacnené');
-  if (chips.length === 0) chips.push('celý katalóg');
-  return chips;
+  const chips = describeCatalogFilter(filter);
+  return chips.length === 0 ? ['celý katalóg'] : chips;
 }
 
 export default NewDiscount;

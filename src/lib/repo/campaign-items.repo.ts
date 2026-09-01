@@ -36,6 +36,7 @@
 import type {
   CampaignItemRecord,
   CampaignItemsRepo,
+  DateOnly,
   DiscountPercent,
   ItemStatus,
   MoneyString,
@@ -59,6 +60,21 @@ const INSERT_CHUNK_ROWS = 500;
  * skutočnú brzdu drží DB.
  */
 export const MAX_ITEMS_PER_CAMPAIGN = 10_000;
+
+/**
+ * Strop jednej strany histórie zľavy. Tabuľka v UI stránkuje po 100; 1 000 je
+ * poistka proti `?perPage=10000`, nie plán — 10 000 riadkov s referenciou a
+ * názvom je jedna odpoveď, ktorú prehliadač nemá ako nakresliť.
+ */
+const MAX_HISTORY_ROWS = 1_000;
+
+/**
+ * Strop histórie JEDNÉHO produktu. Zľava smie trvať najviac 3 mesiace (I7),
+ * takže 200 zliav na jednom produkte je roky prevádzky — a zoznam, ktorý sa
+ * ani nedá prečítať, nie je odpoveď. Že sa strop dosiahol, hovorí route
+ * príznakom `truncated`; ticho sa neoreže nič.
+ */
+const MAX_PRODUCT_HISTORY_ROWS = 200;
 
 /* ─────────────────────────────────── SQL ───────────────────────────────── */
 
@@ -154,6 +170,71 @@ const SQL_NEXT_PENDING =
   `${SELECT_ENRICHED} WHERE i.campaign_id = ? AND i.status = 'pending' ` +
   'ORDER BY i.position ASC LIMIT ?';
 
+/*
+ * HISTÓRIA PRODUKT ↔ ZĽAVA (D127 bod 3) — DVA POHĽADY NAD JEDNOU TABUĽKOU
+ *
+ * Oba sú ČISTO ČÍTACIE a oba sú JEDEN dotaz. Žijú tu a nie v `insights.repo.ts`
+ * preto, že `campaign_items` pozná toto jediné miesto — dva repozitáre nad tou
+ * istou tabuľkou by boli dve definície toho, čo je „položka zľavy".
+ *
+ * Prečo nestačilo, čo už existovalo:
+ *   · `listPage()` vracia CELÝ riadok položky vrátane blobov a nevie nič o tom,
+ *     ako sa produkt menuje v zrkadle ani čo dnes stojí. Tabuľka „ktoré produkty
+ *     boli v tejto zľave" potrebuje referenciu, názov a cenu — a nepotrebuje
+ *     `sent_payload`.
+ *   · `insightsRepo.productWrites()` (graf G3) zahadzuje `status = 'pending'`,
+ *     lebo kreslí DOKONČENÉ pokusy. História „v ktorých zľavách bol tento
+ *     produkt" musí ukázať aj to, čo ešte len čaká vo fronte — inak by produkt
+ *     naplánovaný na zajtra vyzeral, že v žiadnej zľave nie je.
+ */
+
+/**
+ * `LEFT JOIN` na zrkadlo katalógu (ten istý zámer ako pri `CATALOG_JOIN`):
+ * produkt smie z katalógu zmiznúť a jeho položka sa z histórie NESMIE stratiť.
+ * `reference`, `catalog_name` aj `catalog_price` sú vtedy `NULL` = „nevieme"
+ * (I11), nikdy nula a nikdy pomlčka — tú skladá až obrazovka.
+ *
+ * `name_at_write` je iná vec než `c.name`: prvé je to, čo appka o produkte
+ * vedela V ČASE ZÁPISU, druhé to, čo o ňom vie DNES. Vracajú sa obe, lebo
+ * rozdiel medzi nimi je informácia (produkt sa premenoval), nie duplikát.
+ */
+const SQL_HISTORY_PAGE =
+  'SELECT i.id, i.product_id, i.percent, i.position, i.status, i.attempt_count, ' +
+  'i.name_at_write, i.price_at_preview, i.price_at_write, i.price_mismatch, ' +
+  'i.reduction_unverifiable, i.error_code, i.finished_at, ' +
+  'c.reference AS reference, c.name AS catalog_name, c.price AS catalog_price, ' +
+  'c.enriched_at AS enriched_at, ' +
+  /*
+   * Toto pole rozlišuje DVA rôzne „nevieme", ktoré by inak vyzerali rovnako:
+   * produkt, ktorý z katalógu ZMIZOL (riadok zrkadla neexistuje), a produkt,
+   * ktorý v zrkadle je, ale NIE JE obohatený (D118) — v oboch prípadoch je
+   * `reference` `NULL`. Bez neho by obrazovka nemala z čoho povedať, ktoré
+   * z tých dvoch to je, a jedno by vydávala za druhé (I11).
+   */
+  'CASE WHEN c.product_id IS NULL THEN 0 ELSE 1 END AS in_catalog ' +
+  'FROM campaign_items i' +
+  CATALOG_JOIN +
+  ' WHERE i.campaign_id = ? ORDER BY i.position ASC LIMIT ? OFFSET ?';
+
+/**
+ * Opačný smer: v ktorých zľavách bol tento produkt.
+ *
+ * `JOIN campaigns` je INNER ZÁMERNE — `fk_items_campaign` garantuje, že kampaň
+ * položky existuje, takže tu sa stratiť nemá čo. (Zrkadlo katalógu je iný
+ * prípad: tam žiadny FK nie je, a preto je tam `LEFT JOIN`.)
+ *
+ * Poradie je od najnovšieho okna: `date_from DESC`. Zoznam je stropovaný, nie
+ * stránkovaný — jeden produkt v stovkách zliav je choroba, nie stránka.
+ */
+const SQL_PRODUCT_HISTORY =
+  'SELECT i.id AS item_id, i.status, i.percent, i.position, i.attempt_count, ' +
+  'i.price_at_preview, i.price_at_write, i.price_mismatch, i.error_code, ' +
+  'i.started_at, i.finished_at, ' +
+  'c.id AS campaign_id, c.name AS campaign_name, c.status AS campaign_status, ' +
+  'c.kind AS campaign_kind, c.percent AS campaign_percent, c.date_from, c.date_to ' +
+  'FROM campaign_items i JOIN campaigns c ON c.id = i.campaign_id ' +
+  'WHERE i.product_id = ? ORDER BY c.date_from DESC, i.id DESC LIMIT ?';
+
 const SQL_COUNT = 'SELECT COUNT(*) AS total FROM campaign_items WHERE campaign_id = ?';
 
 const SQL_COUNT_BY_STATUS =
@@ -212,6 +293,81 @@ export type CampaignItemWriteRow = Omit<
   CampaignItemRecordV3,
   'sentPayload' | 'rawResponse' | 'reference'
 >;
+
+/* ─────────────────── typy histórie produkt ↔ zľava (D127/3) ─────────────── */
+
+/**
+ * Jeden riadok tabuľky „ktoré produkty boli v tejto zľave".
+ *
+ * TROJSTAVOVOSŤ (I11) tu platí na KAŽDOM poli, ktoré je `| null`:
+ *   · `reference`, `catalogName`, `catalogPrice` — `null` = produkt nie je
+ *     v zrkadle, alebo nie je obohatený. NIKDY „produkt to nemá".
+ *   · `nameAtWrite`, `priceAtWrite` — `null` = zápis sa ešte nestal (položka je
+ *     `pending`), nie „bez názvu" a nie „cena nula".
+ *
+ * Zľavnená cena tu NIE JE. Počíta ju až route cez `discountedPrice()` a je to
+ * ORIENTAČNÉ číslo (D4) — skutočnú zľavnenú cenu určuje shop a cez API sa
+ * overiť nedá. Repozitár vracia fakty, nie aritmetiku nad nimi.
+ */
+export interface CampaignHistoryItem {
+  itemId: number;
+  productId: number;
+  percent: DiscountPercent;
+  position: number;
+  status: ItemStatus;
+  attemptCount: number;
+  /** Referencia zo zrkadla (D116). `null` = nevieme. */
+  reference: string | null;
+  /** Názov v zrkadle DNES. `null` = produkt v zrkadle nie je. */
+  catalogName: string | null;
+  /** Názov, ktorý appka videla V ČASE ZÁPISU. `null` = ešte sa nezapisovalo. */
+  nameAtWrite: string | null;
+  /** Cenníková cena v zrkadle DNES. `null` = nevieme. */
+  catalogPrice: MoneyString | null;
+  priceAtPreview: MoneyString | null;
+  priceAtWrite: MoneyString | null;
+  priceMismatch: boolean;
+  reductionUnverifiable: boolean;
+  errorCode: string | null;
+  finishedAt: Date | null;
+  /** `true` = riadok zrkadla prešiel `getFull` (D118). */
+  enriched: boolean;
+  /**
+   * `false` = produkt v zrkadle katalógu VÔBEC NIE JE (zmizol z katalógu).
+   * Rozlišuje sa od `enriched: false`, čo znamená „riadok je, `getFull` nebol".
+   */
+  inCatalog: boolean;
+}
+
+/**
+ * Jeden riadok tabuľky „v ktorých zľavách bol tento produkt".
+ *
+ * `itemStatus` je stav ZÁPISU na tomto produkte, `campaignStatus` stav celej
+ * zľavy — nie je to to isté a zliať sa nesmú: zľava môže byť `done`, kým jej
+ * položka skončila `failed`.
+ */
+export interface ProductCampaignHistoryRow {
+  itemId: number;
+  campaignId: number;
+  campaignName: string;
+  campaignStatus: string;
+  campaignKind: string;
+  /** Percento zľavy v hlavičke kampane. */
+  campaignPercent: DiscountPercent;
+  /** Percento pásma NA POLOŽKE (K3) — rozhodnuté pri potvrdení. */
+  percent: DiscountPercent;
+  dateFrom: DateOnly;
+  dateTo: DateOnly;
+  itemStatus: ItemStatus;
+  position: number;
+  attemptCount: number;
+  priceAtPreview: MoneyString | null;
+  priceAtWrite: MoneyString | null;
+  priceMismatch: boolean;
+  errorCode: string | null;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+}
 
 /** Vstup `createMany()` — `percent` je povinný, DB ho nemá ako doplniť (K3). */
 export interface NewCampaignItem {
@@ -286,6 +442,37 @@ type WriteItemRow = Omit<ItemRow, 'sent_payload' | 'raw_response'>;
  */
 type EnrichedItemRow = ItemRow & { reference: string | null };
 
+/** Riadok `SQL_HISTORY_PAGE` — položka + tri polia zo zrkadla. */
+type HistoryItemRow = Omit<ItemRow, 'sent_payload' | 'raw_response'> & {
+  reference: string | null;
+  catalog_name: string | null;
+  catalog_price: string | number | null;
+  enriched_at: Date | string | null;
+  in_catalog: number | boolean;
+};
+
+/** Riadok `SQL_PRODUCT_HISTORY` — položka + hlavička jej kampane. */
+interface ProductHistoryRow {
+  item_id: number;
+  status: ItemStatus;
+  percent: number;
+  position: number;
+  attempt_count: number;
+  price_at_preview: string | number | null;
+  price_at_write: string | number | null;
+  price_mismatch: number | boolean;
+  error_code: string | null;
+  started_at: Date | string | null;
+  finished_at: Date | string | null;
+  campaign_id: number;
+  campaign_name: string | null;
+  campaign_status: string | null;
+  campaign_kind: string | null;
+  campaign_percent: number;
+  date_from: Date | string;
+  date_to: Date | string;
+}
+
 const toDate = (value: Date | string): Date => (value instanceof Date ? value : new Date(value));
 const toDateOrNull = (value: Date | string | null): Date | null =>
   value == null ? null : toDate(value);
@@ -333,6 +520,63 @@ function mapRow(row: EnrichedItemRow): CampaignItemRecordV3 {
     /* Prázdny reťazec ani pomlčka sa tu NEVYRÁBAJÚ — `null` je „nevieme" (I11)
        a vetu z neho skladá až obrazovka. */
     reference: nonEmptyOrNull(row.reference),
+  };
+}
+
+/**
+ * `DATE` stĺpec chodí z drivera ako `Date` (pool má `timezone: 'Z'`) aj ako
+ * string. Von ide vždy `YYYY-MM-DD` — deň zľavy je kalendárny fakt, nie okamih.
+ */
+function toDateOnly(value: Date | string): DateOnly {
+  if (value instanceof Date) return value.toISOString().slice(0, 10) as DateOnly;
+  return String(value).slice(0, 10) as DateOnly;
+}
+
+function mapHistoryRow(row: HistoryItemRow): CampaignHistoryItem {
+  return {
+    itemId: Number(row.id),
+    productId: Number(row.product_id),
+    percent: Number(row.percent) as DiscountPercent,
+    position: Number(row.position),
+    status: row.status,
+    attemptCount: Number(row.attempt_count),
+    /* Prázdny reťazec sa nevyrába — `null` je „nevieme" (I11). */
+    reference: nonEmptyOrNull(row.reference),
+    catalogName: nonEmptyOrNull(row.catalog_name),
+    nameAtWrite: nonEmptyOrNull(row.name_at_write),
+    catalogPrice: toMoney(row.catalog_price),
+    priceAtPreview: toMoney(row.price_at_preview),
+    priceAtWrite: toMoney(row.price_at_write),
+    priceMismatch: Boolean(row.price_mismatch),
+    reductionUnverifiable: Boolean(row.reduction_unverifiable),
+    errorCode: row.error_code,
+    finishedAt: toDateOrNull(row.finished_at),
+    /* Turbopack tu už raz zahodil `if (!x)` — porovnávame explicitne. */
+    enriched: row.enriched_at !== null && row.enriched_at !== undefined,
+    inCatalog: Boolean(row.in_catalog),
+  };
+}
+
+function mapProductHistoryRow(row: ProductHistoryRow): ProductCampaignHistoryRow {
+  return {
+    itemId: Number(row.item_id),
+    campaignId: Number(row.campaign_id),
+    campaignName: row.campaign_name === null ? '' : String(row.campaign_name),
+    campaignStatus: row.campaign_status === null ? '' : String(row.campaign_status),
+    campaignKind: row.campaign_kind === null ? '' : String(row.campaign_kind),
+    campaignPercent: Number(row.campaign_percent) as DiscountPercent,
+    percent: Number(row.percent) as DiscountPercent,
+    dateFrom: toDateOnly(row.date_from),
+    dateTo: toDateOnly(row.date_to),
+    itemStatus: row.status,
+    position: Number(row.position),
+    attemptCount: Number(row.attempt_count),
+    priceAtPreview: toMoney(row.price_at_preview),
+    priceAtWrite: toMoney(row.price_at_write),
+    priceMismatch: Boolean(row.price_mismatch),
+    errorCode: row.error_code,
+    startedAt: toDateOrNull(row.started_at),
+    finishedAt: toDateOrNull(row.finished_at),
   };
 }
 
@@ -431,6 +675,31 @@ export interface CampaignItemsRepoExt extends CampaignItemsRepo {
   countByStatus(campaignId: number, conn?: Queryable): Promise<ItemStatusCounts>;
   /** K2: súhrn fronty naprieč živými kampaňami (hlavička „Fronta X/Y"). */
   queueTotals(conn?: Queryable): Promise<QueueTotals>;
+  /**
+   * D127 bod 3 — „ktoré produkty boli v tejto zľave", JEDNÝM dotazom.
+   *
+   * Ľahšia sestra `listPage()`: bez blobov, zato s referenciou, názvom a cenou
+   * zo zrkadla. Položka produktu, ktorý z katalógu zmizol, v zozname ZOSTANE
+   * (`LEFT JOIN`) s `reference === null`.
+   */
+  historyPage(
+    campaignId: number,
+    limit: number,
+    offset: number,
+    conn?: Queryable,
+  ): Promise<CampaignHistoryItem[]>;
+  /**
+   * D127 bod 3, opačný smer — „v ktorých zľavách bol tento produkt".
+   *
+   * Vracia aj `pending` položky (na rozdiel od `insightsRepo.productWrites()`,
+   * ktorý kreslí graf dokončených pokusov): zľava naplánovaná na zajtra je
+   * odpoveď na otázku „bol/bude tento produkt v zľave", nie medzera.
+   */
+  historyForProduct(
+    productId: number,
+    limit?: number,
+    conn?: Queryable,
+  ): Promise<ProductCampaignHistoryRow[]>;
 }
 
 const EMPTY_COUNTS: ItemStatusCounts = {
@@ -545,6 +814,34 @@ export function createCampaignItemsRepo(deps: CampaignItemsRepoDeps = {}): Campa
       if (!isValidId(campaignId)) return [];
       const capped = Math.min(1000, Math.max(1, Math.trunc(limit)));
       return selectMany(conn, SQL_NEXT_PENDING, [campaignId, capped]);
+    },
+
+    async historyPage(
+      campaignId: number,
+      limit: number,
+      offset: number,
+      conn?: Queryable,
+    ): Promise<CampaignHistoryItem[]> {
+      if (!isValidId(campaignId)) return [];
+      const cappedLimit = Math.min(MAX_HISTORY_ROWS, Math.max(1, Math.trunc(limit)));
+      const cappedOffset = Math.max(0, Math.trunc(offset));
+      const rows = await run<HistoryItemRow[]>(conn, SQL_HISTORY_PAGE, [
+        campaignId,
+        cappedLimit,
+        cappedOffset,
+      ]);
+      return (Array.isArray(rows) ? rows : []).map(mapHistoryRow);
+    },
+
+    async historyForProduct(
+      productId: number,
+      limit = MAX_PRODUCT_HISTORY_ROWS,
+      conn?: Queryable,
+    ): Promise<ProductCampaignHistoryRow[]> {
+      if (!isValidId(productId)) return [];
+      const capped = Math.min(MAX_PRODUCT_HISTORY_ROWS, Math.max(1, Math.trunc(limit)));
+      const rows = await run<ProductHistoryRow[]>(conn, SQL_PRODUCT_HISTORY, [productId, capped]);
+      return (Array.isArray(rows) ? rows : []).map(mapProductHistoryRow);
     },
 
     async countByCampaign(campaignId: number, conn?: Queryable): Promise<number> {

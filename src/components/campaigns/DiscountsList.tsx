@@ -120,6 +120,7 @@ import {
   type DiscountRow,
   type TierView,
 } from '@/components/campaigns/zlavy-api';
+import { repeatDiscountHref } from '@/components/campaigns/presets-model';
 import { useRefreshable } from '@/components/layout/refresh';
 import EmptyState from '@/components/ui/EmptyState';
 import Note from '@/components/ui/Note';
@@ -215,6 +216,101 @@ function StopQueue({ id, onChanged }: { id: number; onChanged: () => void }) {
         </button>
       </div>
       {note === null ? null : <div className={styles.note}>{note}</div>}
+    </details>
+  );
+}
+
+/* ═════════════════ začatie novej zľavy odtiaľto (D127 bod 2) ══════════════ */
+
+/** Sprievodca novou zľavou bez predplnenia — vyberie sa filtrom. */
+export const NEW_DISCOUNT_HREF = '/zlavy/nova';
+
+/**
+ * Koľko minulých zliav sa ponúkne ako východisko. Rozbaľovadlo je rozcestník,
+ * nie druhý rebrík — zliav môže byť päťdesiat a všetky sú vľavo.
+ */
+export const REPEAT_CHOICES = 5;
+
+/**
+ * Veta, ktorá stojí nad KAŽDOU cestou k novej zľave. Nie je to zdvorilosť:
+ * z tejto obrazovky sa zľava zapísať NEDÁ a človek to má vedieť skôr, než
+ * klikne — inak by tlačidlo „Nová zľava" pri produktoch existujúcej zľavy
+ * vyzeralo ako príkaz na zlacnenie.
+ */
+export const NEW_DISCOUNT_GATE_SK =
+  'Odtiaľto sa nič nezapíše. Otvorí sa sprievodca, ktorý urobí skúšku naprázdno a vypýta si potvrdenie.';
+
+/**
+ * Adresa sprievodcu s KONKRÉTNYM výberom produktov (`?produkty=…`).
+ *
+ * Sú to hodnoty formulára, nie príkaz na zápis: percento, okno, skúška
+ * naprázdno aj potvrdenie sa odohrajú v sprievodcovi nanovo (I3). Route, ktorá
+ * by z tohto zoznamu vyrobila kampaň, neexistuje a vzniknúť nesmie.
+ *
+ * Neplatné a opakované ID sa ZAHADZUJÚ, nie opravujú — adresa je vstup od
+ * človeka a sprievodca si aj tak vypýta riadky od API. Prázdny výber vracia
+ * `null`: odkaz na sprievodcu „s ničím" by predstieral výber, ktorý neexistuje.
+ */
+export function newDiscountFromProductsHref(
+  productIds: readonly number[],
+): string | null {
+  const seen = new Set<number>();
+  for (const id of productIds) {
+    if (Number.isInteger(id) && id > 0) seen.add(id);
+  }
+  if (seen.size === 0) return null;
+  const params = new URLSearchParams();
+  params.set('produkty', [...seen].join(','));
+  return `${NEW_DISCOUNT_HREF}?${params.toString()}`;
+}
+
+/**
+ * NOVÁ ZĽAVA ODTIAĽTO — rozcestník, nie holý odkaz (D127 bod 2).
+ *
+ * Do 1. 9. 2026 tu stálo `<Link href="/zlavy/nova">`, čo je odkaz do prázdneho
+ * formulára: kto chcel zopakovať to, čo raz fungovalo, musel otvoriť detail
+ * zľavy a nájsť tlačidlo tam. Odteraz sa dá začať dvomi spôsobmi a oba KONČIA
+ * v tom istom sprievodcovi:
+ *
+ *   · výberom podľa filtra (predvolene ležiaky),
+ *   · z výberu minulej zľavy — prenesú sa pásma a dĺžka okna, PRODUKTY NIE.
+ *     Sada sa vyberie znova z dnešného katalógu, lebo minulá zľava bežala nad
+ *     iným (`repeatDiscountHref`, D112).
+ *
+ * I3 sa tým NEOSLABUJE ani o kúsok: obe vetvy sú `href` do `/zlavy/nova`,
+ * teda hodnoty formulára. Skúška naprázdno a potvrdenie sa odohrajú tam
+ * nanovo a inej cesty k `setReduction` odtiaľto niet.
+ */
+export function NewDiscountStart({ rows }: { rows: readonly DiscountRow[] }) {
+  const choices = rows.slice(0, REPEAT_CHOICES);
+  return (
+    <details className="stopq" data-testid="new-discount-start">
+      <summary className="btn primary">Nová zľava</summary>
+      <div className="stopq-b">
+        <span>{NEW_DISCOUNT_GATE_SK}</span>
+        <Link className="btn sm" href={NEW_DISCOUNT_HREF} data-testid="new-discount-link">
+          Vybrať produkty podľa filtra
+        </Link>
+        {choices.length === 0 ? null : (
+          <div data-testid="new-discount-repeat">
+            <div className="lvl-3">
+              Alebo začať z výberu minulej zľavy — prenesú sa pásma a dĺžka okna, produkty sa
+              vyberú nanovo z dnešného katalógu.
+            </div>
+            {choices.map((row) => (
+              <Link
+                key={row.id}
+                className="btn sm"
+                href={repeatDiscountHref(row)}
+                data-testid="new-discount-repeat-one"
+              >
+                {row.name} <Dot />
+                {row.percent} %
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
     </details>
   );
 }
@@ -557,11 +653,7 @@ export function DiscountsList({ selectedId = null, detail = null }: DiscountsLis
       <div className={styles.head}>
         <h1>Zľavy</h1>
         {/* Pri prázdnej obrazovke nesie jedinú akciu prázdny stav (bod 11). */}
-        {empty ? null : (
-          <Link className="btn primary" href="/zlavy/nova" data-testid="new-discount-link">
-            Nová zľava
-          </Link>
-        )}
+        {empty ? null : <NewDiscountStart rows={[...live, ...ordered.finished]} />}
       </div>
 
       {failed === null ? null : (
@@ -586,11 +678,9 @@ export function DiscountsList({ selectedId = null, detail = null }: DiscountsLis
           <EmptyState
             title="Zatiaľ tu nie je ani jedna zľava"
             description="Zľava je sada produktov, ktorým appka zapíše nižšiu cenu na zvolené obdobie."
-            action={
-              <Link className="btn primary" href="/zlavy/nova">
-                Nová zľava
-              </Link>
-            }
+            /* Bez jedinej zľavy nie je čo zopakovať — rozcestník ponúkne
+               výber filtrom a povie tú istú vetu o skúške naprázdno (I3). */
+            action={<NewDiscountStart rows={[]} />}
           />
         </section>
       ) : null}

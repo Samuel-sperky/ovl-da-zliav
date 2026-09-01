@@ -98,7 +98,8 @@ import BlockerNotes from '@/components/products/BlockerNotes';
 import CatalogFilters from '@/components/products/CatalogFilters';
 import CatalogStatusPanel from '@/components/products/CatalogStatusPanel';
 import CatalogTable from '@/components/products/CatalogTable';
-import { fetchExtras } from '@/components/products/extras-api';
+import { enrichPage, fetchExtras } from '@/components/products/extras-api';
+import { enrichPageNote, type EnrichPageView } from '@/components/products/enrich-note';
 import { EMPTY_EXTRAS, mergeExtras, type ExtrasStore } from '@/components/products/product-extras';
 import ProductDetailPanel from '@/components/products/ProductDetailPanel';
 import SelectionBar from '@/components/products/SelectionBar';
@@ -441,6 +442,48 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
    */
   const [kpi, setKpi] = useState<ProductKpiPageView | null>(null);
 
+  /*
+   * OBOHATENIE STRANY, NA KTORÚ SA ČLOVEK PRÁVE POZERÁ (D123, K2).
+   *
+   * Do 1. 9. 2026 sa obohacovalo len na pozadí (dávka vo vlastnom tempe
+   * a v poradí priority) a na klik po JEDNOM produkte v bočnom paneli. Tabuľka
+   * preto zostávala plná pomlčiek bez ohľadu na to, ako dobre bola navrhnutá —
+   * kvóta 20/min nedovolila nič iné. Zdvihnutá kvóta (150/min, 1000/deň) mení
+   * aritmetiku: strana po 100 stojí ~50 s, teda sa dá obohatiť to, čo je na
+   * obrazovke.
+   *
+   * `kpiTick` je dôvod, prečo tu nestačí jeden efekt: KPI sa čítajú z LOKÁLNEJ
+   * databázy, takže dovtedy, kým obohatenie riadky nezapíše, by odpoveď bola
+   * tá istá. Po `enriched > 0` sa preto KPI vypýtajú znova — inak by človek
+   * videl pomlčky na riadkoch, ktoré appka práve doplnila, a musel by
+   * prelistovať tam a späť.
+   *
+   * Čo tu ZÁMERNE NIE JE: žiadna vlastná brána. O sviežosť (6 h), poradie
+   * priority, denný cieľ, minútový strop a pauzy od shopu sa stará engine
+   * (`enrichPageOnDemand`). Druhé pravidlo o tom istom na klientovi by sa
+   * s tým prvým rozišlo.
+   */
+  const [enrichView, setEnrichView] = useState<EnrichPageView | null>(null);
+  const [kpiTick, setKpiTick] = useState(0);
+
+  useEffect(() => {
+    setEnrichView(null);
+    if (rows.length === 0) return;
+    const abort = new AbortController();
+    void enrichPage(
+      rows.map((row) => row.productId),
+      abort.signal,
+    ).then((res) => {
+      if (abort.signal.aborted) return;
+      /* Neúspech siete NIE JE výsledok obohatenia: veta pod tabuľkou zostane
+         nenapísaná, namiesto toho, aby tvrdila „shop nás odmietol". */
+      if (!res.ok) return;
+      setEnrichView(res.data);
+      if (res.data.enriched > 0) setKpiTick((tick) => tick + 1);
+    });
+    return () => abort.abort();
+  }, [pageIds]);
+
   useEffect(() => {
     setKpi(null);
     if (rows.length === 0) return;
@@ -455,8 +498,12 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
       if (res.ok) setKpi(res.data);
     });
     return () => abort.abort();
-    // Ten istý odtlačok stránky ako pri kódoch — pri rovnakých ID sa nepýta znova.
-  }, [pageIds]);
+    // Ten istý odtlačok stránky ako pri kódoch — pri rovnakých ID sa nepýta
+    // znova; `kpiTick` prikáže druhé čítanie po tom, čo obohatenie niečo zapísalo.
+  }, [pageIds, kpiTick]);
+
+  /** Veta o obohatení strany (R2). `null` = mlčí, lebo niet čo povedať. */
+  const enrichNote = useMemo(() => enrichPageNote(enrichView), [enrichView]);
 
   /**
    * Načítanie rozdelenia cien — spúšťa ho výhradne otvorenie rozkliku.
@@ -745,10 +792,12 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
       />
 
       <div className="layout-filters">
+        {/* `lockedFilters` sa do panela od D125 NEPOSIELAJÚ: filter bez dátového
+            zdroja obrazovka nekreslí ani sivý (K4). Odpoveď ich naďalej hlási —
+            je to priznanie „poslal si parameter, ktorý neaplikujem". */}
         <CatalogFilters
           filter={filter}
           counts={view === null ? null : view.counts}
-          lockedFilters={view === null ? {} : view.lockedFilters}
           saved={saved}
           activeSaved={activeSaved}
           open={filtersOpen}
@@ -869,6 +918,21 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
             coverage={soldCoverage}
             windowDays={view === null ? filter.soldWindowDays : view.soldWindowDays}
           />
+
+          {/* OBOHATENIE TEJTO STRANY, POVEDANÉ ČÍSLOM (D123, R2).
+              Stojí NAD tabuľkou — tam, kde človek číta pomlčky a pýta sa
+              prečo. Keď sa nič nestalo a ani nemalo (strana bola svieža),
+              veta sa nekreslí vôbec: trvalá vysvetlivka sa prestane čítať. */}
+          {enrichNote === null ? null : (
+            <div
+              className={enrichNote.tone === 'attention' ? 'fresh' : 'fresh lvl-3'}
+              title={enrichNote.title ?? undefined}
+              data-testid="catalog-enrich-note"
+              data-tone={enrichNote.tone}
+            >
+              {enrichNote.text}
+            </div>
+          )}
 
           {/* Výsledok posledného dohľadania — pri mieste, kde vzniklo. Sú to
               MERANÉ čísla (koľko riadkov pribudlo, koľko sa nestihlo), takže

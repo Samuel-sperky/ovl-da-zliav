@@ -266,8 +266,11 @@ describe('Karty rozcestníka: stav sa netlačí na spodok karty', () => {
 describe('Zamknuté funkcie zostali celé na POVRCHU (kontrakt bod 18)', () => {
   const povrch = surfaceBlocks(LOCKED);
 
-  it('všetky štyri funkcie aj s tým, čo im chýba, sú bez kliknutia vidieť', () => {
-    expect(LOCKED_FEATURES).toHaveLength(4);
+  it('všetky zamknuté funkcie aj s tým, čo im chýba, sú bez kliknutia vidieť', () => {
+    /* Dva, nie štyri: D125 (1. 9. 2026) vyradilo maržu a sklad — dáta na ne
+       appka po migrácii 0014 MÁ a Produkty podľa nich filtrujú. Dôvod je
+       v `LockedFeatures.tsx`. */
+    expect(LOCKED_FEATURES).toHaveLength(2);
     const text = povrch.join(' ');
     for (const row of LOCKED_FEATURES) {
       expect(text, `funkcia „${row.feature}" nie je na povrchu`).toContain(row.feature);

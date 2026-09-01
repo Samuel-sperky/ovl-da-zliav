@@ -44,6 +44,7 @@ import type { CatalogFilterState, OriginFilter } from '@/components/products/cat
 import {
   catalogSearchQuery,
   DEFAULT_CATALOG_FILTER,
+  describeCatalogFilter,
   filterRowsByOrigin,
   parseCatalogFilterQuery,
 } from '@/components/products/catalog-filter';
@@ -64,15 +65,11 @@ const ROW: CatalogRowView = {
   origin: 'mirror' as const,
 };
 
-const LOCKED = {
-  stock: { locked: true as const, requested: false },
-  turnover: { locked: true as const, requested: false },
-  category: { locked: true as const, requested: false },
-  metal: { locked: true as const, requested: false },
-  jewelryType: { locked: true as const, requested: false },
-  margin: { locked: true as const, requested: false },
-};
-
+/*
+ * D125 (1. 9. 2026) — zamknuté filtre panel NEDOSTÁVA a nekreslí (K4), takže
+ * tu už nie je čo podstrčiť. Kto by chcel `lockedFilters` vrátiť, musí najprv
+ * vrátiť dátový zdroj; dovtedy je to filter, ktorý appka nedodrží.
+ */
 const write = (over: Partial<ProductWriteView>): ProductWriteView => ({
   itemId: 1,
   campaignId: 7,
@@ -102,7 +99,6 @@ function renderFilters(
     createElement(CatalogFilters, {
       filter,
       counts: null,
-      lockedFilters: LOCKED,
       saved: [],
       activeSaved: null,
       open: false,
@@ -344,17 +340,135 @@ describe('filtre — zľava je vlastný zápis', () => {
     expect(html).not.toContain('Appka vidí len to, čo sama zapísala.');
   });
 
-  it('skutočná zľava v eshope je vidieť ako zamknutá, nie zamlčaná', () => {
-    expect(html).toContain('Skutočná zľava v eshope');
-    expect(html).toContain('fopt locked');
-    expect(html).toContain('Čaká na dáta zo shopu');
+  it('skutočná zľava v eshope už nie je zamknutá — filtruje sa naozaj', () => {
+    /*
+     * ZMENA 1. 9. 2026 (D125, K4). Do tohto dňa tu bol SIVÝ riadok „Skutočná
+     * zľava v eshope" so zámkom a s vetou „Čaká na dáta zo shopu". Bol sivý
+     * zbytočne: `catalog_cache.reduction_percent` (D116, migrácia 0014) presne
+     * tú vec drží, takže odpoveď shopu sa filtrovať DÁ — a políčko „Zlacnené
+     * v shope" v skupine „Zľava v shope" to robí. Zamlčané to teda nie je,
+     * naopak: zamknutý sľub sa zmenil na funkčný filter a hranicu dát nesie
+     * priznanie, že shop appka pozná len pri OBOHATENÝCH riadkoch (I11).
+     *
+     * Tvrdenie sa tým nezoslabilo, sprísnilo sa: „vidieť so zámkom" splnil aj
+     * sivý text, „vidieť ako políčko, ktoré filtruje" sivý text nesplní.
+     */
+    expect(html).toContain('Zľava v shope');
+    expect(html).toContain('Zlacnené v shope');
+    expect(html).toContain('data-testid="filter-shop-discounted"');
+    expect(html).toContain('len pri obohatených produktoch');
+    // Zámok aj jeho slovník z tohto panela odišli celé (K4).
+    expect(html).not.toContain('Skutočná zľava v eshope');
+    expect(html).not.toContain('fopt locked');
+    expect(html).not.toContain('Čaká na dáta zo shopu');
   });
 
-  it('zamknuté filtre zostávajú vidieť aj po doplnení nových skupín', () => {
-    for (const label of ['Kategória', 'Kov', 'Typ šperku', 'Marža', 'Obrátkovosť', 'Sklad']) {
-      expect(html, `zamknutý filter ${label}`).toContain(label);
+  it('filter je len taký, aký sa dá naplniť — a ten sa dá naozaj kliknúť', () => {
+    /*
+     * D125 / K4 (1. 9. 2026) — INVENTÚRA, nie preferencia. Skupina „Zatiaľ
+     * nedostupné" so šiestimi sivými riadkami zmizla, lebo boli tri rôzne veci
+     * pod jedným priznaním:
+     *
+     *  · MARŽA a SKLAD zdroj MAJÚ (`margin_percent`, `qty` z `getFull`,
+     *    migrácia 0014). Sú to preto NORMÁLNE filtre s poľom a s prepínačom.
+     *    Sivý filter nad stĺpcom, ktorý v schéme JE, bolo priznanie bez dôvodu.
+     *  · OBRÁTKOVOSŤ ako meno ZMIZLA (R3 kontraktu V5): `qty_in_orders` je
+     *    CELKOVÉ množstvo za históriu shopu, nie za okno, takže filter sa menuje
+     *    „Celkovo objednané" a povie to aj popisom. Meno, ktoré sľubuje okno,
+     *    nad dátami, ktoré sú celkové, je presne to zliatie, čo I11 zakazuje.
+     *  · KATEGÓRIA, KOV a TYP ŠPERKU sa nekreslia VÔBEC. `catalog_cache.categories`
+     *    je pole ID bez slovníka názvov (appka dnes `GET /api/categories` vôbec
+     *    nevolá) a kov ani typ šperku nie sú v shope zoznamovateľné — sú to
+     *    „feature filters" pod nedokumentovanými ID. Z ničoho z toho nemá panel
+     *    čo ponúknuť na kliknutie, a podľa K4 taký filter na obrazovke NEEXISTUJE.
+     *
+     * KTO STRÁŽI TIE TRI NAMIESTO TOHTO TESTU: že ich API naďalej PRIZNÁVA
+     * („poslal si `?category=…` a ja som ho nepoužila") drží
+     * `test/integration/repo-fronta.spec.ts` a `test/integration/routes-v8.spec.ts`
+     * nad `lockedFilters`; že sa o zamknutých veciach dá čítať na jedinom
+     * mieste, drží `test/unit/sales-insights.spec.ts` nad `LockedFeatures`.
+     */
+    for (const [label, testId] of [
+      ['Marža', 'filter-margin-from'],
+      ['Sklad', 'filter-stock-in'],
+      ['Celkovo objednané', 'filter-ordered-from'],
+      ['Posledný predaj', 'filter-last-sale-any'],
+    ] as const) {
+      expect(html, `filter ${label} sa nekreslí`).toContain(label);
+      expect(html, `filter ${label} sa nedá kliknúť`).toContain(`data-testid="${testId}"`);
     }
+    for (const label of ['Kategória', 'Kov', 'Typ šperku']) {
+      expect(html, `filter ${label} nemá čím byť naplnený a v UI byť nesmie`).not.toContain(label);
+    }
+    // Meno nesľubuje okno tam, kde sú dáta celkové (R3).
+    expect(html).not.toContain('Obrátkovosť');
+    expect(html).toContain('NIE za zvolené obdobie');
     // Odhad sa v paneli filtrov nevyskytuje — všetky čísla sú merané (P7).
     expect(html).not.toContain('≈');
+  });
+});
+
+/* ═══════ F. Filtre sú na jednom mieste — Produkty aj výber do zľavy ═══════ */
+
+/**
+ * D125, bod „filtre sú rovnaké na Produktoch aj vo výbere do zľavy".
+ *
+ * Sprievodca novou zľavou filter NEPREKRESĽUJE: dostane ho hotový a pošle ho do
+ * `searchCatalog()`, takže množina, ktorú filter vyberie, je presne tá, ktorá
+ * sa ZAPÍŠE do produkčného eshopu. Zhrnutie v sprievodcovi preto nesmie poznať
+ * menej podmienok než dotaz — kým bol slovník čipov skopírovaný v
+ * `NewDiscount.tsx`, poznal sedem z pätnástich a zľava zúžená maržou či skladom
+ * sa hlásila ako „celý katalóg".
+ */
+describe('filtre — jeden slovník pre Produkty aj pre zľavu', () => {
+  /** Ku každej podmienke stavu jedna nepredvolená hodnota. */
+  const NARROWING: Readonly<Partial<Record<string, Partial<CatalogFilterState>>>> = {
+    query: { query: 'náramok' },
+    soldBuckets: { soldBuckets: ['none'] },
+    priceFrom: { priceFrom: '10' },
+    priceTo: { priceTo: '90' },
+    currentlyDiscounted: { currentlyDiscounted: true },
+    neverDiscounted: { neverDiscounted: true },
+    shopDiscounted: { shopDiscounted: true },
+    marginPercentFrom: { marginPercentFrom: '30' },
+    marginPercentTo: { marginPercentTo: '80' },
+    stock: { stock: 'out' },
+    orderedTotalFrom: { orderedTotalFrom: '5' },
+    orderedTotalTo: { orderedTotalTo: '50' },
+    lastSaleOlderDays: { lastSaleOlderDays: 180 },
+    shopPresence: { shopPresence: 'onlyMissing' },
+  };
+
+  /* Okno, poradie ani stránkovanie vybranú MNOŽINU nemenia — nie sú podmienky. */
+  const NOT_A_CONDITION = ['soldWindowDays', 'sort', 'page', 'perPage'];
+
+  it('predvolený filter nezužuje nič, a tak nemá ani jeden čip', () => {
+    expect(describeCatalogFilter(DEFAULT_CATALOG_FILTER)).toEqual([]);
+  });
+
+  it('KAŽDÁ podmienka stavu sa v zhrnutí ozve — nová sa nepridá ticho', () => {
+    for (const key of Object.keys(DEFAULT_CATALOG_FILTER)) {
+      if (NOT_A_CONDITION.includes(key)) continue;
+      const patch = NARROWING[key];
+      expect(patch, `pribudla podmienka ${key}, ale zhrnutie zľavy o nej nevie`).toBeDefined();
+      const chips = describeCatalogFilter({ ...DEFAULT_CATALOG_FILTER, ...patch });
+      expect(chips.length, `podmienka ${key} sa v zhrnutí zľavy neozve`).toBeGreaterThan(0);
+    }
+  });
+
+  it('čipy filtrov z obohatenia menujú to isté, čo panel (R3)', () => {
+    const chips = describeCatalogFilter({
+      ...DEFAULT_CATALOG_FILTER,
+      marginPercentFrom: '30',
+      stock: 'in',
+      orderedTotalFrom: '5',
+      lastSaleOlderDays: 180,
+    });
+    expect(chips).toContain('marža od 30 %');
+    expect(chips).toContain('na sklade');
+    expect(chips).toContain('celkovo objednané od 5 ks');
+    expect(chips).toContain('posledný predaj starší než 180 dní');
+    // Ani tu sa celkové množstvo nevydáva za obrátkovosť za okno (R3).
+    expect(chips.join(' ')).not.toMatch(/obrátkovosť/i);
   });
 });

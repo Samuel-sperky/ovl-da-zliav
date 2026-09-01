@@ -321,6 +321,15 @@ describe('predajnosť sa nikde nevydáva za obrátkovosť', () => {
       'src/lib/sales/insights.ts',
       'src/components/products/ProductDetailPanel.tsx',
       'src/components/products/CatalogTable.tsx',
+      /*
+       * PRIBUDLO 1. 9. 2026 (zelená brána V5). Jednotná definícia stĺpcov mala
+       * stĺpec pomeru pomenovaný `turnover` — teda presne tak, ako to tento
+       * test zakazuje — a prešlo jej to len preto, že v tomto zozname nebola.
+       * Je to ten istý tvar zlyhania ako „grep nad priečinkom A nepovie nič
+       * o diere v priečinku B": modul sa premenoval na `soldPerStock` a odteraz
+       * v zozname stojí.
+       */
+      'src/lib/ui/product-columns.ts',
     ]) {
       const code = read(path);
       // Slovo smie padnúť len v popise toho, čo appka NEVIE — nikdy ako
@@ -348,10 +357,27 @@ describe('predajnosť sa nikde nevydáva za obrátkovosť', () => {
     // Chýbajú nákupné ceny (COGS) — nie predaje.
     expect(locked).toContain('nákupné ceny');
     expect(locked).toContain('Predané kusy fungujú vždy');
-    // Vo filtroch je viditeľná, ale neklikateľná (K8) — nie skrytá.
+    /*
+     * ZMENA 1. 9. 2026 (D125, R3 kontraktu V5). Do tohto dňa sa tu meralo, že
+     * panel filtrov kreslí sivý neklikateľný riadok `turnover: 'Obrátkovosť'`
+     * s `aria-disabled="true"`. Ten riadok ZMIZOL a nič ho nenahradilo pod tým
+     * menom: podľa K4 filter bez dátového zdroja na obrazovke NEEXISTUJE, a
+     * `qty_in_orders` obrátkovosť NIE JE — je to CELKOVÉ množstvo za históriu
+     * shopu, nie obrat za okno. Panel preto ponúka filter „Celkovo objednané",
+     * ktorý sľubuje presne toľko, koľko stĺpec vie.
+     *
+     * Tvrdenie tohto testu — „predajnosť sa nikde nevydáva za obrátkovosť" —
+     * sa tým nezoslabilo: dovtedy sa strážilo, že sivé slovo je vidieť, odteraz
+     * sa stráži, že to slovo nad celkovým množstvom NEPADNE vôbec a že popis
+     * okno výslovne popiera. Že je obrátkovosť naďalej priznaná ako zamknutá,
+     * drží `LockedFeatures` o tri riadky vyššie; že ju API neaplikuje ako
+     * filter, drží `test/integration/repo-fronta.spec.ts` (`lockedFilters`
+     * neobsahuje `turnover`).
+     */
     const filters = read('src/components/products/CatalogFilters.tsx');
-    expect(filters).toContain("turnover: 'Obrátkovosť'");
-    expect(filters).toContain('aria-disabled="true"');
+    expect(filters).not.toContain("turnover: 'Obrátkovosť'");
+    expect(filters).toContain('Celkovo objednané');
+    expect(filters).toContain('NIE za zvolené obdobie');
   });
 });
 

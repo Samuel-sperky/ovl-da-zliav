@@ -279,3 +279,83 @@
   font-size: 11px;
   font-weight: 620;
 }
+
+/* ── Koláč: rozdelenie katalógu alebo výberu (D126) ────────────────────── */
+
+/*
+ * Rám koláča. `max-width` je tu preto, že `globals.css` dáva každému
+ * `.chart svg[role="img"]` šírku 100 % — a kruh roztiahnutý cez celú kartu má
+ * priemer 600 px a vyzerá ako chyba. Šírka sa nesmie riešiť na SVG cez `width`,
+ * to by ten globálny predpis prebil len náhodou; `max-width` je iná vlastnosť,
+ * takže spolupracujú.
+ */
+.pieFrame {
+  max-width: 280px;
+}
+
+/*
+ * Výsek. Obrys v papieri oddeľuje susedné diely aj vtedy, keď majú blízke
+ * kroky rampy — bez neho splynú dva tenké výseky do jedného a koláč tvrdí
+ * o jeden diel menej.
+ */
+.pieWedge {
+  stroke: var(--paper2);
+  stroke-width: 1.5;
+}
+
+/*
+ * Poradové číslo dielu — DRUHÝ kanál popri farbe (pravidlo troch kanálov).
+ * Leží mimo výseku, na papieri, takže mu kontrast nekolíše s krokom rampy.
+ */
+.pieOrder {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+/* Poradové číslo v legende — tá istá značka ako pri výseku, nie ozdoba. */
+.legendOrder {
+  color: var(--ink);
+  font-weight: 620;
+}
+
+/* ── Stĺpec v riadku zoznamu: porovnanie medzi položkami (D126) ─────────── */
+
+/*
+ * Podklad stĺpca. Je to DRUHÝ kanál nad číslom, ktoré v riadku už stojí —
+ * preto sa pod tento stĺpec nekreslí dátová tabuľka: tabuľkou je sám zoznam.
+ *
+ * Mierku dáva `barLayout()` z NAJVÄČŠEJ hodnoty skupiny a základňa je nula.
+ * Kto by dal každému riadku vlastnú mierku, spraví z porovnania ozdobu.
+ */
+.rowBar {
+  grid-column: 1 / -1;
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.rowBarFill {
+  display: block;
+  height: 100%;
+  background: var(--seq-teal-5);
+}
+
+/*
+ * Položka BEZ merania nedostane nulový stĺpec — nula je odpoveď a toto ňou
+ * nie je (I11). Dostane šrafovaný pahýľ cez celú šírku, teda tú istú značku,
+ * akou čiara kreslí nesťahovaný deň a koláč diel „nevieme".
+ */
+.rowBarUnknown {
+  display: block;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--line2) 0,
+    var(--line2) 1px,
+    transparent 1px,
+    transparent 5px
+  );
+}

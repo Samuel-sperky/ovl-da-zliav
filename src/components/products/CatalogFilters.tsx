@@ -7,27 +7,28 @@
  * `.filters.open`). Dominanta obrazovky je TABUĽKA — tento panel je preto
  * zámerne tichý: malé písmo, žiadne karty, žiadne vysvetľujúce odstavce (P2).
  *
- * Zamknuté filtre (K8, architektúra §5) — JEDNA SKUPINA, JEDNO VYSVETLENIE
- * ───────────────────────────────────────────────────────────────────────
- * Kategória, kov, typ šperku, marža, obrátkovosť a sklad sú v zozname
- * VIDITEĽNÉ, sivé a neklikateľné — nesmú byť skryté ani predstierané. Ich
- * zoznam sa NEPÍŠE natvrdo do obrazovky: prichádza z odpovede API
- * (`lockedFilters`). Keď dáta zo shopu pribudnú, filter zmizne zo zoznamu
- * v repozitári a táto obrazovka ho prestane kresliť sivý sama od seba.
+ * ZAMKNUTÉ FILTRE TU UŽ NIE SÚ (D125, K4 — 1. 9. 2026)
+ * ────────────────────────────────────────────────────
+ * Do 1. 9. 2026 mal panel na spodku skupinu „Zatiaľ nedostupné" so šiestimi
+ * sivými riadkami (kategória, kov, typ šperku, obrátkovosť, sklad, marža) a
+ * so siedmym o skutočnej zľave v eshope. **Celá zmizla**, lebo tie riadky boli
+ * dve rôzne veci pod jedným priznaním:
  *
- * Do 19. 8. 2026 boli zamknuté filtre v paneli DVOMA rôznymi spôsobmi naraz
- * (D9): obrátkovosť visela pod Predajnosťou, sklad mal vlastnú skupinu
- * s jediným sivým riadkom, skutočná zľava sedela medzi zaškrtávacími políčkami
- * a kategória, kov, typ a marža stáli zvlášť v skupine „Zatiaľ nedostupné".
- * Ten istý stav sa dal prečítať v troch rôznych tvaroch a vysvetlenie k nemu
- * bolo na dvoch miestach. Teraz je zamknuté JEDNOU skupinou na spodku panela,
- * s jednou vetou a jedným odkazom do Nastavení — kontrakt UI, bod 18:
- * vysvetlenie žije na jedinom mieste (`LockedFeatures.tsx`) a NEROZŠIRUJE sa.
+ *  · **Marža, sklad, obrátkovosť a posledný predaj zdroj MAJÚ** — `getFull` ich
+ *    vracia a migrácia 0014 ich drží v zrkadle (`margin_percent`, `qty`,
+ *    `qty_in_orders`, `last_time_in_order`). Sú preto nižšie ako NORMÁLNE
+ *    filtre, v skupine s jednou vetou o tom, že platia nad obohatenými
+ *    riadkami. Obrátkovosť pritom NEMÁ okno: `qty_in_orders` je celkové
+ *    množstvo za históriu shopu, a tak sa aj menuje (R3 kontraktu V5).
+ *  · **Kategória, kov a typ šperku zdroj NEMAJÚ** (kategórie sú v zrkadle len
+ *    pole ID bez slovníka názvov). Podľa K4 filter bez dátového zdroja na
+ *    obrazovke NEEXISTUJE — nie skrytý, nie sivý, ale žiadny. Že ich API
+ *    neaplikuje, hlási `lockedFilters` v odpovedi; obrazovka ich nekreslí.
+ *  · „Skutočná zľava v eshope" bola sivá zbytočne: filter „Zlacnené v shope"
+ *    (D116) presne to robí — nad obohatenými riadkami a s priznaním.
  *
- * „Skutočná zľava v eshope" je v tej skupine tiež, hoci ju API do
- * `lockedFilters` neposiela: nie je to filter nad stĺpcom zrkadla, ale
- * schopnosť, ktorú appka celú nemá. Až API začne vedieť filtrovať podľa
- * skutočnej zľavy, tento riadok odtiaľto zmizne.
+ * Vysvetlenie zamknutých vecí tým z tohto panela odišlo celé; jediné, čo
+ * o hraniciach dát hovorí, je veta pri obohatených filtroch (I11).
  *
  * DVE SKUPINY O ZĽAVE, LEBO SÚ TO DVE RÔZNE VETY
  * ──────────────────────────────────────────────
@@ -39,18 +40,12 @@
  * počet produktov v zľave (I11). Kým čísla nie sú (`counts=0`), veta sa
  * nekreslí — nula by klamala tak isto.
  *
- * Riadok „Skutočná zľava v eshope" zostáva medzi zamknutými: filter nad
- * obohatenými riadkami NIE JE stav zľavy celého katalógu a zliať to dvoje by
- * bolo presne to tvrdenie, ktoré K8 zakazuje.
- *
  * ZĽAVA JE VLASTNÝ ZÁPIS, NIE STAV ESHOPU
  * ───────────────────────────────────────
  * „Práve v zľave" a „nikdy nezlacnené" hovoria o tom, čo appka SAMA zapísala.
  * Nesie to NADPIS skupiny, nie poznámka pod ňou — poznámku pod skupinou nikto
  * nečíta a zámena týchto dvoch vecí je najdrahší omyl na tejto obrazovke.
- * Preto ten rozdiel drží nadpis aj po presune zamknutého riadku o skupinu
- * nižšie, a pod políčkami zostáva jedna krátka veta. Riadok „Skutočná zľava
- * v eshope" bol pri nich druhou poistkou, nie jedinou.
+ * Preto ten rozdiel drží NADPIS a pod políčkami zostáva jedna krátka veta.
  *
  * Čísla pri možnostiach sú z `counts` — meraný fakt, nie odhad (P7), preto sú
  * bez značky `≈`. Kým čísla nie sú, nekreslí sa nič; nula by klamala.
@@ -68,18 +63,20 @@
  */
 import type { CSSProperties } from 'react';
 
-import type { CatalogCountsView, LockedFilterView } from '@/components/products/catalog-api';
+import type { CatalogCountsView } from '@/components/products/catalog-api';
 import type {
   CatalogFilterState,
+  CatalogStock,
+  LastSaleWindow,
   OriginFilter,
   ShopPresence,
   SoldBucket,
   SoldWindow,
 } from '@/components/products/catalog-filter';
-import { SOLD_WINDOWS } from '@/components/products/catalog-filter';
+import { LAST_SALE_WINDOWS, SOLD_WINDOWS } from '@/components/products/catalog-filter';
 import type { SavedFilter } from '@/components/products/saved-filters';
 import Icon from '@/components/ui/Icon';
-import { formatCountSk, pluralSk, SURFACE_TERMS } from '@/lib/ui/vocabulary';
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Popisy ════════════════════════════════════ */
 
@@ -91,25 +88,12 @@ const BUCKET_LABELS: ReadonlyArray<{ bucket: SoldBucket; label: string }> = [
   { bucket: 'high', label: '10 a viac' },
 ];
 
-/**
- * Slovenské meno zamknutého filtra. Kľúče sú kódy z API — keď pribudne nový,
- * dostane meno tu; bez mena sa nekreslí vôbec (radšej nič než kód na povrchu).
- */
-const LOCKED_LABELS: Readonly<Record<string, string>> = {
-  stock: 'Sklad',
-  turnover: 'Obrátkovosť',
-  category: 'Kategória',
-  metal: 'Kov',
-  jewelryType: 'Typ šperku',
-  margin: 'Marža',
-};
-
-/**
- * Poradie zamknutých filtrov v jedinej skupine „Zatiaľ nedostupné" (D9).
- * Zhora to, čo si používateľ pýta najčastejšie. Kód, ktorý tu nie je, sa
- * nekreslí — radšej nič než kód na povrchu (P3).
- */
-const LOCKED_ORDER = ['category', 'metal', 'jewelryType', 'turnover', 'stock', 'margin'] as const;
+/** Sklad z obohatenia (D125). Tri možnosti, z ktorých vždy platí práve jedna. */
+const STOCK_LABELS: ReadonlyArray<{ value: CatalogStock; label: string }> = [
+  { value: 'any', label: 'Bez ohľadu na sklad' },
+  { value: 'in', label: 'Na sklade (viac než 0)' },
+  { value: 'out', label: 'Vypredané (0 a menej)' },
+];
 
 /**
  * Čo eshop o produkte povedal pri poslednom načítaní. Tri vylučujúce sa
@@ -144,21 +128,53 @@ const BARE_BUTTON: CSSProperties = {
   cursor: 'pointer',
 };
 
-function LockedOption({
-  label,
-  testId,
+/**
+ * Dvojica polí „od – do" nad jedným číslom. Je to ten istý tvar, aký má cena —
+ * dva rôzne tvary pre to isté by sa v hustom paneli čítali ako dve rôzne veci.
+ */
+function RangeRow({
+  unit,
+  fromValue,
+  toValue,
+  fromLabel,
+  toLabel,
+  testIdPrefix,
+  onFrom,
+  onTo,
 }: {
-  label: string;
-  testId?: string | undefined;
+  unit: string;
+  fromValue: string;
+  toValue: string;
+  fromLabel: string;
+  toLabel: string;
+  testIdPrefix: string;
+  onFrom: (next: string) => void;
+  onTo: (next: string) => void;
 }) {
   return (
-    <div
-      className="fopt locked"
-      aria-disabled="true"
-      title={SURFACE_TERMS.lockedFeature}
-      data-testid={testId}
-    >
-      {label}
+    <div className="row">
+      <input
+        className="inp"
+        style={{ width: '78px' }}
+        inputMode="decimal"
+        value={fromValue}
+        aria-label={fromLabel}
+        placeholder="od"
+        onChange={(event) => onFrom(event.target.value)}
+        data-testid={`${testIdPrefix}-from`}
+      />
+      <span className="lvl-3">–</span>
+      <input
+        className="inp"
+        style={{ width: '78px' }}
+        inputMode="decimal"
+        value={toValue}
+        aria-label={toLabel}
+        placeholder="do"
+        onChange={(event) => onTo(event.target.value)}
+        data-testid={`${testIdPrefix}-to`}
+      />
+      <span className="lvl-3">{unit}</span>
     </div>
   );
 }
@@ -210,7 +226,6 @@ function ChoiceGroup<T extends string>({
 export interface CatalogFiltersProps {
   filter: CatalogFilterState;
   counts: CatalogCountsView | null;
-  lockedFilters: Readonly<Record<string, LockedFilterView>>;
   saved: readonly SavedFilter[];
   /** Meno uloženého filtra, ktorý presne sedí s aktuálnym stavom. */
   activeSaved: string | null;
@@ -230,7 +245,6 @@ export interface CatalogFiltersProps {
 export function CatalogFilters({
   filter,
   counts,
-  lockedFilters,
   saved,
   activeSaved,
   open,
@@ -240,13 +254,6 @@ export function CatalogFilters({
   origin,
   onOriginChange,
 }: CatalogFiltersProps) {
-  const locked = Object.keys(lockedFilters);
-  /** Zamknuté filtre v jednom zozname a v stálom poradí — pozri hlavičku (D9). */
-  const lockedRows = LOCKED_ORDER.filter((code) => locked.includes(code)).map((code) => ({
-    code: code as string,
-    label: LOCKED_LABELS[code] as string,
-  }));
-
   function toggleBucket(bucket: SoldBucket, on: boolean) {
     const next = on
       ? [...filter.soldBuckets, bucket]
@@ -443,6 +450,102 @@ export function CatalogFilters({
         )}
       </div>
 
+      {/*
+       * ĎALŠIE ÚDAJE Z OBOHATENIA (D125, K4) — filtre, ktoré appka NAOZAJ vie
+       * naplniť: `margin_percent`, `qty`, `qty_in_orders`, `last_time_in_order`
+       * z `getFull` (migrácia 0014). Do 1. 9. 2026 boli sivé v skupine „Zatiaľ
+       * nedostupné", hoci pole v schéme bolo — priznanie bez dôvodu.
+       *
+       * Jedna veta na spodku hovorí, z koľkých riadkov odpoveď je: neobohatený
+       * produkt sa do výsledku NEDOSTANE, a bez toho čísla by prázdna tabuľka
+       * vyzerala ako „také produkty neexistujú" namiesto „toľko ich vieme" (I11).
+       */}
+      <div className="fgroup" data-testid="filter-enriched">
+        <h3>Marža</h3>
+        <RangeRow
+          unit="%"
+          fromValue={filter.marginPercentFrom}
+          toValue={filter.marginPercentTo}
+          fromLabel="Marža od (%)"
+          toLabel="Marža do (%)"
+          testIdPrefix="filter-margin"
+          onFrom={(value) => onChange({ marginPercentFrom: value, page: 1 })}
+          onTo={(value) => onChange({ marginPercentTo: value, page: 1 })}
+        />
+        {/* Marža prichádza zo shopu hotová — appka ju NEPOČÍTA (0014, bod 2).
+            Veta to hovorí, aby nikto nehľadal vzorec, ktorý v appke nie je. */}
+        <p className="lvl-3" data-testid="filter-margin-note">
+          Percento marže tak, ako ho posiela shop. Appka ju neprepočítava.
+        </p>
+
+        <h3>Sklad</h3>
+        <ChoiceGroup
+          name="stock"
+          options={STOCK_LABELS}
+          value={filter.stock}
+          onPick={(value) => onChange({ stock: value, page: 1 })}
+          testIdPrefix="filter-stock"
+        />
+
+        {/* NÁZOV NESĽUBUJE OKNO (R3). `qty_in_orders` je celkové množstvo za
+            históriu shopu; „obrátkovosť za 30 dní" sa bez histórie objednávok
+            vypočítať nedá, takže sa tak ani nemenuje. */}
+        <h3>Celkovo objednané</h3>
+        <RangeRow
+          unit="ks"
+          fromValue={filter.orderedTotalFrom}
+          toValue={filter.orderedTotalTo}
+          fromLabel="Celkovo objednané od (ks)"
+          toLabel="Celkovo objednané do (ks)"
+          testIdPrefix="filter-ordered"
+          onFrom={(value) => onChange({ orderedTotalFrom: value, page: 1 })}
+          onTo={(value) => onChange({ orderedTotalTo: value, page: 1 })}
+        />
+        <p className="lvl-3" data-testid="filter-ordered-note">
+          Za celú históriu eshopu, NIE za zvolené obdobie — obrátkovosť za okno
+          appka nemá z čoho počítať.
+        </p>
+
+        <h3>Posledný predaj</h3>
+        <div className="seg" role="group" aria-label="Posledný predaj starší než">
+          {/* `null` = bez filtra. Prepínač, nie políčka: „starší než 90 aj 180"
+              je tá istá otázka dvakrát. */}
+          <button
+            type="button"
+            className={filter.lastSaleOlderDays === null ? 'on' : undefined}
+            aria-pressed={filter.lastSaleOlderDays === null}
+            onClick={() => onChange({ lastSaleOlderDays: null, page: 1 })}
+            data-testid="filter-last-sale-any"
+          >
+            všetky
+          </button>
+          {LAST_SALE_WINDOWS.map((days: LastSaleWindow) => (
+            <button
+              key={days}
+              type="button"
+              className={filter.lastSaleOlderDays === days ? 'on' : undefined}
+              aria-pressed={filter.lastSaleOlderDays === days}
+              onClick={() => onChange({ lastSaleOlderDays: days, page: 1 })}
+              data-testid={`filter-last-sale-${days}`}
+            >
+              {`> ${days} d`}
+            </button>
+          ))}
+        </div>
+        <p className="lvl-3" data-testid="filter-last-sale-note">
+          Vrátane produktov, o ktorých shop nevie žiadny predaj — to sú tie
+          najhoršie ležiaky a vynechať ich by filter pokazilo.
+        </p>
+
+        {counts === null ? null : (
+          <div className="lvl-3" style={{ marginTop: '6px' }} data-testid="filter-enriched-scope">
+            {`Tieto štyri filtre platia len pre ${formatCountSk(
+              counts.enrichedRows,
+            )} obohatených produktov; o ostatných appka tieto čísla nepozná a nevráti ich.`}
+          </div>
+        )}
+      </div>
+
       {/* Stav v eshope je fail-closed: predvolene sa neponúkajú kusy, ktoré
           eshop pri poslednom načítaní nenašiel. Dostať sa k nim ale musí dať —
           práve tie treba z výberu odobrať alebo skontrolovať. */}
@@ -470,22 +573,6 @@ export function CatalogFilters({
         </div>
       )}
 
-      {/* JEDINÉ miesto so zamknutými filtrami (D9). Skupina stojí na spodku,
-          lebo sa ňou nedá pracovať — je to priznanie, nie ovládanie. Vysvetlenie
-          je jedna veta a jeden odkaz; celé žije v `LockedFeatures.tsx` a tu sa
-          NEROZŠIRUJE (kontrakt UI, bod 18). */}
-      <div className="fgroup" data-testid="filter-locked">
-        <h3>Zatiaľ nedostupné</h3>
-        {lockedRows.map((row) => (
-          <LockedOption key={row.code} label={row.label} />
-        ))}
-        {/* Skutočná zľava v eshope nie je stĺpec zrkadla, takže ju API do
-            `lockedFilters` nepošle — a napriek tomu musí byť vidieť. */}
-        <LockedOption label="Skutočná zľava v eshope" testId="filter-real-discount" />
-        <div className="lvl-3" style={{ marginTop: '6px' }}>
-          {SURFACE_TERMS.lockedFeature} · <a href="/nastavenia#zamknute">viac</a>
-        </div>
-      </div>
     </aside>
   );
 }

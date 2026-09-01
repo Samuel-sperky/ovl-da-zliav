@@ -21,6 +21,14 @@
  *     adresou requestu, nie prečítaním kódu.
  *  5. **Route `POST /api/catalog/enrich` je idempotentná.** Druhé otvorenie
  *     toho istého produktu nesmie poslať ANI JEDEN HTTP request.
+ *  6. **Strana na dopyt (D123, 1. 9. 2026) proti SKUTOČNEJ DB.** Route prijme
+ *     až 100 ID, `getFull` odošle LEN za nesvieže riadky a odpoveď nesie riadky
+ *     pre celú stranu aj ČÍSLA DŇA (R2). Vyčerpaný denný cieľ neobohacuje a
+ *     povie to číslom; chýbajúci kľúč je čitateľný dôvod, nie chyba appky.
+ *     Do 1. 9. 2026 tu bol test „route prijme JEDEN produkt, nie zoznam";
+ *     D123 ho prepísal, lebo zdvihnutá kvóta (150/min, 1000/deň) skrátila
+ *     stranu po 100 produktoch zo 6,3 min na ~50 s. Strážené zostáva všetko
+ *     ostatné: 101 ID, obe polia naraz, nula aj prázdne telo sú stále 400.
  *
  * Shop je buď skutočný mock server na loopbacku (I6), alebo fake klient, keď je
  * potrebná odpoveď, ktorú mock nepozná (`getFull` v ňom nie je implementovaný —
@@ -42,7 +50,12 @@ import type {
   UtcDate,
 } from '@/contracts';
 
-import { createCatalogEnrichRoute, type EnrichResponse } from '@/app/api/catalog/enrich/route';
+import {
+  createCatalogEnrichRoute,
+  type EnrichPageResponse,
+  type EnrichResponse,
+} from '@/app/api/catalog/enrich/route';
+import { ENRICH_PAGE_MAX_PRODUCTS } from '@/lib/engine/catalog-enrich';
 import { runEnrichBatch, type EnrichBatchDeps } from '@/lib/engine/catalog-enrich';
 import { resetRateLimiter } from '@/lib/http/define-route';
 import {
@@ -571,7 +584,7 @@ describe.skipIf(!available)('obohacovanie katalógu nad skutočnou DB', () => {
     });
   });
 
-  it('route prijme JEDEN produkt, nie zoznam — plošné obohatenie neexistuje', async () => {
+  it('route prijme STRANU (≤ 100 ID), plošné obohatenie stále neexistuje', async () => {
     await withAppConn(async (conn) => {
       const repo = createCatalogRepo({ defaultConn: conn });
       const shop = fakeShop((id) => richFull(id));
@@ -581,11 +594,20 @@ describe.skipIf(!available)('obohacovanie katalógu nad skutočnou DB', () => {
         reads: memoryBudget(),
         apiKey: apiKeyStub(),
         now,
+        sleepFn: async () => {},
         routeDeps: actorRouteDeps({ now }),
       });
 
+      // Strop je STRANA TABUĽKY: 101 ID je 400, nie tichá orezaná strana —
+      // vrátilo by sa iné číslo, než volajúci poslal.
+      const tooMany = Array.from({ length: ENRICH_PAGE_MAX_PRODUCTS + 1 }, (_, i) => 80_000 + i);
       for (const body of [
-        { productIds: ALL_PRODUCTS },
+        { productIds: tooMany },
+        { productIds: [] },
+        { productIds: [0] },
+        { productIds: [1.5] },
+        // Obe polia naraz: volajúci nevie, čo chce, a route si to nedomýšľa.
+        { productId: P_REST, productIds: [P_REST] },
         { productId: ALL_PRODUCTS },
         { productId: 0 },
         {},
@@ -596,6 +618,192 @@ describe.skipIf(!available)('obohacovanie katalógu nad skutočnou DB', () => {
         expect(response.status).toBe(400);
       }
       expect(shop.calls).toEqual([]);
+    });
+  });
+
+  /* ══════════ 5. Strana na dopyt (D123): platí sa len za neznáme ════════ */
+
+  it('strana obohatí LEN neobohatené riadky a vráti riadky pre celú stranu', async () => {
+    await withAppConn(async (conn) => {
+      const repo = createCatalogRepo({ defaultConn: conn });
+      const shop = fakeShop((id) => richFull(id));
+      const route = createCatalogEnrichRoute({
+        shop,
+        catalog: repo,
+        reads: memoryBudget(),
+        apiKey: apiKeyStub(),
+        now,
+        sleepFn: async () => {},
+        routeDeps: actorRouteDeps({ now }),
+      });
+
+      // Jeden riadok je obohatený UŽ TERAZ (tou istou routou), zvyšok nie.
+      const first = await parse(
+        await route(makeRequest('POST', '/api/catalog/enrich', { productId: P_ALLOW })),
+      );
+      expect((first.body.data as EnrichResponse).outcome).toBe('enriched');
+      expect(shop.calls).toEqual([P_ALLOW]);
+
+      const page = await parse(
+        await route(makeRequest('POST', '/api/catalog/enrich', { productIds: ALL_PRODUCTS })),
+      );
+      // Odpoveď, nie 500: keď route spadne, obálka nesie `internal_error` a
+      // celý zvyšok tvrdení by čítal `undefined` — tak sa pýtame priamo.
+      expect(page.body.error ?? null).toBeNull();
+      expect(page.status).toBe(200);
+      const data = page.body.data as EnrichPageResponse;
+
+      expect(data.mode).toBe('page');
+      expect(data.outcome).toBe('done');
+      expect(data.requested).toBe(ALL_PRODUCTS.length);
+      expect(data.fresh).toBe(1);
+      expect(data.stale).toBe(2);
+      expect(data.enriched).toBe(2);
+      expect(data.readsUsed).toBe(2);
+      expect(data.skipped).toEqual([]);
+      // Svieži riadok NEVOLAL `getFull` — počítadlo volaní klienta je dôkaz.
+      expect(shop.calls).toEqual([P_ALLOW, P_CAMPAIGN, P_REST]);
+
+      // Tabuľka dostane riadky pre KAŽDÉ poslané ID, jedným dotazom.
+      expect(data.enrichments).toHaveLength(ALL_PRODUCTS.length);
+      expect(data.enrichments.map((row) => row.productId)).toEqual(ALL_PRODUCTS);
+      for (const row of data.enrichments) {
+        expect(row.reference).toBe('SP-1042');
+        // `0` je vypredaný sklad, PLATNÁ NULA — a prežila MariaDB (I11).
+        expect(row.qty).toBe(0);
+        expect(row.enrichedAt).not.toBeNull();
+      }
+
+      // Čísla dňa idú von vždy — obrazovka nemá mlčať (R2).
+      expect(data.day.dailyTarget).not.toBeNull();
+      expect(data.day.readsLeftToday).not.toBeNull();
+    });
+  });
+
+  it('vyčerpaný denný cieľ NEOBOHACUJE a odpoveď to povie číslami (R2)', async () => {
+    // Cieľ dňa nastavíme na dnešok a naplníme ho — presne stav „desiata strana".
+    await withMigrationConn(async (conn) => {
+      await conn.query(
+        'UPDATE catalog_enrich_state SET batch_day = ?, enriched_today = 150, ' +
+          'daily_target = 150 WHERE id = 1',
+        [now().toISOString().slice(0, 10)],
+      );
+    });
+
+    await withAppConn(async (conn) => {
+      const repo = createCatalogRepo({ defaultConn: conn });
+      const shop = fakeShop((id) => richFull(id));
+      const route = createCatalogEnrichRoute({
+        shop,
+        catalog: repo,
+        reads: memoryBudget(),
+        apiKey: apiKeyStub(),
+        now,
+        sleepFn: async () => {},
+        routeDeps: actorRouteDeps({ now }),
+      });
+
+      const parsed = await parse(
+        await route(makeRequest('POST', '/api/catalog/enrich', { productIds: ALL_PRODUCTS })),
+      );
+      expect(parsed.status).toBe(200);
+      const data = parsed.body.data as EnrichPageResponse;
+
+      expect(data.outcome).toBe('target_reached');
+      expect(data.enriched).toBe(0);
+      expect(data.readsUsed).toBe(0);
+      // Toto je celé R2: číslo namiesto mlčania.
+      expect(data.day.enrichedTodayByBatch).toBe(150);
+      expect(data.day.dailyTarget).toBe(150);
+      expect(data.day.targetLeft).toBe(0);
+      expect(data.skipped).toEqual(ALL_PRODUCTS);
+      // Riadky sa vrátia aj tak — samé `null`, teda priznaná medzera, nie nula.
+      expect(data.enrichments).toHaveLength(ALL_PRODUCTS.length);
+      for (const row of data.enrichments) {
+        expect(row.enrichedAt).toBeNull();
+        expect(row.reference).toBeNull();
+        expect(row.qty).toBeNull();
+      }
+      expect(shop.calls).toEqual([]);
+    });
+  });
+
+  it('CHÝBAJÚCI KĽÚČ je čitateľný dôvod, nie chyba appky (dnešný stav)', async () => {
+    await withAppConn(async (conn) => {
+      const repo = createCatalogRepo({ defaultConn: conn });
+      const shop = fakeShop((id) => richFull(id));
+      const route = createCatalogEnrichRoute({
+        shop,
+        catalog: repo,
+        reads: memoryBudget(),
+        // `shop_write` kľúč 1. 9. 2026 v appke NIE JE (`present: false`), takže
+        // toto nie je hypotetický stav, ale ten, v ktorom appka práve stojí.
+        apiKey: {
+          loadForUse: async () => null,
+          recallScopes: () => ({ scopes: SCOPES, checkedAt: NOW }),
+        },
+        now,
+        sleepFn: async () => {},
+        routeDeps: actorRouteDeps({ now }),
+      });
+
+      const parsed = await parse(
+        await route(makeRequest('POST', '/api/catalog/enrich', { productIds: ALL_PRODUCTS })),
+      );
+      // 200 s dôvodom, nie 500: appka nie je pokazená, len nemá čím čítať.
+      expect(parsed.status).toBe(200);
+      const data = parsed.body.data as EnrichPageResponse;
+      expect(data.outcome).toBe('no_key');
+      expect(data.enriched).toBe(0);
+      expect(shop.calls).toEqual([]);
+      expect(data.enrichments).toHaveLength(ALL_PRODUCTS.length);
+      expect(data.day.dailyTarget).not.toBeNull();
+
+      // Pauza sa NEZAPÍŠE — kľúč vloží človek a ďalší klik to má skúsiť znova.
+      const state = await repo.loadEnrichState();
+      expect(state.pauseReason).toBeNull();
+    });
+  });
+
+  it('strana pri `ip_banned` neoznačí NIČ a dôvod zapíše do stavu (D120)', async () => {
+    await withAppConn(async (conn) => {
+      const repo = createCatalogRepo({ defaultConn: conn });
+      const banned = new ShopRequestError(
+        makeShopError({ kind: 'forbidden', code: 'ip_banned', httpStatus: 403 }),
+      );
+      const shop = fakeShop(() => banned);
+      const route = createCatalogEnrichRoute({
+        shop,
+        catalog: repo,
+        reads: memoryBudget(),
+        apiKey: apiKeyStub(),
+        now,
+        sleepFn: async () => {},
+        routeDeps: actorRouteDeps({ now }),
+      });
+
+      const parsed = await parse(
+        await route(makeRequest('POST', '/api/catalog/enrich', { productIds: ALL_PRODUCTS })),
+      );
+      const data = parsed.body.data as EnrichPageResponse;
+
+      expect(data.outcome).toBe('ip_banned');
+      expect(data.error).toBe('ip_banned');
+      expect(data.enriched).toBe(0);
+      // Ban platí pre CELÚ cestu — druhý produkt sa už neskúša.
+      expect(shop.calls).toHaveLength(1);
+      expect(data.skipped).toEqual(ALL_PRODUCTS);
+
+      const rows = await repo.enrichmentFor(ALL_PRODUCTS);
+      for (const productId of ALL_PRODUCTS) {
+        expect(rows.get(productId)?.enrichedAt ?? null).toBeNull();
+        // Ani ako POKUS: ban nie je vina produktu (D120).
+        expect(rows.get(productId)?.enrichAttemptedAt ?? null).toBeNull();
+      }
+
+      const state = await repo.loadEnrichState();
+      expect(state.pauseReason).toBe('ip_banned');
+      expect(state.pausedUntil).toBeNull();
     });
   });
 
