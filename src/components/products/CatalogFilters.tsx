@@ -61,8 +61,6 @@
  *
  * Vlastník: V10.
  */
-import type { CSSProperties } from 'react';
-
 import type { CatalogCountsView } from '@/components/products/catalog-api';
 import type {
   CatalogFilterState,
@@ -75,7 +73,7 @@ import type {
 } from '@/components/products/catalog-filter';
 import { LAST_SALE_WINDOWS, SOLD_WINDOWS } from '@/components/products/catalog-filter';
 import type { SavedFilter } from '@/components/products/saved-filters';
-import Icon from '@/components/ui/Icon';
+import { FilterChip } from '@/components/ui';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Popisy ════════════════════════════════════ */
@@ -113,20 +111,6 @@ const ORIGIN_LABELS: ReadonlyArray<{ value: OriginFilter; label: string }> = [
 ];
 
 /* ═══════════════════════════ 2. Drobné kúsky ══════════════════════════════ */
-
-/**
- * Tlačidlo bez vlastného vzhľadu — vzhľad nesie obal `.chip`. Dve tlačidlá
- * vedľa seba namiesto tlačidla v tlačidle: vnorené interaktívne prvky sú
- * neplatné HTML a klávesnica sa v nich stratí.
- */
-const BARE_BUTTON: CSSProperties = {
-  background: 'transparent',
-  border: 0,
-  padding: 0,
-  color: 'inherit',
-  font: 'inherit',
-  cursor: 'pointer',
-};
 
 /**
  * Dvojica polí „od – do" nad jedným číslom. Je to ten istý tvar, aký má cena —
@@ -269,34 +253,31 @@ export function CatalogFilters({
       {saved.length > 0 ? (
         <div className="fgroup">
           <h3>Uložené filtre</h3>
+          {/* ZNAČKA PLATNÉHO FILTRA JE `FilterChip` (V6b, D137/D139/D142).
+              Do V6b to bol `<span class="chip on">` s dvoma tlačidlami bez
+              vzhľadu — a stav „tento filter práve platí" nesla VÝHRADNE farba
+              (`.chip.on` v `globals.css` mení pozadie, rám a farbu textu, a nič
+              viac). `aria-pressed` je kanál pre čítačku, nie pre oko, takže
+              vidiaci používateľ s deuteranopiou nemal z toho ani jeden. Primitívum
+              pridáva ZNAČKU vedľa slova, teda tretí kanál (kontrakt V6 §4 bod 3),
+              a nesie ho `data-selected` na obale.
+
+              Trieda `.chip` v `globals.css` zostáva — kreslí ju sprievodca novej
+              zľavy (`chip lock`), takže mazať sa nesmie (D139). */}
           <div className="chips">
             {saved.map((row) => (
-              <span key={row.name} className={row.name === activeSaved ? 'chip on' : 'chip'}>
-                {/* Že filter práve platí, hovorí trieda `on` na obale — teda
-                    pozadie a farba textu, a nič iné. `aria-pressed` patrí na
-                    tlačidlo, lebo obal je `<span>` bez roly. */}
-                <button
-                  type="button"
-                  style={BARE_BUTTON}
-                  aria-pressed={row.name === activeSaved}
-                  onClick={() => onApplySaved(row.query)}
-                  data-testid={`saved-filter-${row.name}`}
-                >
-                  {row.name}
-                </button>
-                <button
-                  type="button"
-                  className="x"
-                  style={BARE_BUTTON}
-                  aria-label={`Zabudnúť uložený filter ${row.name}`}
-                  onClick={() => onRemoveSaved(row.name)}
-                >
-                  {/* Rovnaká ikona ako v šuplíku aj v detaile produktu —
-                      appka mala do 19. 8. 2026 na „zavrieť" tri rôzne znaky:
-                      U+2715 dvakrát a U+00D7 raz. */}
-                  <Icon name="x" size={0.85} />
-                </button>
-              </span>
+              <FilterChip
+                key={row.name}
+                label={row.name}
+                active={row.name === activeSaved}
+                onApply={() => onApplySaved(row.query)}
+                onRemove={() => onRemoveSaved(row.name)}
+                /* Uložený filter sa ZABÚDA, nie ruší: predvolené „Zrušiť
+                   filter …" by tvrdilo, že klik vypne filtrovanie, kým on
+                   zmaže pomenovanie. */
+                removeLabel={`Zabudnúť uložený filter ${row.name}`}
+                testId={`saved-filter-${row.name}`}
+              />
             ))}
           </div>
         </div>

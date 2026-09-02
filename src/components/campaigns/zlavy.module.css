@@ -62,179 +62,114 @@
   justify-content: center;
 }
 
-/* ───────────── zoznam zliav: percento je dominanta riadku (bod 21) ──────── */
+/* ─────────── zoznam zliav: bunky riadku tabuľky (V6b, bod 21) ────────────
+ *
+ * ČO TU BOLO A PREČO TO ODIŠLO (D139)
+ * -----------------------------------
+ * Do V6b mal zoznam DVE vlastné geometrie: šesťstĺpcovú mriežku (`.cols`,
+ * `.drow`, `.cPct`, `.cName`, `.cState`, `.cCount`, `.cWindow`, `.cWritten`,
+ * `.listScroll`) a 380 px rebrík výberu s opravami nad `.zpick*` z
+ * `globals.css` (`.rail`, `.pickWindow`, `.pickWritten`, `.pickCounts`,
+ * `.pickEst`). Obe kreslili to isté — riadok zľavy — a obe si šírky stĺpcov
+ * držali samy. Zoznam prešiel na primitívum `ui/Table`, takže rozvrh riadku,
+ * prilepenú hlavičku aj prilepené prvé dva stĺpce vlastní tabuľka a šírky
+ * stĺpcov stoja v `discountColumns()`. Tie triedy tu preto ZOSTAŤ nesmeli:
+ * druhá, takmer rovnaká sada by sa o mesiac rozišla s prvou.
+ *
+ * ČO Z NICH PREŽILO A KDE
+ * -----------------------
+ * Prežili tri merané fakty z UX2 (24. 8. 2026) — a nie sú tu ako CSS, lebo
+ * ich nová podoba nie je vzhľad:
+ *
+ *  1. „15–30 %" sa nesmie dotknúť stavu → percento má vlastný stĺpec široký
+ *     112 px (`discountColumns()`, kde `.rail :global(.zpick)` mal 116 px na
+ *     celý riadok);
+ *  2. „zapísané 948 z 1 180" sa nesmie orezať na čísle → je to JEDEN textový
+ *     uzol v bunke s `.nowrap` a vlastnou šírkou stĺpca;
+ *  3. odhad dobehnutia ustupuje pred počtami → má vlastný stĺpec „Dobehne",
+ *     takže sa s počtami už nebije o miesto.
+ *
+ * Stráži ich `test/unit/zlavy-ux2-rozvrh.spec.ts` na tej strane, kde tie
+ * záruky NAOZAJ sú (stĺpce a vykreslené bunky), nie na mŕtvych selektoroch.
+ */
+
+/* Hodnota, ktorá sa nesmie zalomiť ani orezať: dátumy okna a nedeliteľné
+   „zapísané X z Y". Číslo bez slova netvrdí nič — hlavička je prilepená a pri
+   dlhom zozname sa odroluje. */
+.nowrap {
+  white-space: nowrap;
+}
 
 /*
- * Riadok zoznamu má vlastnú mriežku, nie `.zrow` z `globals.css`: percento
- * potrebuje prvý a najsilnejší stĺpec a 90 px, ktoré má `.zrow` na percento,
- * na 26 px číslo nestačia. Hlavička `.cols` MUSÍ mať tie isté stĺpce ako
- * `.drow` — popisky stoja nad svojimi hodnotami a rozísť sa nesmú.
+ * Percento — dominanta riadku (kontrakt UI, bod 21). 26 px = 41 % dominanty
+ * obrazovky (64 px); P1 pripúšťa najviac 55 %, takže percento v riadku smie
+ * byť druhé najväčšie a nesmie sa priblížiť dominante. Rozsah pásiem stojí
+ * pod ním, nie vedľa: vedľa by si vzal šírku, ktorú stĺpec nemá.
  */
-.cols,
-.drow {
-  display: grid;
-  grid-template-columns: 108px 1fr 200px 92px 132px 150px;
-  gap: 14px;
-}
-
-.cols span:nth-child(4) {
-  text-align: right;
-}
-
-.drow {
-  align-items: center;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13.5px;
-}
-
-.drow:last-child {
-  border-bottom: 0;
-}
-
-/* Skončená zľava je tlmená — je to kontext, nie práca (§4). */
-.drowDim {
-  opacity: 0.62;
-}
-
-.cPct {
+.rowPct {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  white-space: nowrap;
 }
 
-/*
- * 26 px = 41 % dominanty (64 px). P1 pripúšťa najviac 55 %, takže percento
- * v riadku smie byť druhé najväčšie a nesmie sa priblížiť dominante.
- */
-.pct {
+.rowPct b {
   font-size: 26px;
   font-weight: 660;
   letter-spacing: -0.025em;
   line-height: 1.05;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
-.pctSub {
+.rowPct i {
+  font-size: 11px;
+  font-weight: 550;
+  font-style: normal;
+  color: var(--dim);
+}
+
+/*
+ * Meno zľavy. NEREŽE sa: v rebríku výberu sa reťazec „Letné dočistenie
+ * skladu — oceľ" orezával a nedočítané meno je horšie než o riadok vyšší
+ * riadok. Tri bodky mali zmysel v šesťstĺpcovej mriežke, kde by druhý riadok
+ * rozhodil rozvrh; tabuľka riadok zniesť vie.
+ */
+.rowName {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-weight: 620;
+  color: var(--ink);
+}
+
+.rowName a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Otvorená zľava: SLOVO ako tretí kanál k pozadiu riadku a `aria-current`. */
+.rowOpen {
   font-size: 11px;
   font-weight: 550;
   color: var(--dim);
 }
 
-.cName {
-  font-weight: 620;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cName a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.cState {
-  min-width: 0;
-}
-
-.cCount {
-  text-align: right;
-}
-
-.cWindow,
-.cWritten {
-  white-space: nowrap;
-}
-
-/*
- * Zoznam je dátová tabuľka a smie skrolovať vo vlastnom ráme — je to jediná
- * výnimka z P4 (obrazovka sa nehýbe, skroluje len rám). Spodná hranica drží
- * rám použiteľný aj na nízkom okne.
- */
-.listScroll {
-  max-height: max(240px, calc(100vh - 420px));
-  overflow-y: auto;
-}
-
-/* ═════════ rebrík výberu: opravy geometrie riadku (UX2, 24. 8. 2026) ══════
- *
- * Tvar riadku (`.zpick*`) kreslí `globals.css` a vlastní ho niekto iný. Tieto
- * dve pravidlá sú preto ÚPRAVY, nie druhá kópia: obe visia na `.rail`, teda
- * na obale rebríka v `DiscountsList.tsx`, a mimo neho nič nemenia.
- *
- * 1. PERCENTO SA NESMIE DOTKNÚŤ STAVU.
- *    Bunka mala 86 px, čo je miera slova „25 %". Zľava s pásmami tam ale
- *    kreslí ROZSAH („15–30 %“) a ten je pri 26 px široký 109 px — znak „%“
- *    tak dosadal na slovo „zapisuje sa“ vedľa. Percento sa nezmenšuje:
- *    dominantou riadku je podľa kontraktu (bod 21) práve ono, takže miesto
- *    dostane bunka. 116 px = 109 px najširšieho rozsahu a 7 px vzduchu.
- */
-.rail :global(.zpick),
-.rail :global(.zpick-h) {
-  grid-template-columns: 116px minmax(0, 1fr);
-}
-
-/*
- * Miesto pre percento ubralo menu 29 px a najdlhší názov sa prestal zmestiť
- * na jeden riadok. Reže sa preto NIČ: názov sa láme. Tri bodky mali zmysel
- * v šesťstĺpcovej tabuľke, kde by druhý riadok rozhodil mriežku — v rebríku
- * výberu je meno to prvé, podľa čoho sa vyberá, a nedočítané meno je horšie
- * než o riadok vyšší riadok.
- */
-.rail :global(.zpick-name) {
-  white-space: normal;
-  overflow: visible;
-}
-
-/*
- * 2. META RIADOK SA NESMIE REZAŤ NA ČÍSLE.
- *    `globals.css` dáva riadku `white-space: nowrap` + `ellipsis`, takže sa
- *    orezával sprava — a sprava stojí práve „zapísané 948 z 1 180“, teda
- *    jediný údaj, kvôli ktorému ten riadok existuje. Skrátiť sa nedá: okno
- *    platnosti aj počet zapísaných sú obe dôvody, prečo sa riadok číta.
- *    Preto sa nereže, ale LÁME na dva riadky — okno hore, čísla dole.
- */
-.rail :global(.zpick-meta) {
+/* Stav a jeho príznaky pod sebou — veta o stave a „nevieme, či sa zapísalo"
+   sú dva rôzne fakty a v jednom riadku by sa tlačili. */
+.rowState {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  white-space: normal;
-  overflow: visible;
-}
-
-/* Okno platnosti má pevnú dĺžku a vojde sa; keby predsa nie, reže sa ONO. */
-.pickWindow {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/*
- * Spodný riadok: počet zapísaných a (ak je) odhad dobehnutia. Čísla majú
- * `flex: 0 0 auto`, takže sa nikdy nezmestia „skoro“ — keď je úzko, ustúpi
- * odhad, ktorý má vlastné miesto v detaile aj na karte na čele.
- */
-.pickWritten {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
-.pickCounts {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.pickEst {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Počet produktov je odkaz; farbu si berie z odkazov, tu je len zarovnanie
+   tabulárnych číslic, aby stĺpec držal desiatky pod desiatkami. */
+.rowItems {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Dominanta zoznamu: percento vľavo, meno a stav vedľa neho. */
@@ -252,16 +187,8 @@
   min-width: 0;
 }
 
-.featureName {
-  font-size: 15px;
-  font-weight: 640;
-  color: var(--ink);
-}
-
-.featureName a {
-  color: inherit;
-  text-decoration: none;
-}
+/* `.featureName` odišlo s prevodom čela na `PanelHead` (D139): meno zľavy na
+   čele je odteraz nadpis panela a jeho veľkosť vlastní `frame.module.css`. */
 
 /* ═════════ zoznam zliav: čím je vyplnená pravá polovica (UX2) ═════════════
  *
@@ -277,16 +204,9 @@
  *     nepoužil nič.
  */
 
-/* Pásma zľavy na čele — hustá čítacia tabuľka, tá istá ako v detaile. */
-.leadTiers {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.leadTiersHead {
-  margin-bottom: 6px;
-}
+/* Pásma zľavy na čele stoja vo vnorenom `Panel soft` s `Table` (D139), takže
+   odsadenie aj vlasovú linku nad nimi kreslí rám panela — `.leadTiers`
+   a `.leadTiersHead` boli druhá kópia toho istého a odišli s prevodom. */
 
 /* Skupina pozornosti — stav, počet, ďalší krok a dotknuté zľavy pod sebou. */
 .watch {
@@ -1317,10 +1237,36 @@
   width: 28%;
 }
 
-/* Dôvod pod stavom — kým bol vlastným stĺpcom, tabuľka sa do karty nezmestila. */
-.itemReason {
+/*
+ * DRUHÝ RIADOK BUNKY — dôvod alebo iný fakt pod hodnotou.
+ *
+ * Do V6b sa trieda volala `.itemReason` a patrila jedinej bunke: dôvodu pod
+ * stavom v tabuľke položiek (kým bol vlastným stĺpcom, tabuľka sa do karty
+ * nezmestila). Zoznam produktov zľavy má na to isté tri miesta — „cena pri
+ * príprave / pri zápise", „cena sa medzitým zmenila" a „pri zápise: názov" —
+ * a druhá, takmer rovnaká trieda by sa o mesiac rozišla s prvou. Meno je
+ * preto podľa ROLE („čo je pod hodnotou v bunke"), nie podľa jedného výskytu.
+ */
+.cellUnder {
   display: block;
   margin-top: 1px;
+  color: var(--dim);
+}
+
+/*
+ * PÄTKA ZOZNAMU PRODUKTOV ZĽAVY (D127) — stránkovanie a pod ním priznanie.
+ *
+ * Veta o orientačnej cene stojí POD `Pagination`, nie v jej riadku: pätka
+ * primitíva je rad ovládačov a dlhá veta by v ňom rozhodila zarovnanie.
+ * Zmiznúť pritom nesmie — „cena po" je výpočet appky, nie cena zo shopu (I11).
+ */
+.productsFoot {
+  display: grid;
+  gap: 4px;
+}
+
+.productsNote {
+  margin: 0;
   color: var(--dim);
 }
 
@@ -1343,48 +1289,16 @@
 }
 
 /*
- * Zoznam zliav na polovici obrazovky (~720 px, kontrakt UI bod 12). Šesť
- * stĺpcov sa tam nezmestí, takže riadok sa skladá do dvoch: percento vľavo,
- * všetko ostatné pod sebou vpravo. Nič sa neskrýva — hlavička áno, tá by nad
- * skladaným riadkom nesedela, preto počet produktov dostane v tomto rozložení
- * svoj popis priamo v riadku.
+ * Zoznam zliav na polovici obrazovky (~720 px, kontrakt UI bod 12).
+ *
+ * Skladanie šiestich stĺpcov do dvoch riadkov ODIŠLO so šesťstĺpcovou
+ * mriežkou (V6b, D139): úzke okno rieši `ui/Table` — rám sa posúva vodorovne
+ * vo vlastnej ploche a hlavička ani prvé dva stĺpce sa pritom nestratia
+ * (`tables.module.css`, D137). Skladaný riadok bol tretia podoba tej istej
+ * tabuľky a mal vlastné pravidlo, ktoré ostatné dve nemali — popis „produktov"
+ * dopisovaný cez `::after`, teda text existujúci len v CSS a neviditeľný pre
+ * ktorýkoľvek test nad markupom.
  */
-@media (max-width: 1080px) {
-  .cols {
-    display: none;
-  }
-
-  .drow {
-    grid-template-columns: 96px 1fr;
-    gap: 2px 12px;
-    align-items: start;
-    padding: 10px 12px;
-  }
-
-  .cPct {
-    grid-column: 1;
-    grid-row: 1 / span 5;
-    align-self: center;
-  }
-
-  .cName,
-  .cState,
-  .cCount,
-  .cWindow,
-  .cWritten {
-    grid-column: 2;
-  }
-
-  .cCount {
-    text-align: left;
-  }
-
-  .cCount::after {
-    content: ' produktov';
-    font-size: 11px;
-    color: var(--dim);
-  }
-}
 
 /*
  * Mobil (predlohy `m-nova-zlava.html`, `m-schvalenie.html`): sekcie sú pod
@@ -1531,44 +1445,27 @@
   min-width: 0;
 }
 
-/* ═══════════════ Okná zliav v čase — pásy na osi (graf G1) ══════════════ */
+/* ═════════════ Okná zliav v čase — pás v bunke tabuľky (V6b) ═════════════
+ *
+ * Do V6b bola os vlastným rozvrhom: `.tl`, `.tlRow`, `.tlName`, `.tlAxis`
+ * a `.tlFlags` kreslili mriežku meno/dráha/príznaky. Rozklik prešiel na
+ * primitívum `ui/Table` (D126 — okná na osi nie sú ani čiara, ani stĺpec, ani
+ * koláč, takže nosičom je tabuľka), a tie triedy s ním ODIŠLI (D139): meno,
+ * dátumy aj príznaky sú odteraz bunky, a rozvrh riadku vlastní tabuľka.
+ *
+ * Zostali TRI a je to zámer — pás sa nakresliť nedá bez plochy, v ktorej
+ * percentá z `timeline-model.ts` niečo znamenajú:
+ */
 
-.tlAxis {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.tl {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.tlRow {
-  display: grid;
-  grid-template-columns: minmax(120px, 210px) 1fr;
-  align-items: center;
-  gap: 4px 12px;
-}
-
-.tlName {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  font-size: 13px;
-}
-
-/* Dráha pásu. `position: relative` je nosná: pás aj značka dneška sú v nej
-   umiestnené v percentách osi, ktoré počíta `timeline-model.ts`. */
+/* Dráha pásu v bunke „Na osi". `position: relative` je nosná: pás aj značka
+   dneška sú v nej umiestnené v percentách osi, ktoré počíta model, nie CSS.
+   `min-width` drží mierku čitateľnú aj vtedy, keď je stĺpec posledný a úzky. */
 .tlTrack {
   position: relative;
-  height: 12px;
-  border-radius: 6px;
+  display: block;
+  min-width: 140px;
+  height: 10px;
+  border-radius: 5px;
   background: var(--line);
   overflow: hidden;
 }
@@ -1577,12 +1474,14 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--accent);
   display: block;
 }
 
-/* Orezaná hrana je HRANA, nie zaoblenie — pás pokračuje mimo osi. */
+/* Orezaná hrana je HRANA, nie zaoblenie — pás pokračuje mimo osi. Slovo
+   („začala pred osou" / „končí za osou") stojí pod pásom v tej istej bunke;
+   hrana sama by bola jediný kanál. */
 .tlBand[data-clip-start='true'] {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
@@ -1600,23 +1499,4 @@
   width: 1px;
   background: var(--ink2);
   display: block;
-}
-
-.tlFlags {
-  grid-column: 2;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-/* Na užšom okne (~720 px) sa meno zľavy zalomí nad svoj pás. */
-@media (max-width: 760px) {
-  .tlRow {
-    grid-template-columns: 1fr;
-  }
-
-  .tlFlags {
-    grid-column: 1;
-  }
 }

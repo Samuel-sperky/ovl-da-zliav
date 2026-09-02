@@ -313,7 +313,13 @@ describe('V10 — obrazovka Produkty', () => {
       createElement(CatalogPanel, { initialFilter: DEFAULT_CATALOG_FILTER }),
     );
     expect(html).toContain('layout-filters');
-    expect(html).toContain('tbl-frame');
+    /* PRESMEROVANÉ 2. 9. 2026 (V6b, D137/D139): rám tabuľky už nie je
+       `.tbl-frame` z `globals.css` — kreslí ho primitívum `ui/Table`
+       triedou `.frame` z `ui/tables.module.css` (D143) a tá je v testovom
+       prostredí zahašovaná. Meria sa preto to isté: na obrazovke JE rám
+       a nesie ho tabuľka katalógu. Geometriu rámu (`min-width: 0`,
+       `max-width: 100%`) stráži `tabulka-skupina.spec.ts`. */
+    expect(html).toMatch(/<div class="_frame_[^"]*"[^>]*data-testid="catalog-table"/);
     // Bez načítaných dát sa čerstvosť NEODHADUJE — obrazovka to povie (P7).
     expect(html).toContain('Katalóg sa zatiaľ nenačítal.');
     expect(html.match(/class="fresh"/g)?.length ?? 0).toBe(1);

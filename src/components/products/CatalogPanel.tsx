@@ -146,7 +146,9 @@ import type { SavedFilter } from '@/components/products/saved-filters';
 import { readSavedFilters, removeFilter, saveFilter } from '@/components/products/saved-filters';
 import SoldCoverageNote from '@/components/products/SoldCoverageNote';
 import { useSoldCoverage } from '@/components/products/sold-coverage';
-import EmptyState from '@/components/states/EmptyState';
+import panelStyles from '@/components/products/catalog-panel.module.css';
+import { EmptyState, NoResultsState } from '@/components/states';
+import { Button, Toolbar, ToolbarSearch, ToolbarSpacer } from '@/components/ui';
 import Note from '@/components/ui/Note';
 import { LOGIC_TIME_ZONE } from '@/lib/domain/dates';
 import { formatDateTimeSk } from '@/lib/ui/format';
@@ -780,6 +782,60 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
     };
   })();
 
+  /**
+   * „NIČ TU NIE JE" A „NIČ TAKÉ TU NIE JE" SÚ DVA RÔZNE STAVY (D134, V6b).
+   *
+   * Do V6b kreslila tabuľka oba jedným `EmptyState`. Vety sa pritom rozlišovali
+   * už dávno (`catalogEmptyView({ narrowed })` a `searchEmpty` nižšie) — chýbal
+   * len ten, kto to povie STROJU: `data-story`. A na tom rozdiele stojí ďalší
+   * krok: prázdny katalóg sa rieši načítaním dávky, prázdny VÝSLEDOK zrušením
+   * filtra. Kto ich zlúči, pošle človeka doťahovať produkty, ktoré appka už má
+   * — len ich schoval filter.
+   *
+   * Hľadaný text je tiež filter (zrkadlo hľadá v názve a čísle), takže sa počíta
+   * do tej istej otázky. Vety a akciu si obrazovka drží vlastné: `NoResultsState`
+   * má predvolené len ako náhradník a `catalogEmptyView()` vie o katalógu viac
+   * (rozlíši „medzi načítanými nič takéto nie je" od „katalóg je celý, takže je
+   * vinný filter") — pozri bod 2 v hlavičke `NoResultsState.tsx`.
+   */
+  const emptyIsFiltered = searchTerm.length > 0 || filterIsNarrowed(filter);
+  const emptyCopy = searchTerm.length > 0 ? searchEmpty : empty;
+
+  /**
+   * Jediná akcia prázdnej tabuľky. Prázdny stav bez ďalšieho kroku je slepá
+   * ulica (kontrakt bod 11), preto ju kreslí obrazovka a nie stavový komponent
+   * — potrebuje na nej zámky (`disabled`) a dve rôzne akcie:
+   *
+   *  · po prázdnom HĽADANÍ vedie ďalší krok do eshopu, nie na ďalšiu stovku
+   *    riadkov v abecednom poradí — kód, popis a kategórie pozná len on.
+   *    Tlačidlo je to isté, ktoré stojí pri poli (rovnaká akcia aj zámky),
+   *    ale patrí aj sem;
+   *  · pri nedočítanom zrkadle je ďalší krok dávka, lebo hľadané môže byť
+   *    medzi nenačítanými (o tom rozhoduje `offerLoad`, nie táto obrazovka).
+   */
+  const emptyAction =
+    searchTerm.length > 0 ? (
+      <button
+        type="button"
+        className="btn sm"
+        onClick={() => void lookupNow()}
+        disabled={lookingUp || !searchSettled}
+        data-testid="catalog-empty-lookup"
+      >
+        {lookingUp ? 'Hľadám v eshope…' : 'Dohľadať v eshope'}
+      </button>
+    ) : empty.offerLoad ? (
+      <button
+        type="button"
+        className="btn sm"
+        onClick={loadBatch}
+        disabled={running}
+        data-testid="catalog-empty-load"
+      >
+        {running ? 'Načítavam ďalšiu dávku…' : 'Načítať ďalšiu dávku'}
+      </button>
+    ) : undefined;
+
   return (
     <>
       <CatalogStatusPanel
@@ -809,16 +865,20 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
         {/* Nie `<main>`: hlavný orientačný bod stránky je `main.wrap` z rozloženia
             appky a dva naraz sú neplatné HTML aj mätúca navigácia pre čítačku. */}
         <div>
-          <div className="row wrapx" style={{ marginBottom: '10px' }}>
-            <input
-              className="inp"
-              style={{ width: '300px', maxWidth: '100%' }}
-              type="search"
+          {/* LIŠTA NAD TABUĽKOU JE `Toolbar` (V6b, D137/D139).
+              Rad, medzery z tokenov, pole hľadania aj jeho prstenec pri fokuse
+              nesie primitívum; obrazovka dodáva len šírku poľa
+              (`catalog-panel.module.css`) a to, čo v lište stojí. Triedy
+              `.row wrapx`, `.inp` a `.btn sm` odtiaľto odišli — v `globals.css`
+              zostávajú, lebo ich kreslia iné obrazovky (D139). */}
+          <Toolbar style={{ marginBottom: '10px' }}>
+            <ToolbarSearch
+              className={panelStyles.search}
               value={queryDraft}
+              onChange={setQueryDraft}
               placeholder="Hľadať názov, číslo alebo kód produktu"
-              aria-label="Hľadať v katalógu"
-              onChange={(event) => setQueryDraft(event.target.value)}
-              data-testid="catalog-search"
+              ariaLabel="Hľadať v katalógu"
+              testId="catalog-search"
             />
 
             {/* DOHĽADANIE JE PONUKA, NIE AUTOMAT (kontrakt UI, body 25–28).
@@ -829,16 +889,18 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 nájdené názvy nie sú dôkaz o neexistujúcich tridsiatich.
                 Spúšťa ho výhradne kliknutie, lebo míňa rozpočet čítaní. */}
             {searchDraft === '' ? null : (
-              <button
-                type="button"
-                className="btn sm"
+              <Button
+                small
                 onClick={() => void lookupNow()}
                 disabled={lookingUp || !searchSettled}
+                /* Prebiehanie ide DVOMA kanálmi: slovo na tlačidle a `busy`
+                   (spinner + `aria-busy`). Zošednutie samo by bolo len farba. */
+                busy={lookingUp}
                 title="Prehľadá celý eshop — názov, popis, kód aj kategórie."
                 data-testid="catalog-lookup"
               >
                 {lookingUp ? 'Hľadám v eshope…' : 'Dohľadať v eshope'}
-              </button>
+              </Button>
             )}
 
             {/* Čo hľadá pole a čo až eshop. Jedna veta, nie odstavec (P2). */}
@@ -847,16 +909,21 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
             </span>
 
             {narrow ? (
-              <button
-                type="button"
-                className="btn sm ghost"
+              <Button
+                small
+                variant="ghost"
                 aria-expanded={filtersOpen}
                 onClick={() => setFiltersOpen((open) => !open)}
                 data-testid="toggle-filters"
               >
                 Filtre
-              </button>
+              </Button>
             ) : null}
+
+            {/* Počet nájdených stojí vpravo. Pružná medzera z primitíva, nie
+                `margin-left: auto` na samotnom čísle: keď `Toolbar` rad zalomí,
+                medzera zalomenie prežije a číslo nezostane visieť v strede. */}
+            <ToolbarSpacer />
             {/* P7 — dolná hranica nesie `≈` a tlmenejší odtieň; merané číslo
                 zostáva plné. Kým sa nenačítal ani prvý riadok, je tu POMLČKA:
                 nula je tvrdenie, a to appka v tej chvíli nemá čím kryť
@@ -864,7 +931,6 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
             <span
               className="num"
               style={{
-                marginLeft: 'auto',
                 fontSize: '22px',
                 fontWeight: matchingIsLowerBound ? 620 : 660,
                 color: matchingIsLowerBound ? 'var(--ink2)' : 'var(--ink)',
@@ -903,7 +969,7 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 </small>
               )}
             </span>
-          </div>
+          </Toolbar>
 
           <div className="fresh" data-testid="catalog-data-as-of">
             {dataAsOfSentence(view === null ? null : view.dataAsOf)}
@@ -1012,46 +1078,26 @@ export function CatalogPanel({ initialFilter }: CatalogPanelProps) {
                 onSort={(sort: CatalogSort) => change({ sort, page: 1 })}
                 rowReason={rowReason}
                 emptyState={
-                  <EmptyState
-                    /* Prázdny výsledok HĽADANIA je iný príbeh než prázdny
-                       katalóg: nehovorí „nič tu nie je", ale „nič také nie je
-                       TAM, kde zrkadlo vie pozrieť". Preto má vlastnú vetu
-                       a vlastný ďalší krok. */
-                    title={searchTerm.length > 0 ? searchEmpty.title : empty.title}
-                    description={
-                      searchTerm.length > 0 ? searchEmpty.description : empty.description
-                    }
-                    action={
-                      /* Ďalší krok po prázdnom hľadaní je eshop, nie ďalšia
-                         stovka riadkov v abecednom poradí — kód, popis
-                         a kategórie pozná len on. Tlačidlo je to isté, ktoré
-                         stojí pri poli (rovnaká akcia aj rovnaké zámky), ale
-                         patrí aj sem: prázdny stav bez ďalšieho kroku je slepá
-                         ulica (kontrakt bod 11). */
-                      searchTerm.length > 0 ? (
-                        <button
-                          type="button"
-                          className="btn sm"
-                          onClick={() => void lookupNow()}
-                          disabled={lookingUp || !searchSettled}
-                          data-testid="catalog-empty-lookup"
-                        >
-                          {lookingUp ? 'Hľadám v eshope…' : 'Dohľadať v eshope'}
-                        </button>
-                      ) : empty.offerLoad ? (
-                        <button
-                          type="button"
-                          className="btn sm"
-                          onClick={loadBatch}
-                          disabled={running}
-                          data-testid="catalog-empty-load"
-                        >
-                          {running ? 'Načítavam ďalšiu dávku…' : 'Načítať ďalšiu dávku'}
-                        </button>
-                      ) : undefined
-                    }
-                    testId="catalog-empty"
-                  />
+                  /* Prázdny výsledok FILTRA (a hľadaný text je filter) je iný
+                     príbeh než prázdny katalóg: nehovorí „nič tu nie je", ale
+                     „nič také nie je TAM, kde zrkadlo vie pozrieť". Vety sú
+                     vlastné obrazovky, príbeh (`data-story`) nesie komponent —
+                     pozri `emptyIsFiltered` vyššie. */
+                  emptyIsFiltered ? (
+                    <NoResultsState
+                      title={emptyCopy.title}
+                      description={emptyCopy.description}
+                      action={emptyAction}
+                      testId="catalog-empty"
+                    />
+                  ) : (
+                    <EmptyState
+                      title={emptyCopy.title}
+                      description={emptyCopy.description}
+                      action={emptyAction}
+                      testId="catalog-empty"
+                    />
+                  )
                 }
               />
 

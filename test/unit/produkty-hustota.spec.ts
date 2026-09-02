@@ -27,6 +27,9 @@
  *
  * Vlastník: O3.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -55,6 +58,33 @@ import {
 import { collectOperationBlockers } from '@/lib/status/blockers';
 
 /* ═══════════════════════════ vzorka ═══════════════════════════════════════ */
+
+/**
+ * Vzhľad TEJTO tabuľky. Od V6b je pevné rozloženie mriežky v CSS module vedľa
+ * komponentu (D143), nie v inline štýle — v statickom markupe teda nie je čo
+ * grepovať a tvrdenie o mriežke číta súbor.
+ */
+const MODUL_CSS = readFileSync(
+  fileURLToPath(
+    new URL('../../src/components/products/catalog-table.module.css', import.meta.url),
+  ),
+  'utf8',
+);
+
+/**
+ * Telo jedného pravidla z modulu tabuľky.
+ *
+ * Číta sa BLOK, nie celý súbor: hlavička modulu o pevnom rozložení píše (a má
+ * písať) celý odsek, takže `toContain('table-layout: fixed')` nad súborom je
+ * splnené aj vtedy, keď deklarácia zmizne a zostane po nej len komentár. Toto
+ * nie je domnienka — pri mutačnom overení 2. 9. 2026 zmazaná deklarácia
+ * tvrdenie NEPOLOŽILA, kým sa čítal súbor.
+ */
+function pravidloModulu(selektor: string): string {
+  const i = MODUL_CSS.indexOf(`${selektor} {`);
+  expect(i, `selektor ${selektor} v module tabuľky chýba`).toBeGreaterThan(-1);
+  return MODUL_CSS.slice(i, MODUL_CSS.indexOf('}', i));
+}
 
 /** Najdlhší názov v reálnom katalógu k 19. 8. 2026 — 117 znakov. */
 const NAJDLHSI_NAZOV =
@@ -321,24 +351,43 @@ describe('D10 — tabuľka znesie 41 220 riadkov a 117-znakový názov', () => {
   });
 
   it('mriežka stĺpcov je pevná, aby sa čísla medzi stránkami nehýbali', () => {
-    expect(html).toContain('table-layout:fixed');
-    expect(html).toContain('<colgroup>');
-    /* Dvanásť, nie päť: kontrakt V4 D114 (31. 8. 2026) pridal KPI stĺpce,
+    /* PRESMEROVANÉ 2. 9. 2026 (V6b, D137/D139) — pravidlo je to isté, miesto
+       iné. Do tejto zmeny sa tu grepovalo `table-layout:fixed` a `<colgroup>`,
+       lebo tabuľka si značky kreslila sama a pevné rozloženie mala v inline
+       štýle. Odvtedy ju kreslí primitívum `ui/Table` a mriežka má dva nové
+       domovy:
+
+         · `table-layout: fixed` je v `catalog-table.module.css` (D143: vzhľad
+           patrí do CSS modulu vedľa komponentu), takže v statickom markupe
+           nie je čo grepovať — číta sa súbor;
+         · šírky nesie `width` na `<th>`, nie `<col>`. Jedna značka namiesto
+           dvoch a hlavne JEDNA kópia čísla; dve kópie jedného čísla sú presne
+           to, čo sa v tomto repe rozišlo pri strope zápisov.
+
+       Tvrdenie o počte `<col>` sa NEZAHODILO, ale prepísalo na to, čo pri
+       šírkach na `<th>` znamená to isté zlyhanie: pri pevnom rozložení dostane
+       stĺpec BEZ šírky zvyšok mriežky, takže dva takéto stĺpce si zvyšok delia
+       a čísla sa medzi stránkami hýbu rovnako, ako keď `<colgroup>` chýbal
+       jeden `<col>`. Bez šírky preto smie byť PRÁVE JEDEN stĺpec — názov, ktorý
+       je pružný zámerne (bod 1 v hlavičke `CatalogTable.tsx`).
+
+       Dvanásť, nie päť: kontrakt V4 D114 (31. 8. 2026) pridal KPI stĺpce,
        D122 (1. 9. 2026) referenciu ako PRVÝ stĺpec a D124 sklad z jednotnej
        sady. Mriežka musí zostať PEVNÁ aj pri dvanástich — o to v tomto teste
        ide, nie o ich počet; poradie a obsah stĺpca referencie stráži
        `produkty-referencia-stlpec.spec.ts`, jednotnú sadu
-       `produkty-jednotne-stlpce.spec.ts`.
+       `produkty-jednotne-stlpce.spec.ts`. */
+    expect(pravidloModulu('.catalog table'), 'pevné rozloženie mriežky').toContain(
+      'table-layout: fixed',
+    );
 
-       Počet sa NEPÍŠE ako literál dvakrát: `<col>` sa porovnáva s počtom
-       `<th>` v hlavičke. Pevná mriežka, ktorej chýba jeden `col`, je práve tá
-       chyba, pri ktorej sa čísla medzi stránkami hýbu — a literál v teste by
-       ju prepustil, lebo by sa opravil spolu s tabuľkou. */
     const hlavicka = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
-    // `'<th '` s medzerou zámerne: `'<th'` by započítalo aj `<thead>`.
-    const stlpcov = kolkokrat(hlavicka, '<th ');
-    expect(stlpcov).toBe(12);
-    expect(kolkokrat(html, '<col') - kolkokrat(html, '<colgroup')).toBe(stlpcov);
+    // `/<th\s/` zámerne: `'<th'` by započítalo aj `<thead>`.
+    const bunky = hlavicka.match(/<th\s[^>]*>/g) ?? [];
+    expect(bunky.length).toBe(12);
+    const bezSirky = bunky.filter((tag) => !/style="[^"]*width:/.test(tag));
+    expect(bezSirky.length, `bez šírky: ${bezSirky.join(' ')}`).toBe(1);
+    expect(bezSirky[0]).toContain('data-col="name"');
   });
 
   it('celý názov je v `title`, aj keď sa orezal — a s ním technické `id` (D116)', () => {
@@ -353,11 +402,21 @@ describe('D10 — tabuľka znesie 41 220 riadkov a 117-znakový názov', () => {
   });
 
   it('pätka povie, na ktorej z 825 strán človek stojí', () => {
-    expect(html).toContain('strana 412 z 825');
+    /* PRESMEROVANÉ (V6b): pätku kreslí `ui/Pagination`, nie tabuľka. Veta má
+       preto vlastný uzol s `data-testid` a začína veľkým „S" — je to celá veta
+       v samostatnom uzle, nie chvost dlhšieho riadku, akým bola v starej pätke
+       („… z ≈ 41 220 · strana 412 z 825"). Znenie stráži
+       `tabulka-skupina.spec.ts`; tu ide o to, že to obrazovka Produkty naozaj
+       hovorí — a čím, aby sa tvrdenie o veľkom „S" nedalo splniť náhodou. */
+    expect(html).toContain('data-testid="pagination-page-of"');
+    expect(html).toContain('Strana 412 z 825');
   });
 
   it('skok na stránku je pri 825 stranách k dispozícii', () => {
-    expect(html).toContain('page-jump-input');
+    /* PRESMEROVANÉ (V6b): vlastný `PageJump` tabuľky zmizol, skok nesie
+       `ui/Pagination` (prop `jumpFromPages`) — `page-jump-input` sa preto
+       menuje `pagination-jump-input`. Rozsah v poli hovorí to isté. */
+    expect(html).toContain('pagination-jump-input');
     expect(html).toContain('1 – 825');
   });
 
@@ -379,8 +438,8 @@ describe('D10 — tabuľka znesie 41 220 riadkov a 117-znakový názov', () => {
         onPerPage: () => {},
       }),
     );
-    expect(kratke).not.toContain('page-jump-input');
-    expect(kratke).toContain('strana 1 z 3');
+    expect(kratke).not.toContain('pagination-jump-input');
+    expect(kratke).toContain('Strana 1 z 3');
   });
 
   it('dávka je najviac 100 riadkov — strop KPI na jeden dotaz (V4 D114)', () => {

@@ -210,3 +210,43 @@ export function orderTimeline(
     return a.id - b.id;
   });
 }
+
+/**
+ * ID kampaní, o ktorých sa „neprekrýva sa" DOKÁZAŤ NEDÁ.
+ *
+ * `overlappingCampaignIds()` je zámerne opatrné: kampaň bez známych produktov
+ * do poplachu nezaradí. Kým bola os pásmi, tá opatrnosť znamenala TICHO — pás
+ * bez príznaku vyzeral rovnako ako pás, o ktorom appka vie, že je čistý.
+ * V tabuľke má každá zľava na prekryv vlastnú bunku, a bunka musí povedať,
+ * ktorý z TROCH stavov to je (I11):
+ *
+ *   · `overlappingCampaignIds()` → prekrýva sa na tom istom produkte (fakt),
+ *   · TENTO zoznam                → nevieme (pomlčka),
+ *   · ani jeden                    → neprekrýva sa (fakt).
+ *
+ * Nedokázateľné je to vtedy, keď zľava má v ČASE súseda, ktorého produkty
+ * appka nepozná — vlastné alebo susedove. Vtedy sa o tie isté kusy ísť môže
+ * a nemusí; „neprekrýva sa" by bolo tvrdenie z neznalosti.
+ *
+ * Kampaň, ktorá v čase nemá ani jedného suseda, tu NIE JE, aj keď o svojich
+ * produktoch nevie nič: bez prekryvu v čase sa na tom istom kuse zraziť nedá,
+ * takže „neprekrýva sa" je pri nej meraný fakt.
+ */
+export function unprovableOverlapIds(
+  campaigns: readonly TimelineCampaign[],
+): ReadonlySet<number> {
+  const hit = new Set<number>();
+  for (let i = 0; i < campaigns.length; i += 1) {
+    for (let j = i + 1; j < campaigns.length; j += 1) {
+      const a = campaigns[i]!;
+      const b = campaigns[j]!;
+      if (!windowsOverlap(a, b)) continue;
+      /* Porovnáva sa výslovne — obe strany musia byť ZNÁME, inak je dvojica
+         nerozhodnutá a nesie ju obom. */
+      if (a.productIds.length !== 0 && b.productIds.length !== 0) continue;
+      hit.add(a.id);
+      hit.add(b.id);
+    }
+  }
+  return hit;
+}

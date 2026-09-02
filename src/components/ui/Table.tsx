@@ -64,6 +64,14 @@
  *  F. **`caption` je povinný.** Je to meno tabuľky pre čítačku a pri troch
  *     tabuľkách produktov na troch obrazovkách je „tabuľka" bez mena
  *     nepoužiteľná. Voliteľný `caption` by za mesiac chýbal všade.
+ *  G. **`data-col` je členstvo v jednotnej sade, nie kľúč stĺpca** (D124).
+ *     Prvá podoba tohto primitíva vypisovala `data-col={column.key}`, teda na
+ *     KAŽDÝ stĺpec — a tým sa v tabuľke Produktov stratil rozdiel medzi
+ *     stĺpcom sady a stĺpcom obrazovky (`Zľava teraz`, `Posledný predaj`).
+ *     Členstvo sa potom nedalo prečítať z vykresleného `<thead>`, čo je jediná
+ *     poistka proti rozídeniu troch tabuliek produktov. Vypisuje sa preto
+ *     `colId`, ktorý stĺpec mimo sady nemá; menovku bunky nesie `data-l`
+ *     (`cardLabel`) — pozri ich docbloky.
  *
  * Server-safe: žiadne hooky, žiadne `use client`. Obrazovka, ktorá podá
  * `onSortChange` alebo `onRowClick`, je klientská sama — tabuľka tú hranicu
@@ -131,6 +139,35 @@ export interface TableSort {
 export interface TableColumn<T> {
   /** Stabilný kľúč; je to zároveň kľúč triedenia posielaný do `onSortChange`. */
   readonly key: string;
+  /**
+   * KTORÝ STĹPEC JEDNOTNEJ SADY to je (`data-col`) — a nič iné (D124).
+   *
+   * V tomto repe má `data-col` jeden význam a nesú ho všetky tri tabuľky
+   * produktov: „táto bunka je stĺpec `reference` / `margin` / … jednotnej
+   * sady". Stĺpec MIMO sady ho preto NEMÁ — presne tak, ako ho nemá „Pásmo"
+   * v sprievodcovi novej zľavy ani „Zapísané" v položkách kampane. Podľa toho
+   * sa dá z vykresleného `<thead>` prečítať, či je sada celá a v záväznom
+   * poradí, čo je jediný spôsob, ako sa tie tri tabuľky nerozídu.
+   *
+   * Preto to NIE JE `key`: kľúč je vec tabuľky (React, triedenie) a keby ho
+   * primitívum vypisovalo ako `data-col`, každý stĺpec by tvrdil, že je
+   * v jednotnej sade — a členstvo v sade by prestalo byť merateľné.
+   */
+  readonly colId?: string;
+  /**
+   * Menovka BUNKY (`data-l`) — čo v tejto bunke stojí, povedané slovom.
+   *
+   * Je to strojové meno faktu v riadku: `data-col` hovorí „ktorý stĺpec sady",
+   * `data-l` hovorí „ako sa tomu hovorí človeku". Nesú ju všetky ostatné
+   * tabuľky appky (audit, nastavenia, položky kampane), takže bez nej by bola
+   * tabuľka na primitíve jediná, ktorej bunky sa nedajú pomenovať — a v úzkom
+   * kartovom rozložení (`globals.css`, `td[data-l]::before`) je to jediné
+   * miesto, odkiaľ sa meno faktu berie.
+   *
+   * Nemusí to byť to isté, čo `header`: bunka smie obsahovať viac než jeden
+   * údaj (meno + kód + príznaky) a vtedy sa menuje tým, čo v nej stojí.
+   */
+  readonly cardLabel?: string;
   /** Nadpis stĺpca — jediné meno, aké tento stĺpec na obrazovke má. */
   readonly header: ReactNode;
   /** Čo stĺpec znamená a čo NEznamená. Ide do `title` hlavičky. */
@@ -272,7 +309,7 @@ export function Table<T>({
                     key={column.key}
                     scope="col"
                     title={column.headerTitle}
-                    data-col={column.key}
+                    data-col={column.colId}
                     className={cls(
                       styles.head,
                       column.align === 'right' && styles.num,
@@ -390,7 +427,8 @@ export function Table<T>({
                           )}
                           style={offset === null ? undefined : { left: offset }}
                           title={cell.title ?? undefined}
-                          data-col={column.key}
+                          data-l={column.cardLabel}
+                          data-col={column.colId}
                           data-value={state}
                         >
                           {cell.content}

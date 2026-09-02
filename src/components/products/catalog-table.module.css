@@ -73,23 +73,39 @@
 
 /* ═══════════════════════════ 3. Prvý stĺpec: výber a otvorený riadok ═════ */
 
-/* Zaškrtávacie pole je úzke a nepotrebuje odsadenie sprava — vedľa neho stojí
-   referencia, nie ďalšie číslo. */
-.catalog th[data-col='select'],
-.catalog td[data-col='select'] {
+/*
+ * Zaškrtávacie pole je úzke a nepotrebuje odsadenie sprava — vedľa neho stojí
+ * referencia, nie ďalšie číslo.
+ *
+ * CIELI SA NA PRVÝ STĹPEC, NIE NA `data-col='select'` (oprava 2. 9. 2026)
+ * ──────────────────────────────────────────────────────────────────────
+ * Pôvodné pravidlo stálo na `[data-col='select']` a bolo MŔTVE od prechodu na
+ * `ui/Table`: primitívum vypisuje `data-col` len pre stĺpce JEDNOTNEJ SADY
+ * (`colId`, bod G jeho hlavičky) a výber do sady nepatrí, takže atribút na
+ * bunke vôbec nie je. Selektor sa preto nemal ako uchytiť a odsadenie prvej
+ * bunky ticho zmizlo. `:first-child` je to, čo o výberovom stĺpci naozaj
+ * platí — je prvý a je prilepený.
+ */
+.catalog thead th:first-child,
+.catalog tbody td:first-child:not([colspan]) {
   padding-right: 0;
   padding-left: 10px;
-}
-
-/* Kotva pre prúžok otvoreného riadku; prúžok je absolútny v tejto bunke. */
-.catalog td[data-col='select'] {
-  position: relative;
 }
 
 /*
  * Riadok, ktorý panel vpravo práve popisuje (K1). Prúžok stojí v PRVOM
  * stĺpci, a ten je prilepený — takže je vidieť aj vtedy, keď je tabuľka
  * odrolovaná k marži.
+ *
+ * PRÚŽOK NEPOTREBUJE `position: relative` A NESMIE HO DOSTAŤ. Do 2. 9. 2026
+ * tu stálo pravidlo `.catalog td[data-col='select'] { position: relative }`
+ * ako „kotva" preň. Bolo mŕtve (pozri vyššie) — a keby ho niekto oživil
+ * cez `:first-child`, PREPÍŠE `position: sticky` z primitíva a prvý stĺpec
+ * sa prestane lepiť. Kotvou je práve to `sticky`: prilepená bunka je
+ * polohovaná, takže je obaľujúcim blokom pre absolútny prúžok sama.
+ * `stickyColumns` na tejto tabuľke je 3 (`CatalogTable.tsx`), takže prvý
+ * stĺpec prilepený JE; keby na nulu klesol, prúžok stratí kotvu a vyjde
+ * z bunky — to je vtedy zmena v `CatalogTable.tsx`, nie tu.
  */
 .openMark {
   position: absolute;

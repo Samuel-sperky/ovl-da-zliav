@@ -180,9 +180,25 @@ describe('A — prepínač bez roly nemá čítačke ako povedať, čo prepína'
     expect(tag).toContain('role="group"');
   });
 
-  it('prepínač riadkov na stránku v pätke tabuľky je pomenovaná skupina', () => {
-    const tag = tagWithLabel(table(), 'Riadkov na stránku');
-    expect(tag).toContain('role="group"');
+  it('voľba riadkov na stránku v pätke tabuľky má meno na prvku s rolou', () => {
+    /* PRESMEROVANÉ 2. 9. 2026 (V6b, D137): pätku kreslí `ui/Pagination`.
+       Voľba počtu riadkov už NIE JE `.seg` skupina tlačidiel s
+       `aria-label="Riadkov na stránku"` na `<span>`, ale `<select>`
+       s VIDITEĽNÝM popiskom „Na stránku". Pravidlo je to isté a splnené
+       inak — a lepšie: meno nesie prvok, ktorý rolu má sám (`combobox`),
+       takže sa nemá ako zahodiť. `aria-label` by tu bol krok späť — prepísal
+       by viditeľné slovo, ktoré hlasové ovládanie hľadá (to isté pravidlo si
+       `Pagination` píše pri poli skoku na stranu).
+
+       Meria sa teda VÄZBA, nie prítomnosť atribútu: popisok musí ukazovať na
+       `id` toho ovládača. `<label for>` bez partnera je meno, ktoré čítačka
+       neprečíta, a to je presne tá trieda chyby, pre ktorú tento súbor je. */
+    const html = table();
+    const tag = openingTagOf(html, 'pagination-page-size');
+    expect(tag.slice(0, 8)).toBe('<select ');
+    const id = /id="([^"]+)"/.exec(tag)?.[1];
+    expect(id, `ovládač bez \`id\`: ${tag}`).toBeTruthy();
+    expect(html).toContain(`<label for="${id}">Na stránku</label>`);
   });
 
   it('žiadny `.seg` v týchto štyroch obrazovkách nezostal bez roly', () => {
@@ -237,16 +253,21 @@ describe('B — `.on` je farba, takže stav musí niesť `aria-pressed`', () => 
     expect(openingTagOf(html, 'source-filter')).toContain('aria-pressed="false"');
   });
 
+  /* KOTVA PRESMEROVANÁ 2. 9. 2026 (V6b): značku uloženého filtra kreslí
+     `ui/Chip` → `FilterChip`, ktorý má DVA ovládače (použiť a zabudnúť), takže
+     `data-testid` obalu dostane prípony `-apply` a `-remove`. `aria-pressed`
+     patrí tomu, ktorý filter použije. Že stav nesie aj oko (značka vedľa
+     slova, nie iba farba), stráži `test/unit/signaly-tri-kanaly.spec.ts`. */
   it('uložený filter, ktorý práve platí, je stlačený', () => {
     const saved = [{ name: 'Ležiaky', query: 'soldBuckets=none' }];
     const html = filters({ saved, activeSaved: 'Ležiaky' });
-    expect(openingTagOf(html, 'saved-filter-Ležiaky')).toContain('aria-pressed="true"');
+    expect(openingTagOf(html, 'saved-filter-Ležiaky-apply')).toContain('aria-pressed="true"');
   });
 
   it('uložený filter, ktorý neplatí, stlačený nie je', () => {
     const saved = [{ name: 'Ležiaky', query: 'soldBuckets=none' }];
     const html = filters({ saved, activeSaved: null });
-    expect(openingTagOf(html, 'saved-filter-Ležiaky')).toContain('aria-pressed="false"');
+    expect(openingTagOf(html, 'saved-filter-Ležiaky-apply')).toContain('aria-pressed="false"');
   });
 });
 

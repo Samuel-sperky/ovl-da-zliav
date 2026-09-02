@@ -275,8 +275,22 @@ describe('Podstránky Nastavení — omrvinka nahradila „← Nastavenia"', () 
   });
 
   it('rozcestník sa menuje tým ISTÝM slovom, ktoré kreslí prvý krok cesty', () => {
+    /*
+     * 2. 9. 2026 — ČO SA ZMENILO A PREČO: tvrdenie hľadalo
+     * `<h1 class="page">…</h1>`. Rozcestník prešiel na primitívum `PageHeader`
+     * (D142, D143), ktoré nadpis kreslí bez triedy a rám mu dáva hašovaná
+     * trieda z CSS modulu — trieda `page` teda z markupu zmizla. MERANÁ VEC
+     * sa nezmenila (nadpis rozcestníka je to isté slovo ako prvý krok cesty),
+     * len sa presunula do hlavičky, preto sa hľadá TAM: nadpis sa vyberá
+     * z bloku `settings-header`, nie kdekoľvek na stránke. Zúženie na
+     * hlavičku je proti pôvodnému tvrdeniu prísnejšie — `<h1>` s tým istým
+     * textom niekde nižšie by ho neuspokojil.
+     */
     const index = render(createElement(SettingsIndex));
-    expect(index).toContain(`<h1 class="page">${SETTINGS_ROOT.label}</h1>`);
+    const at = index.indexOf('data-testid="settings-header"');
+    expect(at, 'rozcestník stratil hlavičku stránky').toBeGreaterThan(-1);
+    const hlavicka = index.slice(at, index.indexOf('</header>', at));
+    expect(hlavicka).toContain(`<h1>${SETTINGS_ROOT.label}</h1>`);
   });
 
   for (const page of SETTINGS_PAGES) {

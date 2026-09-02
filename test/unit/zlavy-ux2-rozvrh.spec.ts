@@ -190,38 +190,53 @@ const riadok = (row: DiscountRow) =>
 
 /* ═══════ 1. Percento sa nesmie dotknúť stavu (chyba 1) ════════════════════ */
 
+/*
+ * PRESMEROVANÉ 2. 9. 2026 (V6b, D139). Do prevodu na `ui/Table` merali tieto
+ * tvrdenia CSS rebríka: `.rail :global(.zpick)` (šírka riadku) a `.pct`
+ * (veľkosť percenta). Rebrík zmizol a s ním aj tie pravidlá — merať ich ďalej
+ * by znamenalo strážiť mŕtve selektory, teda presne to, čo si tento repo raz
+ * zaplatil (`mrtve-triedy.spec.ts`).
+ *
+ * KTO TÚ ZÁRUKU STRÁŽI TERAZ (aby nezostala nestrážená):
+ *  · šírku bunky percenta → `discountColumns()` (tu, nižšie). `ui/Table` dáva
+ *    ten istý `width` na `<th>` aj na `<td>` a odsadenie prilepených stĺpcov
+ *    z neho počíta `stickyOffsets()` — obe kryje `tabulka-skupina.spec.ts`,
+ *    takže hlavička sa od hodnoty rozísť nemá ako a nemusí to merať aj tento
+ *    súbor;
+ *  · 26 px rez percenta → `.rowPct b` v `zlavy.module.css` (tu, nižšie).
+ */
+
 describe('1 — bunka percenta unesie rozsah pásiem, nielen „25 %"', () => {
   it('meranie vôbec niečo našlo', () => {
     /* Bez tejto poistky by testy nižšie prešli aj nad prázdnym súborom. */
     expect(CSS.length).toBeGreaterThan(10_000);
-    expect(deklaracia('.rail :global(.zpick),', 'grid-template-columns')).not.toBeNull();
+    expect(discountColumns(null).length).toBeGreaterThan(0);
   });
 
-  it('prvý stĺpec riadku má aspoň 109 px, čo je nameraná šírka „15–30 %"', () => {
+  it('stĺpec percenta má aspoň 109 px, čo je nameraná šírka „15–30 %"', () => {
     /*
      * 109 px nie je odhad: pri 86 px bunke nahlásil snímkovač pretečenie
      * o 23 px (86 + 23). Keby sa stĺpec vrátil pod túto mieru, znak „%" by
      * zase dosadal na slovo „zapisuje sa" vedľa.
      */
-    const hodnota = deklaracia('.rail :global(.zpick),', 'grid-template-columns');
-    const prvy = /^(\d+(?:\.\d+)?)px/.exec(hodnota ?? '');
-    expect(prvy, `nečakaná hodnota: ${hodnota}`).not.toBeNull();
-    expect(Number(prvy![1])).toBeGreaterThanOrEqual(109);
+    const stlpec = discountColumns(null).find((column) => column.key === 'percent');
+    expect(stlpec, 'stĺpec percenta sa nenašiel').not.toBeUndefined();
+    const px = /^(\d+(?:\.\d+)?)px$/.exec(stlpec!.width ?? '');
+    expect(px, `nečakaná šírka: ${String(stlpec!.width)}`).not.toBeNull();
+    expect(Number(px![1])).toBeGreaterThanOrEqual(109);
   });
 
-  it('hlavička rebríka má tie isté stĺpce ako riadok — popisky stoja nad hodnotami', () => {
-    const riadokCols = deklaracia('.rail :global(.zpick),', 'grid-template-columns');
-    /* Selektor je spoločný pre `.zpick` aj `.zpick-h`; keby ich niekto
-       rozdelil a zabudol na hlavičku, popisok „Zľava" by sa rozišiel
-       s percentom pod ním. */
-    expect(CSS).toContain('.rail :global(.zpick),\n.rail :global(.zpick-h) {');
-    expect(riadokCols).not.toBeNull();
+  it('percento je PRVÝ stĺpec a je prilepené — identita riadku sa neodroluje', () => {
+    /* Rebrík držal percento vľavo tým, že bol prvý v mriežke. V tabuľke to
+       drží poradie stĺpcov a `stickyColumns` (D137). */
+    expect(discountColumns(null)[0]?.key).toBe('percent');
+    expect(discountColumns(null)[1]?.key).toBe('name');
   });
 
   it('percento sa kvôli miestu nezmenšilo — v riadku zostáva 26 px (P1)', () => {
     /* Alternatívou bolo zmenšiť rozsah. Percento je ale dominanta riadku
        (kontrakt UI, bod 21), takže miesto dostala bunka, nie naopak. */
-    expect(deklaracia('.pct {', 'font-size')).toBe('26px');
+    expect(deklaracia('.rowPct b {', 'font-size')).toBe('26px');
   });
 });
 
@@ -245,10 +260,19 @@ describe('2 — počet zapísaných prežije, nech je riadok akokoľvek úzky', 
   });
 
   it('uzol s číslami sa nikdy nezmenšuje — ustupuje odhad, nie počty', () => {
-    expect(deklaracia('.pickCounts {', 'flex')).toBe('0 0 auto');
-    expect(deklaracia('.pickCounts {', 'white-space')).toBe('nowrap');
-    /* Odhad je ten, čo sa smie orezať: má vlastné miesto na karte aj v detaile. */
-    expect(deklaracia('.pickEst {', 'text-overflow')).toBe('ellipsis');
+    /*
+     * PRESMEROVANÉ 2. 9. 2026 (V6b, D139). V rebríku sa o jedno miesto bili
+     * počty a odhad, takže sa to riešilo CSS (`.pickCounts { flex: 0 0 auto }`,
+     * `.pickEst { text-overflow: ellipsis }`). V tabuľke sa nebijú vôbec —
+     * odhad má VLASTNÝ stĺpec „Dobehne". Záruku preto nesie rozvrh stĺpcov
+     * a `.nowrap` na hodnote, nie pravidlo o ustupovaní.
+     */
+    const zapis = discountColumns(null).find((column) => column.key === 'written');
+    const odhad = discountColumns(null).find((column) => column.key === 'estimate');
+    expect(zapis, 'stĺpec zápisu sa nenašiel').not.toBeUndefined();
+    expect(odhad, 'stĺpec odhadu sa nenašiel').not.toBeUndefined();
+    expect(zapis!.width).not.toBeUndefined();
+    expect(deklaracia('.nowrap {', 'white-space')).toBe('nowrap');
   });
 
   it('bez odhadu sa riadok nekreslí prázdny ani s pomlčkou navyše (P7)', () => {
@@ -257,8 +281,13 @@ describe('2 — počet zapísaných prežije, nech je riadok akokoľvek úzky', 
     expect(html).not.toContain('class="est"');
   });
 
-  it('meta riadok v rebríku nemá nowrap — inak by sa zase orezal', () => {
-    expect(deklaracia('.rail :global(.zpick-meta) {', 'white-space')).toBe('normal');
+  it('meno zľavy sa NEREŽE — nedočítané meno je horšie než dlhší riadok', () => {
+    /* PRESMEROVANÉ (V6b): v rebríku to bol jeden meta riadok, ktorému sa
+       muselo zakázať `nowrap`. V tabuľke je meno vlastná bunka, takže sa
+       tá istá záruka píše na `.rowName` — a `text-overflow` tam nesmie byť. */
+    expect(deklaracia('.rowName {', 'overflow')).toBeNull();
+    expect(deklaracia('.rowName {', 'text-overflow')).toBeNull();
+    expect(deklaracia('.rowName {', 'white-space')).toBeNull();
   });
 });
 

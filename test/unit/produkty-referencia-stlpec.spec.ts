@@ -47,6 +47,11 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 
 const TABULKA = read('../../src/components/products/CatalogTable.tsx');
 const AUDIT = read('../../src/components/audit/api.ts');
+/* Vzhľad tabuľky Produktov po prechode na primitívum `Table` (V6b, D137).
+   Dve pravidlá, ktoré do V6b niesla ZNAČKA v tele odpovede (`class="num"`,
+   inline `text-overflow`), sú odteraz tu — a tvrdenia nižšie ich merajú na
+   tomto mieste, aby ich neprestal strážiť nikto. */
+const MODUL_CSS = read('../../src/components/products/catalog-table.module.css');
 
 /* ═══════════════════════════ vzorka ═══════════════════════════════════════ */
 
@@ -137,13 +142,30 @@ const render = (kpi: ProductKpiPageView | null, row: CatalogRowView = ROW): stri
     }),
   );
 
-/** Bunka referencie aj s obalom `<td>` — testy merajú TELO, nie model. */
-function bunkaReferencie(html: string): string {
-  const zaciatok = html.indexOf('<td class="num" data-l="Referencia"');
-  expect(zaciatok, 'stĺpec Referencia v riadku chýba').toBeGreaterThan(-1);
-  const koniec = html.indexOf('</td>', zaciatok);
-  return html.slice(zaciatok, koniec + 5);
+/**
+ * Bunka jednotného stĺpca aj s obalom `<td>` — testy merajú TELO, nie model.
+ *
+ * KOTVA SA VO V6b ZMENILA, PRAVIDLO NIE (D137, 2. 9. 2026)
+ * ────────────────────────────────────────────────────────
+ * Do V6b si tabuľka kreslila `<td>` sama a bunka referencie začínala
+ * `<td class="num" data-l="Referencia"`. Odvtedy ju kreslí primitívum
+ * `ui/Table.tsx` a triedy sú LOKÁLNE pre modul (D143), takže `class` nesie
+ * `_cell_…`/`_pin_…` a globálne `num` v ňom už byť nemôže — nie preto, že by
+ * stĺpec zmizol, ale preto, že sa presunul vzhľad. Kotvou je preto
+ * `data-col="reference"`, teda členstvo v jednotnej sade (D124), ktoré
+ * primitívum vypisuje. Čo niesla trieda `num`, stráži tvrdenie o
+ * `catalog-table.module.css` v §3 tohto súboru.
+ */
+function bunkaStlpca(html: string, colId: string, meno: string): string {
+  const telo = html.slice(html.indexOf('<tbody>'));
+  const kotva = telo.indexOf(`data-col="${colId}"`);
+  expect(kotva, `stĺpec ${meno} v riadku chýba`).toBeGreaterThan(-1);
+  const zaciatok = telo.lastIndexOf('<td', kotva);
+  return telo.slice(zaciatok, telo.indexOf('</td>', kotva) + 5);
 }
+
+const bunkaReferencie = (html: string): string =>
+  bunkaStlpca(html, 'reference', 'Referencia');
 
 /** Celé tlačidlo názvu aj so štýlom — teda to, čo je NAOZAJ v stĺpci Názov. */
 function bunkaNazvu(html: string): string {
@@ -271,8 +293,30 @@ describe('V5 — referencia sa neskracuje ani o znak', () => {
     // Trieda `name` je tá, ktorá v `globals.css` výpustku má; referencia ju
     // preto nesmie nosiť.
     expect(bunkaReferencie(html)).not.toContain('class="name"');
-    // Názov naopak výpustku MÁ — jeho chvost sa dá dočítať v `title`.
-    expect(bunkaNazvu(html)).toContain('text-overflow:ellipsis');
+    // Ani značku skracovania z primitíva (`truncate: true`) nosiť nesmie.
+    expect(bunkaReferencie(html)).not.toMatch(/truncate/i);
+
+    /*
+     * Názov naopak výpustku MÁ — jeho chvost sa dá dočítať v `title`. Do V6b
+     * ju niesol INLINE štýl tlačidla; odvtedy ju kreslí `.nameBtn`
+     * v `catalog-table.module.css` a bunku značí primitívum triedou
+     * `truncate`. Pravidlo je to isté, len má jeden domov, takže sa meria na
+     * oboch koncoch: značka v tele odpovede a deklarácia v module.
+     */
+    expect(bunkaStlpca(html, 'name', 'Názov')).toMatch(/truncate/i);
+    expect(MODUL_CSS).toMatch(/\.nameBtn\s*\{[^}]*text-overflow:\s*ellipsis/);
+  });
+
+  it('referencia má tabuľkové číslice, aby sa stĺpec dal skenovať zvisle', () => {
+    /*
+     * Toto niesla do V6b trieda `num` priamo na `<td>` (`globals.css`:
+     * `font-variant-numeric: tabular-nums`). S prechodom na primitívum sú
+     * triedy lokálne pre modul, takže pravidlo má nový domov — a keby ho tu
+     * nikto nemeral, „čo test vyňal z kontroly, nestráži NIKTO".
+     */
+    expect(MODUL_CSS).toMatch(
+      /td\[data-col='reference'\]\s*\{[^}]*font-variant-numeric:\s*tabular-nums/,
+    );
   });
 });
 

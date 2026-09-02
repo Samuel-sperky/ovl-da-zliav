@@ -76,6 +76,27 @@ const bezKomentarov = (rel: string) =>
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/[^\n]*/g, '');
 
+const DETAIL = '../../src/components/campaigns/DiscountDetail.tsx';
+const NOVA = '../../src/components/campaigns/NewDiscount.tsx';
+
+/**
+ * Telo JEDNEJ top-level funkcie zo zdroja (bez komentárov).
+ *
+ * Pridané 2. 9. 2026: `DiscountDetail.tsx` hostí odvtedy aj `AuditTrailTable`,
+ * a tam je `productLabel()` SPRÁVNY tvar — audit má na produkt jeden riadok
+ * textu vnútri bunky, nie vlastný stĺpec (D122, K6). Grep nad celým súborom
+ * preto prestal merať to, čo meral: nezakazoval druhú kópiu pravidla
+ * v tabuľke, ale legitímne pomenovanie v inej funkcii.
+ */
+function telo(rel: string, name: string): string {
+  const src = bezKomentarov(rel);
+  const start = src.indexOf(`export function ${name}(`);
+  expect(start, `${rel} — funkcia ${name} v zdroji nie je`).toBeGreaterThan(-1);
+  const rest = src.slice(start + 1);
+  const next = rest.search(/\n(?:export (?:function|const|default)|function) /);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 /* ═══════════════════════════ fixtúry ══════════════════════════════════════ */
 
 /** Riadok, o ktorom appka vie VŠETKO — jeden pre všetkých osem stĺpcov. */
@@ -321,13 +342,31 @@ describe('B. výber do zľavy a položky kampane používajú tú istú definíc
   });
 
   it('tabuľka nemá ako obísť definíciu vlastným formátovaním pomlčky', () => {
-    /* Keby si bunku skladala tabuľka, `productLabel()` by sa do nej vrátil
-       a s ním aj predpona „— · názov", ktorú D122 z tabuliek odstraňuje. */
-    const src = bezKomentarov('../../src/components/campaigns/DiscountDetail.tsx');
-    expect(src).not.toContain('productLabel(');
-    expect(bezKomentarov('../../src/components/campaigns/NewDiscount.tsx')).not.toContain(
+    /*
+     * Keby si bunku skladala tabuľka, `productLabel()` by sa do nej vrátil
+     * a s ním aj predpona „— · názov", ktorú D122 z tabuliek odstraňuje.
+     *
+     * 2. 9. 2026 — ČO SA ZMENILO A PREČO: kontrola bola grep nad CELÝM
+     * `DiscountDetail.tsx`. Detail medzitým dostal `AuditTrailTable`, kde
+     * `productLabel()` byť MUSÍ (D122 ho pre miesta s jedným riadkom textu na
+     * produkt výslovne nechává; žiada si ho `zlava-historia-zapisov.spec.ts`
+     * tvrdením na „NR-0041 · Náramok…"). Zákaz sa preto zúžil na TELÁ
+     * TABULIEK — a aby zo zúženia nebola diera, hneď pod ním stojí tvrdenie,
+     * že v súbore je `productLabel(` PRÁVE RAZ a práve v audite. Kto ho
+     * pridá do tretieho miesta, zhodí tento test, aj keby to bola tabuľka,
+     * ktorú tu nikto nevymenoval.
+     */
+    for (const name of ['ItemsTable', 'CampaignProductsTable', 'campaignProductColumns']) {
+      expect(telo(DETAIL, name), `${name} si skladá pomenovanie sám`).not.toContain(
+        'productLabel(',
+      );
+    }
+    const vyskyty = bezKomentarov(DETAIL).match(/productLabel\(/g) ?? [];
+    expect(vyskyty.length, 'productLabel() je v detaile na inom mieste než v audite').toBe(1);
+    expect(telo(DETAIL, 'AuditTrailTable'), 'audit produkt prestal menovať').toContain(
       'productLabel(',
     );
+    expect(bezKomentarov(NOVA)).not.toContain('productLabel(');
   });
 });
 

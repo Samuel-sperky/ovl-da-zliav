@@ -215,6 +215,44 @@ describe('A. Produkty kreslia CELÚ jednotnú sadu v poradí sady (D124)', () =>
   it('mriežka `data-col` je aj v RIADKU, nielen v hlavičke', () => {
     for (const id of PRODUCT_COLUMN_IDS) expect(bunka(html, id).length).toBeGreaterThan(0);
   });
+
+  /*
+   * ČLENSTVO V SADE SA NEDÁ POUŽIŤ AKO CSS KOTVA PRE STĹPEC MIMO SADY.
+   *
+   * `Table` vypisuje `data-col` LEN pre stĺpce sady (jeho bod G), takže výber
+   * a „Zľava teraz" ho nemajú vôbec. Modul obrazovky mal do 2. 9. 2026 dve
+   * pravidlá na `[data-col='select']` — obe MŔTVE od prechodu na primitívum,
+   * takže odsadenie prvej bunky ticho zmizlo a s ním aj „kotva" prúžku
+   * otvoreného riadku. Nenašiel to typecheck ani grep nad `.tsx`: chyba bola
+   * v CSS, kde sa preklep neprejaví ničím.
+   *
+   * Nemeria sa tu vzhľad, ale ROZPOR: keď selektor menuje `data-col` hodnotou,
+   * ktorú tabuľka nevypisuje, je to pravidlo bez cieľa.
+   */
+  it('CSS obrazovky necieli na `data-col`, ktoré tabuľka nevypisuje', () => {
+    /* Komentáre sa odstrihnú: mŕtve kotvy sú v tomto module POMENOVANÉ ako
+       pasca (`[data-col='select']`) a bez tohto by test padal na vysvetlení
+       toho, čo stráži. */
+    const modul = read('../../src/components/products/catalog-table.module.css').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    );
+    const vSade = new Set<string>(PRODUCT_COLUMN_IDS);
+    /* 2. 9. 2026: `vSade.has()` vracia `boolean`, takže `id` zostávalo `string`
+       a `bunka()` (berie `ProductColumnId`) na ňom neprešlo typecheckom.
+       Členstvo sa preto pýtame PREDIKÁTOM — to isté tvrdenie, len zúži typ. */
+    const jeVSade = (id: string): id is ProductColumnId => vSade.has(id);
+    const cielene = [...modul.matchAll(/data-col=['"]([a-zA-Z]+)['"]/g)].map((m) => m[1] as string);
+
+    expect(cielene.length, 'modul stratil všetky kotvy na stĺpce sady').toBeGreaterThan(0);
+    for (const id of cielene) {
+      expect(jeVSade(id), `CSS cieli na data-col='${id}', ktoré tabuľka nevypisuje`).toBe(true);
+      /* Tvrdenie nad týmto `if` už padlo, keď kotva v sade nie je; `continue`
+         je tu LEN pre zúženie typu, nie ako zmäkčenie kontroly. */
+      if (!jeVSade(id)) continue;
+      expect(bunka(html, id).length, `stĺpec ${id} v riadku nie je`).toBeGreaterThan(0);
+    }
+  });
 });
 
 /* ═════════ B. Mená a vety sú z definície, nie z druhej kópie ══════════════ */

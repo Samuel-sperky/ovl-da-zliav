@@ -30,6 +30,9 @@
  *
  * Vlastník: V10 (testovú sadu ako celok vlastní V14).
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -64,6 +67,9 @@ import {
   toRunView,
 } from '@/components/products/catalog-status';
 import { collectOperationBlockers, PILOT_MAX_PRODUCTS } from '@/lib/status/blockers';
+
+/** Zdroj obrazovky — pre vetvy, do ktorých sa statický render nedostane. */
+const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 /* ═══════════════════════════ vzorka ═══════════════════════════════════════ */
 
@@ -429,6 +435,38 @@ describe('V10 — prázdna tabuľka hovorí, ako ju naplniť', () => {
       }),
     );
     expect(html).toContain('Medzi načítanými produktmi nič takéto nie je');
+  });
+
+  /*
+   * PRÍBEH PRÁZDNA NESIE KOMPONENT, NIE LEN VETA (D134, V6b).
+   *
+   * Vety sa rozlišovali už od V10 (`catalogEmptyView({ narrowed })` a vlastná
+   * veta o hľadaní vyššie), ale kreslil ich oba `EmptyState`, teda
+   * `data-story="prazdno"`. Prázdny VÝSLEDOK filtra je pritom iný stav než
+   * prázdny katalóg a má iný ďalší krok — zrušiť filter verzus načítať dávku.
+   * Kto ich zlúči, pošle človeka doťahovať produkty, ktoré appka už má.
+   *
+   * MERIA SA TO NA ZDROJI, NIE NA VYKRESLENÍ, a je to jediná možnosť: prázdny
+   * stav sa kreslí až pri `rows = []` A `loading = false`, kým `CatalogPanel`
+   * začína s `loading = true` a statický render efekty nespustí — do tej vetvy
+   * sa `renderToStaticMarkup` nedostane vôbec. Že komponenty samy nesú správne
+   * `data-story`, stráži `test/unit/stavove-komponenty.spec.ts`; e2e sa na
+   * hotový stav pozerá cez `catalog-empty` (`test/e2e/produkty-hladanie.spec.ts`).
+   */
+  it('prázdny výsledok filtra kreslí `NoResultsState`, prázdny katalóg `EmptyState`', () => {
+    const src = read('../../src/components/products/CatalogPanel.tsx');
+    const vetva = src.slice(src.indexOf('emptyIsFiltered ? ('));
+    const noResults = vetva.indexOf('<NoResultsState');
+    const empty = vetva.indexOf('<EmptyState');
+
+    expect(noResults, 'zúžený filter nemá vlastný stav').toBeGreaterThan(-1);
+    expect(empty, 'prázdny katalóg nemá vlastný stav').toBeGreaterThan(-1);
+    // Poradie je poradím podmienky: filtrovaný stav je vo `true` vetve.
+    expect(noResults).toBeLessThan(empty);
+    // Hľadaný text je tiež filter — zrkadlo hľadá v názve a čísle.
+    expect(src).toContain("searchTerm.length > 0 || filterIsNarrowed(filter)");
+    // Oba stavy zostávajú adresovateľné tým istým menom, e2e ho pozná.
+    expect(vetva.match(/testId="catalog-empty"/g)?.length ?? 0).toBe(2);
   });
 });
 

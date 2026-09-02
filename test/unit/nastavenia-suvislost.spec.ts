@@ -53,6 +53,9 @@ import DiagnosticsSection from '@/components/settings/DiagnosticsSection';
 import LockedFeatures, { LOCKED_FEATURES } from '@/components/settings/LockedFeatures';
 import ScopeModeForm from '@/components/settings/ScopeModeForm';
 import SafeguardsSection from '@/components/settings/SafeguardsSection';
+/* Mapovanie CSS modulu rozcestníka: vo vykreslenom markupe sú hašované mená
+   tried, takže literál `class="cardTitle"` už nič nenájde (D143). */
+import styles from '@/components/settings/settings-index.module.css';
 import { SETTINGS_CSS } from '@/components/settings/styles';
 import { DIAGNOSTICS_CONTENT_ROWS } from '@/lib/diagnostics/collect';
 import type { SettingsView } from '@/components/settings/api';
@@ -326,16 +329,29 @@ describe('Karty rozcestníka: stav sa netlačí na spodok karty', () => {
     const karty = [...markup.matchAll(/data-testid="settings-card-(?!state-)([a-z-]+)"/g)];
     expect(karty).toHaveLength(4);
 
+    /*
+     * 2. 9. 2026 — ČO SA ZMENILO A PREČO: pásma sa hľadali reťazcami
+     * `class="cardTitle"` a spol. Rozcestník medzitým prešiel na CSS modul
+     * (D143), takže vo vykreslenom markupe stoja HAŠOVANÉ mená
+     * (`_cardTitle_0a1a5b`) a všetky štyri reťazce zmizli — test hlásil
+     * „karta nemá všetky pásma: " s prázdnym zoznamom, teda pád na presunutej
+     * veci, nie na chýbajúcom pásme. Mená sa preto berú z MAPOVANIA modulu
+     * (`styles`), nie z literálu, a hľadajú sa ako TRIEDA v atribúte — karta
+     * skladá `class` z dvoch tried (`_panel_… _card_…`), takže presná zhoda
+     * celého atribútu by bola druhá pasca toho istého druhu.
+     */
+    const maTriedu = (body: string, trieda: string): boolean =>
+      [...body.matchAll(/class="([^"]*)"/g)].some((m) => m[1]!.split(/\s+/).includes(trieda));
+
     for (const [i, m] of karty.entries()) {
       const from = m.index;
       const to = i + 1 < karty.length ? karty[i + 1]!.index : markup.length;
       const body = markup.slice(from, to);
-      const slots = [
-        'class="cardTitle"',
-        'class="lead"',
-        'class="sections"',
-        'class="state"',
-      ].filter((slot) => body.includes(slot));
+      const pasma = [styles.cardTitle, styles.lead, styles.sections, styles.state];
+      /* Poistka: keby modul niektorý názov stratil, `undefined` by z filtra
+         vypadol a test by bol zelený nad neexistujúcim pásmom. */
+      for (const trieda of pasma) expect(typeof trieda, 'pásmo bez triedy v module').toBe('string');
+      const slots = pasma.filter((trieda) => maTriedu(body, trieda));
       expect(slots, `karta ${m[1]} nemá všetky pásma: ${slots.join(', ')}`).toHaveLength(span);
     }
   });

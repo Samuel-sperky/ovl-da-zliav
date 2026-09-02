@@ -85,14 +85,20 @@ describe('V15 — počet zhôd nad neúplným zrkadlom', () => {
     );
     expect(html).toContain('≈ 11 640');
     // Merané číslo je tučné; odhad nesmie mať ten istý štýl.
-    expect(html).not.toContain('<b class="num">11 640</b>');
+    expect(html).not.toMatch(/<b[^>]*>11 640<\/b>/);
   });
 
   it('nad úplným zrkadlom je počet meraný fakt, teda bez značky', () => {
     const html = renderToStaticMarkup(
       createElement(CatalogTable, { ...TABLE, total: 11640, totalIsLowerBound: false }),
     );
-    expect(html).toContain('<b class="num">11 640</b>');
+    /* PRESMEROVANÉ 2. 9. 2026 (V6b, D137): pätku kreslí `ui/Pagination`, nie
+       tabuľka, a trieda `num` z `globals.css` sa v nej vymenila za triedu
+       z CSS modulu (D143), ktorej meno je v testovom prostredí zahašované.
+       Kotvou je preto samotná ZNAČKA `<b>` — v tejto pätke je tučné výhradne
+       merané číslo, takže tvrdenie „meraný fakt je tučný, odhad nie" meria
+       to isté. Že odhad `<b>` NEMÁ, stráži tvrdenie nad týmto. */
+    expect(html).toMatch(/<b[^>]*>11 640<\/b>/);
     expect(html).not.toContain('≈');
   });
 

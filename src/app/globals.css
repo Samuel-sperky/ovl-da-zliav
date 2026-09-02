@@ -2606,27 +2606,13 @@ table.tbl tr.muted td {
   font-weight: 700;
 }
 
-.pager {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-.pager a,
-.pager span {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: var(--r-sm);
-  color: var(--dim);
-}
-.pager a:hover {
-  background: var(--paper3);
-  color: var(--ink2);
-}
-.pager .cur {
-  background: var(--paper3);
-  color: var(--ink);
-  font-weight: 640;
-}
+/* STRÁNKOVAČ TU UŽ NEŽIJE (V6b, 2. 9. 2026, D139).
+   `.pager`, `.pager a`, `.pager span`, `.pager a:hover` a `.pager .cur` mala
+   VÝHRADNE tabuľka Produktov (`CatalogTable.tsx`, jediný výskyt v celom repe).
+   Tá prešla na primitívum `ui/Pagination`, ktoré si vzhľad nesie v
+   `ui/tables.module.css` (D143) — vrátane `.pageCurrent`, nasledovníka `.cur`.
+   Prevedená obrazovka si staré triedy maže; nechať ich tu by znamenalo dve
+   takmer rovnaké sady, o ktorých sa o mesiac nedá povedať, ktorá kreslí. */
 
 /* ---------- 14.7 Spodná lišta výberu ------------------------------------- */
 .selbar {
@@ -3031,44 +3017,16 @@ details.tech.bare {
 }
 
 /* ---------- 14.13 Zoznam zliav a návrhy ---------------------------------- */
-.zrow {
-  display: grid;
-  grid-template-columns: 1fr 190px 110px 90px 150px 200px;
-  gap: 14px;
-  align-items: center;
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13.5px;
-}
-.zrow:last-child {
-  border-bottom: 0;
-}
-.zrow .nm {
-  font-weight: 620;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.zrow.dim {
-  opacity: 0.62;
-}
-.zlist {
-  background: var(--paper2);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-.zlist-h {
-  /* Popisok STLPCA na zozname zliav — ta ista rola ako table.tbl thead th. */
-  font-size: var(--ovl-fs-eyebrow);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--dim);
-  font-weight: 600;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--line);
-}
+/*
+ * `.zlist`, `.zlist-h` a `.zrow` (so `.zrow .nm` a `.zrow.dim`) sú ZMAZANÉ
+ * (V6b, D139). Zoznam zliav prešiel na primitívum `ui/Table`: rám, prilepenú
+ * hlavičku aj popisok stĺpca kreslí `ui/tables.module.css` (`.head` je
+ * nasledovník `.zlist-h` a `typografia.spec.ts` porovnáva obe roly, aby sa
+ * nerozišli), tlmený riadok skončenej zľavy kreslí `rowMeta.muted`.
+ * Karta zľavy na Prehľade `.zrow` nikdy nepoužívala — má vlastnú dvojriadkovú
+ * geometriu v `overview.module.css` (pozri `CampaignsSection.tsx`).
+ */
+
 /* Návrh je riadok s číslom a slovesom — nie karta a nie chatbot. */
 .suggest {
   display: flex;
@@ -3667,11 +3625,6 @@ table.tbl tbody tr.open td:first-child {
     width: 100%;
     top: 0;
   }
-  .zrow {
-    grid-template-columns: 1fr;
-    gap: 4px;
-    padding: 10px 12px;
-  }
 }
 .filters-toggle {
   display: none;
@@ -4021,131 +3974,28 @@ table.tbl tbody tr.open td:first-child {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   15. ZĽAVY — MAJSTER/DETAIL (K1, šprint 20 vlna 3)
+   15. ZĽAVY — MAJSTER/DETAIL (K1, šprint 20 vlna 3; PREVEDENÉ vo V6b)
    ══════════════════════════════════════════════════════════════════════════
 
-   Tab Zľavy prestal byť stránkou, z ktorej sa odchádza na detail. Vľavo je
-   rebrík zliav, vpravo detail tej vybranej. Trasa `/zlavy/[id]` sa tým nemení
-   — pravý stĺpec je slot pre stránku trasy, nie stav komponentu.
+   Rozvrh majster/detail zostáva, jeho CSS už NIE. Zmazané sú `.zsplit`,
+   `.zsplit-rail`, `.zsplit-detail` a celá rodina riadku rebríka (`.zpick`,
+   `.zpick-h`, `.zpick-pct`, `.zpick-main`, `.zpick-name`, `.zpick-state`,
+   `.zpick-meta` a stavy `.on` / `.dim`) — spolu s opravami, ktoré nad nimi
+   viseli v `zlavy.module.css` (`.rail :global(.zpick…)`), V6b, D139.
 
-   Rebrík má pevných 380 px, lebo je to VÝBER: čítať sa v ňom má názov a stav,
-   nie tabuľka. Detail dostáva zvyšok, lebo tam sa pracuje. Pod 1180 px sa
-   stĺpce poskladajú pod seba — 380 px rebríka by inak detailu nechalo menej,
-   než potrebujú jeho štyri dlaždice.
+   Prečo: 380 px rebrík výberu bol tabuľka kreslená ručne. Zoznam prešiel na
+   primitívum `ui/Table`, ktoré má prilepenú hlavičku a prilepené prvé dva
+   stĺpce (D137) — teda presne to, čo rebrík riešil pevnou šírkou a orezávaním
+   textu. Dve sady tried pre ten istý riadok by sa o mesiac rozišli; mŕtva
+   vrstva `.ovl-*` je v tomto repe zapísaná skúsenosť (`mrtve-triedy.spec.ts`),
+   nie hypotéza.
+
+   Čo z nej prežilo a KDE: šírky stĺpcov sú v `discountColumns()`
+   (`DiscountsList.tsx`), vzhľad buniek v `zlavy.module.css` (`.rowPct`,
+   `.rowName`, `.rowState`, `.rowOpen`, `.rowItems`, `.nowrap`), tlmený riadok
+   v `rowMeta.muted`, pruh vybraného riadku v `rowMeta.selected` — a slovo
+   „otvorená" v bunke, aby výber nenieslo len pozadie (tri kanály).
    ------------------------------------------------------------------------- */
-
-.zsplit {
-  display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-
-.zsplit-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.zsplit-detail {
-  min-width: 0;
-}
-
-/* Hlavička rebríka drží tie isté stĺpce ako riadok — popisky stoja nad svojimi
-   hodnotami a rozísť sa nesmú. `padding-left` dorovnáva 2 px pruhu výberu. */
-.zpick-h {
-  display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
-  gap: 12px;
-  padding-left: 16px;
-}
-
-/* Celý riadok je odkaz: v majster/detail je jeho jediným cieľom otvoriť
-   detail, takže klikacia plocha nesmie byť len názov. */
-.zpick {
-  display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--line);
-  border-left: 2px solid transparent;
-  color: inherit;
-  text-decoration: none;
-  font-size: 13px;
-}
-
-.zpick:last-child {
-  border-bottom: 0;
-}
-
-.zpick:hover {
-  background: var(--paper3);
-}
-
-/* Vybraný riadok — pruh v akcente je ten istý mechanizmus ako aktívna položka
-   v ľavom paneli appky (`.shell-side .tabs a.on`). */
-.zpick.on {
-  background: var(--paper3);
-  border-left-color: var(--accent);
-}
-
-/* Skončená zľava je tlmená — je to kontext, nie práca (§4). */
-.zpick.dim {
-  opacity: 0.62;
-}
-
-.zpick-pct {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-/* 26 px = 41 % dominanty (64 px). P1 pripúšťa najviac 55 %, takže percento
-   v rebríku smie byť druhé najväčšie a nesmie sa priblížiť dominante. */
-.zpick-pct b {
-  font-size: 26px;
-  font-weight: 660;
-  letter-spacing: -0.025em;
-  line-height: 1.05;
-  color: var(--ink);
-  white-space: nowrap;
-}
-
-.zpick-pct i {
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 550;
-  color: var(--dim);
-}
-
-.zpick-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.zpick-name {
-  font-weight: 620;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.zpick-state {
-  min-width: 0;
-  font-size: 12.5px;
-}
-
-.zpick-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* Odkaz na JEDINÉ miesto s vysvetlením zamknutých údajov (kontrakt bod 18).
    Zámerne je to len slovo v tlmenej veľkosti: výklad patrí do Nastavení,
@@ -4161,12 +4011,6 @@ a.lockwhy {
 
 a.lockwhy:hover {
   color: var(--ink2);
-}
-
-@media (max-width: 1180px) {
-  .zsplit {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 /* ---------- 14.24 Prehľad vedie číslami (šprint 20, vlna 3, C4) ----------

@@ -124,7 +124,8 @@ import {
   Segmented,
   StatusPill,
   Table,
-  ToneBadge,
+  toneSigClass,
+  ToneSigMark,
   Toolbar,
   ToolbarSearch,
   ToolbarSpacer,
@@ -528,20 +529,32 @@ export function discountColumns(
     },
     {
       key: 'written',
-      header: 'Zapísané',
+      /* Hlavička je „Zápis", nie „Zapísané": slovo `zapísané` stojí v BUNKE
+         (nižšie, ako súčasť meraného reťazca) a ten istý výraz dvakrát nad
+         sebou je práve tá duplicita, ktorú si tab Zľavy raz už vyčistil
+         (`test/unit/text-zlavy-duplicity.spec.ts`). */
+      header: 'Zápis',
       align: 'right',
       width: '124px',
       headerTitle: 'Koľkým produktom appka nižšiu cenu do eshopu naozaj zapísala.',
       cell: (row): TableCell => ({
         /*
          * Nález UX2: „zapísané 948 z 1 180" sa v jednoriadkovom rebríku
-         * orezávalo presne na čísle. V tabuľke je to jedna bunka s vlastnou
-         * šírkou, ale nedeliteľné to zostáva — inak sa pri úzkom okne odláme
-         * práve to, kvôli čomu stĺpec existuje.
+         * orezávalo presne na čísle — snímkovač z tohto reťazca odmeral
+         * „zapísané 948 z " (−109 px), teda odpadol práve ten údaj, kvôli
+         * ktorému bunka existuje.
+         *
+         * V tabuľke má hodnota vlastnú šírku, ale nedeliteľná zostáva
+         * VRÁTANE SLOVA a ako JEDEN textový uzol. Dôvod je, že hlavička sa od
+         * hodnoty odtrhne: hlavička je prilepená a pri dlhom zozname sa
+         * odroluje, a číslo bez slova („948 z 1 180") potom netvrdí nič —
+         * dalo by sa čítať aj ako počet produktov v stĺpci vedľa. Kto sem
+         * vloží `<b>` alebo `<span>` okolo čísla, uzol rozdelí a orezanie sa
+         * vráti; preto je to šablónový reťazec, nie tri deti JSX.
          */
         content: (
           <span className={styles.nowrap} data-testid="row-written">
-            {formatCountSk(row.itemsOk)} z {formatCountSk(row.itemsTotal)}
+            {`zapísané ${formatCountSk(row.itemsOk)} z ${formatCountSk(row.itemsTotal)}`}
           </span>
         ),
       }),
@@ -650,10 +663,19 @@ interface WatchGroup {
  * Nekreslí sa, keď nie je čo: prázdny rám s nulami by bol veta, ktorá stojí
  * na obrazovke stále a nič nehlási (kontrakt UI, bod 3).
  *
- * Značku stavu kreslí `ToneBadge` — kanonický vykresľovač tónu v riadku
- * (pozri hlavičku `ui/StatusPill.tsx`). Do V6b to bola trieda `.sig` z
- * `globals.css` so `SigMark` vedľa; badge robí to isté, ale slovo si vynúti
- * sám (`ui/signals.ts`), takže sa z troch kanálov nedajú stratiť dva.
+ * Tri kanály (§4 bod 3) nesie trieda `.sig <tón>` — `toneSigClass()`
+ * (`ui/blocker-look.ts`) dá FARBU, `ToneSigMark` (`ui/StatusMark.tsx`) ZNAČKU
+ * a `WatchGroup.word` SLOVO, všetko v jednom uzle. Je to ten istý mechanizmus,
+ * akým o závažnosti hovorí prehľad (`dashboard/BlockersSection.tsx`,
+ * `dashboard/StatusSection.tsx`), takže tón sa nemá kde rozísť.
+ *
+ * Vo V6b tu chvíľu stál `ToneBadge`. Robí to isté, ale bol by to DRUHÝ
+ * vykresľovač stavu na tej istej obrazovke: stav zľavy v tabuľke nad tým
+ * kreslí `DiscountState` (`.state`/`.flag` so `StateMark`/`FlagMark`), takže
+ * by jedna obrazovka o tej istej veci rozprávala dvoma tvarmi — a to je práve
+ * to, čo bod 6 hlavičky tohto súboru zakazuje. Slovo je tu literál z
+ * `WatchGroup`, nie hodnota zo servera, takže sa nemá ako stratiť; poistka
+ * `isWordless()` (`ui/signals.ts`) chráni presne ten opačný prípad.
  */
 export function WatchSection({ queue }: { queue: QueueSnapshotView }) {
   const groups: WatchGroup[] = [];
@@ -696,7 +718,10 @@ export function WatchSection({ queue }: { queue: QueueSnapshotView }) {
         {groups.map((item) => (
           <div className={styles.watch} key={item.key} data-testid={`watch-${item.key}`}>
             <div className={styles.watchHead}>
-              <ToneBadge tone={item.tone}>{item.word}</ToneBadge>
+              <span className={toneSigClass(item.tone)}>
+                <ToneSigMark tone={item.tone} />
+                {item.word}
+              </span>
               <b className="lvl-2 num">{formatCountSk(item.group.items)}</b>
               <span className="lvl-3">{pluralSk(item.group.items, 'kus', 'kusy', 'kusov')}</span>
             </div>

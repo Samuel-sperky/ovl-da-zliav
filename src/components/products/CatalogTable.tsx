@@ -287,6 +287,15 @@ const WAIT_ROWS = 8;
  * jednotné stĺpce v hlavičke idú v poradí sady, len prekladané. Stráži to
  * `produkty-jednotne-stlpce.spec.ts`, ktorý číta `data-col` z hlavičky.
  *
+ * ČLENSTVO V SADE NESIE `data-col`, MENOVKU BUNKY `data-l`
+ * ───────────────────────────────────────────────────────
+ * `colId` dostane VÝHRADNE stĺpec sady, takže z vykresleného `<thead>` sa dá
+ * prečítať, či je sada celá a v poradí. Tri stĺpce mimo sady majú len
+ * `cardLabel` (`data-l`) — presne ako „Pásmo" v sprievodcovi novej zľavy
+ * a „Zapísané" v položkách kampane. Prvá podoba primitíva vypisovala
+ * `data-col` z KĽÚČA stĺpca, teda na každý; členstvo v sade sa tým prestalo
+ * dať zmerať a s ním padla jediná poistka proti rozídeniu troch tabuliek.
+ *
  * DVA STĹPCE O ZĽAVE MAJÚ ODTERAZ DVE RÔZNE MENÁ
  * ──────────────────────────────────────────────
  * `Zľava v shope` je jednotný stĺpec `discountNow` — čo o produkte povedal SHOP
@@ -679,8 +688,12 @@ export function CatalogTable({
             data-testid={`open-detail-${row.productId}`}
           >
             {/* Názov stojí SÁM (D122). Keď ho zrkadlo nemá, je tu `#id` —
-                stlmené bunkou, aby sa nečítalo ako meno. */}
-            {name.text}
+                a je STLMENÉ triedou `lvl-3`, teda tým istým spôsobom, akým
+                celá appka hovorí „potlačený kontext" (P1). Nie je to ozdoba:
+                bez toho by priznanie „názov nevieme" vyzeralo ako meno. Bunka
+                to hlási aj strojovo (`data-value="unknown"`), ale to je pre
+                testy a čítačku — oku to musí povedať trieda. */}
+            <span className={name.unknown ? 'lvl-3' : undefined}>{name.text}</span>
           </button>
           {/* EAN — tichý druhý riadok. Pri prázdne nesie SLOVO, nie len
               pomlčku: „ešte sa doťahuje", „vyžaduje kľúč" a „shop ho nevedie"
@@ -767,6 +780,8 @@ export function CatalogTable({
        vo vlastnej kópii. */
     {
       key: 'reference',
+      colId: 'reference',
+      cardLabel: col.reference.label,
       header: col.reference.label,
       headerTitle: col.reference.headTitle,
       width: WIDTH.reference,
@@ -775,6 +790,13 @@ export function CatalogTable({
     },
     {
       key: 'name',
+      colId: 'name',
+      /* Menovka BUNKY nie je meno stĺpca, a tu sa to rozchádza zámerne:
+         stĺpec sa volá `Názov` (jednotná sada), ale v bunke stojí meno,
+         kód EAN a príznaky riadku — teda celý PRODUKT. Menovka sa preto
+         menuje tým, čo v bunke naozaj je, presne ako pred prechodom na
+         primitívum. Druhé meno pre tú istú VELIČINU to nie je (D124). */
+      cardLabel: 'Produkt',
       header: col.name.label,
       headerTitle: headTitle(col.name.headTitle, 'name'),
       sortable: true,
@@ -787,6 +809,8 @@ export function CatalogTable({
          povrchu: dva peňažné stĺpce vedľa seba by sa čítali ako jedna cena
          a druhý by vyzeral ako chyba. */
       key: 'price',
+      colId: 'price',
+      cardLabel: col.price.label,
       header: col.price.label,
       headerTitle: headTitle(col.price.headTitle, 'price'),
       align: 'right',
@@ -799,6 +823,8 @@ export function CatalogTable({
     },
     {
       key: 'discountNow',
+      colId: 'discountNow',
+      cardLabel: col.discountNow.label,
       header: col.discountNow.label,
       headerTitle: col.discountNow.headTitle,
       align: 'right',
@@ -815,6 +841,7 @@ export function CatalogTable({
          nič nehlási", ale „appka si na tento produkt zľavu nezapísala" — je to
          MERANÝ fakt o vlastnej knihe, takže bunka ho ako priznanie nehlási. */
       key: 'discountOwn',
+      cardLabel: 'Zľava teraz',
       header: 'Zľava teraz',
       headerTitle:
         'Podľa vlastných zápisov appky — nie je to stav v shope, ten hovorí stĺpec „Zľava v shope“.',
@@ -829,6 +856,8 @@ export function CatalogTable({
     },
     {
       key: 'soldWindow',
+      colId: 'soldWindow',
+      cardLabel: col.soldWindow.label,
       header: col.soldWindow.label,
       headerTitle: headTitle(
         col.soldWindow.headTitle,
@@ -846,6 +875,7 @@ export function CatalogTable({
       /* MIMO SADY — druhé okno predajnosti. Sada pozná JEDNO okno
          (`soldWindow`); druhé je vlastnosť tejto obrazovky. */
       key: 'soldWindowLong',
+      cardLabel: `Predané ${longDays} d`,
       header: `Predané ${longDays} d`,
       headerTitle: `Predané kusy za ${longDays} dní — len za dni, ktoré má appka naozaj stiahnuté.`,
       align: 'right',
@@ -859,6 +889,8 @@ export function CatalogTable({
          zásobu ako jednu momentku, nie priemer za obdobie (I11, stráži to
          `sales-insights.spec.ts`). */
       key: 'soldPerStock',
+      colId: 'soldPerStock',
+      cardLabel: col.soldPerStock.label,
       header: col.soldPerStock.label,
       headerTitle: col.soldPerStock.headTitle,
       align: 'right',
@@ -872,6 +904,7 @@ export function CatalogTable({
     {
       /* MIMO SADY — posledný predaj podľa shopu. */
       key: 'lastSale',
+      cardLabel: 'Posledný predaj',
       header: 'Posledný predaj',
       headerTitle: 'Posledný predaj podľa shopu, zmerané pri obohatení produktu.',
       align: 'right',
@@ -885,6 +918,8 @@ export function CatalogTable({
          bunky hovorí jednotný stĺpec: pomlčka za celý stĺpec je až vtedy, keď
          nevieme ani jednu polovicu. */
       key: 'margin',
+      colId: 'margin',
+      cardLabel: col.margin.label,
       header: col.margin.label,
       headerTitle: col.margin.headTitle,
       align: 'right',
@@ -909,6 +944,8 @@ export function CatalogTable({
     },
     {
       key: 'stock',
+      colId: 'stock',
+      cardLabel: col.stock.label,
       header: col.stock.label,
       headerTitle: col.stock.headTitle,
       align: 'right',

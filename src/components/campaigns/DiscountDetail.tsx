@@ -110,11 +110,31 @@
  *     o tom, či taká schopnosť vôbec existuje. Podrobne pri
  *     `expiryNoteText()`.
  *
- * Vlastník: V11.
+ * ČO PRINIESLO V6b (2. 9. 2026) A ČO ZÁMERNE NEZMENILO
+ * ---------------------------------------------------
+ * Prekopal sa **zoznam produktov zľavy** (rozklik „Produkty v zľave", D127) —
+ * stojí na primitíve `ui/Table.tsx` a `ui/Pagination.tsx`, teda na tom istom
+ * tvare ako rebríček Zliav a tabuľka Produktov. Získalo sa tým to, čo ručný
+ * `<table class="tbl">` nemal: prilepená hlavička a prilepená identita
+ * (D137), priznanie stlmené primitívom a dopovedané čítačke
+ * (`data-value="unknown"`) a jedna pätka na stránkovanie. Prázdno, chyba
+ * a načítavanie majú tvary z `components/states` — každý s vlastným príbehom,
+ * takže „nič tu nie je" a „nepodarilo sa prečítať" nesplynú.
+ *
+ * **Tabuľka POLOŽIEK (`ItemsTable`) na primitívum ZÁMERNE neprešla.** Jej
+ * rozvrh je pevný (`<colgroup>` + `table-layout: fixed` + päť šírok
+ * v `zlavy.module.css`), pretože UX2 odmeral, ako jej päť stĺpcov s
+ * `nowrap` pretieklo von z karty; `zlavy-ux2-rozvrh.spec.ts` §3 to stráži
+ * číslami z prehliadača. Prepísať ju na primitívum znamená premerať tie
+ * šírky nanovo v prehliadači — je to vlastná úloha, nie vedľajší efekt tejto.
+ *
+ * Vlastník: V11; zoznam produktov V6b.
  */
 import Link from 'next/link';
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 
+import { auditRowText, showsFailureFlag } from '@/components/audit/AuditTable';
+import { auditActorLabel } from '@/components/audit/api';
 import { StandPanel } from '@/components/campaigns/BlockerList';
 import DiscountPerformance from '@/components/campaigns/DiscountPerformance';
 import DiscountState from '@/components/campaigns/DiscountState';
@@ -141,6 +161,7 @@ import {
   stopDiscountQueue,
   type CampaignProductRowView,
   type CampaignProductsView,
+  type AuditRowView,
   type DiscountDetailData,
   type DiscountItemView,
   type ItemBreakdownView,
@@ -148,14 +169,28 @@ import {
 import { useRefreshable } from '@/components/layout/refresh';
 import { repeatDiscountHref } from '@/components/campaigns/presets-model';
 import { hrefForAnchor } from '@/components/settings/sub-pages';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  NoResultsState,
+} from '@/components/states';
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Icon from '@/components/ui/Icon';
 import StatTile from '@/components/ui/StatTile';
-import { SigMark, type SigVariant } from '@/components/ui/StatusMark';
+import { FlagMark, SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { TONE_ICON } from '@/components/ui/ToneBadge';
+import {
+  Button,
+  Pagination,
+  Table,
+  type TableCell,
+  type TableColumn,
+} from '@/components/ui';
 import { DISCOUNTED_PRICE_DISCLAIMER_SK } from '@/lib/domain/pricing';
+import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import { formatDateSk, formatDateTimeSk, formatEur } from '@/lib/ui/format';
-import { productNameCell } from '@/lib/ui/product-label';
+import { productLabel, productNameCell } from '@/lib/ui/product-label';
 import { productColumns, valueOrGap } from '@/lib/ui/product-columns';
 import { formatCountSk, itemSentence, pluralSk } from '@/lib/ui/vocabulary';
 
@@ -611,7 +646,7 @@ export function ItemsTable({
                     {say.label}
                   </span>
                   {reason === '' ? null : (
-                    <span className={`lvl-3 ${styles.itemReason}`}>{reason}</span>
+                    <span className={`lvl-3 ${styles.cellUnder}`}>{reason}</span>
                   )}
                 </td>
               </tr>
@@ -641,6 +676,14 @@ export const GONE_FROM_CATALOG_SK =
   'Produkt už v zrkadle katalógu nie je. Riadok zľavy zostáva ako dôkaz o tom, ' +
   'čo appka urobila, ale referenciu ani dnešný názov nemá odkiaľ vziať.';
 
+/**
+ * Prečo „cena pred" nie je. Nie je to cena nula a nie je to zľava z nuly:
+ * appka nevidela cenu ani v náhľade, ani v okamihu zápisu (I11).
+ */
+export const PRICE_BEFORE_UNKNOWN_SK =
+  'Cenu, z ktorej sa percento počítalo, appka nemá — ani z náhľadu, ani z času zápisu. ' +
+  'Preto sa z nej nevyrába ani „cena po".';
+
 /** Odkiaľ je „cena pred" — veta k stĺpcu, nie kód. */
 function priceBeforeNote(row: CampaignProductRowView): string | null {
   if (row.priceBeforeSource === 'write') return 'cena pri zápise';
@@ -649,149 +692,257 @@ function priceBeforeNote(row: CampaignProductRowView): string | null {
 }
 
 /**
- * TABUĽKA PRODUKTOV JEDNEJ ZĽAVY.
+ * STĹPCE ZOZNAMU PRODUKTOV ZĽAVY — jednotná sada plus história zápisu.
  *
- * Čo tu drží a prečo:
+ * Prečo je to funkcia mimo komponentu: rovnako ako `discountColumns()` v tabe
+ * Zľavy sa tým dá poradie stĺpcov, členstvo v jednotnej sade aj trojstavovosť
+ * buniek overiť bez vykreslenia celej obrazovky.
  *
+ * ČO TU DRŽÍ A PREČO
+ * ──────────────────
  *  1. **Referencia je PRVÝ stĺpec** (D122) a berie sa z jednotnej sady (D124),
- *     takže sa volá rovnako a znamená to isté ako na Produktoch.
+ *     takže sa volá rovnako a znamená to isté ako na Produktoch. Meno stĺpca
+ *     tu NEEXISTUJE ako literál — príde z `productColumns()`.
  *  2. **Riadok sa nestratí.** Produkt, ktorý z katalógu zmizol, tu JE — s
- *     pomlčkou a s dôvodom v `title` (`GONE_FROM_CATALOG_SK`). Route ho drží
- *     cez `LEFT JOIN`, tabuľka ho nesmie odfiltrovať.
- *  3. **„Cena po" je ORIENTAČNÁ** (D4, I11). Appka ju vypočítala z ceny, ktorú
- *     naposledy videla; skutočnú zľavnenú cenu cez API nevidela nikdy. Preto ju
- *     sprevádza `DISCOUNTED_PRICE_DISCLAIMER_SK` a nikdy sa nedopočítava
- *     z neznámej ceny — bez „ceny pred" je „cena po" pomlčka, nie nula.
+ *     pomlčkou a s dôvodom v `title` (`GONE_FROM_CATALOG_SK`). Sú to DVE rôzne
+ *     nevedomosti (D118) a nezlievajú sa do jednej vety.
+ *  3. **„Cena po" je ORIENTAČNÁ** (D4, I11). Bez známej „ceny pred" je pomlčka,
+ *     nikdy nula, a všade ju sprevádza `DISCOUNTED_PRICE_DISCLAIMER_SK`.
  *  4. **Zaškrtávanie nie je zápis.** Výber slúži jedine na predplnenie
  *     sprievodcu (`?produkty=…`); skúška naprázdno a potvrdenie sa odohrajú
  *     tam nanovo (I3).
+ *  5. **Bunka vracia POPIS, nie uzol** — `TableCell` nesie `unknown`, takže
+ *     primitívum vie priznanie stlmiť a dopovedať ho čítačke. Preto sa
+ *     pomlčka nezabaľuje do vlastného `.lvl-3`: obal by z priznania urobil
+ *     hodnotu, ktorá len šedo vyzerá.
+ */
+export function campaignProductColumns({
+  selected,
+  onToggle,
+}: {
+  /** ID produktov, ktoré sú zaškrtnuté. Prázdna množina = nič nie je vybrané. */
+  readonly selected: ReadonlySet<number>;
+  /** `undefined` = zoznam je len na čítanie a zaškrtávadlá sa nekreslia. */
+  readonly onToggle?: (productId: number) => void;
+}): readonly TableColumn<CampaignProductRowView>[] {
+  const columns: TableColumn<CampaignProductRowView>[] = [];
+
+  if (onToggle !== undefined) {
+    columns.push({
+      key: 'pick',
+      /*
+       * Hlavička je PRÁZDNA zámerne. Meno stĺpca nesie `title` (čítačka ho
+       * vezme ako prístupné meno `<th>`) a hlavne každé políčko svojím
+       * `aria-label` s referenciou — teda menom KUSU, nie stĺpca. Slovo
+       * v 44 px hlavičke by rozdrvilo prilepenú identitu vedľa.
+       */
+      header: '',
+      headerTitle: 'Vybrať produkty do novej zľavy',
+      width: '44px',
+      cell: (row) => ({
+        content: (
+          <input
+            type="checkbox"
+            checked={selected.has(row.productId)}
+            onChange={() => onToggle(row.productId)}
+            aria-label={`Vybrať produkt ${row.reference ?? `#${row.productId}`}`}
+            data-testid="detail-products-pick"
+          />
+        ),
+      }),
+    });
+  }
+
+  for (const column of productColumns(['reference', 'name'])) {
+    columns.push({
+      key: column.id,
+      /* `data-col` = členstvo v jednotnej sade (D124), nie kľúč stĺpca. */
+      colId: column.id,
+      cardLabel: column.label,
+      header: column.label,
+      headerTitle: column.headTitle,
+      align: column.numeric ? 'right' : 'left',
+      /* Šírka nie je ozdoba: bez nej sa prilepený stĺpec nemá o čo odsadiť
+         (`stickyOffsets()`), takže by sa identita pri rolovaní neudržala. */
+      width: column.id === 'reference' ? '132px' : '264px',
+      cell: (row): TableCell => {
+        const cell = column.cell({
+          productId: row.productId,
+          reference: valueOrGap(row.reference, 'not_enriched'),
+          name: valueOrGap(row.catalogName, 'not_enriched'),
+        });
+        /*
+         * Dva rôzne dôvody pre tú istú pomlčku (I11): produkt buď v zrkadle
+         * NIE JE vôbec, alebo v ňom je a nie je obohatený (D118). Kód medzery
+         * je v oboch prípadoch ten istý, dôvod v `title` nie.
+         */
+        const gone = !row.inCatalog;
+        const atWrite =
+          column.id === 'name' && row.catalogName === null && row.nameAtWrite !== null;
+        return {
+          content: (
+            <>
+              {cell.text}
+              {/* Názov PRI ZÁPISE je iný fakt než dnešný názov v katalógu a
+                  história zápisu sa neprepisuje (I4). Preto sa nedosadzuje do
+                  stĺpca „Názov", ale stojí pod ním s vlastným menom. */}
+              {atWrite ? (
+                <span className={styles.cellUnder} data-testid="detail-products-name-at-write">
+                  pri zápise: {row.nameAtWrite}
+                </span>
+              ) : null}
+            </>
+          ),
+          unknown: cell.unknown,
+          lowerBound: cell.lowerBound,
+          title: cell.unknown && gone ? GONE_FROM_CATALOG_SK : cell.title,
+        };
+      },
+    });
+  }
+
+  /*
+   * TRI STĹPCE MIMO JEDNOTNEJ SADY (D124). „Cena pred" je momentka z času
+   * náhľadu alebo zápisu, „Cena po" je VÝPOČET a „Zapísané" je stav histórie,
+   * ktorá sa neprepisuje (I4). Ani jeden z nich nie je „Cena" ani „Zľava
+   * v shope", takže sa do sady nevkladá a `data-col` nedostáva.
+   */
+  columns.push(
+    {
+      key: 'priceBefore',
+      cardLabel: 'Cena pred',
+      header: 'Cena pred',
+      headerTitle:
+        'Cena, z ktorej sa percento počítalo — pri zápise, a kým sa nezapisovalo, pri príprave.',
+      align: 'right',
+      width: '148px',
+      cell: (row): TableCell => {
+        const note = priceBeforeNote(row);
+        return {
+          content: (
+            <>
+              {formatEur(row.priceBefore)}
+              {note === null ? null : <span className={styles.cellUnder}>{note}</span>}
+              {row.priceMismatch ? (
+                <span className={styles.cellUnder} data-testid="detail-products-mismatch">
+                  cena sa medzitým zmenila
+                </span>
+              ) : null}
+            </>
+          ),
+          /* Neznáma cena je priznanie, nie nula (P7) — a tabuľka to označí. */
+          unknown: row.priceBefore === null,
+          title: row.priceBefore === null ? PRICE_BEFORE_UNKNOWN_SK : null,
+        };
+      },
+    },
+    {
+      key: 'priceAfter',
+      cardLabel: 'Cena po',
+      header: 'Cena po',
+      headerTitle: DISCOUNTED_PRICE_DISCLAIMER_SK,
+      align: 'right',
+      width: '148px',
+      cell: (row): TableCell => ({
+        content: (
+          <>
+            {formatEur(row.priceAfter)}
+            <span className={styles.cellUnder}>
+              {row.priceAfterEstimated ? `orientačne · −${row.percent} %` : `−${row.percent} %`}
+            </span>
+          </>
+        ),
+        /* Bez známej „ceny pred" sa zľavnená cena NEVYRÁBA — pomlčka, nie nula. */
+        unknown: row.priceAfter === null,
+        title: DISCOUNTED_PRICE_DISCLAIMER_SK,
+      }),
+    },
+    {
+      key: 'written',
+      cardLabel: 'Zapísané',
+      header: 'Zapísané',
+      headerTitle: 'Čo appka so zápisom tohto produktu naozaj dosiahla.',
+      width: '208px',
+      cell: (row): TableCell => {
+        const say = itemSentence(row.status);
+        const sig: SigVariant = row.status === 'ok' ? 'ok' : 'warn';
+        return {
+          content: (
+            <>
+              {/* Tri kanály naraz: farba (`sig`), značka (`SigMark`) a SLOVO. */}
+              <span className={`sig ${sig}`}>
+                <SigMark variant={sig} />
+                {say.label}
+              </span>
+              {row.reductionUnverifiable ? (
+                <span className={styles.cellUnder} data-testid="detail-products-unverifiable">
+                  zľavu sa po zápise nepodarilo overiť
+                </span>
+              ) : null}
+            </>
+          ),
+        };
+      },
+    },
+  );
+
+  return columns;
+}
+
+/**
+ * TABUĽKA PRODUKTOV JEDNEJ ZĽAVY — na primitíve `ui/Table.tsx` (V6b, D133).
  *
- * Komponent je čistý (žiadne načítanie, žiadne hooky okrem tých, ktoré dostane
- * zvonka), aby sa dal vykresliť a overiť bez appky aj bez prehliadača.
+ * Do V6b si tabuľka kreslila `<thead>`, `<td>` aj pätku sama. Odteraz ich
+ * kreslí primitívum, a získali sa tým tri veci, ktoré ručný markup nemal:
+ * **prilepená hlavička a prilepená identita** (kto dorolluje k stavu zápisu,
+ * stále vidí, o ktorý kus ide — D137), **stlmené priznanie so slovom pre
+ * čítačku** (`data-value="unknown"`) a **jedna pätka** pre stránkovanie.
+ *
+ * Prilepené sú prvé TRI stĺpce, keď sa zaškrtáva (políčko · referencia ·
+ * názov), inak dva: výber bez identity vedľa seba je zaškrtávadlo naslepo.
+ *
+ * Komponent je čistý (žiadne načítanie, žiadne hooky), aby sa dal vykresliť
+ * a overiť bez appky aj bez prehliadača.
  */
 export function CampaignProductsTable({
   rows,
   selected,
   onToggle,
+  loading = false,
+  empty,
+  footer,
 }: {
   readonly rows: readonly CampaignProductRowView[];
   /** ID produktov, ktoré sú zaškrtnuté. Prázdna množina = nič nie je vybrané. */
   readonly selected: ReadonlySet<number>;
   /** `undefined` = tabuľka je len na čítanie a zaškrtávadlá sa nekreslia. */
   readonly onToggle?: (productId: number) => void;
+  /** Prekresľuje sa iná strana — kostra riadkov namiesto starých čísel. */
+  readonly loading?: boolean;
+  /** Čo stojí namiesto riadkov, keď žiadne neprišli. Nikdy prázdno. */
+  readonly empty?: ReactNode;
+  /** Pätka rámu — stránkovanie a priznanie o orientačnej cene. */
+  readonly footer?: ReactNode;
 }) {
-  const columns = productColumns(['reference', 'name']);
-  const pickable = onToggle !== undefined;
+  const columns = campaignProductColumns({ selected, onToggle });
 
   return (
-    <table className="tbl" data-testid="detail-products-table">
-      <thead>
-        <tr>
-          {pickable ? <th aria-label="Vybrať" /> : null}
-          {columns.map((column) => (
-            <th
-              key={column.id}
-              className={column.numeric ? 'n' : undefined}
-              title={column.headTitle}
-              data-col={column.id}
-            >
-              {column.label}
-            </th>
-          ))}
-          <th className="n">Cena pred</th>
-          <th className="n" title={DISCOUNTED_PRICE_DISCLAIMER_SK}>
-            Cena po
-          </th>
-          <th>Zapísané</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => {
-          const say = itemSentence(row.status);
-          const sig: SigVariant = row.status === 'ok' ? 'ok' : 'warn';
-          /*
-           * Dva rôzne dôvody pre tú istú pomlčku (I11): produkt buď v zrkadle
-           * nie je vôbec, alebo v ňom je a nie je obohatený (D118). Kód medzery
-           * je v oboch prípadoch ten istý, dôvod v `title` nie.
-           */
-          const gone = !row.inCatalog;
-          const values = {
-            productId: row.productId,
-            reference: valueOrGap(row.reference, 'not_enriched'),
-            name: valueOrGap(row.catalogName, 'not_enriched'),
-          };
-          const beforeNote = priceBeforeNote(row);
-          return (
-            <tr key={row.itemId} data-testid="detail-products-row">
-              {pickable ? (
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(row.productId)}
-                    onChange={() => onToggle(row.productId)}
-                    aria-label={`Vybrať produkt ${row.reference ?? `#${row.productId}`}`}
-                    data-testid="detail-products-pick"
-                  />
-                </td>
-              ) : null}
-              {columns.map((column) => {
-                const cell = column.cell(values);
-                const title = cell.unknown && gone ? GONE_FROM_CATALOG_SK : cell.title;
-                return (
-                  <td
-                    key={column.id}
-                    className={column.id === 'name' ? 'name' : undefined}
-                    data-col={column.id}
-                    data-l={column.label}
-                    title={title ?? undefined}
-                  >
-                    {cell.unknown ? <span className="lvl-3">{cell.text}</span> : cell.text}
-                    {/*
-                      Názov PRI ZÁPISE je iný fakt než dnešný názov v katalógu
-                      a história zápisu sa neprepisuje (I4). Preto sa nedosadzuje
-                      do stĺpca „Názov", ale stojí pod ním s vlastným menom.
-                    */}
-                    {column.id === 'name' &&
-                    row.catalogName === null &&
-                    row.nameAtWrite !== null ? (
-                      <span className="lvl-3" data-testid="detail-products-name-at-write">
-                        pri zápise: {row.nameAtWrite}
-                      </span>
-                    ) : null}
-                  </td>
-                );
-              })}
-              <td className="n" data-l="Cena pred">
-                {formatEur(row.priceBefore)}
-                {beforeNote === null ? null : <span className="lvl-3">{beforeNote}</span>}
-                {row.priceMismatch ? (
-                  <span className="lvl-3" data-testid="detail-products-mismatch">
-                    cena sa medzitým zmenila
-                  </span>
-                ) : null}
-              </td>
-              <td className="n" data-l="Cena po" title={DISCOUNTED_PRICE_DISCLAIMER_SK}>
-                {formatEur(row.priceAfter)}
-                <span className="lvl-3">
-                  {row.priceAfterEstimated ? `orientačne · −${row.percent} %` : `−${row.percent} %`}
-                </span>
-              </td>
-              <td data-l="Zapísané">
-                <span className={`sig ${sig}`}>
-                  <SigMark variant={sig} />
-                  {say.label}
-                </span>
-                {row.reductionUnverifiable ? (
-                  <span className="lvl-3" data-testid="detail-products-unverifiable">
-                    zľavu sa po zápise nepodarilo overiť
-                  </span>
-                ) : null}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <Table
+      caption="Produkty v zľave — referencia, názov, cena pred zľavou a po nej a stav zápisu"
+      columns={columns}
+      rows={rows}
+      rowKey={(row) => String(row.itemId)}
+      rowMeta={(row) => ({
+        /* Pozadie je DRUHÝ kanál k zaškrtávadlu v bunke, nikdy jediný. */
+        selected: selected.has(row.productId),
+        testId: 'detail-products-row',
+      })}
+      stickyColumns={onToggle === undefined ? 2 : 3}
+      loading={loading}
+      empty={empty}
+      footer={footer}
+      testId="detail-products-table"
+    />
   );
 }
 
@@ -810,7 +961,7 @@ export function CampaignProductsTable({
  */
 export function CampaignProductsPane({ id, total }: { id: number; total: number }) {
   const [data, setData] = useState<CampaignProductsView | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<number>>(new Set<number>());
 
@@ -821,13 +972,13 @@ export function CampaignProductsPane({ id, total }: { id: number; total: number 
       setBusy(false);
       if (res.ok) {
         setData(res.data);
-        setFailed(null);
+        setFailure(null);
         return;
       }
       // Zlyhanie čítania NIE JE prázdny zoznam — prázdny zoznam by tvrdil, že
       // zľava nemá produkty, a to tu nikto nevie (P7).
       setData(null);
-      setFailed(res.error.message);
+      setFailure(describeActionFailure(res.error, { action: 'Načítanie zoznamu produktov' }));
     },
     [id],
   );
@@ -841,7 +992,6 @@ export function CampaignProductsPane({ id, total }: { id: number; total: number 
     });
   }, []);
 
-  const pages = total === 0 ? 1 : Math.ceil(total / PRODUCTS_PER_PAGE);
   const startHref = newDiscountFromProductsHref([...picked]);
 
   return (
@@ -849,7 +999,7 @@ export function CampaignProductsPane({ id, total }: { id: number; total: number 
       className={styles.fold}
       data-testid="detail-products"
       onToggle={(event) => {
-        if (event.currentTarget.open && data === null && failed === null && !busy) {
+        if (event.currentTarget.open && data === null && failure === null && !busy) {
           void load(1);
         }
       }}
@@ -858,52 +1008,72 @@ export function CampaignProductsPane({ id, total }: { id: number; total: number 
         Produkty v zľave ({formatCountSk(total)}) — referencia, cena pred a po, stav zápisu
       </summary>
       <div className={styles.foldBody}>
-        {failed === null ? null : (
-          <div className="lvl-3" data-testid="detail-products-error">
-            Zoznam produktov zľavy sa nepodarilo načítať: {failed}
-          </div>
+        {failure === null ? null : (
+          <ErrorState
+            title="Zoznam produktov zľavy sa nepodarilo načítať"
+            description="Ktoré produkty v tejto zľave sú, obrazovka teraz nevie — nie je to prázdna zľava."
+            failure={failure}
+            testId="detail-products-error"
+          />
         )}
 
         {data === null ? (
-          failed === null ? (
-            <div className="lvl-3">{busy ? 'Načítavam produkty…' : 'Zoznam sa ešte nenačítal.'}</div>
+          failure === null ? (
+            /* Kostra len vtedy, keď sa naozaj načítava. Inak sa nepredstiera
+               ani riadok: „ešte sa nenačítal" je iná veta než „načítavam". */
+            busy ? (
+              <LoadingState label="Načítavam produkty…" blocks={3} testId="detail-products-busy" />
+            ) : (
+              <p className={styles.productsNote} data-testid="detail-products-idle">
+                Zoznam sa ešte nenačítal.
+              </p>
+            )
           ) : null
         ) : (
           <>
-            <div className="tbl-frame">
-              <div className={styles.itemsScroll}>
-                <CampaignProductsTable rows={data.items} selected={picked} onToggle={toggle} />
-              </div>
-              <div className="tbl-foot">
-                <span>
-                  Strana {formatCountSk(data.page)} z {formatCountSk(pages)} ·{' '}
-                  {formatCountSk(data.items.length)}{' '}
-                  {pluralSk(data.items.length, 'riadok', 'riadky', 'riadkov')} z{' '}
-                  {formatCountSk(total)}. {DISCOUNTED_PRICE_DISCLAIMER_SK}
-                </span>
-              </div>
-            </div>
-
-            {pages <= 1 ? null : (
-              <div className="row wrapx" data-testid="detail-products-paging">
-                <button
-                  type="button"
-                  className="btn sm"
-                  disabled={busy || data.page <= 1}
-                  onClick={() => void load(data.page - 1)}
-                >
-                  Predošlá strana
-                </button>
-                <button
-                  type="button"
-                  className="btn sm"
-                  disabled={busy || data.page >= pages}
-                  onClick={() => void load(data.page + 1)}
-                >
-                  Ďalšia strana
-                </button>
-              </div>
-            )}
+            <CampaignProductsTable
+              rows={data.items}
+              selected={picked}
+              onToggle={toggle}
+              loading={busy}
+              empty={
+                total === 0 ? (
+                  <EmptyState
+                    title="Zľava nemá ani jednu položku"
+                    description="Do tejto zľavy sa nedostal ani jeden produkt, takže nie je čo vypísať."
+                    testId="detail-products-empty"
+                  />
+                ) : (
+                  <NoResultsState
+                    description="Na tejto strane nie je ani jeden riadok — skús prvú stranu."
+                    action={
+                      <Button small onClick={() => void load(1)} data-testid="detail-products-first">
+                        Prvá strana
+                      </Button>
+                    }
+                    testId="detail-products-noresults"
+                  />
+                )
+              }
+              footer={
+                <div className={styles.productsFoot}>
+                  <Pagination
+                    page={data.page}
+                    pageSize={PRODUCTS_PER_PAGE}
+                    total={total}
+                    onPageChange={(page) => void load(page)}
+                    idPrefix={`detail-products-${id}`}
+                    testId="detail-products-paging"
+                  />
+                  {/* Priznanie stojí POD stránkovaním a nikdy v ňom: pätka
+                      `Pagination` je riadok ovládačov, ale zmiznúť táto veta
+                      nesmie — „cena po" je výpočet appky, nie cena zo shopu. */}
+                  <p className={styles.productsNote} data-testid="detail-products-disclaimer">
+                    {DISCOUNTED_PRICE_DISCLAIMER_SK}
+                  </p>
+                </div>
+              }
+            />
 
             {/*
              * ZAČAŤ NOVÚ ZĽAVU Z VYBRANÝCH (D127 bod 2). Odkaz, nie akcia:
@@ -1302,8 +1472,35 @@ export function DiscountDetail({ id }: { id: number }) {
        * Žiadny záver o príčine (P8) — čísla stoja vedľa seba a nič netvrdia.
        */}
       <details className={`${styles.fold} ${styles.perfPane}`} data-testid="detail-performance-fold">
-        <summary>Výkon výberu — predané kusy pred zľavou a teraz</summary>
+        <summary>
+          Výkon výberu — predané kusy pred zľavou a teraz · účinnosť je podmienená
+        </summary>
         <div className={styles.foldBody}>
+          {/*
+           * PODMIENKA ÚČINNOSTI STOJÍ VETOU, NIE MLČANÍM (K9 kontraktu V5, I11).
+           *
+           * Účinnosť sa počíta z dní predajov, ktoré má appka stiahnuté. Koľko
+           * objednávok eshop DENNE má, sa ale nikdy nezmeralo — kľúč na
+           * objednávky je neoverený a IP zabanovaná (P1 kontraktu V5), takže
+           * jediné meranie, z ktorého by sa dalo určiť poctivé okno histórie,
+           * neexistuje. Kým je to tak, čísla pod týmto odsekom sú to, čo appka
+           * má stiahnuté, a NIE tvrdenie o účinnosti zľavy.
+           *
+           * Veta stojí TU, a nie v `DiscountPerformance`, zámerne: tá sekcia
+           * hovorí o KONKRÉTNOM stave odpovede (dočítané okná, chýbajúce dni,
+           * príliš mladá zľava), kým toto je podmienka celej veličiny a platí
+           * pre všetky jej stavy — vrátane `measured`. V každom z nich by to
+           * bola tá istá veta napísaná štyrikrát.
+           *
+           * Tón je tichý, nie výstražný: nie je to porucha appky, je to
+           * otvorená položka kontraktu a akcia Samuela.
+           */}
+          <p className="lvl-3" data-testid="detail-performance-condition">
+            Účinnosť je <b>podmienená</b>: koľko objednávok denne eshop má, appka nikdy
+            nezmerala — kľúč na objednávky je neoverený a IP zabanovaná, takže okno histórie
+            predajov nie je určené. Čísla nižšie hovoria len o dňoch, ktoré má appka stiahnuté;
+            že zľava účinkuje, z nich netvrdí.
+          </p>
           <DiscountPerformance id={campaign.id} />
         </div>
       </details>
@@ -1414,35 +1611,158 @@ export function DiscountDetail({ id }: { id: number }) {
 
         <details className="tech" data-testid="detail-audit">
           <summary>
-            História zápisov — posledných {formatCountSk(Math.min(8, data.auditTrail.length))}{' '}
-            {pluralSk(Math.min(8, data.auditTrail.length), 'záznam', 'záznamy', 'záznamov')}
+            História zápisov — posledných {formatCountSk(auditShown(data.auditTrail).length)}{' '}
+            {pluralSk(auditShown(data.auditTrail).length, 'záznam', 'záznamy', 'záznamov')}
           </summary>
           <div className="body">
-            <table>
-              <tbody>
-                {data.auditTrail.slice(0, 8).map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatDateTimeSk(row.ts)}</td>
-                    <td>
-                      <b>{row.message ?? row.eventType}</b>
-                    </td>
-                  </tr>
-                ))}
-                {data.auditTrail.length === 0 ? (
-                  <tr>
-                    <td>—</td>
-                    <td>zatiaľ žiadny záznam</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-            <div style={{ marginTop: '6px' }}>
+            <AuditTrailTable rows={data.auditTrail} items={data.items} />
+            <p className={styles.productsNote}>
               <Link href="/nastavenia#historia">Celá história v Nastaveniach</Link>
-            </div>
+            </p>
           </div>
         </details>
       </section>
     </div>
+  );
+}
+
+/* ═════════════════════ AUDIT STOPA ZĽAVY (V6b, D139) ═════════════════════ */
+
+/** Koľko posledných záznamov detail ukazuje. Zvyšok je v Nastaveniach. */
+export const AUDIT_TRAIL_SHOWN = 8;
+
+/** Riadky, ktoré fold naozaj kreslí — jedno miesto pre počet aj pre tabuľku. */
+export function auditShown(rows: readonly AuditRowView[]): readonly AuditRowView[] {
+  return rows.slice(0, AUDIT_TRAIL_SHOWN);
+}
+
+/**
+ * HISTÓRIA ZÁPISOV JEDNEJ ZĽAVY — na primitíve `ui/Table.tsx`.
+ *
+ * Do V6b to bola bezhlavičková `<table>` s dvoma bunkami: čas a veta. Appka
+ * pritom o každom riadku vie päť vecí a tri z nich zahadzovala — KTO zápis
+ * urobil, AKO dopadol a KTORÝ kus sa ho týkal. To nie je „krajšie, nie
+ * tichšie", to bolo tichšie (§4 kontraktu V6) — a k tomu druhý spôsob, ako
+ * v tej istej appke nakresliť históriu.
+ *
+ * Preto sa tu nič nové nevymýšľa: stĺpce sú **Kedy · Čo sa stalo · Kto**, teda
+ * presne tie, aké má História v Nastaveniach (`audit/AuditTable.tsx`), a
+ * pravidlá vety aj príznaku zlyhania sú TIE ISTÉ funkcie (`auditRowText()`,
+ * `showsFailureFlag()`), nie ich druhá kópia. Kto zmení pravidlo tam, zmení
+ * ho aj tu.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * ───────────────────────
+ *
+ *  · **Audit sa NEPREPISUJE (I4).** Tabuľka riadok len číta; nemá a nesmie
+ *    mať akciu, ktorá by ho zmenila alebo zmazala.
+ *  · **Produkt sa menuje, keď sa menovať DÁ.** Riadok histórie kampane nesie
+ *    `productId`, nie referenciu — tú vie appka doplniť len z položiek, ktoré
+ *    má detail načítané. Keď medzi nimi produkt je, pomenuje ho
+ *    `productLabel()` (D116: „referencia · názov"); keď nie je, riadok
+ *    o produkte MLČÍ, presne ako História (`auditProductLabel()` → `null`).
+ *    Vymyslené číslo na povrchu je horšie než ticho a `#id` patrí do
+ *    technického detailu (K6).
+ *    Je to `productLabel()`, nie `productNameCell()`: na produkt je tu JEDEN
+ *    RIADOK TEXTU vnútri bunky „Čo sa stalo", nie vlastný stĺpec (D122).
+ *  · **Chýbajúca referencia nie je „produkt ju nemá".** Priznáva sa tou istou
+ *    vetou ako v Histórii — „kód produktu zatiaľ nevieme" (D118).
+ *  · **Zlyhanie nesie tri kanály:** farbu a značku (`FlagMark` v `.flag`) a
+ *    SLOVO „nepodarilo sa". Tlmený riadok (`rowMeta.muted`) je až štvrtý,
+ *    podporný — sám by bol iba farba.
+ */
+export function AuditTrailTable({
+  rows,
+  items,
+}: {
+  readonly rows: readonly AuditRowView[];
+  /** Načítané položky zľavy — jediný zdroj, z ktorého sa dá produkt pomenovať. */
+  readonly items: readonly DiscountItemView[];
+}) {
+  /* Pomenovanie sa hľadá v položkách, ktoré appka MÁ. `null` = medzi nimi
+     produkt nie je, teda sa o ňom nič netvrdí. */
+  const named = (productId: number | null) => {
+    if (productId === null) return null;
+    const item = items.find((row) => row.productId === productId);
+    if (item === undefined) return null;
+    return productLabel({
+      productId,
+      reference: item.reference ?? null,
+      /* Názov PRI ZÁPISE, nie dnešný z katalógu: história sa neprepisuje (I4). */
+      name: item.nameAtWrite,
+    });
+  };
+
+  const columns: readonly TableColumn<AuditRowView>[] = [
+    {
+      key: 'ts',
+      header: 'Kedy',
+      cardLabel: 'Kedy',
+      width: '158px',
+      cell: (row): TableCell => ({
+        content: <span className={styles.nowrap}>{formatDateTimeSk(row.ts)}</span>,
+      }),
+    },
+    {
+      key: 'event',
+      header: 'Čo sa stalo',
+      cardLabel: 'Čo sa stalo',
+      cell: (row): TableCell => {
+        const label = named(row.productId);
+        return {
+          content: (
+            <>
+              {auditRowText(row)}
+              {label === null ? null : (
+                <span className={styles.cellUnder} data-testid={`detail-audit-product-${row.id}`}>
+                  {label.text}
+                  {label.referenceUnknown ? ' · kód produktu zatiaľ nevieme' : ''}
+                </span>
+              )}
+              {showsFailureFlag(row) ? (
+                <span className="flag" data-testid={`detail-audit-failed-${row.id}`}>
+                  <FlagMark />
+                  nepodarilo sa
+                </span>
+              ) : null}
+            </>
+          ),
+          title:
+            row.message === null
+              ? 'Vetu k tejto udalosti appka nemá — na povrchu je jej strojový kód.'
+              : null,
+        };
+      },
+    },
+    {
+      key: 'actor',
+      header: 'Kto',
+      cardLabel: 'Kto',
+      width: '116px',
+      headerTitle: 'Appka = plánovač alebo systém, človek = zápis spustený z obrazovky.',
+      cell: (row): TableCell => ({ content: auditActorLabel(row.actor) }),
+    },
+  ];
+
+  return (
+    <Table
+      caption="História zápisov tejto zľavy — kedy, čo sa stalo a kto to spustil"
+      columns={columns}
+      rows={auditShown(rows)}
+      rowKey={(row) => String(row.id)}
+      rowMeta={(row) => ({
+        muted: row.ok === false,
+        testId: `detail-audit-row-${row.id}`,
+      })}
+      empty={
+        <EmptyState
+          title="Zatiaľ žiadny záznam"
+          description="Do tejto zľavy sa ešte nezapisovalo, takže história nemá čo vypísať."
+          testId="detail-audit-empty"
+        />
+      }
+      testId="detail-audit-table"
+    />
   );
 }
 

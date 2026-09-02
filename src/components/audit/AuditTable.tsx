@@ -15,7 +15,7 @@ import Button from '@/components/ui/Button';
 import { FlagMark } from '@/components/ui/StatusMark';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import {
-  AUDIT_ACTOR_LABELS,
+  auditActorLabel,
   auditEventLabel,
   auditProductLabel,
   type AuditRow,
@@ -26,8 +26,15 @@ export interface AuditTableProps {
   onSelect: (id: number) => void;
 }
 
-/** Čo sa stalo — najprv veta zo servera, inak preklad kódu udalosti. */
-export function auditRowText(row: AuditRow): string {
+/**
+ * Čo sa stalo — najprv veta zo servera, inak preklad kódu udalosti.
+ *
+ * Vstup je ZÁMERNE len tá časť riadku, ktorú funkcia naozaj číta: to isté
+ * pravidlo potrebuje aj audit stopa v detaile zľavy (V6b), kde riadok prichádza
+ * z `/api/campaigns/[id]` a nemá polia filtra histórie. Druhá kópia pravidla by
+ * znamenala dve appky, ktoré tú istú udalosť pomenujú inak.
+ */
+export function auditRowText(row: Pick<AuditRow, 'message' | 'eventType'>): string {
   const message = row.message === null ? '' : row.message.trim();
   return message === '' ? auditEventLabel(row.eventType) : message;
 }
@@ -40,7 +47,7 @@ export function auditRowText(row: AuditRow): string {
  * bol ten istý údaj dvakrát — presne tá redundancia, ktorú pravidlo o žiadnych
  * vysvetľujúcich odstavcoch zakazuje.
  */
-export function showsFailureFlag(row: AuditRow): boolean {
+export function showsFailureFlag(row: Pick<AuditRow, 'ok' | 'message'>): boolean {
   if (row.ok !== false) return false;
   return row.message !== null && row.message.trim() !== '';
 }
@@ -95,7 +102,7 @@ export function AuditTable({ rows, onSelect }: AuditTableProps) {
                 </div>
               ) : null}
             </td>
-            <td data-l="Kto">{AUDIT_ACTOR_LABELS[row.actor] ?? 'appka'}</td>
+            <td data-l="Kto">{auditActorLabel(row.actor)}</td>
             <td className="act">
               <Button small onClick={() => onSelect(row.id)} data-testid={`audit-detail-${row.id}`}>
                 Detail

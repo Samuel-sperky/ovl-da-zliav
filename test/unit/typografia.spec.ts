@@ -34,6 +34,8 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 
 const GLOBALS = read('../../src/app/globals.css');
 const ZLAVY_CSS = read('../../src/components/campaigns/zlavy.module.css');
+/** Vzhľad primitíva tabuľky — od V6b domov popisku stĺpca (D137, D143). */
+const TABULKY_CSS = read('../../src/components/ui/tables.module.css');
 
 /**
  * Všetky zdroje komponentov ako jeden reťazec.
@@ -156,30 +158,55 @@ describe('tri roly popiskov sa dajú rozoznať (D2)', () => {
   /**
    * ŽIVÉ selektory popiskov. Kto sem pridá ďalší, musí zároveň zniesť dôkaz,
    * že ho niekto kreslí — inak sa zopakuje chyba z 19. 8. 2026.
+   *
+   * `dokaz` je to, čo sa hľadá v zdrojoch komponentov; bez neho je to kotviaca
+   * trieda selektora. Trieda z CSS modulu ho mať MUSÍ: jej meno sa v značkách
+   * nikdy neobjaví (buildér ho hašuje), kreslí sa cez `styles.<meno>` — a
+   * samotné „head" by v zdrojoch trafilo aj `<thead>`, teda dôkaz, ktorý
+   * nedokazuje nič.
+   *
+   * PRESMEROVANÉ 2. 9. 2026 (V6b, D137/D139): `.zlist-h` PADOL. Zoznam zliav
+   * prešiel na primitívum `ui/Table`, takže popisok stĺpca už nekreslí vlastnou
+   * triedou z `globals.css`, ale `.head` z `ui/tables.module.css` (D143).
+   * Selektor sa preto PRESMEROVAL, nie zmazal — inak by rolu popisku stĺpca
+   * v novej tabuľke nestrážil nikto, a to je presne tá chyba z 19. 8. 2026,
+   * len naopak: vtedy tu stáli mŕtve selektory, teraz by chýbal živý.
+   * (`.zlist-h` a `.zlist` zostali v `globals.css` ako mŕtve pravidlá — patria
+   * obrazovke Zľavy a zmaže si ich ona, D139.)
    */
-  const ZIVE = [
-    'table.tbl thead th',
-    '.zlist-h',
-    '.sec-h h2',
-    '.kpi .k',
-  ] as const;
+  const ZIVE: readonly {
+    readonly sel: string;
+    readonly css: string;
+    readonly dokaz?: string;
+  }[] = [
+    { sel: 'table.tbl thead th', css: GLOBALS },
+    { sel: '.head', css: TABULKY_CSS, dokaz: 'styles.head' },
+    { sel: '.sec-h h2', css: GLOBALS },
+    { sel: '.kpi .k', css: GLOBALS },
+  ];
 
-  for (const sel of ZIVE) {
+  for (const { sel, dokaz } of ZIVE) {
     it(`${sel} naozaj niekto kreslí`, () => {
       expect(
         KOMPONENTY,
         `${sel} je mŕtvy selektor — tvrdenia o ňom nemerajú nič`,
-      ).toContain(kotva(sel));
+      ).toContain(dokaz ?? kotva(sel));
     });
   }
 
   it('hlavičky stĺpcov sú na oboch miestach rovnaké', () => {
-    // Zoznam zliav kreslí hlavičky vlastným selektorom. Keď sa rozídu, dve
-    // tabuľky v tej istej appke vyzerajú ako z dvoch rôznych appiek.
-    for (const sel of ['table.tbl thead th', '.zlist-h']) {
-      expect(pravidlo(sel), sel).toContain('font-size: var(--ovl-fs-eyebrow)');
-      expect(pravidlo(sel), sel).toContain('font-weight: 600');
-      expect(pravidlo(sel), sel).toContain('letter-spacing: 0.06em');
+    /* Appka má DVE miesta, kde sa kreslí popisok stĺpca: staré tabuľky
+       v `globals.css` (Audit, Nastavenia, Zľava detail) a primitívum `ui/Table`
+       vo vlastnom module. Keď sa rozídu, dve tabuľky v tej istej appke vyzerajú
+       ako z dvoch rôznych appiek — presne to hrozilo pri `.zlist-h`, ktorého
+       nasledovníkom je `.head`. */
+    for (const [sel, css] of [
+      ['table.tbl thead th', GLOBALS],
+      ['.head', TABULKY_CSS],
+    ] as const) {
+      expect(pravidlo(sel, css), sel).toContain('font-size: var(--ovl-fs-eyebrow)');
+      expect(pravidlo(sel, css), sel).toContain('font-weight: 600');
+      expect(pravidlo(sel, css), sel).toContain('letter-spacing: 0.06em');
     }
   });
 
@@ -203,8 +230,8 @@ describe('tri roly popiskov sa dajú rozoznať (D2)', () => {
   });
 
   it('popisky nepoužívajú zlatú — akcent je v tejto palete jediný (R5)', () => {
-    for (const sel of ZIVE) {
-      expect(pravidlo(sel), sel).not.toContain('var(--gold');
+    for (const { sel, css } of ZIVE) {
+      expect(pravidlo(sel, css), sel).not.toContain('var(--gold');
     }
   });
 });

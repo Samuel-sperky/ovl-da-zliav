@@ -40,6 +40,7 @@ import {
   GONE_FROM_CATALOG_SK,
 } from '@/components/campaigns/DiscountDetail';
 import { newDiscountFromProductsHref } from '@/components/campaigns/DiscountsList';
+import { TABLE_UNKNOWN_WORD } from '@/components/ui';
 import { DISCOUNTED_PRICE_DISCLAIMER_SK } from '@/lib/domain/pricing';
 import { PRODUCT_GAP_REASON } from '@/lib/ui/product-columns';
 
@@ -257,6 +258,29 @@ function bunka(row: HTMLElement, selector: string): HTMLElement {
 
 const text = (node: Element): string => (node.textContent ?? '').replace(/\s+/g, ' ').trim();
 
+/**
+ * Text, ktorý človek na obrazovke VIDÍ — bez uzlov len pre čítačku.
+ *
+ * PREČO TO VO V6b PRIBUDLO (2. 9. 2026)
+ * ─────────────────────────────────────
+ * Bunky zoznamu odteraz kreslí primitívum `ui/Table.tsx` a k pomlčke dopisuje
+ * slovo `TABLE_UNKNOWN_WORD` do `.srOnly` uzla (bod B jeho hlavičky): čítačka
+ * pomlčku spravidla neprečíta, takže riadok by znel ako PRÁZDNY — a to je
+ * „tichšie", nie „krajšie" (§4 bod 1 kontraktu V6). Viditeľne sa nemení nič.
+ *
+ * Tvrdenia nižšie preto merajú pomlčku BEZ toho slova a k nej aj strojový
+ * kanál `data-value="unknown"`. Oslabenie to nie je — pridal sa tretí kanál
+ * k tomu istému priznaniu a merajú sa oba; slovo pre čítačku stráži nad
+ * primitívom `test/unit/tabulka-skupina.spec.ts`.
+ */
+function vidno(node: HTMLElement): string {
+  const kopia = node.cloneNode(true) as HTMLElement;
+  for (const uzol of [...kopia.querySelectorAll('span')]) {
+    if ((uzol.textContent ?? '').trim() === TABLE_UNKNOWN_WORD) uzol.remove();
+  }
+  return text(kopia);
+}
+
 /* ═════════════ 3. Rozklik ten endpoint naozaj číta — a až po otvorení ═════ */
 
 describe('rozklik „Produkty v zľave" siaha na svoj endpoint', () => {
@@ -309,7 +333,9 @@ describe('zoznam produktov zľavy', () => {
     await otvorDetail();
     await otvorRozklik();
     const cell = bunka(riadky()[2]!, '[data-col="reference"]');
-    expect(text(cell)).toBe('—');
+    expect(vidno(cell)).toBe('—');
+    // Tretí kanál toho istého priznania — stroj ho vie prečítať bez textu.
+    expect(cell.getAttribute('data-value')).toBe('unknown');
     expect(cell.getAttribute('title')).toBe(GONE_FROM_CATALOG_SK);
   });
 
@@ -317,7 +343,8 @@ describe('zoznam produktov zľavy', () => {
     await otvorDetail();
     await otvorRozklik();
     const cell = bunka(riadky()[1]!, '[data-col="reference"]');
-    expect(text(cell)).toBe('—');
+    expect(vidno(cell)).toBe('—');
+    expect(cell.getAttribute('data-value')).toBe('unknown');
     expect(cell.getAttribute('title')).toBe(PRODUCT_GAP_REASON.not_enriched);
     // Dve nevedomosti sa nezlievajú — inak by pomlčka prestala byť priznaním.
     expect(cell.getAttribute('title')).not.toBe(GONE_FROM_CATALOG_SK);

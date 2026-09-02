@@ -222,6 +222,22 @@ export const AUDIT_ACTOR_LABELS: Readonly<Record<AuditRow['actor'], string>> = {
   system: 'appka',
 };
 
+/**
+ * Kto to urobil, vrátane roly, ktorú tento zoznam nepozná.
+ *
+ * Rovnaký vzor ako `auditEventLabel()`: surová hodnota zo servera sa na povrch
+ * NIKDY nedostane. Funkcia existuje preto, že to isté slovo potrebuje aj audit
+ * stopa v detaile zľavy, kde `actor` prichádza ako `string` (riadok
+ * `/api/campaigns/[id]` nemá zúžený typ filtra histórie) — a `?? 'appka'`
+ * napísané na dvoch miestach je dvojica, ktorá sa rozíde.
+ */
+export function auditActorLabel(actor: string): string {
+  const known = Object.prototype.hasOwnProperty.call(AUDIT_ACTOR_LABELS, actor)
+    ? AUDIT_ACTOR_LABELS[actor as AuditRow['actor']]
+    : undefined;
+  return known ?? 'appka';
+}
+
 /** Možnosti výberu v filtri histórie; prázdna hodnota = bez obmedzenia. */
 export const AUDIT_EVENT_OPTIONS: readonly { value: string; label: string }[] = [
   { value: '', label: 'všetko' },

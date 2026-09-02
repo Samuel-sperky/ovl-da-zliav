@@ -1,0 +1,32 @@
+/*
+ * Aura Zľavy — ČO JE NA OBRAZOVKE PRODUKTOV MIESTNE MIMO TABUĽKY (V6b, D143).
+ *
+ * PREČO TENTO SÚBOR VZNIKOL
+ * ─────────────────────────
+ * Lišta nad tabuľkou prešla na primitívum `Toolbar` (D137, D139): rozloženie
+ * radu, medzery z tokenov, pole hľadania aj jeho prstenec pri fokuse sú
+ * v `ui/tables.module.css` a TU sa neopakujú. Zostáva jediná vec, ktorú
+ * primitívum vedieť nemôže — **aké široké má byť pole hľadania na TEJTO
+ * obrazovke**.
+ *
+ * Vzhľad ide do CSS modulu vedľa komponentu, nie do `globals.css` (D143):
+ * trieda je lokálna, takže sa ňou nedá omylom prepísať cudzia obrazovka.
+ *
+ * Vlastník: V6b, obrazovka Produkty (lišta nad tabuľkou).
+ */
+
+/*
+ * Pole hľadania je 300 px a NIE JE pružné do šírky.
+ *
+ * `Toolbar` je zalamovací rad (`flex-wrap`), v ktorom má pole susedov s pevnou
+ * potrebou miesta: tlačidlo dohľadania, vetu o tom, kde sa hľadá, a počet
+ * nájdených vpravo. Keby pole rástlo (`flex: 1 1 auto`), zjedlo by miesto
+ * práve tej vete — a to je jediný text, ktorý vysvetľuje, prečo hľadanie
+ * nenašlo kód produktu. Základ 300 px je ten istý, aký mala lišta pred
+ * prechodom na primitívum; `max-width` drží pole v rade aj na úzkom okne,
+ * kde `Toolbar` zalomí zvyšok pod seba.
+ */
+.search {
+  flex: 0 1 300px;
+  max-width: 100%;
+}
