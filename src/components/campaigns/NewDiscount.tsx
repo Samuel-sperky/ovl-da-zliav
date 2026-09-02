@@ -1529,6 +1529,19 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
             countKnown={!(catalogEmpty && itemsCount === 0)}
             tiers={tiers}
             averagePrice={avgPrice}
+            /*
+             * Okno a rozpočet idú do karty rozhodnutia PRETO, že súhrn skúšky
+             * naprázdno musí povedať všetky štyri čísla, ktoré človek
+             * potvrdzuje (I3): koľko produktov, aké percentá, od kedy do kedy
+             * a koľko zápisov to zoberie z denného rozpočtu. Dovtedy boli
+             * dátumy len v `plan` a rozpočet iba v odhade dobehnutia, takže sa
+             * dalo potvrdiť bez toho, aby ich človek raz videl pri sebe.
+             * `startBudget` je TEN ISTÝ objekt, ktorý dostáva
+             * `NewDiscountStart` — dve kópie toho istého čísla by sa rozišli.
+             */
+            from={from}
+            to={to}
+            budget={startBudget}
             obstacles={alarming}
             plan={
               <NewDiscountStart

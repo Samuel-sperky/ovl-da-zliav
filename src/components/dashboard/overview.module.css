@@ -402,17 +402,13 @@
 }
 
 /*
- * Červený príznak. `globals.css` má `.flag` (jantár) a `.flag.neutral` (sivá);
- * kritický tón vlastnú variantu nemá, takže sa tu prefarbí existujúcim
- * tokenom — nová farba sa nevymýšľa. Použije sa VÝHRADNE na stratu dát
- * a zastavený zápis (architektúra §4).
+ * ČERVENÝ PRÍZNAK TU UŽ NIE JE — a nemá sa sem vracať (D139, 2. 9. 2026).
+ * Trieda `.flagCritical` bola druhá kópia toho istého pravidla: kým tu
+ * čakala, `StateLine.tsx` sa stal len druhým menom pre `DiscountState`
+ * a ten si červený príznak berie zo `zlavy.module.css`. Tá kópia teda
+ * nekreslila nič — presne dlh, pre ktorý D139 existuje. Kto bude príznak
+ * potrebovať, použije `zlavy.module.css`, inak sa obe farby o mesiac rozídu.
  */
-/* `-ink`, nie plný tón — ten istý dôvod ako v `zlavy.module.css`: slovo pri
-   malom písme potrebuje 4,5 : 1 a plný `--st-critical` ho v svetlej téme
-   nemá (4,02 : 1 na papieri pod závojom). */
-.flagCritical {
-  color: var(--st-critical-ink);
-}
 
 /* Priznaná medzera v stave — vysvetlivka pod riadkami, nie cez celú stránku. */
 .gapNote {

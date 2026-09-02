@@ -19,16 +19,19 @@
  * isté, čo počíta prehliadač:
  *
  *   · pri legende sa selektor z CSS priloží na SKUTOČNE VYKRESLENÉ `<svg>`
- *     z `PriceHistogram` a pýta sa, ktoré z nich kreslí;
+ *     z `SharePie` a pýta sa, ktoré z nich kreslí;
  *
- *     PRESMEROVANÉ VO V6b (2. 9. 2026): vzorku dával do 2. 9. graf predaja
- *     (`SalesChart`). Ten prešiel na `ChartCard` + Recharts (D135), takže už
- *     nekreslí ani `.chart`, ani `svg[role="img"]` — plochu mu robí `Panel`
- *     a Recharts. Pravidlo `.chart svg[role='img'] { width: 100% }` v
- *     `globals.css` ale ŽIJE a kreslí `PriceHistogram`, ktorý inline SVG v
- *     `.chart` ráme zostal. Meria sa preto on: rovnaká chyba (marky legendy
- *     nafúknuté na 100 %) sa dá spraviť presne tam, kde to pravidlo dopadá.
- *     Kým graf cien neprejde tou istou cestou, je toto jeho jediný strážca.
+ *     PRESMEROVANÉ DVAKRÁT, VŽDY ZA ŽIVÝM KONZUMENTOM PRAVIDLA. Vzorku dával
+ *     do 2. 9. 2026 graf predaja (`SalesChart`); ten prešiel vo V6a na
+ *     `ChartCard` + Recharts (D135), takže `.chart` ani `svg[role="img"]` už
+ *     nekreslí. Vzorka sa presunula na `PriceHistogram` — a ten prešiel tou
+ *     istou cestou vo V6b (K5), takže sa presunula ďalej na `SharePie`
+ *     (koláč rozdelenia na Prehľade), ktorý inline SVG v `.chart` ráme
+ *     s `role="img"` zostal. Pravidlo `.chart svg[role='img'] { width: 100% }`
+ *     v `globals.css` totiž ŽIJE a chyba z 24. 8. 2026 (marky legendy
+ *     nafúknuté na 100 % šírky) sa dá spraviť presne tam, kde dopadá.
+ *     Koláč je jeho POSLEDNÝ konzument: keď prejde na `ChartCard` aj on,
+ *     zmaže sa pravidlo v `globals.css` aj celá skupina 1 tohto súboru.
  *   · pri rozložení sa zloží celý reťazec šírok (bočný panel → `.wrap` →
  *     stĺpec filtrov → rad) a porovná sa so súčtom flex-základov, lebo presne
  *     ten rozhoduje o zalomení radu;
@@ -47,7 +50,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import PriceHistogram from '@/components/charts/PriceHistogram';
+import { SharePie } from '@/components/ui/Charts';
 
 import { contrast } from '../helpers/palette-math';
 
@@ -185,34 +188,51 @@ describe('1 — `.chart svg` nesmie chytiť marky legendy', () => {
     return true;
   }
 
-  /* Rozdelenie so zberným pásmom a s jedným vybraným produktom, teda legenda
-     s tromi markami: stĺpec, šrafovaný chvost a referenčná značka. */
+  /*
+   * VZORKA JE PRESMEROVANÁ NA KOLÁČ (2. 9. 2026, K5) — a je to tá istá otázka.
+   *
+   * Merané to bolo na `PriceHistogram`, ktorý vo V6b prešiel na `ChartCard`:
+   * jeho plocha už nestojí v `.chart`, nemá `role="img"` a je `aria-hidden`
+   * (čísla nesie prepis pod ňou). Tým z neho zmizol PREDMET tohto tvrdenia —
+   * globálne pravidlo `.chart svg[role='img'] { width: 100% }` sa ho už
+   * netýka, takže merať ho tu by znamenalo merať vzťah, ktorý neexistuje.
+   *
+   * Pravidlo ale nezaniklo: v `.chart` s `role="img"` dnes stojí `SharePie`
+   * (koláč rozdelenia na Prehľade), a chyba z 24. 8. 2026 mu hrozí presne
+   * rovnako — jeho legenda má štyri marky vedľa slov. Vzorka je preto koláč.
+   *
+   * Kto raz prevedie na `ChartCard` aj koláč, nech túto skupinu ZMAŽE spolu
+   * s pravidlom v `globals.css` a nech to napíše sem: dovtedy toto tvrdenie
+   * stráži jediného živého konzumenta toho pravidla. Čo z prevedeného
+   * histogramu stráži jednotný rám, stojí v `grafy-ceny-obrazovka.spec.ts`
+   * (sekcia E) a v `grafy-selektory.spec.ts`.
+   */
   const HTML = renderToStaticMarkup(
-    createElement(PriceHistogram, {
-      bins: [
-        { from: 0, to: 20, count: 1_240 },
-        { from: 20, to: 40, count: 6_800 },
-        { from: 40, to: null, count: 180 },
-      ],
-      selection: [{ productId: 4_211, price: 43 }],
-      rows: 8_220,
-      withoutPrice: 0,
-      maxPrice: 1_758.46,
-      oldestFetchedAt: '2026-07-02T10:00:00.000Z',
-      newestFetchedAt: '2026-08-18T21:30:00.000Z',
-      complete: true,
+    createElement(SharePie, {
+      input: {
+        slices: [
+          { bucket: 'none', label: '0 predaných', count: 60 },
+          { bucket: 'low', label: '1–2 predané', count: 25 },
+          { bucket: 'high', label: '10 a viac', count: 5 },
+        ],
+        unknown: { label: 'nevieme', count: 10, note: 'dni predajov chýbajú' },
+        total: 100,
+        sumMatchesTotal: true,
+      },
+      caption: 'Rozdelenie podľa predaja',
+      label: 'Koláčový graf rozdelenia katalógu podľa predaja',
     }),
   );
 
   const VSETKY = znacky(HTML);
-  const PLOCHA = VSETKY.filter((z) => z.atributy['data-testid'] === 'price-histogram-svg');
+  const PLOCHA = VSETKY.filter((z) => z.atributy['role'] === 'img');
   const MARKY = VSETKY.filter((z) => z.atributy['aria-hidden'] === 'true');
 
   it('vzorka je tá pravá — jedna plocha grafu a niekoľko mariek legendy', () => {
     expect(PLOCHA).toHaveLength(1);
     // Bez mariek by test nemal čo merať a tichým prechodom by klamal.
     expect(MARKY.length).toBeGreaterThanOrEqual(2);
-    expect(HTML).toContain('data-testid="price-histogram-legend"');
+    expect(HTML).toContain('data-testid="share-pie-legend"');
   });
 
   it('pravidlo kreslí plochu grafu', () => {

@@ -11,10 +11,21 @@
  * ČO JE TU SPOLOČNÉ PRE VŠETKY TRI FORMY
  * ──────────────────────────────────────
  *
- *  · `ChartHatchPattern` — JEDINÁ definícia značky „nevieme". Používa ju
- *    čiarový graf na nesťahovaný deň (`SalesChart`) aj koláč na diel, ktorý
- *    appka nikdy nečítala. Kto ju rozdvojí, dovolí, aby to isté šrafovanie
- *    znamenalo na dvoch obrazovkách dve rôzne veci.
+ *  · `ChartHatchPattern` — definícia značky „nevieme". Používa ju čiarový graf
+ *    na nesťahovaný deň (`SalesChart`) aj koláč na diel, ktorý appka nikdy
+ *    nečítala. Kto ju rozdvojí, dovolí, aby to isté šrafovanie znamenalo na
+ *    dvoch obrazovkách dve rôzne veci.
+ *
+ *    DO 2. 9. 2026 TU STÁLO „JEDINÁ" A NEBOLA TO PRAVDA. Denná krivka
+ *    v detaile produktu (`products/ProductDetailPanel.tsx` → `ProductCurveChart`)
+ *    si kreslí VLASTNÝ `<pattern>`: 4 × 4 s `rotate(45)` namiesto 6 × 6
+ *    s `M0,6 L6,0`. Farba je v oboch `--line2`, takže to nikto nenahlási —
+ *    ale hustota šrafovania je iná, teda tá istá značka má v appke dva
+ *    vzhľady. Histogram cien mal do V6b tretí (a k tomu nesprávny význam,
+ *    pozri `PriceHistogram.tsx`); ten je zrušený. Zlúčenie krivky je práca
+ *    v `products/`, teda mimo rozsahu agenta 27 — inventúru grafov
+ *    a to, kto cez `ChartCard` ešte neide, drží `grafy-chartcard.spec.ts`
+ *    (skupina D3).
  *  · `useChartPatternId` — id vzoru očistené o znaky, ktoré sa v `url(#…)`
  *    čítajú zle. Dva grafy na jednej obrazovke nesmú siahnuť na ten istý vzor.
  *
@@ -114,6 +125,26 @@ export interface SharePieProps {
 /**
  * Koláč = ROZDELENIE katalógu alebo výberu (D126). Nič iné; „podiel z celku"
  * je jediná otázka, na ktorú je kruh správna forma.
+ *
+ * PREČO KOLÁČ EŠTE NEIDE CEZ `ChartCard` (V6b, 2. 9. 2026)
+ * ───────────────────────────────────────────────────────
+ * Graf predaja aj histogram cien už rám grafov používajú; koláč nie, a nie je
+ * to zabudnuté miesto. Dva dôvody, oba mimo rozsahu vzhľadu:
+ *
+ *  1. **Nie je to samostatná karta.** `TopFlopSection` ho kreslí VNÚTRI
+ *     `Panel`-u rebríčka, takže `ChartCard` (ktorý `Panel` je) by vyrobil
+ *     kartu v karte. Riešenie je bezrámová podoba `ChartCard`, alebo presun
+ *     koláča z rebríčka — a to druhé je rozhodnutie o informačnej
+ *     architektúre, ktorú kontrakt V6 §5 z rozsahu vylučuje.
+ *  2. **Jeho legenda nesie ŠTVRTÝ kanál.** Poradové číslo dielu
+ *     (`.legendOrder`) je to, čo spája výsek s riadkom legendy a s riadkom
+ *     tabuľky. Slovník mariek rámu (farba · šrafovanie · prerušovaná čiara ·
+ *     prerušovaná hrana · zvislá čiarka) číslo nepozná, a pridať ho tam len
+ *     pre koláč by bola šiesta marka bez rozhodnutia.
+ *
+ * Kým to platí, drží tento stav zapísaný `grafy-chartcard.spec.ts` (skupina
+ * D3): inventúra menuje všetkých päť súborov, ktoré v appke kreslia graf,
+ * a hovorí, ktoré dva cez rám ešte neidú. Nový graf sa tam nepridá tichom.
  */
 export function SharePie({ input, caption, label, note, testId = 'share-pie' }: SharePieProps) {
   const hatchId = useChartPatternId('pie-hatch');

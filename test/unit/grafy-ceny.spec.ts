@@ -31,10 +31,10 @@ import {
   BAR_GAP,
   PRICE_CHART,
   eurWhole,
-  niceCount,
   priceHistogramGeometry,
   type PriceBinInput,
 } from '@/components/charts/price-bins';
+import { chartScaleMax } from '@/components/ui/chart-language';
 import { PRICE_BIN_COUNT, PRICE_BIN_WIDTH, foldBuckets } from '@/app/api/insights/_prices';
 
 /** Tvar nameraný na živej kópii katalógu: ťažký vrchol nízko, dlhý chvost. */
@@ -91,9 +91,21 @@ describe('pásma sa skladajú súvisle a prázdne pásmo je nula', () => {
   });
 
   it('horná hranica osi je okrúhle číslo nad maximom', () => {
-    expect(niceCount(9_450)).toBe(10_000);
-    expect(niceCount(0)).toBe(1);
+    /*
+     * PRESMEROVANÉ 2. 9. 2026 (K5, V6b). Merané bolo telo `niceCount()`
+     * v `price-bins.ts` — znakovo zhodná KÓPIA `chartScaleMax()` z jazyka
+     * grafov. Tri kópie toho pravidla sú zlúčené na jednu, takže `niceCount`
+     * už neexistuje a histogram si hranicu pýta z jazyka. Samotné pravidlo
+     * (rebrík 1, 2, 5, 10 a základňa nula) stráži `grafy-jazyk.spec.ts`
+     * sekcia A vlastnou tabuľkou očakávaní a závorou na druhé telo; tu sa
+     * meria to, čo do tohto súboru patrí — že histogram to pravidlo NAOZAJ
+     * použije a neurobí si vlastnú mierku.
+     */
+    expect(chartScaleMax(9_450)).toBe(10_000);
     expect(priceHistogramGeometry(realneBins(), [])!.scaleMax).toBe(10_000);
+    expect(priceHistogramGeometry(realneBins(), [])!.scaleMax).toBe(
+      chartScaleMax(Math.max(...realneBins().map((bin) => bin.count))),
+    );
   });
 
   it('bez jediného produktu sa graf nekreslí', () => {
@@ -172,9 +184,23 @@ describe('graf hovorí, čo o cenách nevie', () => {
     expect(render()).toContain('najvyššia cena');
   });
 
-  it('priznáva pripnuté značky', () => {
-    const html = render({ selection: [{ productId: 9, price: 900 }] });
-    expect(html).toContain('pripnutých na okraj');
+  it('priznáva pripnuté značky — a po slovensky, aj keď je jedna', () => {
+    /* Doplnené 2. 9. 2026: veta znela „1 značiek pripnutých na okraj". Kontrakt
+       V6 §4 bod 4 hovorí, že priznania majú zabehnuté SLOVENSKÉ formulácie;
+       veta, ktorá znie ako strojový preklad, sa prestane čítať. */
+    const jedna = render({ selection: [{ productId: 9, price: 900 }] });
+    expect(jedna).toContain('1 značka pripnutá na okraj');
+    const dve = render({
+      selection: [
+        { productId: 9, price: 900 },
+        { productId: 10, price: 1_200 },
+      ],
+    });
+    expect(dve).toContain('2 značky pripnuté na okraj');
+    const pat = render({
+      selection: [900, 1_000, 1_100, 1_200, 1_300].map((price, i) => ({ productId: i, price })),
+    });
+    expect(pat).toContain('5 značiek pripnutých na okraj');
   });
 
   it('ku grafu patrí dátová tabuľka so všetkými pásmami', () => {

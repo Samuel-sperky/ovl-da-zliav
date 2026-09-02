@@ -253,8 +253,17 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   vykreslený markup o tom nepovie nič (`class="undefined"` sa v ňom nenájde
   ani raz, lebo Proxy dodá hash). Jediná cesta je **čítať CSS ako TEXT** a
   porovnať množinu použitých kľúčov s množinou deklarovaných tried — v oboch
-  smeroch. Robí to `test/unit/nova-zlava-selektory.spec.ts`; pri prepnutí
-  importu CSS modulu je taký test POVINNÝ.
+  smeroch. **Robí to `test/unit/css-moduly-strazca.spec.ts` pre KAŽDÝ
+  `src/**/*.module.css`** (zoznam modulov aj ich volajúcich sa hľadá na disku,
+  takže nový modul je pod dozorom hneď, ako vznikne; `nova-zlava-selektory.spec.ts`
+  §A drží nad sprievodcom to isté pravidlo aj menovite). Vypočítaný kľúč
+  (`styles[premenná]`) sa staticky prečítať nedá a strážca preto PADNE, keď
+  nejaký pridáš — vypíš kľúče, alebo rozšír strážcu a napíš do hlavičky, čo
+  vie merať. Čo strážca NEVIDÍ: selektor cielený na `data-*` atribút, ktorý
+  nikto nevypisuje — tak zmizlo odsadenie prvej bunky v Produktoch
+  (`[data-col='select']`), a rovnako sa 2. 9. 2026 našli mŕtve
+  `.presetSave .presetInput` a `.dataTable th.num` (obe cielili na modulovú
+  triedu tam, kde JSX píše GLOBÁLNU — opravené na `:global(…)`, nie zmazané).
 - **Čo test vyňal z kontroly, nestráži NIKTO.** `nastavenia-v12.spec.ts` si
   kotvu `odhlasenie` vyňal zo zoznamu identifikátorov s tým, že „kryje ju e2e";
   e2e ju nekryla, a keď D99 zmazalo `SignOut.tsx`, rozcestník Nastavení mesiac

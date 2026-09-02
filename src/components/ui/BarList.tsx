@@ -124,8 +124,11 @@ function viewOf(item: BarListItem): StatValueView {
  * riadok ukázal pomlčku a pod ňou zmeraný pás.
  */
 export function barListInputs(items: readonly BarListItem[]): readonly BarInput[] {
+  /* `bucket`, nie `key`: v dátach grafu sa pole `key` menovať nesmie — dôvod
+     je v `chart-language.ts` nad `BarInput`. `BarListItem.key` je React kľúč
+     riadku a zostáva, sú to dve rôzne veci. */
   return items.map((item) => ({
-    key: item.key,
+    bucket: item.key,
     value: viewOf(item).unknown ? null : item.value,
   }));
 }

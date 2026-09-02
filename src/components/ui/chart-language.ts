@@ -34,6 +34,21 @@
  * ktorú si nikto neprečíta. Kto pridá štvrtú formu, musí povedať, na akú
  * otázku odpovedá, inak sa graf vyberá podľa toho, ako vyzerá.
  *
+ * HISTOGRAM NIE JE ŠTVRTÁ FORMA — je to STĹPEC (V6b, 2. 9. 2026)
+ * ─────────────────────────────────────────────────────────────
+ * Rozdelenie cien (`charts/PriceHistogram.tsx`) je rozdelenie SPOJITEJ
+ * veličiny, takže sa na prvé prečítanie hlási ku koláču. Nie je to tak a
+ * `CHART_KINDS` sa preto NEROZŠIRUJE: len čo sú ceny nakrájané na pomenované
+ * pásma, sú tie pásma POLOŽKY a otázka „v ktorom pásme je viac produktov" je
+ * porovnanie medzi položkami. Koláč to uniesť nevie ani technicky —
+ * `MAX_PIE_SLICES` je šesť, pásiem je dvadsaťjeden, a kruh nemá os, na ktorej
+ * by cena zostala usporiadaná. Celý rozbor je v hlavičke `PriceHistogram.tsx`;
+ * tu je zapísaný preto, aby si ho ďalší graf nemusel vymyslieť znova.
+ *
+ * Presne takto sa časová os Zliav NEstala grafom: okno platnosti nemeria
+ * veličinu, ale interval, a to nie je ani jedna z troch foriem — zostala
+ * tabuľkou. Kto siahne na `CHART_KINDS`, musí to pomenovať ako rozhodnutie.
+ *
  * ═══ 2. JEDNA OS PRE VŠETKY TRI ═══
  *
  * `chartScaleMax()` je jediné pravidlo hornej hranice osi: najbližšie okrúhle
@@ -41,11 +56,18 @@
  * Useknutá os je pri stĺpci najsilnejšie skreslenie, aké sa dá urobiť —
  * pomer výšok prestane zodpovedať pomeru čísel a nikto si toho nevšimne.
  *
- * POZOR — TÚ ISTÚ FUNKCIU MAJÚ ZATIAĽ TRI MIESTA. `sales-view.niceCeiling()`
- * a `price-bins.niceCount()` sú jej znakovo zhodné kópie z V1. Zliať ich do
- * jednej je úprava dvoch súborov mimo rozsahu tohto sprintu, takže tu zostáva
- * to druhé najlepšie: `test/unit/grafy-jazyk.spec.ts` porovnáva všetky tri na
- * celom rozsahu hodnôt. Keď sa rozídu, spadne test, nie graf.
+ * TRI KÓPIE SÚ ZLÚČENÉ NA JEDNU (V6b, 2. 9. 2026). Do tohto sprintu žilo to
+ * isté pravidlo na TROCH miestach: `chartScaleMax()` tu, `niceCeiling()`
+ * v `dashboard/sales-view.ts` a `niceCount()` v `charts/price-bins.ts` — tri
+ * znakovo zhodné telá. Kontrakt V6a §9 hlásil pod K5 „zlúčené", ale zlúčené
+ * neboli; zostal len test, ktorý ich porovnával. Teraz je telo JEDNO a oba
+ * ostatné moduly ho importujú.
+ *
+ * Čo zlúčenie stráži namiesto starého porovnávania (obe v `grafy-jazyk.spec.ts`):
+ *  · hodnoty `chartScaleMax()` sú pribité na VLASTNÚ tabuľku očakávaní, nie na
+ *    druhú implementáciu — klon a jeho test sa vedeli pokaziť spolu,
+ *  · statická závora prehľadá `src/` a nájde nanajvýš JEDNO telo rebríka
+ *    `[1, 2, 5, 10]`. Kto si napíše štvrtú kópiu, spadne na nej.
  *
  * ═══ 3. ZNAČKA „NEVIEME" JE JEDNA A TÁ ISTÁ ═══
  *
@@ -60,6 +82,19 @@
  * Koláč bez toho dielu je najhoršia z troch možností: scíta 100 % z nepravdy.
  * „92 % produktov nie je v zľave" znamená v skutočnosti „92 % produktov appka
  * nikdy nečítala" — a to je iná veta s iným ďalším krokom.
+ *
+ * ŠRAFOVANIE NESMIE ZNAMENAŤ NIČ INÉ — a raz už znamenalo (V6b, 2. 9. 2026).
+ * Histogram cien kreslil ZBERNÉ PÁSMO („200 € a viac") tým istým vzorom.
+ * Vyzeralo to ako vlastná farba, lebo `<pattern>` mal napísané
+ * `stroke="var(--seq-teal-3)"` — ale trieda `.gapHatch` je v CSS a CSS
+ * prebíja prezentačný atribút, takže sa kreslilo `--line2`, teda ZNAK
+ * „nemerali sme" nad 180 poctivo zmeranými produktmi. Ten atribút bol mŕtvy
+ * a test naň mal tvrdenie, takže o rozchode nepovedal nič.
+ *
+ * ZHRNUTÝ CHVOST JE DOLNÁ HRANICA, NIE NEVEDOMOSŤ. Má preto značku dolnej
+ * hranice — PRERUŠOVANÝ tvar (`ChartLegendEntry.open`, `.barOpen`) a `≥`
+ * v texte — presne ako nedočítaný deň (`.dotEstimate`). Kto sa chystá
+ * šrafovať čokoľvek, čo appka NAMERALA, hľadá túto značku.
  *
  * ═══ 4. PRAVIDLO TROCH KANÁLOV ═══
  *
@@ -347,14 +382,37 @@ export function piePercentText(slice: Pick<PieSlice, 'percent' | 'tiny'>): strin
 
 /* ═════════════════════════════ 5. Stĺpec ══════════════════════════════════ */
 
+/**
+ * Jeden stĺpec na vstupe.
+ *
+ * POLE SA MENUJE `bucket` A **NIKDY** `key` — NEPREMENOVÁVAJ HO SPÄŤ
+ * ----------------------------------------------------------------
+ * Je to to isté pravidlo a ten istý dôvod ako pri koláči, ktorý ho už raz
+ * porušil (rozbor je v `app/api/insights/catalog-distribution/route.ts`,
+ * sekcia 3): centrálny redaktor (`lib/log/redact.ts`, invariant I1) má `key`
+ * v `DENY_EXACT` a maskuje HODNOTU každého poľa s tým menom v ľubovoľnej
+ * hĺbke vnorenia. Kým sa diel koláča volal `key`, vracal sa
+ * `{ key: '***REDACTED***', count: 3 }` — symbol zmizol, počty zostali a graf
+ * sa dal nakresliť s tromi rovnako pomenovanými dielmi.
+ *
+ * Stĺpec dnes cez redaktor NECHODÍ (je to klientská mierka, nie odpoveď
+ * route). To ale nie je dôvod čakať, kým to niekto naloguje alebo pošle:
+ * jedno meno pre „symbol položky" naprieč všetkými tromi formami je lacnejšie
+ * než rozhodovať pri každom novom grafe, na ktorej strane hranice stojí.
+ * Redaktor sa NESMIE oslabiť ani obísť výnimkou — robil presne to, čo má.
+ *
+ * `BarListItem.key` v `ui/BarList.tsx` je iná vec a menuje sa inak zámerne:
+ * je to React `key` riadku zoznamu, nie pole v dátach grafu.
+ */
 export interface BarInput {
-  key: string;
+  /** Symbol položky. Musí byť v skupine jedinečný — nesie ho aj mierka. */
+  bucket: string;
   /** `null` = nemerané. NIE nula — nula je odpoveď, `null` je jej absencia. */
   value: number | null;
 }
 
 export interface Bar {
-  key: string;
+  bucket: string;
   value: number | null;
   /** Šírka v percentách rámu. Pri „nevieme" je nula a kreslí sa šrafovaný pahýľ. */
   widthPercent: number;
@@ -382,7 +440,7 @@ export function barLayout(items: readonly BarInput[]): BarLayout {
     scaleMax,
     unknownCount: items.length - measured.length,
     bars: items.map((item) => ({
-      key: item.key,
+      bucket: item.bucket,
       value: item.value,
       widthPercent:
         item.value === null ? 0 : Math.round((Math.max(0, item.value) / scaleMax) * 1000) / 10,

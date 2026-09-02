@@ -19,7 +19,11 @@
  *  3. **Legenda nesie TRI KANÁLY.** Predloha mala v položke legendy `label`
  *     a `color`. Farba sama v tejto appke nosičom rozdielu byť nesmie (§4
  *     bod 3 kontraktu V6), takže marka vie byť aj šrafovaná (`gap` —
- *     „nevieme") alebo prerušovaná (`dashed` — trend), a slovo je povinné vždy.
+ *     „nevieme"), prerušovaná (`dashed` — trend), s prerušovanou hranou
+ *     (`open` — dolná hranica, zhrnutý chvost) alebo zvislá čiarka (`tick` —
+ *     jednotlivá položka na osi), a slovo je povinné vždy. Zoznam mariek je
+ *     uzavretý rovnako ako `CHART_KINDS`: nová marka je rozhodnutie o jazyku,
+ *     nie o vzhľade jedného grafu.
  *  4. **Rám je `Panel`, nie vlastná karta.** Predloha to má rovnako a bolo by
  *     to jediné miesto, kde by v tejto appke stála druhá, takmer rovnaká
  *     ohraničená plocha (D142: dvojník je dlh). V `charts.module.css` zostáva
@@ -83,6 +87,27 @@ export interface ChartLegendEntry {
   gap?: boolean;
   /** Prerušovaná marka (trend). Odlíšenie TVAROM, nie len farbou. */
   dashed?: boolean;
+  /**
+   * Marka DOLNEJ HRANICE: plná výplň s prerušovanou hranou.
+   *
+   * Pribudla vo V6b s histogramom cien a je to jazykové rozhodnutie, nie
+   * ozdoba. Zberné pásmo („200 € a viac") je NAMERANÝ počet, ktorého rozsah na
+   * osi je len ohraničený zdola — teda tá istá vec ako nedočítaný deň
+   * (`.dotEstimate`), a NIE to isté ako `gap`. Kým sa kreslilo šrafovaním,
+   * appka tvrdila „toto sme nemerali" nad 180 poctivo zmeranými produktmi.
+   *
+   * Farba zostáva farbou radu: chvost je ten istý rad, len zhrnutý. Rozdiel
+   * nesie hrana (tvar) a slovo v legende, nie odtieň.
+   */
+  open?: boolean;
+  /**
+   * Marka JEDNOTLIVEJ POLOŽKY na osi — zvislá čiarka, nie rad.
+   *
+   * Ceny vybraných produktov v histograme sú body na tej istej osi, nie druhá
+   * veličina. Plná plôška by z nich urobila sériu; preto majú tvar značky
+   * a neutrálny textový token, nie krok rampy.
+   */
+  tick?: boolean;
 }
 
 /**
@@ -121,6 +146,46 @@ function LegendMark({ entry, hatchId }: { entry: ChartLegendEntry; hatchId: stri
           stroke={entry.color ?? 'currentColor'}
           strokeWidth="2"
           strokeDasharray="4 3"
+        />
+      </svg>
+    );
+  }
+  if (entry.open === true) {
+    /* Plná výplň radu + prerušovaná hrana — presne to, čo kreslí `.barOpen`.
+       Marka, ktorá by sa od stĺpca líšila, je návod na inú vec. */
+    return (
+      <svg
+        className={styles.legendMark}
+        width="16"
+        height="12"
+        viewBox="0 0 16 12"
+        aria-hidden="true"
+      >
+        <rect
+          className={styles.legendOpenEdge}
+          x="1.75"
+          y="2.75"
+          width="12.5"
+          height="7.5"
+          fill={entry.color ?? 'currentColor'}
+        />
+      </svg>
+    );
+  }
+  if (entry.tick === true) {
+    return (
+      <svg
+        className={styles.legendMark}
+        width="16"
+        height="12"
+        viewBox="0 0 16 12"
+        aria-hidden="true"
+      >
+        <path
+          d="M8 1 V11"
+          fill="none"
+          stroke={entry.color ?? 'currentColor'}
+          strokeWidth="1.5"
         />
       </svg>
     );
@@ -205,8 +270,17 @@ export interface ChartCardProps {
    * `h2` už názov zľavy, musí byť `h3` (`nadpisy-osnova.spec.ts`).
    */
   as?: 'h2' | 'h3';
-  /** `md` = `--chart-h` (hlavný graf), `sm` = `--chart-h-sm` (druhotný). */
-  size?: 'md' | 'sm';
+  /**
+   * `md` = `--chart-h` (hlavný graf), `sm` = `--chart-h-sm` (druhotný),
+   * `auto` = plocha si výšku určí sama.
+   *
+   * `auto` je VÝHRADNE pre plochu z INLINE SVG s `viewBox` (histogram cien,
+   * koláč): tá si výšku odvodí z pomeru strán a pevná výška by ju len
+   * zarámovala do prázdna, prípadne orezala. Pre Recharts sa `auto` použiť
+   * NESMIE — `ResponsiveContainer` meria rodiča, takže by sa zbalil na nulu a
+   * graf by zmizol bez jediného hlásenia. Stráži to `grafy-chartcard.spec.ts`.
+   */
+  size?: 'md' | 'sm' | 'auto';
   /** Vlastná legenda pod plochou. Legenda Rechartsu je hlučnejšia. */
   legend?: readonly ChartLegendEntry[];
   /** Načítava sa. Kostra v mieste plochy, nie skok obsahu. */
@@ -276,7 +350,12 @@ export function ChartCard({
   testId = 'chart-card',
 }: ChartCardProps) {
   const hatchId = useChartPatternId('legend-hatch');
-  const bodyClass = size === 'sm' ? `${styles.cardBody} ${styles.cardBodySm}` : styles.cardBody;
+  const bodyClass =
+    size === 'sm'
+      ? `${styles.cardBody} ${styles.cardBodySm}`
+      : size === 'auto'
+        ? `${styles.cardBody} ${styles.cardBodyAuto}`
+        : styles.cardBody;
 
   /* Porovnáva sa výslovne — Turbopack v tomto repe už raz vyhodnotil skrátený
      guard ako compile-time falsy. Poradie vetiev nesie význam; pozri hlavičku

@@ -70,6 +70,18 @@ const html = renderToStaticMarkup(createElement(NewDiscount, { initial: INITIAL 
 
 /* ═════════ A. Každá modulová trieda naozaj existuje ══════════════════════ */
 
+/*
+ * TOTO PRAVIDLO JE ODVTEDY ZOVŠEOBECNENÉ — a skupina A tu zostáva zámerne.
+ * `test/unit/css-moduly-strazca.spec.ts` (V6b, posledný agent) meria oba smery
+ * pre KAŽDÝ `src/**\/*.module.css` a jeho zoznam modulov aj volajúcich sa
+ * hľadá na disku, takže nový modul je pod dozorom hneď, ako vznikne. Nič sa
+ * odtiaľto nepresunulo a žiadne tvrdenie sa neoslabilo: tri veci má táto
+ * skupina, ktoré všeobecný strážca mať NEMÔŽE — vie, ktoré DVA súbory smú
+ * modul sprievodcu importovať, pozná menovite deväť osirených mien zo
+ * `zlavy.module.css` (nižšie), a vykresľuje si obrazovku, takže vidí aj
+ * `undefined` vpísané do template stringu. Keď sa toto pravidlo bude meniť,
+ * mení sa na OBOCH miestach.
+ */
 describe('A. `styles.*` sprievodcu sa v jeho module nájde', () => {
   it('oba súbory berú vzhľad z modulu sprievodcu, nie zo spoločného', () => {
     /* Bez tejto poistky by cyklus nižšie prešiel aj nad prázdnym zoznamom —

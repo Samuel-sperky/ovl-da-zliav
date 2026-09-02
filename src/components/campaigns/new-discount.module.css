@@ -506,7 +506,19 @@
   border-top: 1px solid var(--line);
 }
 
-.presetSave .presetInput {
+/*
+ * CIELI SA NA GLOBÁLNE `.inp`, NIE NA MODULOVÚ TRIEDU (oprava 2. 9. 2026)
+ * ───────────────────────────────────────────────────────────────────────
+ * Do 2. 9. 2026 tu stálo `.presetSave .presetInput` a bolo to MŔTVE:
+ * `DiscountPresets.tsx` píše vstupu `className="inp"` (globálna trieda
+ * z `globals.css`), takže modulová `.presetInput` na ňom nikdy nebola a
+ * pole na meno presetu sa prestalo naťahovať na šírku riadku. Nie je to
+ * „nepoužitý selektor" — je to selektor, ktorý sa nemá ako uchytiť, ten istý
+ * druh chyby ako `[data-col='select']` v `catalog-table.module.css`. Predloha
+ * v `zlavy.module.css` mala `:global(.inp)` správne; pri prepnutí modulu sa
+ * z nej stalo modulové meno, ktoré nikto nenastavuje.
+ */
+.presetSave :global(.inp) {
   flex: 1 1 auto;
   min-width: 0;
 }

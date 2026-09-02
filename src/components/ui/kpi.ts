@@ -283,7 +283,7 @@ export function barListBars(
 ): ReadonlyMap<string, Bar> {
   const all = groups.flat();
   const layout = barLayout(all);
-  return new Map(layout.bars.map((bar) => [bar.key, bar]));
+  return new Map(layout.bars.map((bar) => [bar.bucket, bar]));
 }
 
 /**

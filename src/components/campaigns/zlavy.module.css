@@ -24,19 +24,13 @@
   gap: 8px;
 }
 
-/* Nadpis obrazovky + jedno primárne tlačidlo (zlavy.html). */
-.head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 2px;
-}
-
-.head h1 {
-  font-size: 15px;
-  font-weight: 640;
-}
+/*
+ * NADPIS OBRAZOVKY TU UŽ NIE JE (V6b, D139, D142). `.head` a `.head h1`
+ * kreslili „titulok vľavo, jedno primárne tlačidlo vpravo"; odkedy to
+ * robí primitívum `PageHeader` (`ui/frame.module.css`), boli to dve
+ * pravidlá, ktoré nemali na čom držať. Nový nadpis sa nepíše sem —
+ * pridáva sa do `PageHeader`, inak bude mať appka dva rôzne nadpisy.
+ */
 
 /* Dominanta zoznamu aj detailu: obsah vľavo, akcie vpravo. */
 .top {
@@ -246,6 +240,55 @@
   color: inherit;
 }
 
+/*
+ * ŠTYRI TRIEDY, KTORÉ V TOMTO MODULE CHÝBALI (nájdené 2. 9. 2026 strážcom
+ * `nova-zlava-dry-run.spec.ts`, skupina „CSS ako TEXT").
+ *
+ * `DiscountsList.tsx` kreslí `styles.startBox`, `styles.startRow`,
+ * `styles.startGate` a `styles.tableFoot` — a ani jedna z nich tu (ani nikde
+ * inde v repe) NEBOLA. V prehliadači je taký kľúč `undefined`, teda
+ * `class="undefined"`: rozcestník „Nová zľava" na zozname zliav aj počet
+ * riadkov pod tabuľkou sa kreslili bez akéhokoľvek pravidla. Je to presne tá
+ * trieda chyby, pre ktorú vznikol `nova-zlava-selektory.spec.ts` — Proxy nad
+ * CSS modulmi v testoch vráti hašované meno na KAŽDÝ kľúč, takže typecheck,
+ * lint ani 4754 tvrdení o tom nepovedali nič.
+ *
+ * Pravidlá nižšie sú preto DOPLNENIE chýbajúceho vzhľadu, nie nový návrh:
+ * rozcestník je riadok akcií s vetou o I3 pod ním (tá veta MUSÍ byť čitateľná
+ * bez kliknutia — `NEW_DISCOUNT_GATE_SK`), pätička tabuľky je tichý počet.
+ */
+.startBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovl-s2);
+  min-width: 0;
+}
+
+.startRow {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  flex-wrap: wrap;
+}
+
+/* Veta o skúške naprázdno pri tlačidle. Tichšia než akcia, ale nikdy skrytá:
+   je to jediné miesto na zozname, kde je vidieť, že odtiaľto sa nič nezapíše. */
+.startGate {
+  margin: 0;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  line-height: var(--ovl-lh-body);
+  max-width: 44rem;
+}
+
+/* Počet riadkov pod tabuľkou — fakt, nie nadpis. */
+.tableFoot {
+  margin: 0;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  line-height: var(--ovl-lh-body);
+}
+
 /* ───────────── sekcia zbalená do jedného riadku (P5, P6) ────────────────── */
 
 /*
@@ -297,160 +340,23 @@
   padding: 0 16px 12px;
 }
 
-/* ─────────────────────────── nová zľava ──────────────────────────────── */
-
-.nz {
-  display: grid;
-  grid-template-columns: 1fr 476px;
-  gap: 14px;
-  align-items: start;
-}
-
-.nzCol {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-
-.nzHead {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.nzTitle {
-  font-size: 17px;
-  font-weight: 660;
-  letter-spacing: -0.02em;
-}
-
-.nzName {
-  width: 300px;
-  max-width: 100%;
-}
-
-.pushRight {
-  margin-left: auto;
-}
-
-/*
- * D14 — prázdny stav ako JEDEN RIADOK. Predtým to bola vycentrovaná karta
- * s ~300 px ničoho v ľavom stĺpci. Veta a tlačidlo zostávajú jedno a jedno
- * (kontrakt UI, bod 11), len prestali stáť v prázdnej škatuli.
+/* ─────────────────────────── nová zľava ───────────────────────────────
+ *
+ * SPRIEVODCA NOVEJ ZĽAVY SI VZHĽAD BERIE Z `new-discount.module.css`
+ * (V6b, D139, D143, 2. 9. 2026) a týchto štrnásť tried tu zostalo len
+ * ako dlh: `.nz`, `.nzCol`, `.nzHead`, `.nzTitle`, `.nzName`,
+ * `.pushRight`, `.nzEmpty`, `.tiers` (a jej `:global(.n)`,
+ * `:global(tr.sum)`), `.band`, `.pctInput`, `.capInput`, `.win`
+ * (a jej `:global(.inp)`) a `.winline`.
+ *
+ * PREČO SA MAZALI, A NIE NECHALI. Presne tieto mená zostali 2. 9. 2026
+ * v JSX sprievodcu po prepnutí importu a v prehliadači z nich bolo
+ * `class="undefined"` — obrazovka sa rozsypala a testy zostali zelené.
+ * Kým tu ležia, vyzerá každé z nich ako živý vzhľad, ktorý sa dá
+ * upraviť; upraviť sa nedá nič, lebo tento modul sprievodca už
+ * neimportuje. Stráži to `test/unit/css-moduly-strazca.spec.ts`
+ * v OBOCH smeroch, takže mŕtve meno sa sem nemá ako vrátiť potichu.
  */
-.nzEmpty {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-/* Tabuľka pásiem — hustá, bez rámu, s pravými číslami. */
-.tiers {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 13px;
-}
-
-.tiers th {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--dim);
-  font-weight: 650;
-  text-align: left;
-  padding: 0 10px 6px;
-  border-bottom: 1px solid var(--line2);
-}
-
-.tiers td {
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--line);
-  color: var(--ink2);
-  vertical-align: middle;
-}
-
-.tiers td:first-child,
-.tiers th:first-child {
-  padding-left: 0;
-}
-
-/* `n` a `sum` sú globálne triedy z JSX — v module ich treba prehlásiť. */
-.tiers :global(.n) {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.tiers :global(tr.sum) td {
-  border-bottom: 0;
-  color: var(--ink);
-  font-weight: 640;
-  padding-top: 8px;
-}
-
-.band {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-weight: 640;
-  color: var(--ink);
-}
-
-.band i {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: var(--deep);
-  display: block;
-}
-
-.band[data-ord='2'] i {
-  opacity: 0.62;
-}
-
-.band[data-ord='3'] i {
-  opacity: 0.34;
-}
-
-.band[data-ord='4'] i {
-  opacity: 0.2;
-}
-
-.pctInput {
-  width: 74px;
-  text-align: right;
-}
-
-.capInput {
-  width: 92px;
-  text-align: right;
-}
-
-/* Okno platnosti: dve dátumové polia v riadku. */
-.win {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.win :global(.inp) {
-  width: 148px;
-}
-
-/* Okno platnosti — oddelené od tabuľky pásiem vlastnou linkou. */
-.winline {
-  margin-top: 11px;
-  padding-top: 11px;
-  border-top: 1px solid var(--line);
-}
 
 /*
  * KEDY (`NewDiscountStart`) — dva dni v karte rozhodnutia, pod dominantou.
@@ -572,6 +478,73 @@
 .wide {
   width: 100%;
   justify-content: center;
+}
+
+/*
+ * SÚHRN SKÚŠKY NAPRÁZDNO (V6b, 2. 9. 2026) — štyri čísla ODKRYTÉ.
+ *
+ * Kreslí sa vo vnorenom `Panel soft`, teda ako plocha v ploche: karta
+ * rozhodnutia je jedna, ale toto je v nej DOKLAD, nie ďalší krok. Preto nemá
+ * vlastnú hlavičku ani rám v barve akcie — váhu nesie kontrast čísla proti
+ * popisku, nie farba (`--accent` patrí akcii).
+ *
+ * Riadok je `dt`/`dd` v mriežke s pevným prvým stĺpcom, aby čísla stáli pod
+ * sebou a dali sa porovnať očami. Neznáma hodnota má `data-known="no"` a
+ * kreslí sa tichšie — SLOVOM a pomlčkou v samom texte, farba je až tretí
+ * kanál (kontrakt V6 §4, bod 3).
+ */
+.dry {
+  margin-top: var(--ovl-s4);
+  text-align: left;
+}
+
+.dryIntro {
+  margin: 0 0 var(--ovl-s3);
+  font-size: var(--ovl-fs-micro);
+  color: var(--ink2);
+  font-weight: 600;
+  line-height: var(--ovl-lh-body);
+}
+
+.dryList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovl-s2);
+  margin: 0;
+}
+
+.dryRow {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: var(--ovl-s3);
+  align-items: baseline;
+}
+
+.dryTerm {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.dryValue {
+  margin: 0;
+  font-size: var(--ovl-fs-table);
+  color: var(--ink);
+  font-weight: 700;
+  line-height: var(--ovl-lh-body);
+  font-variant-numeric: tabular-nums;
+}
+
+/* „Nevieme" je tichšie než merané číslo, ale nikdy nie neviditeľné. */
+.dryValue[data-known='no'] {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+/* Priznanie zastaranej skúšky pod číslami. Vlastný obal, nie margin na
+   `Note` — vzhľad priznaní vlastní `Note`, rozostup vlastní táto plocha. */
+.dryStale {
+  margin-top: var(--ovl-s3);
 }
 
 /*
@@ -1276,11 +1249,12 @@
  * Appka beží na jednom počítači v 1440, ale zúžené okno nesmie vyrobiť
  * vodorovný skrol. Stĺpce sa skladajú pod seba, nič sa neskrýva.
  */
-@media (max-width: 1180px) {
-  .nz {
-    grid-template-columns: 1fr;
-  }
-}
+/*
+ * Skladanie DVOJSTĹPCOVEJ MRIEŽKY SPRIEVODCU (`.nz`) tu už nie je (D139):
+ * odišlo s prepnutím `NewDiscount.tsx` na `new-discount.module.css`,
+ * ktorý má svoju vlastnú hranicu. Zostáva `.top`, ktorú kreslí zoznam
+ * a detail zľavy — to sú obrazovky TOHTO modulu.
+ */
 
 @media (max-width: 1000px) {
   .top {
@@ -1321,9 +1295,8 @@
     flex: 1;
   }
 
-  .nzName {
-    width: 100%;
-  }
+  /* `.nzName` odišla so sprievodcom (D139) — mená polí novej zľavy
+     zužuje `new-discount.module.css`, nie tento modul. */
 }
 
 /* ═══════════════ Výkon výberu — čísla hore, zámky dole (§1 TAB 3, D17) ═══ */
@@ -1402,48 +1375,15 @@
   }
 }
 
-/* ═══════════════ Presety — zoznam a uloženie (D112, K7) ═════════════════ */
-
-/*
- * Zoznam presetov je pod rozklikom, teda mimo počtu sekcií (P5). Riadok je
- * meno + súhrn vľavo a dve akcie vpravo; „Predplniť formulár" je ODKAZ, nie
- * zápis (I3), preto nemá tón potvrdzovacieho tlačidla.
+/* ═══════════════ Presety — zoznam a uloženie (D112, K7) ═════════════════
+ *
+ * ZOZNAM PRESETOV TU UŽ NIE JE (V6b, D139, 2. 9. 2026). `.presetList`,
+ * `.presetRow`, `.presetName` a `.presetSave` odišli s prepnutím
+ * `DiscountPresets.tsx` na `new-discount.module.css`: presety patria
+ * k sprievodcovi novej zľavy, nie k zoznamu zliav, a modul zľav ich
+ * kreslil naposledy pred prepnutím. Kópia, ktorá nič nekreslí, sa
+ * o mesiac rozíde s originálom — a rozíde sa tá, ktorú nikto nevidí.
  */
-.presetList {
-  display: flex;
-  flex-direction: column;
-  margin-top: 10px;
-}
-
-.presetRow {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  border-top: 1px solid var(--line);
-}
-
-.presetName {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.presetSave {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 11px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.presetSave :global(.inp) {
-  flex: 1 1 auto;
-  min-width: 0;
-}
 
 /* ═════════════ Okná zliav v čase — pás v bunke tabuľky (V6b) ═════════════
  *

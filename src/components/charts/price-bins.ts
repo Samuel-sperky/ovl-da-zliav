@@ -9,9 +9,15 @@
  *
  *  1. **Zberné pásmo prestane byť rozoznateľné.** Posledný stĺpec nie je
  *     „190 až 200 €", ale „200 € a viac" — zhrnutý chvost, ktorý siaha rádovo
- *     desaťnásobne ďalej. Nesie preto `open: true` a kreslí sa šrafovaním.
- *     Kto ho vykreslí ako obyčajný stĺpec, urobí z rozdelenia lož: vyzeralo by
- *     to, že drahšie produkty neexistujú.
+ *     desaťnásobne ďalej. Nesie preto `open: true`. Kto ho vykreslí ako
+ *     obyčajný stĺpec, urobí z rozdelenia lož: vyzeralo by to, že drahšie
+ *     produkty neexistujú.
+ *
+ *     `open` sa kreslí PRERUŠOVANOU hranou, nie šrafovaním (V6b, 2. 9. 2026).
+ *     Šrafovanie v tejto appke znamená „toto sme nemerali" a zberné pásmo
+ *     nameraných 180 produktov nevedomosť nie je — je to DOLNÁ HRANICA ceny,
+ *     teda tá istá vec ako nedočítaný deň. Rozbor: `ui/chart-language.ts`,
+ *     sekcia 3.
  *
  *  2. **Značka výberu sa mlčky presunie.** Cena nad hranicou osi sa PRIPNE na
  *     pravý okraj (`clamped: true`), lebo mimo rámu by nebola vidieť. Pripnutá
@@ -26,6 +32,7 @@
  *
  * Vlastník: V1.
  */
+import { chartScaleMax } from '@/components/ui/chart-language';
 
 /** Súradnicová sústava histogramu. Vyššia než graf predaja — má popisky osi. */
 export const PRICE_CHART = {
@@ -75,16 +82,15 @@ export interface PriceHistogramGeometry {
   axisTop: number;
 }
 
-/** Najbližšie okrúhle číslo nad `value` (1, 2, 5 × mocnina desiatich). */
-export function niceCount(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(value));
-  for (const step of [1, 2, 5, 10]) {
-    const candidate = step * magnitude;
-    if (candidate >= value) return candidate;
-  }
-  return 10 * magnitude;
-}
+/*
+ * HORNÁ HRANICA OSI TU UŽ NEŽIJE (K5, V6b, 2. 9. 2026).
+ *
+ * Bolo tu telo `niceCount()` — znakovo zhodná kópia `chartScaleMax()`
+ * z `ui/chart-language.ts` a jednej ďalšej (`niceCeiling()`)
+ * v `dashboard/sales-view.ts`. Tri kópie jedného pravidla osi sú zlúčené na
+ * jednu a je to tá v jazyku grafov; tento modul si ju IMPORTUJE. Kto ju bude
+ * hľadať pod starým menom, nájde ju tam.
+ */
 
 const round1 = (value: number): number => Number(value.toFixed(1));
 
@@ -116,7 +122,7 @@ export function priceHistogramGeometry(
   const span = PRICE_CHART.right - PRICE_CHART.left;
   const height = PRICE_CHART.baseline - PRICE_CHART.top;
   const slot = span / bins.length;
-  const scaleMax = niceCount(Math.max(...bins.map((bin) => bin.count)));
+  const scaleMax = chartScaleMax(Math.max(...bins.map((bin) => bin.count)));
 
   const bars: PriceBar[] = bins.map((bin, index) => {
     const barHeight = round1((bin.count / scaleMax) * height);

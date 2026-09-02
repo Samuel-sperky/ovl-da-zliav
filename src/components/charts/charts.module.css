@@ -30,72 +30,26 @@
  *     šrafovaný pás v `--line2`, nikdy plocha a nikdy bod na nule. Kto ho
  *     vyplní, začne appka tvrdiť, že v tie dni bol predaj nulový.
  *
+ *  5. **Trieda tu zostane po komponente, ktorý odišiel.** V CSS moduloch to
+ *     nikde nespadne: nepoužitá trieda je platné CSS a nepoužitý KĽÚČ je
+ *     v teste hash (Proxy), takže ani jedna strana nič nenahlási. Preto je
+ *     odteraz nad tým súbor `test/unit/grafy-selektory.spec.ts`, ktorý porovná
+ *     množinu použitých kľúčov s množinou deklarovaných tried V OBOCH SMEROCH.
+ *
+ * ČO SA ODTIAĽ ZMAZALO A PREČO (V6b, 2. 9. 2026)
+ * ─────────────────────────────────────────────
+ * Trinásť tried po vrstve myši z V1: `.frame`, `.hitArea`, `.crosshair`,
+ * `.hotDot`, `.tip`, `.tipDay`, `.tipValue`, `.tipNote`, `.gapFill`,
+ * `.gapLabel`, `.pointLabel`, `.pointLabelDim`, `.refLabel`. Vlastný nitkový
+ * kríž a vlastnú bublinu nahradil vo V6a `<Tooltip>` Rechartsu (`SalesChart`
+ * má odvtedy svoje tri riadky bubliny v `sales-chart.module.css`) a histogram
+ * priamy popisok nikdy nekreslil. Ani jednu z nich nečítal žiadny súbor
+ * v `src/` a ani jedno tvrdenie v `test/` — takže mazanie neubralo nič, čo by
+ * niekto strážil. Pozostatok tej vrstvy je `charts/chart-hover.ts`: čisté
+ * funkcie, ktoré si dnes pýta už len test.
+ *
  * Vlastník: V1.
  */
-
-/* ── Rám s vrstvou myši ────────────────────────────────────────────────── */
-
-.frame {
-  position: relative;
-}
-
-/* Priehľadná plocha, ktorá zbiera pohyb myši nad celým grafom. */
-.hitArea {
-  cursor: crosshair;
-}
-
-.crosshair {
-  stroke: var(--line2);
-  stroke-width: 1;
-  stroke-dasharray: 2 3;
-  pointer-events: none;
-}
-
-/* Zvýraznený bod pod kurzorom — o niečo väčší, nikdy inej farby. */
-.hotDot {
-  fill: var(--paper2);
-  stroke: var(--accent);
-  stroke-width: 2.4;
-  pointer-events: none;
-}
-
-/*
- * Bublina s hodnotou. Je to HTML nad SVG, nie `foreignObject`: text v nej
- * musí dediť rodinu, tabulárne číslice aj tokeny textu.
- */
-.tip {
-  position: absolute;
-  transform: translate(-50%, -100%);
-  margin-top: -10px;
-  pointer-events: none;
-  background: var(--paper2);
-  border: 1px solid var(--line2);
-  border-radius: var(--r-sm);
-  box-shadow: var(--ovl-shadow);
-  padding: 5px 8px;
-  white-space: nowrap;
-  z-index: 2;
-}
-
-.tipDay {
-  display: block;
-  font-size: var(--ovl-fs-micro);
-  color: var(--dim);
-}
-
-.tipValue {
-  display: block;
-  font-size: var(--ovl-fs-small);
-  color: var(--ink);
-  font-weight: 620;
-}
-
-/* Riadok pod bublinou, keď hodnota nie je celý deň. */
-.tipNote {
-  display: block;
-  font-size: var(--ovl-fs-micro);
-  color: var(--dim);
-}
 
 /* ── Značky série ──────────────────────────────────────────────────────── */
 
@@ -114,27 +68,11 @@
   stroke-width: 2;
 }
 
-/* Priamy popisok pri bode. Text nosí textový token, nikdy farbu série. */
-.pointLabel {
-  fill: var(--ink);
-  font-size: 11px;
-  font-weight: 620;
-}
-
 /* ── Pás nesťahovaného obdobia ─────────────────────────────────────────── */
 
 .gapHatch {
   stroke: var(--line2);
   stroke-width: 1;
-}
-
-.gapFill {
-  pointer-events: none;
-}
-
-.gapLabel {
-  fill: var(--dim);
-  font-size: 10px;
 }
 
 /* ── Legenda ───────────────────────────────────────────────────────────── */
@@ -199,8 +137,16 @@
   border-bottom: 0;
 }
 
-.dataTable th.num,
-.dataTable td.num {
+/*
+ * Číselný stĺpec sa zarovnáva doprava. CIELI SA NA GLOBÁLNE `num`, NIE NA
+ * MODULOVÚ TRIEDU (oprava 2. 9. 2026): `ChartTable.tsx` vypisuje bunkám
+ * `className="num"` — globálnu triedu z `globals.css` —, takže `th.num`
+ * v module sa nemal ako uchytiť a čísla v rozkliku grafu stáli vľavo.
+ * Nebol to „nepoužitý selektor", ale mŕtvy; ten istý druh chyby ako
+ * `[data-col='select']` v `catalog-table.module.css`.
+ */
+.dataTable :global(th.num),
+.dataTable :global(td.num) {
   text-align: right;
   padding-right: 0;
 }
@@ -226,6 +172,78 @@
 }
 
 /*
+ * ZBERNÉ PÁSMO („200 € a viac") — DOLNÁ HRANICA, NIE NEVEDOMOSŤ.
+ *
+ * Do 2. 9. 2026 sa kreslilo ŠRAFOVANÍM, teda značkou „toto sme nemerali"
+ * (`.gapHatch`) nad stovkami poctivo zmeraných produktov. Vyzeralo to ako
+ * vlastná farba, lebo `<pattern>` v histograme mal napísané
+ * `stroke="var(--seq-teal-3)"` — ale trieda je v CSS a CSS prebíja
+ * prezentačný atribút, takže sa kreslilo `--line2`. Ten atribút bol mŕtvy
+ * a test naň mal zelené tvrdenie.
+ *
+ * Odteraz je to VÝPLŇ RADU (chvost je ten istý rad, len zhrnutý) a rozdiel
+ * nesie PRERUŠOVANÁ HRANA v papieri — ten istý tvar, akým `.dotEstimate`
+ * hovorí „toto je dolná hranica". Hrana ide v `--paper2` zámerne: na plnej
+ * výplni je vidieť ako perforácia, teda „pokračuje za okrajom". Kto ju
+ * vráti na šrafovanie, začne appka o meraní tvrdiť, že meranie nie je.
+ */
+.barOpen {
+  stroke: var(--paper2);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+
+/*
+ * Plocha grafu kreslená INLINE SVG (histogram cien). Šírku berie od rámu
+ * `ChartCard`, výšku si drží pomer strán `viewBox` — preto ide vždy spolu
+ * so `size="auto"`. Predtým tú istú vec robil globálny predpis
+ * `.chart svg[role="img"] { width: 100% }`; ten sem nedosiahne a nemá,
+ * lebo plocha v `ChartCard` je `aria-hidden` a rolu `img` už nenesie.
+ */
+.plotSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/*
+ * Mriežka a os plochy z inline SVG. Ide v `--line` — proti papieru je to
+ * kontrast okolo 1,3 : 1, teda sotva viditeľné, presne ako má byť. Kto ju
+ * prepne na `--line2` alebo `--dim`, urobí z pozadia druhú sériu (bod 2
+ * v hlavičke). Predtým to isté robila globálna `.ax`; tu je preto, aby plocha
+ * nezávisela od rámu `.chart`, ktorý `ChartCard` už nekreslí.
+ */
+.gridLine {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+/*
+ * Popisok osi. `font-family: inherit` je nosné, nie kozmetika: SVG má vlastnú
+ * východiskovú rodinu, takže bez toho by čísla na osi boli z iného písma než
+ * čísla v tabuľke pod grafom. Veľkosť je v jednotkách `viewBox` (880 na
+ * ~600 px), takže 10 je na obrazovke okolo 7 px — hraničné, a preto sa
+ * nezmenšuje.
+ */
+.axisTick {
+  font-family: inherit;
+  font-size: 10px;
+  fill: var(--dim);
+}
+
+/*
+ * Hrana marky „dolná hranica" v legende. Je to tá istá perforácia ako
+ * `.barOpen`; marka, ktorá by sa od stĺpca líšila, je návod na inú vec.
+ * Hrúbka je menšia, lebo marka je 16 × 12, nie 880 jednotiek `viewBox`.
+ */
+.legendOpenEdge {
+  stroke: var(--paper2);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+
+/*
  * Referenčná značka (cena vybraného produktu) je NEUTRÁLNA a preto zámerne
  * MIMO rampy: je to jednotlivý bod na osi cien, nie hodnota série. Kto jej dá
  * `--seq-teal-*`, spraví z výberu druhú sériu v tom istom ráme.
@@ -233,11 +251,6 @@
 .refMark {
   stroke: var(--ink);
   stroke-width: 1.5;
-}
-
-.refLabel {
-  fill: var(--ink2);
-  font-size: 10px;
 }
 
 /*
@@ -271,13 +284,6 @@
   stroke: var(--dim);
   stroke-width: 2;
   stroke-dasharray: 3 2;
-}
-
-/* Popisok odhadu je tlmený — meranie a dolná hranica nemajú rovnakú váhu. */
-.pointLabelDim {
-  fill: var(--dim);
-  font-size: 11px;
-  font-weight: 620;
 }
 
 /* ── Koláč: rozdelenie katalógu alebo výberu (D126) ────────────────────── */
@@ -402,6 +408,20 @@
 .cardBodySm {
   height: var(--chart-h-sm);
   min-height: var(--chart-h-sm);
+}
+
+/*
+ * Plocha, ktorá si výšku určí sama (`size="auto"`).
+ *
+ * Iba pre INLINE SVG s `viewBox`: to si výšku odvodí z pomeru strán, takže
+ * pevná výška by ho buď zarámovala do prázdna (histogram je 880 × 180, teda
+ * plochý, a `--chart-h` má 220 až 380 px), alebo orezala. Pre Recharts sa
+ * použiť NESMIE — `ResponsiveContainer` meria rodiča a na nulovej výške zmizne
+ * bez jediného hlásenia. Stráži to `grafy-chartcard.spec.ts`.
+ */
+.cardBodyAuto {
+  height: auto;
+  min-height: 0;
 }
 
 /*

@@ -27,6 +27,7 @@
  * Vlastník: V9.
  */
 import type { SalesDay, SalesSnapshot } from '@/components/dashboard/api';
+import { chartScaleMax } from '@/components/ui/chart-language';
 import { NEVIEME } from '@/lib/ui/product-label';
 
 /* ═════════════════════════════ 1. Tri čísla ═══════════════════════════════ */
@@ -273,16 +274,14 @@ export interface ChartGeometry {
   }>;
 }
 
-/** Najbližšie okrúhle číslo nad `value` (1, 2, 5 × mocnina desiatich). */
-export function niceCeiling(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(value));
-  for (const step of [1, 2, 5, 10]) {
-    const candidate = step * magnitude;
-    if (candidate >= value) return candidate;
-  }
-  return 10 * magnitude;
-}
+/*
+ * HORNÁ HRANICA OSI TU UŽ NEŽIJE (K5, V6b, 2. 9. 2026).
+ *
+ * Bolo tu telo `niceCeiling()` — znakovo zhodná kópia `chartScaleMax()`
+ * z `ui/chart-language.ts` a jednej ďalšej v `charts/price-bins.ts`. Tri kópie
+ * jedného pravidla osi sú zlúčené na jednu a je to tá v jazyku grafov; tento
+ * modul si ju IMPORTUJE. Kto ju bude hľadať pod starým menom, nájde ju tam.
+ */
 
 /** `2026-08-10` → `10. 8.` — os grafu, nie veta. */
 export function axisDay(day: string): string {
@@ -453,7 +452,7 @@ export function chartGeometry(days: readonly SeriesDay[], today: string): ChartG
   const measured = days.filter((day) => day.units !== null);
   if (measured.length < 2) return null;
 
-  const scaleMax = niceCeiling(Math.max(...measured.map((day) => day.units as number)));
+  const scaleMax = chartScaleMax(Math.max(...measured.map((day) => day.units as number)));
   const height = CHART.baseline - CHART.top;
   const placed = positions(days);
   const yOf = (units: number): number => round1(CHART.baseline - (units / scaleMax) * height);

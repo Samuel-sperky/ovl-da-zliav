@@ -29,7 +29,7 @@
  * Vlastník: V6a-GRAFY.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -604,6 +604,60 @@ describe('C3. legenda nesie tri kanály — farba, značka, slovo', () => {
     expect(html).toContain('stroke-dasharray');
   });
 
+  it('DOLNÁ HRANICA je prerušovaná HRANA, nie šrafovanie (V6b)', () => {
+    /*
+     * `open` pribudlo s histogramom cien a je to jazykové rozhodnutie:
+     * zberné pásmo („200 € a viac") je NAMERANÝ počet, ktorého rozsah na osi
+     * je ohraničený zdola. Kým sa kreslilo šrafovaním, appka tvrdila „toto
+     * sme nemerali" nad 180 poctivo zmeranými produktmi.
+     *
+     * Meria sa preto rozdiel oproti `gap`: `open` má PLNÚ výplň farbou radu
+     * a prerušovanú hranu, `gap` má vzor a farbu ignoruje. Keby sa zliali,
+     * dve rôzne priznania by vyzerali rovnako.
+     */
+    const html = card({
+      legend: [{ label: 'zberné pásmo', color: 'var(--chart-2)', open: true }],
+    });
+    expect(html).toContain('zberné pásmo');
+    expect(html).toContain('fill="var(--chart-2)"');
+    // Hrana je v module (`.legendOpenEdge`), nie inline — vzhľad patrí do CSS.
+    expect(CHARTS_CSS).toMatch(/\.legendOpenEdge\s*\{[^}]*stroke-dasharray/);
+    // A hlavne: NIE je to šrafovanie.
+    expect(html).not.toContain('<pattern');
+  });
+
+  it('JEDNOTLIVÁ POLOŽKA na osi je zvislá čiarka, nie plôška (V6b)', () => {
+    /*
+     * Ceny vybraných produktov sú body na tej istej osi, nie druhá séria.
+     * Plná plôška by z nich sériu urobila — marka má preto tvar značky
+     * a berie neutrálny textový token, nie krok rampy.
+     */
+    const html = card({ legend: [{ label: 'ceny vybraných produktov', color: 'var(--ink)', tick: true }] });
+    expect(html).toContain('ceny vybraných produktov');
+    expect(html).toContain('stroke="var(--ink)"');
+    expect(html).not.toContain('<rect');
+    expect(html).not.toContain('stroke-dasharray');
+  });
+
+  it('marky sa navzájom nezliali — štyri tvary, štyri významy', () => {
+    /*
+     * Bez tejto vety by tvrdenia vyššie prešli aj vtedy, keby `LegendMark`
+     * vracal pre všetko to isté. Meria sa, že sa štyri marky od seba naozaj
+     * LÍŠIA vykresleným tvarom.
+     */
+    const tvar = (entry: Record<string, unknown>) => {
+      const html = card({ legend: [{ label: 'x', ...entry }] });
+      return html.slice(html.indexOf('<svg'), html.indexOf('</svg>'));
+    };
+    const plna = tvar({ color: 'var(--chart-1)' });
+    const medzera = tvar({ gap: true });
+    const trend = tvar({ color: 'var(--chart-1)', dashed: true });
+    const hranica = tvar({ color: 'var(--chart-1)', open: true });
+    const znacka = tvar({ color: 'var(--ink)', tick: true });
+    const vsetky = [plna, medzera, trend, hranica, znacka];
+    expect(new Set(vsetky).size, 'dve marky vyzerajú rovnako').toBe(vsetky.length);
+  });
+
   it('legenda sa nekreslí, keď sa nekreslí graf', () => {
     // Legenda nad chybovou vetou popisuje rad, ktorý na obrazovke nie je.
     const html = card({ failure: FAILURE, legend: [{ label: 'predané kusy' }] });
@@ -714,6 +768,101 @@ describe('D. závora `connectNulls` siaha tam, kde sa rad naozaj kreslí', () =>
   });
 });
 
+describe('D3. inventúra: KTO v `src/` kreslí graf a kto ide cez `ChartCard`', () => {
+  /**
+   * Kreslí súbor plochu grafu?
+   *
+   * Detektor je zámerne z dvoch podmienok: vykresľuje SVG (alebo Recharts)
+   * A hovorí o legende. Prvá sama by chytila `Icon.tsx` a každú značku
+   * v appke, druhá sama by chytila CSS aj čisté modely. Spolu dávajú presne
+   * tie súbory, ktoré kreslia GRAF — teda plochu, ku ktorej patrí legenda.
+   */
+  const KRESLI_GRAF = (code: string) =>
+    (/<svg[\s>]/.test(code) || usesRecharts(code)) && /legend/i.test(code);
+
+  const GRAFY = SOURCES.filter((f) => f.path.endsWith('.tsx') && KRESLI_GRAF(f.code)).map((f) =>
+    f.path.split(sep).join('/').replace(/^.*\/src\//, 'src/'),
+  );
+
+  it('detektor nie je slepý ani nenažratý', () => {
+    // Bez tejto vety by inventúra nižšie platila aj pre pokazený detektor.
+    expect(KRESLI_GRAF('<svg viewBox="0 0 1 1" />\nlegend')).toBe(true);
+    expect(KRESLI_GRAF('<svg viewBox="0 0 1 1" />')).toBe(false);
+    expect(KRESLI_GRAF('const legend = 1;')).toBe(false);
+    expect(KRESLI_GRAF("import { Line } from 'recharts';\nlegend")).toBe(true);
+    expect(SOURCES.length).toBeGreaterThan(100);
+  });
+
+  it('graf v `src/` kreslí presne PIAŤ súborov — nový sa nepridá tichom', () => {
+    /*
+     * Toto je zapísaná inventúra, nie výnimka. Kto pridá šiesty graf, spadne
+     * na tomto tvrdení a bude musieť povedať, do ktorej z dvoch skupín nižšie
+     * patrí. Bez toho by sa nový graf pridal so vlastným rámom, vlastnou
+     * legendou a vlastným pravidlom osi — presne tak vznikli tri jazyky,
+     * ktoré D126 zliepal dokopy.
+     */
+    expect(GRAFY).toEqual([
+      'src/components/charts/ChartCard.tsx',
+      'src/components/charts/PriceHistogram.tsx',
+      'src/components/dashboard/SalesChart.tsx',
+      'src/components/products/ProductDetailPanel.tsx',
+      'src/components/ui/Charts.tsx',
+    ]);
+  });
+
+  it('kto kreslí RÁMOVANÝ graf, berie rám aj paletu z jedného miesta', () => {
+    /*
+     * `ChartCard.tsx` je sám ten rám, takže sa nemôže volať. Ostatné, ktoré
+     * kreslia graf V KARTE, musia ísť cezeň a farby si brať z `useChartTheme()`
+     * — napísaná farba zostane v druhej téme tá istá.
+     */
+    const RAMOVANE = [
+      'src/components/charts/PriceHistogram.tsx',
+      'src/components/dashboard/SalesChart.tsx',
+    ];
+    for (const path of RAMOVANE) {
+      const file = SOURCES.find((f) => f.path.split(sep).join('/').endsWith(path));
+      expect(file, `${path} sa nenašiel`).toBeDefined();
+      expect(file!.code, `${path} nekreslí rám cez ChartCard`).toContain('<ChartCard');
+      expect(file!.code, `${path} si neberie paletu z useChartTheme`).toContain('useChartTheme');
+    }
+  });
+
+  it('dva grafy cez `ChartCard` ešte NEIDÚ — a je zapísané prečo a kto ich má', () => {
+    /*
+     * PRIZNANIE, NIE VÝNIMKA. Kontrakt V6 §5 vylučuje z rozsahu informačnú
+     * architektúru, a obom týmto grafom prevod na `ChartCard` mení práve ju:
+     *
+     *  · `ui/Charts.tsx` → `SharePie` (koláč rozdelenia). Nie je to
+     *    samostatná karta — `TopFlopSection` ho kreslí VNÚTRI `Panel`-u
+     *    rebríčka, takže `ChartCard` (ktorý je `Panel`) by vyrobil kartu
+     *    v karte. Navyše jeho legenda nesie ŠTVRTÝ kanál (poradové číslo
+     *    dielu), ktorý slovník mariek rámu nepozná. Prevod je preto buď
+     *    bezrámová podoba `ChartCard`, alebo presun koláča z rebríčka —
+     *    a oboje je rozhodnutie o architektúre, nie o vzhľade.
+     *  · `products/ProductDetailPanel.tsx` → `ProductCurveChart` (denná
+     *    krivka v detaile produktu). Kreslí si VLASTNÉ šrafovanie
+     *    (`<pattern>` 4 × 4 rotate(45) namiesto `ChartHatchPattern` 6 × 6),
+     *    takže tá istá značka „nemerali sme" má v appke dve hustoty, a os si
+     *    berie hranicu z `curve.maxUnits`, nie z `chartScaleMax()`.
+     *
+     * Kto niektorý z nich prevedie, MUSÍ upraviť aj tvrdenie vyššie —
+     * inventúra sa tým nezmení, ale skupina `RAMOVANE` áno.
+     */
+    const zatial = [
+      'src/components/ui/Charts.tsx',
+      'src/components/products/ProductDetailPanel.tsx',
+    ];
+    for (const path of zatial) {
+      const file = SOURCES.find((f) => f.path.split(sep).join('/').endsWith(path));
+      expect(file, `${path} sa nenašiel`).toBeDefined();
+      expect(file!.code, `${path} už ide cez ChartCard — uprav inventúru`).not.toContain(
+        '<ChartCard',
+      );
+    }
+  });
+});
+
 describe('D2. výška plochy a výrez pre čítačku sú tokeny, nie čísla', () => {
   it('plocha grafu berie výšku z `--chart-h`', () => {
     const body = /\.cardBody\s*\{([^}]*)\}/.exec(CHARTS_CSS);
@@ -726,6 +875,41 @@ describe('D2. výška plochy a výrez pre čítačku sú tokeny, nie čísla', (
   it('malý graf berie `--chart-h-sm`', () => {
     const body = /\.cardBodySm\s*\{([^}]*)\}/.exec(CHARTS_CSS);
     expect(body?.[1]).toContain('var(--chart-h-sm)');
+  });
+
+  it('`size="auto"` výšku PUSTÍ — a smie ju pustiť len inline SVG (V6b)', () => {
+    /*
+     * `auto` pribudlo s histogramom cien: plocha z inline SVG s `viewBox` si
+     * výšku odvodí z pomeru strán (880 × 180, teda plochá), a pevná
+     * `--chart-h` (220 – 380 px) by ju zarámovala do prázdna.
+     *
+     * PRE RECHARTS BY TO BOLA TICHÁ SMRŤ. `ResponsiveContainer` meria rodiča,
+     * takže na `height: auto` sa zbalí na nulu a graf zmizne bez jediného
+     * hlásenia — presne ten druh chyby, ktorú v tomto repe nachádza až
+     * preklik. Preto je tu závora nad celým `src/`, nie veta v komentári.
+     */
+    const body = /\.cardBodyAuto\s*\{([^}]*)\}/.exec(CHARTS_CSS);
+    expect(body, 'pravidlo .cardBodyAuto sa nenašlo').not.toBeNull();
+    expect(body?.[1]).toContain('height: auto');
+    expect(body?.[1]).toContain('min-height: 0');
+
+    for (const file of SOURCES) {
+      if (!usesRecharts(file.code)) continue;
+      expect(file.code, `${file.path} kreslí Recharts a pýta si size="auto"`).not.toContain(
+        'size="auto"',
+      );
+    }
+  });
+
+  it('závora na `size="auto"` nie je vákuum — niekto ho naozaj používa', () => {
+    /*
+     * Bez tejto vety by tvrdenie vyššie platilo aj vtedy, keby `auto`
+     * neexistovalo. Aspoň jeden súbor ho použiť MUSÍ, a nesmie to byť súbor
+     * s Rechartsom.
+     */
+    const sauto = SOURCES.filter((f) => f.code.includes('size="auto"'));
+    expect(sauto.length).toBeGreaterThan(0);
+    for (const file of sauto) expect(usesRecharts(file.code)).toBe(false);
   });
 
   it('`.srOnly` skrýva pred OKOM, nie pred čítačkou', () => {

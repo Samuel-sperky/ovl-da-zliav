@@ -5,11 +5,19 @@
  * predaja. Tento súbor meria to, čo majú všetky tri formy SPOLOČNÉ, a všetko
  * v ňom je otázka, ktorá sa okom nedá zodpovedať:
  *
- *  A. **Je os naozaj jedna?** Pravidlo hornej hranice existuje v troch kópiách
- *     (`chartScaleMax`, `sales-view.niceCeiling`, `price-bins.niceCount`).
- *     Zliať ich je úprava mimo tohto sprintu, takže tu stojí to druhé
- *     najlepšie: porovnajú sa na celom rozsahu hodnôt. Keď sa rozídu, spadne
- *     test, nie graf.
+ *  A. **Je os naozaj jedna?** PRESMEROVANÉ 2. 9. 2026 (K5, V6b). Do tohto
+ *     sprintu existovalo pravidlo hornej hranice v TROCH kópiách
+ *     (`chartScaleMax`, `sales-view.niceCeiling`, `price-bins.niceCount`) a
+ *     tvrdenie tu bolo to druhé najlepšie: porovnávalo ich na celom rozsahu
+ *     hodnôt. Tri kópie sú teraz ZLÚČENÉ na jednu, takže sa nemá čo s čím
+ *     porovnávať — a porovnávanie klonu s klonom bolo aj tak slabšie, než sa
+ *     zdalo: keby sa niekto preklepol v rebríku `[1, 2, 5, 10]` v OBOCH
+ *     kópiách naraz (copy-paste), test by zostal zelený. Namiesto toho tu
+ *     stoja dve silnejšie tvrdenia:
+ *       · hodnoty `chartScaleMax()` sú pribité na VLASTNÚ tabuľku očakávaní,
+ *         nie na druhú implementáciu,
+ *       · statická závora prehľadá `src/` a nájde nanajvýš JEDNO telo toho
+ *         rebríka. Kto si napíše štvrtú kópiu, spadne na nej.
  *
  *  B. **Scitáva koláč 100 % z PRAVDY?** Diel „nevieme" je jediné miesto, kde
  *     appka priznáva, že o časti katalógu nevie nič. Keby vypadol, koláč by
@@ -31,17 +39,17 @@
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { CatalogDistributionResponse } from '@/app/api/insights/catalog-distribution/route';
-import { niceCount } from '@/components/charts/price-bins';
 import SalesChart from '@/components/dashboard/SalesChart';
 import { salesChartView } from '@/components/dashboard/sales-chart-view';
 import { tableRows } from '@/components/dashboard/SalesSection';
 import TopFlopSection, { ThinWithPie } from '@/components/dashboard/TopFlopSection';
-import { chartGeometry, niceCeiling } from '@/components/dashboard/sales-view';
+import { chartGeometry } from '@/components/dashboard/sales-view';
 import type { RankRow } from '@/components/dashboard/overview-model';
 import type { TopFlopView } from '@/components/dashboard/window-api';
 import { RowBar, SharePie } from '@/components/ui/Charts';
@@ -65,21 +73,127 @@ import {
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
+/* ── Celý `src/` ako text — na závoru „druhé telo pravidla osi" ─────────── */
+
+const ROOT = resolve(process.cwd());
+
+function tsFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...tsFiles(path));
+    else if (/\.(ts|tsx)$/.test(entry.name)) out.push(path);
+  }
+  return out;
+}
+
+const SRC_FILES = tsFiles(resolve(ROOT, 'src'))
+  .map((path) => ({
+    path: relative(ROOT, path).split(sep).join('/'),
+    code: readFileSync(path, 'utf8'),
+  }))
+  .sort((a, b) => (a.path < b.path ? -1 : 1));
+
+/**
+ * Telo pravidla hornej hranice osi: rebrík `[1, 2, 5, 10]` v cykle.
+ *
+ * Hľadá sa tvar, nie meno funkcie — kópia pod iným menom (a práve tak sa
+ * `niceCeiling` a `niceCount` volali) by grepu na meno ušla.
+ */
+const LADDER = /\[\s*1\s*,\s*2\s*,\s*5\s*,\s*10\s*\]/;
+
 /* ═══════════════════ A. Jedna os pre všetky tri formy ═════════════════════ */
 
-describe('os je jedna, aj keď pravidlo býva na troch miestach', () => {
-  const HODNOTY = [
-    -5, 0, 0.4, 1, 2, 3, 7, 9, 10, 11, 14, 20, 21, 49, 50, 51, 99, 100, 101, 199, 200, 501,
-    1180, 41348, 999999,
+describe('pravidlo hornej hranice osi je JEDNO a je pribité na vlastnú tabuľku', () => {
+  /**
+   * Očakávania sú vypísané RUČNE, nie dopočítané druhou implementáciou.
+   * Presne to bola slabina predchádzajúceho tvrdenia: porovnávalo `chartScaleMax`
+   * s dvoma jeho vlastnými kópiami, takže rovnaký preklep vo všetkých troch by
+   * prešiel. Tabuľka pokrýva hranice rebríka (1, 2, 5, 10) v troch dekádach,
+   * hodnoty tesne pod a nad nimi, nulu, zlomok a dve reálne čísla z tejto appky
+   * (1 180 kusov za okno, 41 348 riadkov katalógu).
+   */
+  const OCAKAVANIA: ReadonlyArray<readonly [number, number]> = [
+    [-5, 1],
+    [0, 1],
+    /* Zlomok: rebrík funguje aj pod jednotkou (0,1 · 0,2 · 0,5). Ručná
+       tabuľka to odhalila, porovnávanie dvoch klonov nie — všetky tri kópie
+       vracali 0,5 a test bol zelený. V grafoch tejto appky sa to nestane,
+       lebo os nesie KUSY a produkty, ale pravidlo je zapísané tak, ako sa
+       naozaj chová, nie tak, ako sa niekomu zdalo. */
+    [0.4, 0.5],
+    [1, 1],
+    [2, 2],
+    [3, 5],
+    [7, 10],
+    [9, 10],
+    [10, 10],
+    [11, 20],
+    [14, 20],
+    [20, 20],
+    [21, 50],
+    [49, 50],
+    [50, 50],
+    [51, 100],
+    [99, 100],
+    [100, 100],
+    [101, 200],
+    [199, 200],
+    [200, 200],
+    [501, 1000],
+    [1180, 2000],
+    [41348, 50000],
+    [999999, 1000000],
   ];
 
-  it('`chartScaleMax` sa zhoduje so `niceCeiling` aj `niceCount` na celom rozsahu', () => {
-    for (const value of HODNOTY) {
-      expect(chartScaleMax(value), `hodnota ${String(value)} vs niceCeiling`).toBe(
-        niceCeiling(value),
-      );
-      expect(chartScaleMax(value), `hodnota ${String(value)} vs niceCount`).toBe(niceCount(value));
+  it('základňa je nula a hranica najbližšie okrúhle číslo NAD maximom', () => {
+    for (const [value, expected] of OCAKAVANIA) {
+      expect(chartScaleMax(value), `hodnota ${String(value)}`).toBe(expected);
     }
+  });
+
+  it('v `src/` neexistuje DRUHÉ telo toho istého pravidla', () => {
+    /*
+     * ZLÚČENIE TROCH KÓPIÍ NA JEDNU (K5, 2. 9. 2026) — a závora, ktorá ho drží.
+     *
+     * `niceCeiling()` v `dashboard/sales-view.ts` a `niceCount()`
+     * v `charts/price-bins.ts` boli znakovo zhodné telá `chartScaleMax()`.
+     * Kontrakt V6a §9 hlásil pod K5 „zlúčené", ale zlúčené neboli — zostal len
+     * test, ktorý ich porovnával. Tu sa preto nemeria zhoda, ale POČET:
+     * rebrík `[1, 2, 5, 10]` nad `Math.log10` smie mať v `src/` jedno jediné
+     * telo a musí byť v jazyku grafov.
+     */
+    const hits = SRC_FILES.filter((file) => LADDER.test(file.code));
+    expect(hits.map((f) => f.path)).toEqual(['src/components/ui/chart-language.ts']);
+  });
+
+  it('závora na druhé telo nie je slepá', () => {
+    // Bez tejto vety by tvrdenie vyššie platilo aj pre pokazený detektor.
+    expect(LADDER.test('for (const step of [1, 2, 5, 10]) {')).toBe(true);
+    expect(LADDER.test('for (const step of [1,2,5,10]) {')).toBe(true);
+    expect(LADDER.test('for (const step of [1, 2, 5]) {')).toBe(false);
+    expect(SRC_FILES.length).toBeGreaterThan(100);
+  });
+
+  it('žiadne pole v dátach grafu sa nemenuje `key` (I1, redaktor)', () => {
+    /*
+     * Redaktor logov (`lib/log/redact.ts`) má `key` v `DENY_EXACT` a maskuje
+     * HODNOTU každého poľa s tým menom v ľubovoľnej hĺbke vnorenia. Koláč to
+     * už raz odniesol: kým sa diel volal `key`, route vracala
+     * `{ key: '***REDACTED***', count: 3 }` — symbol dielu zmizol, počty
+     * zostali, a graf sa dal nakresliť s tromi rovnako pomenovanými dielmi.
+     *
+     * Stĺpec mal to isté meno až do 2. 9. 2026. Cez redaktor síce nechodí
+     * (je to klientská mierka), ale rozhodovať pri každom novom grafe, na
+     * ktorej strane hranice stojí, je drahšie než jedno meno pre všetky tri
+     * formy. Redaktor sa NESMIE oslabiť ani obísť výnimkou.
+     */
+    for (const rel of ['../../src/components/ui/chart-language.ts', '../../src/components/charts/price-bins.ts']) {
+      const src = read(rel).replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(src, `${rel} deklaruje pole \`key\``).not.toMatch(/^\s*(readonly\s+)?key\??:/m);
+    }
+    // A pozitívna strana: symbol položky sa naozaj volá `bucket`.
+    expect(barLayout([{ bucket: 'a', value: 1 }]).bars[0]?.bucket).toBe('a');
   });
 
   it('nečíslo ani záporné číslo os nezrútia — hranica je vždy aspoň 1', () => {
@@ -360,9 +474,9 @@ describe('rozdelenie katalógu z API', () => {
 describe('stĺpec — jedna mierka, základňa nula, „nevieme" nie je nula', () => {
   it('mierka je spoločná pre celú skupinu a rastie od nuly', () => {
     const layout = barLayout([
-      { key: 'a', value: 40 },
-      { key: 'b', value: 10 },
-      { key: 'c', value: 1 },
+      { bucket: 'a', value: 40 },
+      { bucket: 'b', value: 10 },
+      { bucket: 'c', value: 1 },
     ]);
     expect(layout.scaleMax).toBe(50);
     expect(layout.bars.map((bar) => bar.widthPercent)).toEqual([80, 20, 2]);
@@ -371,9 +485,9 @@ describe('stĺpec — jedna mierka, základňa nula, „nevieme" nie je nula', (
 
   it('MERANÁ nula je nulový stĺpec, `null` je „nevieme" a šrafovaný pahýľ', () => {
     const layout = barLayout([
-      { key: 'a', value: 10 },
-      { key: 'b', value: 0 },
-      { key: 'c', value: null },
+      { bucket: 'a', value: 10 },
+      { bucket: 'b', value: 0 },
+      { bucket: 'c', value: null },
     ]);
     expect(layout.unknownCount).toBe(1);
     const measuredZero = layout.bars[1];
@@ -384,7 +498,7 @@ describe('stĺpec — jedna mierka, základňa nula, „nevieme" nie je nula', (
     expect(unknown?.widthPercent).toBe(0);
 
     const html = renderToStaticMarkup(
-      createElement(RowBar, { bar: unknown ?? { key: 'c', value: null, widthPercent: 0, unknown: true } }),
+      createElement(RowBar, { bar: unknown ?? { bucket: 'c', value: null, widthPercent: 0, unknown: true } }),
     );
     expect(html).toContain('data-unknown="ano"');
     // Bez čísla v riadku musí pás prehovoriť sám.
@@ -392,7 +506,7 @@ describe('stĺpec — jedna mierka, základňa nula, „nevieme" nie je nula', (
   });
 
   it('meraný stĺpec je pre čítačku skrytý — číslo vedľa neho hovorí to isté', () => {
-    const layout = barLayout([{ key: 'a', value: 12 }]);
+    const layout = barLayout([{ bucket: 'a', value: 12 }]);
     const bar = layout.bars[0];
     expect(bar).toBeDefined();
     if (bar === undefined) return;

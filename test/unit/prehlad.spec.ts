@@ -46,10 +46,10 @@ import {
   axisDay,
   chartGeometry,
   closedDays,
-  niceCeiling,
   salesNumbers,
   trendPercent,
 } from '@/components/dashboard/sales-view';
+import { chartScaleMax } from '@/components/ui/chart-language';
 
 const TODAY = '2026-08-10';
 
@@ -408,11 +408,19 @@ describe('Prehľad — tržby počítajú len uzavreté dni', () => {
   });
 
   it('os grafu používa slovenský krátky dátum a okrúhlu hornú hranicu', () => {
+    /*
+     * PRESMEROVANÉ 2. 9. 2026 (K5, V6b). Hranicu tu merali tri riadky na
+     * `niceCeiling()` — znakovo zhodnú KÓPIU `chartScaleMax()` z jazyka
+     * grafov. Tri kópie sú zlúčené na jednu, takže `niceCeiling` už
+     * neexistuje a `sales-view.ts` si pravidlo importuje. Rebrík a základňu
+     * nula stráži `grafy-jazyk.spec.ts` sekcia A (vlastná tabuľka očakávaní
+     * plus závora na druhé telo v `src/`); tu zostáva to, čo do Prehľadu
+     * patrí — že os grafu predaja to pravidlo NAOZAJ dostane.
+     */
     expect(axisDay('2026-08-04')).toBe('4. 8.');
     expect(axisDay('nezmysel')).toBe('nezmysel');
-    expect(niceCeiling(14)).toBe(20);
-    expect(niceCeiling(0)).toBe(1);
-    expect(niceCeiling(1180)).toBe(2000);
+    expect(chartScaleMax(1180)).toBe(2000);
+    expect(chartGeometry([{ day: '2026-08-08', units: 1180 }, { day: '2026-08-09', units: 14 }], TODAY)?.scaleMax).toBe(2000);
   });
 });
 
