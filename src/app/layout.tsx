@@ -16,11 +16,14 @@
  * jeden dotaz pre celý shell. Čísla sa NEOBNOVUJÚ samy — obnoví ich tlačidlo
  * v stavovom pruhu (`components/layout/refresh.ts`).
  *
- * Téma: SVETLÁ je predvolená a `<html>` sa renderuje BEZ `data-theme`, takže
- * kým si používateľ nevyberie, rozhoduje systém (`prefers-color-scheme`).
- * Inline skript nižšie prečíta `localStorage` a atribút nastaví — alebo zmaže —
- * PRED prvým paintom, aby nič neblikalo. Skript je bez závislostí a nič
- * nezapisuje na server.
+ * Téma: TMAVÁ je od V6a predvolená (D131, D145) a nesie ju HOLÝ `:root`;
+ * `<html>` sa renderuje BEZ `data-theme`, takže kým skript nedobehne, platí
+ * tmavá — nie systém. Inline skript nižšie prečíta `localStorage` a atribút
+ * nastaví PRED prvým paintom, aby nič neblikalo; pri voľbe „systém" atribút
+ * NEMAŽE, ale svetlú stampuje explicitne (celý rozbor je v `layout/theme.ts`).
+ * Táto veta tu do 2. 9. 2026 tvrdila, že predvolená je SVETLÁ — bola pravdivá
+ * pred obrátením tém a prežila ho. Skript je bez závislostí a nič nezapisuje
+ * na server.
  */
 import type { Metadata } from 'next';
 

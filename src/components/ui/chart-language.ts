@@ -11,7 +11,18 @@
  *
  * Tento modul je preto SLOVNÍK, nie knižnica grafov. Sú v ňom pravidlá, ktoré
  * musia platiť rovnako pre čiaru, stĺpec aj koláč, a čisté funkcie, ktoré ich
- * vedia spočítať bez prehliadača. Kreslenie je v `Charts.tsx`.
+ * vedia spočítať bez prehliadača. Kreslenie je v `Charts.tsx` (inline SVG)
+ * a v `charts/ChartCard.tsx` (Recharts).
+ *
+ * ROZŠÍRENIE V6a (D135, D142, 2. 9. 2026): Recharts prišiel s vlastnou sadou
+ * pojmov — paleta ako reťazce, `connectNulls`, `ResponsiveContainer`. Sekcie 7
+ * a 8 nižšie ich vťahujú DO TOHTO slovníka, namiesto aby vedľa neho vznikol
+ * druhý (`useChartTheme` z `aura-roadmap` mal vlastný `lib/chartTheme.ts`;
+ * tu by to bol presne ten „druhý, takmer rovnaký" modul, ktorý si tento repo
+ * zakázal v `primitives.module.css`). Vstupný bod pre komponenty je
+ * `charts/useChartTheme.ts` a je to tenká obálka nad `chartTheme()` odtiaľto —
+ * nie druhá paleta. Tento súbor zostáva bez prehliadača a bez Rechartsu: sú
+ * v ňom mená tokenov a pravidlá, nie farby a nie kreslenie.
  *
  * ═══ 1. KTORÁ FORMA ODPOVEDÁ NA KTORÚ OTÁZKU (D126) ═══
  *
@@ -61,6 +72,7 @@
  * Vlastník: V5-GRAFY.
  */
 import { tierRuleSentence, type SoldBucketKey } from '@/components/campaigns/discounts-model';
+import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════ 1. Formy a otázky, na ktoré odpovedajú ═══════════════ */
 
@@ -543,4 +555,245 @@ export function distributionPieInput(view: CatalogDistributionView): PieInput {
     total: view.total,
     sumMatchesTotal: view.sumMatchesTotal,
   };
+}
+
+/* ═══════════ 7. PALETA GRAFU — MENÁ TOKENOV, NIE FARBY (D135) ═════════════ */
+
+/**
+ * Recharts kreslí z JavaScriptu, takže farbu chce ako REŤAZEC. To vyzerá ako
+ * dôvod napísať paletu do konštanty — a je to pasca: napísaný odtieň zostane
+ * v druhej téme ten istý a nikto to neodhalí okom pri jednom nastavení
+ * systému. Presne preto tento súbor stráži `grafy-jazyk.spec.ts` vetou „nemá
+ * ani jednu farbu napísanú ručne".
+ *
+ * ODPOVEĎ NIE JE ČÍTAŤ CSS ZA BEHU, ALE PODAŤ `var()`.
+ *
+ * `aura-roadmap` má `lib/chartTheme.ts`, ktorý za behu volá `getComputedStyle`
+ * a drží zoznam svetlých hexov ako zálohu pre beh bez DOM. Tu to netreba a bolo
+ * by to horšie: prehliadač doriešuje `var()` aj v prezentačných atribútoch SVG
+ * a táto appka sa na to už spolieha — `Charts.tsx` kreslí výseky koláča
+ * hodnotou `var(--seq-teal-3)` v atribúte `fill` a funguje to v oboch témach.
+ * Recharts stavia tie isté atribúty na tie isté prvky, takže mu stačí to isté.
+ *
+ * Čo sa tým získalo:
+ *  · **nula napísaných farieb** — ani zálohy, ktorá by sa mohla rozísť
+ *    s tokenovou vrstvou (a rozišla by sa tichučko, v jednej téme),
+ *  · prepnutie témy prekreslí graf BEZ JavaScriptu, teda aj počas prvého
+ *    renderu a aj keď efekt nikdy nebeží (server render),
+ *  · inline SVG z V1 a Recharts z V6a berú farbu tým istým spôsobom — je to
+ *    jeden jazyk aj na úrovni farieb, nie dva.
+ *
+ * Kedy by sa to muselo zmeniť: keby graf potreboval farbu ako HODNOTU v JS
+ * (počítať kontrast, kresliť do canvasu, poslať ju do knižnice, ktorá CSS
+ * nevidí). Vtedy pribudne čitateľ tokenov TU, na jednom mieste, a nie
+ * v komponente.
+ *
+ * ZLATÁ TU NIE JE a nie je to nedopatrenie. Trendovú čiaru kreslí `globals.css`
+ * pravidlom `.line.trend` (odstup od série je zmeraný naprieč typmi videnia
+ * v `grafy-paleta.spec.ts`), takže rad Rechartsu dostane triedu, nie farbu.
+ * Stavová mierka v grafe nemá čo robiť vôbec: rad zafarbený „na zle" by povedal
+ * hodnotenie, ktoré nikto nezmeral.
+ */
+
+/** Osem kategorických radov v poradí kreslenia. Deviaty sa už nedá odlíšiť. */
+export const CHART_SERIES_VARS = [
+  '--chart-1',
+  '--chart-2',
+  '--chart-3',
+  '--chart-4',
+  '--chart-5',
+  '--chart-6',
+  '--chart-7',
+  '--chart-8',
+] as const;
+
+export type ChartSeriesVar = (typeof CHART_SERIES_VARS)[number];
+
+/**
+ * Kroky sekvenčnej rampy. Kódujú VEĽKOSŤ, nie kategóriu — preto sú mimo
+ * `CHART_SERIES_VARS` a preto sa po stĺpcoch jednej série NEROZVÍJAJÚ
+ * (`charts.module.css` → `.bar`).
+ */
+export const CHART_RAMP_VARS = [
+  '--seq-teal-1',
+  '--seq-teal-2',
+  '--seq-teal-3',
+  '--seq-teal-4',
+  '--seq-teal-5',
+] as const;
+
+/**
+ * Meno tokenu → hodnota, ktorú prehliadač doriešuje sám.
+ *
+ * Jediné miesto, kde sa v grafoch skladá `var(…)`. Keby si to skladal každý
+ * komponent, prvý preklep v mene tokenu by nakreslil rad bez farby a nikde by
+ * nič nespadlo — `var(--chart-9)` je platný CSS, len neexistuje.
+ */
+export function chartVar(name: string): string {
+  return `var(${name})`;
+}
+
+/**
+ * Paleta jedného grafu — roly, nie farby.
+ *
+ * Nie sú tu `success`, `warn` ani `danger`, ktoré má `aura-roadmap`: v tejto
+ * appke je stav vec tokenov `--st-*` a troch kanálov, nie vec grafu. Nie je tu
+ * ani trend — pozri poslednú vetu hlavičky sekcie.
+ */
+export interface ChartTheme {
+  /** Osem kategorických radov v poradí kreslenia. */
+  series: readonly string[];
+  /** Päť krokov rampy — magnitúda, nie kategória. */
+  ramp: readonly string[];
+  /** Mriežka. Musí ustúpiť dátam; meria to `grafy-paleta.spec.ts`. */
+  grid: string;
+  /** Os a jej popisky. */
+  axis: string;
+  /** Text v ploche grafu — priamy popisok, číslo pri bode. */
+  ink: string;
+  /** Bublina s hodnotou: plocha, písmo, okraj. */
+  tooltipBg: string;
+  tooltipInk: string;
+  tooltipBorder: string;
+  /** Šrafovanie „nevieme" — silnejšie než mriežka, slabšie než dáta. */
+  gap: string;
+  /** Jediný rad, keď je rad jeden. */
+  accent: string;
+}
+
+/**
+ * Paleta grafu. Je to ČISTÁ funkcia bez DOM: to isté na serveri aj v klientovi,
+ * v tmavej aj vo svetlej téme — rozdiel dorieši prehliadač z tokenovej vrstvy.
+ *
+ * Že každý token nižšie v `globals.css` naozaj EXISTUJE a je definovaný pre obe
+ * témy, overuje `test/unit/grafy-chartcard.spec.ts`. To je tá kontrola, ktorú
+ * by inak musela robiť záloha s hexmi — len bez rizika, že sa rozíde.
+ */
+export function chartTheme(): ChartTheme {
+  return {
+    series: CHART_SERIES_VARS.map((name) => chartVar(name)),
+    ramp: CHART_RAMP_VARS.map((name) => chartVar(name)),
+    grid: chartVar('--line'),
+    axis: chartVar('--dim'),
+    ink: chartVar('--ink'),
+    tooltipBg: chartVar('--paper2'),
+    tooltipInk: chartVar('--ink'),
+    tooltipBorder: chartVar('--line2'),
+    gap: chartVar('--line2'),
+    accent: chartVar('--accent'),
+  };
+}
+
+/** Farba radu `index`, po ôsmom sa vracia na začiatok. */
+export function seriesColor(index: number): string {
+  const count = CHART_SERIES_VARS.length;
+  const i = ((Math.trunc(index) % count) + count) % count;
+  return chartVar(CHART_SERIES_VARS[i] as ChartSeriesVar);
+}
+
+/**
+ * Výplň pod čiarou je TÓN farby radu, nikdy plná farba: plocha sa číta ako
+ * hodnota a dve plné plochy nad sebou vyrobia tretiu, ktorá nič neznamená.
+ * `color-mix()` je jediný povolený spôsob tónovania (D147); `rgba()` by tu bola
+ * porušením aj vtedy, keby vyšla rovnako.
+ */
+export function areaFill(color: string, percent = 14): string {
+  return `color-mix(in srgb, ${color} ${String(percent)}%, transparent)`;
+}
+
+/** Popisky osi majú naprieč appkou jednu veľkosť, inak grafy nečítať ako rodinu. */
+export const AXIS_TICK = { fontSize: 11 } as const;
+/* ══════ 8. TROJSTAVOVÝ RIADOK: hodnota · nula · nevieme (I11, K6) ═════════ */
+
+/**
+ * Toto je jadro I11 preložené do jazyka Rechartsu.
+ *
+ * Nula je MERANÝ fakt a kreslí sa. `null` je priznanie nevedomosti a NEKRESLÍ
+ * sa — Recharts pri `connectNulls: false` líniu na takom riadku pretne a vznikne
+ * medzera. Kto `null` po ceste z API do grafu nahradí nulou, spraví z výpadku
+ * sťahovania prepad predaja a bude to vyzerať dôveryhodne. Presne to sa už raz
+ * stalo (D121: server posielal `unitsSold: 0` namiesto `null`, klientský model
+ * bol správny a dostal nepravdivý vstup) a nenašlo to 3756 testov, ale preklik.
+ *
+ * Preto je `chartValue()` STRIKTNÁ: meranie je len konečné číslo. `undefined`,
+ * `NaN`, `'0'` ani `null` meraním nie sú a všetky štyri končia ako medzera.
+ */
+export function chartValue(raw: unknown): number | null {
+  if (typeof raw !== 'number') return null;
+  if (!Number.isFinite(raw)) return null;
+  return raw;
+}
+
+export interface ChartRowInput {
+  /** Popis na osi — hotový text, nie surový symbol z API. */
+  label: string;
+  /** Čokoľvek z odpovede. Meraním sa stane len konečné číslo. */
+  value: unknown;
+  /** Číslo je DOLNÁ HRANICA (nedočítané obdobie) — v prepise dostane `≥`. */
+  lowerBound?: boolean;
+}
+
+export interface ChartRow {
+  label: string;
+  /** Meranie, alebo `null` = medzera. Nula je meranie. */
+  value: number | null;
+  lowerBound: boolean;
+}
+
+/**
+ * Odpoveď → riadky pre Recharts.
+ *
+ * Riadok sa NIKDY nevynecháva: vynechaný deň by os stiahla a graf by tvrdil, že
+ * medzi 6. a 22. augustom nie je čo ukázať. Riadok s `null` je opak — medzera,
+ * ktorú je VIDIEŤ.
+ *
+ * `lowerBound` na medzere je nezmysel (nie je čo ohraničovať), takže ho tu
+ * zámerne strácame — inak by prepis pod grafom napísal `≥ —`.
+ */
+export function chartRows(items: readonly ChartRowInput[]): ChartRow[] {
+  return items.map((item) => {
+    const value = chartValue(item.value);
+    return { label: item.label, value, lowerBound: value !== null && item.lowerBound === true };
+  });
+}
+
+/**
+ * Props, ktoré MUSÍ dostať každý rad Rechartsu (`<Line>`, `<Area>`, `<Bar>`).
+ *
+ * `connectNulls` je názov z Rechartsu, pravidlo je naše: `true` by cez medzeru
+ * natiahlo spojnicu a z priznania „toto sme nemerali" by spravilo tvrdenie
+ * „medzi týmito dvoma dňami to šlo takto". Recharts má dnes `false` aj ako
+ * predvolenú hodnotu; napísané je to tu preto, že predvolená hodnota cudzej
+ * knižnice nie je náš invariant a pri veľkej verzii sa môže zmeniť bez slova.
+ */
+export const GAP_SERIES_PROPS = { connectNulls: false } as const;
+
+/** Koľko riadkov je priznanie, nie meranie. Legenda to musí povedať slovom. */
+export function gapRowCount(rows: readonly ChartRow[]): number {
+  return rows.reduce((sum, row) => (row.value === null ? sum + 1 : sum), 0);
+}
+
+/**
+ * Veta o medzerách pod graf. Bez nej je šrafovaná plocha len zvláštna farba;
+ * s ňou je to konkrétny ďalší krok. Keď nie je čo priznať, funkcia MLČÍ —
+ * „0 nesťahovaných bodov" je hluk, nie priznanie.
+ */
+export function gapLegendSentence(rows: readonly ChartRow[]): string | null {
+  const count = gapRowCount(rows);
+  if (count === 0) return null;
+  const unit = pluralSk(count, 'bod', 'body', 'bodov');
+  return `${formatCountSk(count)} ${unit} grafu je ${GAP_WORD} — kreslí sa medzera, nie nula.`;
+}
+
+/**
+ * Hodnota riadku ako text do prepisu grafu.
+ *
+ * Tri stavy, tri tvary: pomlčka U+2014 pri medzere, `≥ N` pri dolnej hranici,
+ * samotné číslo pri meraní. Pomlčka sa NIKDY nesmie stať nulou a `≥` sa nikdy
+ * nesmie stratiť — obe sú priznania (I11), nie formátovanie.
+ */
+export function chartRowText(row: ChartRow, format: (value: number) => string): string {
+  if (row.value === null) return '—';
+  const text = format(row.value);
+  return row.lowerBound ? `≥ ${text}` : text;
 }

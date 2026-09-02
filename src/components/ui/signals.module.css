@@ -1,0 +1,230 @@
+/*
+ * Aura Zľavy — VZHĽAD SIGNÁLNEJ SKUPINY (V6a, D133, D142, D143).
+ *
+ * Je tu len to, čo v repe naozaj CHÝBALO: čip. `ToneBadge` (`.ovl-badge`),
+ * `StatusPill` a `BudgetMeter` (`primitives.module.css`) svoj vzhľad majú
+ * a druhá, takmer rovnaká sada tried by sa o mesiac rozišla s prvou — presne
+ * to zakazuje docblock v `primitives.module.css` a je to dôvod, prečo sa
+ * z predlohy portuje TVAR a PRAVIDLO, nie súbor (D142).
+ *
+ * Tu, a nie v `globals.css` (D143): trieda je lokálna, takže sa nedá omylom
+ * prepísať cudzia obrazovka. `globals.css` má dnes na čip TRI rôzne rodiny
+ * (`.chip`, `.ovl-chip`, `.ovl-variant-chip`) a práve to je stav, ktorý V6
+ * ukončuje — mŕtve z nich odchádzajú s obrazovkami (D139, K11), nie odtiaľto.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *
+ * 1. **Zapnutý čip sa nesmie líšiť LEN výplňou.** Farba je pre časť
+ *    používateľov prázdny kanál, takže výplň tu smie byť len tretí kanál
+ *    popri značke (`Icon` v `Chip.tsx`) a `aria-pressed`. Kto zmaže značku
+ *    a nechá výplň, vráti appku presne tam, odkiaľ ju D142 vytiahol —
+ *    a `products/CatalogFilters.tsx` aj `campaigns/NewDiscount.tsx` majú vo
+ *    vlastných komentároch napísané, že to tak už raz bolo.
+ * 2. **Žiadny surový hex, žiadna priehľadnosť zápisom `rgba`** (D132, D147).
+ *    Ani v komentári — strážny test číta `globals.css` AJ moduly (D144) a
+ *    hodnota v komentári je prvý krok k hodnote v pravidle. Tónuje sa výhradne
+ *    `color-mix(in srgb | oklab, var(--token) N%, …)`. Stmavenie výplne má
+ *    partnera `--mix-shade`, ktorý na to v tokenovej vrstve existuje.
+ * 3. **Obrys ostáva pilulka aj pri fokuse.** Globálne `button:focus-visible`
+ *    nastavuje `border-radius: var(--ovl-radius-sm)`, čo by z pilulky spravilo
+ *    zaoblený obdĺžnik — a „pilulka = voľba, zaoblený obdĺžnik = akcia" (V30)
+ *    je rozdiel, ktorý appka nesie tvarom.
+ *
+ * Vlastník: V6a, signálna skupina.
+ */
+
+/* ═══════════════════════ 1. Čip ako prepínač (Chip) ═══════════════════════ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s1);
+  min-height: 1.75rem;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ovl-radius-pill);
+  background: transparent;
+  color: var(--ink2);
+  font: inherit;
+  font-size: var(--ovl-fs-small);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--ovl-dur-hover) var(--ovl-ease-out),
+    border-color var(--ovl-dur-hover) var(--ovl-ease-out),
+    color var(--ovl-dur-hover) var(--ovl-ease-out);
+}
+
+.chip:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink);
+}
+
+.chip:focus-visible {
+  border-radius: var(--ovl-radius-pill);
+}
+
+/*
+ * Vypnutý čip je stále čitateľný. `--dim` je NAJSVETLEJŠIA legálna farba textu
+ * v oboch témach (tokenová vrstva to má zmerané) — pod ňu sa ísť nesmie ani
+ * pri „zošednutí".
+ */
+.chip:disabled {
+  cursor: not-allowed;
+  color: var(--dim);
+  border-color: var(--line);
+}
+
+/*
+ * ZAPNUTÝ ČIP. Teal je značková voľba, nie stav — tokenová vrstva to hovorí
+ * výslovne („teal a gold nekódujú stav"), takže výplň tu nekoliduje s piatimi
+ * stavovými tónmi. Pár `--accent` / `--accent-on` je pritom jediný, ktorý má
+ * zmeraný kontrast v OBOCH témach: `--accent-on` na `--accent` dáva 7,27 : 1
+ * v tmavej a 5,20 : 1 v svetlej (hodnoty oboch tokenov aj ich meranie sú
+ * v tokenovej vrstve `globals.css`). Kto tu vymení `--accent-on` za `--ink`
+ * alebo za bielu natvrdo, spadne v jednej z tém pod 4,5 : 1 — a žiadny linter
+ * ho nezastaví.
+ */
+.chip[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+  font-weight: 700;
+}
+
+.chip[aria-pressed='true']:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 86%, var(--mix-shade));
+  color: var(--accent-on);
+}
+
+/* Značka výberu. Farbu dedí z čipu (`currentColor` v `Icon`), vlastnú nemá. */
+.chipMark {
+  flex: 0 0 auto;
+}
+
+/*
+ * Počet v čipe. Tabulárne číslice preto, že čipy stoja pod sebou v rade
+ * a netabulárna sedmička by rad rozhýbala.
+ */
+.chipCount {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-weight: 700;
+  color: var(--dim);
+}
+
+.chip[aria-pressed='true'] .chipCount {
+  color: inherit;
+}
+
+/* ══════════════ 2. Čip ako značka platného filtra (FilterChip) ═══════════ */
+
+/*
+ * `<span>` s tlačidlami vnútri, nie tlačidlo. Vnorené interaktívne prvky sú
+ * neplatné HTML a klávesnica sa v nich stratí — preto je tvar iný než pri
+ * prepínači, hoci silueta je tá istá. Predloha to má rozdelené rovnako
+ * (`Chip` verzus `FilterChip` v `Toolbar.tsx`) a je to jediný dôvod, prečo sú
+ * v `Chip.tsx` dva komponenty a nie jeden s prepínačom.
+ */
+.tray {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  max-width: 100%;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.35rem 0.2rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--ovl-radius-pill);
+  background: var(--surface-solid);
+  color: var(--ink2);
+  font-size: var(--ovl-fs-small);
+  font-weight: 600;
+}
+
+/*
+ * Platná značka. Tinta a značkový okraj, nie plná výplň: v rade platných
+ * filtrov je plných čipov aj desať a desať tealových plôch pod sebou je stena.
+ * Slovo aj značku nesie vnútorné tlačidlo, takže tinta je tu naozaj len
+ * doplnok.
+ */
+.tray[data-selected='true'] {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+  color: var(--ink);
+}
+
+/*
+ * Text bez akcie — dlhý popis filtra sa ZALOMÍ, nie skráti trojbodkou.
+ * Skrátený filter je horší než žiadny: vyzerá presne ako ten správny.
+ */
+.trayLabel {
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Tlačidlo bez vlastného vzhľadu — vzhľad nesie obal. Nahrádza inline
+ * `BARE_BUTTON` v `products/CatalogFilters.tsx`, ktorý si tú istú deklaráciu
+ * niesol v JS objekte.
+ */
+.trayAction {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s1);
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.trayRemove {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background var(--ovl-dur-hover) var(--ovl-ease-out),
+    color var(--ovl-dur-hover) var(--ovl-ease-out);
+}
+
+.trayRemove:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--ink);
+}
+
+.trayRemove:focus-visible {
+  border-radius: 50%;
+}
+
+/* ═════════════════ 3. Chýbajúce slovo je vidieť (signals.ts) ══════════════ */
+
+/*
+ * Náhradné slovo (`SIGNAL_WORD_FALLBACK`) sa kreslí tečkovaným podčiarknutím.
+ * Nie je to ozdoba: defekt, ktorý vyzerá ako bežný text, sa opraví až vtedy,
+ * keď si ho niekto všimne. Farba sa NEMENÍ — červené slovo by sa čítalo ako
+ * stav `critical`, hoci hovorí o chýbajúcom popise.
+ */
+.wordless {
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip,
+  .trayRemove {
+    transition: none;
+  }
+}

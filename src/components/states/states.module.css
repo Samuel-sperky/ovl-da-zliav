@@ -1,0 +1,83 @@
+/*
+ * Aura Zľavy — GEOMETRIA RODINY STAVOV (V6a, D143).
+ *
+ * Zámerne LEN to, čo v `globals.css` naozaj chýba. Rám prázdneho stavu
+ * (vycentrovaný stĺpec s tlmeným textom) je `.ovl-empty` a všetkých šesť stavov
+ * ho zdieľa, pretože sú to varianty jednej vety, nie šesť rôznych plôch. Druhá,
+ * takmer rovnaká sada tried by sa o mesiac rozišla s prvou — presne to má
+ * napísané `ui/primitives.module.css` v hlavičke a platí to aj tu.
+ *
+ * ČO TU JE A PREČO
+ * ----------------
+ *
+ * 1. `noteSlot` — miesto pre DRUHÚ vetu (vysvetlivka, zámok, chybová hláška).
+ *    Rám je vycentrovaný, ale `Note`, `ErrorMessage` aj `LockBadge` majú prúžok
+ *    a značku vľavo: vycentrovaný text v nich má každý riadok inde a značka nad
+ *    ním visí bez vzťahu k prvému slovu. Slot preto vracia zarovnanie vľavo
+ *    a berie celú šírku stĺpca.
+ *
+ * 2. `loading`, `tiles`, `tile`, `block`, `caption` — kostra prvého načítania.
+ *    Sivé plochy kreslí `.ovl-skeleton` z `globals.css` (shimmer 1,2 s), ktorý
+ *    appka na šiestich miestach používala s ručným `style={{ minHeight }}`;
+ *    tie miery sú odteraz tu, aby sa dve obrazovky nenačítavali s inou výškou.
+ *
+ * ŽIADNA FARBA STAVU
+ * ------------------
+ * Ani jedna trieda v tomto module nesiaha na `--st-*`. Prázdno nie je stav:
+ * zafarbený prázdny stav by niesol štvrtý kanál bez značky a bez slova, čo
+ * pravidlo troch kanálov zakazuje. Keď je prázdno DÔSLEDKOM chyby, farbu nesie
+ * `ErrorMessage` v slote `noteSlot` — teda vec, ktorá má aj značku, aj vetu.
+ *
+ * Farby a rozmery výhradne z tokenovej vrstvy (`globals.css`, T1–T5); žiadny
+ * surový hex, žiadna `rgba()` (D147).
+ *
+ * Vlastník: V6a (rodina stavov, D134).
+ */
+
+/* ═══════════════════ 1. Slot pre druhú vetu ═══════════════════════════════ */
+
+.noteSlot {
+  width: 100%;
+  margin-block: var(--ovl-s2) var(--ovl-s3);
+  text-align: left;
+}
+
+/* ═══════════════════ 2. Kostra prvého načítania ═══════════════════════════ */
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/*
+ * Riadok dlaždíc sa láme sám. Pevný počet stĺpcov by pri troch dlaždiciach
+ * nechal štvrtú medzeru a kostra by mala iný rytmus než obsah, ktorý ju
+ * vystrieda.
+ */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--gap);
+}
+
+/* Výška dlaždice KPI: popis + hodnota + detail (`.kpi` v `globals.css`). */
+.tile {
+  min-height: 84px;
+}
+
+/* Výška bloku obsahu — toľko, koľko mala karta na Prehľade pred prepisom. */
+.block {
+  min-height: 190px;
+}
+
+/*
+ * Slovo pod kostrou. Nesie celý význam: shimmer je animácia a pri
+ * `prefers-reduced-motion` ju `globals.css` vypína, takže bez tohto riadku by
+ * z načítavania zostali tri sivé obdĺžniky bez vysvetlenia.
+ */
+.caption {
+  color: var(--dim);
+  font-size: var(--ovl-fs-micro);
+  text-align: center;
+}

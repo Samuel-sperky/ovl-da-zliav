@@ -21,18 +21,45 @@
  * 3. **Do detailu nepatrí tajomstvo.** Sem ide doména alebo názov prostredia,
  *    NIKDY kľúč, token ani ich časť.
  *
+ * ZLÚČENIE S `Pill` Z `aura-roadmap` (D142, 2. 9. 2026)
+ * ------------------------------------------------------
+ * Predlohová `ui/Pill.tsx` je INLINE pilulka verzálkami s bodkou — kanonický
+ * vykresľovač doménových slovníkov (stav položky, životný cyklus, zdravie).
+ * Táto pilulka je iná vec: dvojriadková, s monospace detailom a s možnosťou
+ * ohlasovať zmenu čítačke. Zlučuje sa preto PRAVIDLO, nie tvar:
+ *
+ *  · **Prišlo:** „popis je platba, tón ju len zosilňuje". Vynútené — pozri
+ *    prop `label` a `ui/signals.ts`.
+ *  · **NEPRIŠLO:** inline tvar. Tú rolu tu už nesie `ToneBadge` a druhá
+ *    inline pilulka vedľa nej by bola presne ten dvojník, ktorý D142 zakazuje.
+ *    Kto chce stav do bunky tabuľky alebo do riadku zoznamu, píše `ToneBadge`.
+ *  · **NEPRIŠLO:** prop `dot={false}` („turn off for plain labels"). Je to
+ *    zadné dvierka z pravidla troch kanálov: pilulka bez značky nesie stav
+ *    farbou a slovom, a v tejto appke je značka to jediné, čo prežije
+ *    monochromatickú tlač aj deuteranopiu. Kto potrebuje popis bez stavu,
+ *    nepotrebuje stavovú pilulku, ale text.
+ *
  * Server-safe: žiadne hooky, žiadne `use client`.
  *
- * Vlastník: U1.
+ * Vlastník: U1; zlúčenie V6a.
  */
 import Icon, { type IconName } from '@/components/ui/Icon';
 import styles from '@/components/ui/primitives.module.css';
+import signalStyles from '@/components/ui/signals.module.css';
+import { signalLabel, wordlessAttrs } from '@/components/ui/signals';
 import { TONE_ICON, type StatusTone } from '@/components/ui/ToneBadge';
 
 export interface StatusPillProps {
   /** Tón stavu (§3.2). `idle` = nespojené, `good` = spojené, `attention` = náhrada. */
   tone: StatusTone;
-  /** Názov stavu po slovensky — „Pripojené", „Nepripojené", „Ukážkové dáta". */
+  /**
+   * Názov stavu po slovensky — „Pripojené", „Nepripojené", „Ukážkové dáta".
+   *
+   * Je to PLATBA pilulky, nie jej ozdoba (formulácia predlohy: „the SK label
+   * is the payload; the tone only reinforces it"). Keď dorazí prázdny,
+   * nakreslí sa náhradné slovo a príznak `data-signal-wordless` — pilulka bez
+   * názvu je krúžok s farbou a monospace adresou pod ním.
+   */
   label: string;
   /** Doména alebo prostredie pod stavom, monospacom. Nikdy nie kľúč. */
   detail?: string | null;
@@ -49,16 +76,25 @@ export interface StatusPillProps {
 }
 
 export function StatusPill({ tone, label, detail, icon, live = false, testId }: StatusPillProps) {
+  const { label: word, wordless } = signalLabel(label);
   return (
     <div
       className={styles.pill}
       data-tone={tone}
       data-testid={testId}
       role={live ? 'status' : undefined}
+      /* Až za ostatnými — príznak defektu sa nesmie dať prepísať zvonku. */
+      {...wordlessAttrs(wordless)}
     >
       <div className={styles.pillTop}>
         <Icon className={styles.pillMark} name={icon ?? TONE_ICON[tone]} size={0.9} />
-        <span className={styles.pillLabel}>{label}</span>
+        <span
+          className={
+            wordless ? `${styles.pillLabel} ${signalStyles.wordless}` : styles.pillLabel
+          }
+        >
+          {word}
+        </span>
       </div>
       {detail ? <div className={styles.pillDetail}>{detail}</div> : null}
     </div>

@@ -400,8 +400,11 @@
  * tokenom — nová farba sa nevymýšľa. Použije sa VÝHRADNE na stratu dát
  * a zastavený zápis (architektúra §4).
  */
+/* `-ink`, nie plný tón — ten istý dôvod ako v `zlavy.module.css`: slovo pri
+   malom písme potrebuje 4,5 : 1 a plný `--st-critical` ho v svetlej téme
+   nemá (4,02 : 1 na papieri pod závojom). */
 .flagCritical {
-  color: var(--st-critical);
+  color: var(--st-critical-ink);
 }
 
 /* Priznaná medzera v stave — vysvetlivka pod riadkami, nie cez celú stránku. */

@@ -171,9 +171,11 @@ export const SETTINGS_CSS = `
   display:flex;flex-wrap:wrap;gap:4px 8px}
 
 /* ─────────────────── Podstránka: návrat a hlavička ─────────────────────── */
-.set-page .sub-back{font-size:12px;color:var(--dim);text-decoration:none;
-  display:inline-block;margin-bottom:8px}
-.set-page .sub-back:hover{color:var(--accent)}
+/* Trieda .sub-back (odkaz „← Nastavenia") tu stála do V6. Nahradila ju
+   omrvinková cesta a jej vzhľad žije v ui/breadcrumb.module.css (D143), takže
+   tu po nej nesmie zostať ani riadok — mŕtvy selektor by pri ďalšej oprave
+   vyzeral ako to, čo obrazovku kreslí (D139, K11).
+   POZOR: tento reťazec je šablónový literál, spätné apostrofy sa doň nedajú. */
 /* Odkaz do červenej zóny stojí sám na spodku brzdovej podstránky — nie je to
    karta a nesmie tak ani vyzerať. */
 .set-page .dz-link{margin-top:12px;font-size:12px;color:var(--dim)}

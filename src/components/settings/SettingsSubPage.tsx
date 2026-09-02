@@ -24,8 +24,13 @@
  *     kľúčov spravila vec na dosah omylom mierenej myši.
  *  4. **Pád jedného zdroja nezhodí stránku.** Sekcia, ktorej údaj chýba,
  *     to prizná sama.
+ *  5. **Cesta von je JEDNA a je nad nadpisom.** Od V6 je to omrvinka (D138),
+ *     ktorá povie aj polohu; odkaz „← Nastavenia" povedal len to, že cesta
+ *     existuje, a je zmazaný spolu s triedou `.sub-back` (D139). Kto pridá
+ *     druhú cestu von, vyrobí dve miesta, ktoré sa vedia rozísť — a jedno
+ *     z nich prestane byť pravda.
  *
- * Vlastník: V12.
+ * Vlastník: V12 (omrvinka: V6a).
  */
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -45,11 +50,13 @@ import WritesSection from '@/components/settings/WritesSection';
 import { SETTINGS_CSS } from '@/components/settings/styles';
 import {
   pageBySlug,
+  settingsTrail,
   subPagePath,
   type SettingsPage,
   type SettingsPageSlug,
 } from '@/components/settings/sub-pages';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
+import Breadcrumb from '@/components/ui/Breadcrumb';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
   getCatalog,
@@ -165,9 +172,11 @@ export function SettingsSubPage({ slug }: SettingsSubPageProps) {
   return (
     <div className="set-page" data-testid={`settings-sub-${slug}`}>
       <style>{SETTINGS_CSS}</style>
-      <Link className="sub-back" href="/nastavenia">
-        ← Nastavenia
-      </Link>
+      {/* Cesta von aj poloha naraz (D138). Do V6 tu stál odkaz „← Nastavenia",
+          ktorý povedal len to prvé; omrvinka ho NAHRADILA a jeho trieda
+          `.sub-back` je zo `SETTINGS_CSS` zmazaná (D139) — dve cesty von
+          vedľa seba by boli dve miesta, ktoré sa vedia rozísť. */}
+      <Breadcrumb items={settingsTrail(slug)} testId="settings-breadcrumb" />
       {/* `page.lead` sa TU nekreslí zámerne — používateľ ho práve prečítal na
           karte rozcestníka, na ktorú klikol, a `h1` nad tým ho hovorí tretí
           raz. Pole samo zostáva: `SettingsIndex.tsx` ho na tej karte kreslí. */}

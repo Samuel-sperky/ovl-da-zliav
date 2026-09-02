@@ -1,0 +1,516 @@
+/*
+ * Aura Zľavy — GEOMETRIA TABUĽKOVEJ SKUPINY (`Table`, `Pagination`, `Toolbar`).
+ *
+ * PREČO JEDEN MODUL PRE TRI KOMPONENTY
+ * ────────────────────────────────────
+ * Sú to tri časti JEDNEJ veci: lišta nad tabuľkou, tabuľka a pätka pod ňou
+ * stoja v tom istom ráme a delia si jeho hrany, rozostupy aj hustotu. Keby mal
+ * každý vlastný modul, prvá zmena výšky riadku by rozišla pätku s telom —
+ * presne to, čo `primitives.module.css` zapisuje ako dôvod, prečo tu nesmie
+ * vzniknúť druhá takmer rovnaká sada tried.
+ *
+ * PREČO TU A NIE V `globals.css` (D143)
+ * ─────────────────────────────────────
+ * Vzhľad primitíva žije vedľa primitíva. Triedy sú lokálne, takže sa nedá
+ * omylom prepísať cudzia obrazovka — a dva agenti môžu pracovať súčasne bez
+ * zápasu o jeden 4483-riadkový súbor.
+ *
+ * FARBA SA TU NEVYRÁBA (D132 · D144 · D147)
+ * ─────────────────────────────────────────
+ * Ani jeden surový hex, ani jedno `rgba()`. Tónuje sa výhradne
+ * `color-mix(in srgb, var(--token) N%, transparent)`. Jediná „farba" bez tokenu
+ * by bola maska dolného stmievania — preto sa berie `var(--mask-opaque)`,
+ * ktorý je v tokenovej vrstve zavedený presne na to (je to nepriehľadnosť
+ * masky, nie farba).
+ *
+ * ROZMERY SÚ MIESTNE TOKENY, NIE ČÍSLA V PRAVIDLÁCH
+ * ─────────────────────────────────────────────────
+ * `--ovl-tbl-*` sú deklarované na `.frame`, takže ich obrazovka smie prepísať
+ * jedným riadkom bez toho, aby siahla do tohto súboru:
+ *
+ *   --ovl-tbl-row-h    výška riadku (D137: kompaktná, 36 px)
+ *   --ovl-tbl-head-h   výška prilepenej hlavičky
+ *   --ovl-tbl-max-h    strop výšky posuvnej plochy
+ *   --ovl-tbl-cell-x   vodorovné odsadenie bunky
+ *   --ovl-tbl-trunc    dokedy smie rásť skracovaný stĺpec (názov)
+ *   --ovl-toolbar-top  kam sa prilepí lišta (pod hlavičku, či pod topbar)
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * ───────────────────────
+ *  1. **Vodorovne sa posúva LEN `.scroll`.** Telo stránky sa vodorovne
+ *     posúvať nesmie; preto má `.frame` `min-width: 0` a `max-width: 100%`
+ *     (bez nich flex/grid rodič roztlačí rám na šírku tabuľky a vodorovný
+ *     posuv skončí na `<body>`).
+ *  2. **`border-collapse: separate`.** Pri `collapse` sa okraje prilepenej
+ *     hlavičky ani prilepených stĺpcov neposúvajú s nimi a pri rolovaní
+ *     zostanú visieť na pôvodnom mieste.
+ *  3. **Prilepená bunka MUSÍ byť nepriesvitná.** `position: sticky` nekreslí
+ *     pozadie — bez `background` by pod referenciou presvital text stĺpcov,
+ *     ktoré sa pod ňou posúvajú.
+ *  4. **Pomlčka sa stlmí, NEZMIZNE** (I11). `.unknown` mení farbu na `--dim`,
+ *     nikdy nie veľkosť, nikdy nie `opacity` pod čitateľnosť a nikdy nie
+ *     `display`. Priznanie „nevieme" má byť krajšie, nie tichšie.
+ *  5. **Dolná hranica nie je zvýraznená hodnota.** `.bound` drží normálnu
+ *     hrúbku písma: merané číslo a dolná hranica nesmú mať rovnaký štýl (P7),
+ *     inak sa `≥ 12` čita ako „12".
+ *  6. **Zvýraznenie riadku nie je stav.** `.rowSelected` je len pozadie —
+ *     výber vždy nesie aj skutočný ovládač v bunke (zaškrtávacie pole so
+ *     svojím menom). Pravidlo troch kanálov platí aj tu.
+ *
+ * Vlastník: V6a, skupina „Tabuľka" (D133, D137).
+ */
+
+/* ═══════════════════════════ 1. Rám a posuvná plocha ══════════════════════ */
+
+.frame {
+  /* Miestne rozmery skupiny — pozri hlavičku modulu. */
+  --ovl-tbl-row-h: 36px;
+  --ovl-tbl-head-h: 34px;
+  --ovl-tbl-cell-x: 12px;
+  --ovl-tbl-trunc: 340px;
+  /* 280 px je rezerva na chróm, lištu a pätku na obrazovke Produkty. Číslo
+     sem prišlo z `.tbl-frame`, ktorý tento rám nahrádza; obrazovka s inou
+     rezervou prepíše `--ovl-tbl-max-h`, nie tento súbor. */
+  --ovl-tbl-max-h: calc(100vh - 280px);
+
+  display: flex;
+  flex-direction: column;
+  /* Bod 1 hlavičky — bez tejto dvojice sa vodorovný posuv presunie na stránku. */
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-solid);
+  overflow: hidden;
+}
+
+.scroll {
+  overflow: auto;
+  max-height: var(--ovl-tbl-max-h);
+  /* Posuv sa nedeje von z tabuľky: kto dorolluje na koniec zoznamu, neposunie
+     omylom celú stránku. */
+  overscroll-behavior: contain;
+
+  /*
+   * DOLNÁ HRANA SA STMIEVA, NEREŽE (prevzaté z `.tbl-scroll`).
+   *
+   * Strop výšky je odvodený od okna, nie od výšky riadku, takže posledný
+   * viditeľný riadok padne kdekoľvek — najčastejšie do polovice písmen.
+   * Vodorovne odseknutý text nevyzerá ako „ide sa posúvať", ale ako chyba
+   * vykreslenia. Maska je pripnutá na RÁM plochy, nie na obsah, takže sa
+   * stmieva vždy práve to, čo pokračuje ďalej; `padding-bottom` tej istej
+   * výšky drží posledný riadok celý a ostrý na konci posunu.
+   */
+  padding-bottom: var(--fade);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    var(--mask-opaque) calc(100% - var(--fade)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    var(--mask-opaque) calc(100% - var(--fade)),
+    transparent
+  );
+}
+
+/* ═══════════════════════════ 2. Tabuľka ═══════════════════════════════════ */
+
+.table {
+  width: 100%;
+  /* Bod 2 hlavičky — `collapse` rozbije prilepené okraje. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--ovl-fs-table);
+}
+
+/* Hlavička JE PRILEPENÁ (D137). Popisok stĺpca je najtlmenejšia z troch rolí
+   popiskov (D2) — nesúperí s hodnotami v bunkách. */
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: var(--ovl-tbl-head-h);
+  padding: 0 var(--ovl-tbl-cell-x);
+  background: var(--surface-solid);
+  border-bottom: 1px solid var(--line2);
+  color: var(--dim);
+  font-size: var(--ovl-fs-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/*
+ * Tlačidlo triedenia. Vzhľad dedí od hlavičky (`font: inherit`), takže sa
+ * hlavička klikom nezmení na iné písmo; klikateľnosť hovorí kurzor
+ * a podčiarknutie pri prejazde. Fokusový prstenec kreslí `globals.css`
+ * pre každý `button` — tu sa nezdvojuje.
+ */
+.sortBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s1);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sortBtn:hover {
+  color: var(--ink2);
+  text-decoration: underline;
+}
+
+.cell {
+  /* `height` je pre bunku tabuľky MINIMUM, nie strop: riadok, ktorý sa
+     zalomí, smie narásť. Kompaktná hustota (D137) je teda spodná hrana
+     rytmu, nie klietka. */
+  height: var(--ovl-tbl-row-h);
+  padding: 0 var(--ovl-tbl-cell-x);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink2);
+  line-height: var(--ovl-lh-tight);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Číselný stĺpec: doprava a tabulárne číslice, aby sa cifry pod sebou
+   zarovnali a dali sa porovnať pohľadom. */
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Skracovaný stĺpec (názov). Referencia sa NESKRACUJE NIKDY — orezaný
+   identifikátor je iný identifikátor (D122), preto túto triedu nedostane. */
+.truncate {
+  max-width: var(--ovl-tbl-trunc);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 2b. Tri stavy jednej bunky (I11) ─────────────────────────────────────
+   Hodnota · priznanie „nevieme" · dolná hranica. Bod 4 a 5 hlavičky. */
+
+.unknown {
+  color: var(--dim);
+}
+
+.bound {
+  /* Merané číslo smie byť zvýraznené, dolná hranica nie (P7). */
+  font-weight: 400;
+  color: var(--ink2);
+}
+
+/* ── 2c. Riadky ───────────────────────────────────────────────────────────── */
+
+.rowClickable {
+  cursor: pointer;
+}
+
+.row:hover > .cell {
+  background: var(--paper3);
+}
+
+/*
+ * Zvýraznený riadok stojí ZA prejazdom a s rovnakou špecifickosťou, takže
+ * výber vyhráva: kto má označených tridsať riadkov, musí ich vidieť aj pod
+ * kurzorom. Pozadie je pritom len pomôcka — pozri bod 6 hlavičky.
+ */
+.rowSelected > .cell,
+.rowSelected:hover > .cell {
+  background: var(--sel);
+}
+
+.rowMuted > .cell {
+  color: var(--dim);
+}
+
+/* ── 2d. Prilepené stĺpce (D137) ──────────────────────────────────────────
+   Vodorovné odsadenie počíta `stickyOffsets()` v `Table.tsx` a dodáva ho
+   inline — CSS o šírkach stĺpcov nevie a vedieť nemôže. */
+
+.pin {
+  position: sticky;
+  z-index: 1;
+  /* Bod 3 hlavičky: bez nepriesvitného pozadia by pod prilepenou bunkou
+     presvital posúvajúci sa obsah. */
+  background: var(--surface-solid);
+}
+
+/* Prilepená bunka V HLAVIČKE je prilepená v oboch osiach naraz, takže musí
+   prekryť aj bežnú hlavičku (z-index 2), aj bežnú prilepenú bunku (1). */
+.pinHead {
+  z-index: 3;
+}
+
+/*
+ * Hrana, za ktorou sa obsah podsúva. Vlas hovorí, kde prilepená časť končí;
+ * mäkký tieň hovorí, že za ňou niečo je. Bez oboch vyzerá tabuľka pri
+ * vodorovnom posune ako preklep vo zarovnaní.
+ */
+.pinEdge {
+  border-right: 1px solid var(--line-strong);
+  box-shadow: 8px 0 8px -8px color-mix(in srgb, var(--ink) 22%, transparent);
+}
+
+/* ── 2e. Prázdno a čakanie ────────────────────────────────────────────────── */
+
+/* Prázdny stav dostane celý riadok a smie dýchať — `height` riadku tu
+   neplatí, lebo veta o tom, ako sa dáta dostanú na obrazovku, sa do 36 px
+   nezmestí. */
+.emptyCell {
+  height: auto;
+  padding: var(--ovl-s5) var(--ovl-tbl-cell-x);
+  text-align: center;
+  white-space: normal;
+}
+
+/*
+ * Čakací prúžok. ZÁMERNE bez animácie: appka nemá blikať a `.wait` nie je
+ * hodnota — je to „ešte sa nenačítalo", teda tá istá trieda medzery, akú
+ * `product-columns.ts` volá `not_asked`. Preto má farbu dráhy, nie textu.
+ */
+.wait {
+  display: block;
+  height: 10px;
+  max-width: 140px;
+  border-radius: var(--r-pill);
+  background: var(--track);
+}
+
+/* ═══════════════════════════ 3. Pätka a stránkovanie ══════════════════════ */
+
+/* Pätka stojí MIMO `.scroll`, takže sa s tabuľkou vodorovne neposúva —
+   stránkovanie musí byť po ruke aj pri dvanástom stĺpci. */
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ovl-s3);
+  padding: var(--ovl-s2) var(--ovl-tbl-cell-x, 12px);
+  border-top: 1px solid var(--line);
+  background: var(--surface-solid);
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+.footInfo {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ovl-s2);
+}
+
+.footCount {
+  color: var(--ink2);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/*
+ * Dolná hranica počtu (P7). Bez tučného a bez farby hodnoty: merané číslo
+ * a odhad nesmú vyzerať rovnako. Znak `≈` nesie text, nie táto trieda —
+ * CSS priznanie nevyrába.
+ */
+.footApprox {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.footActions {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s4);
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s1);
+}
+
+.pageBtn {
+  min-width: 24px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--ovl-radius-sm);
+  background: none;
+  color: var(--ink2);
+  font: inherit;
+  font-variant-numeric: tabular-nums lining-nums;
+  cursor: pointer;
+}
+
+.pageBtn:hover {
+  background: var(--paper3);
+  color: var(--ink);
+}
+
+/* Aktuálna strana nie je tlačidlo — nemá kam viesť. Nesie ju `aria-current`
+   a zvýraznenie je len druhý kanál k tomu. */
+.pageCurrent {
+  min-width: 24px;
+  padding: 2px 6px;
+  border-radius: var(--ovl-radius-sm);
+  background: var(--brand-tint);
+  color: var(--ink);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums lining-nums;
+  text-align: center;
+}
+
+.pageGap {
+  padding: 0 var(--ovl-s1);
+  color: var(--dim);
+}
+
+.perPage {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+}
+
+.jump {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+}
+
+.jumpInput {
+  width: 76px;
+  padding: 3px 7px;
+  border: 1px solid var(--line2);
+  border-radius: var(--ovl-radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.select {
+  padding: 3px 6px;
+  border: 1px solid var(--line2);
+  border-radius: var(--ovl-radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+
+/* ═══════════════════════════ 4. Lišta nad tabuľkou ════════════════════════ */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ovl-s3);
+}
+
+/*
+ * Prilepená lišta. `--ovl-toolbar-top` je odsadenie od hornej hrany a MUSÍ ho
+ * povedať obrazovka: hlavička appky je 56 px, ale obrazovka s vlastným
+ * `topbar`-om má pod ním ešte 44 px. Predvolená hodnota je preto samotná
+ * hlavička — najmenšie tvrdenie, ktoré je vždy pravdivé.
+ * `z-index` je zámerne pod hlavičkou (40) aj pod `topbar`-om (5).
+ */
+.toolbarSticky {
+  position: sticky;
+  top: var(--ovl-toolbar-top, var(--hdr-h));
+  z-index: 4;
+  background: var(--paper);
+  padding-block: var(--ovl-s2);
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.filterToolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovl-s3);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  padding: 0 var(--ovl-s3);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm);
+  background: var(--paper2);
+  color: var(--dim);
+}
+
+.search:focus-within {
+  border-color: color-mix(in srgb, var(--brand) 60%, var(--line2));
+}
+
+/* Pole nemá vlastný rám — rámom je `.search`, aby ikona a text stáli v jednom
+   políčku a nie v dvoch. */
+.searchInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+}
+
+.searchInput:focus-visible {
+  outline: none;
+}
+
+.tray {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ovl-s2);
+}
+
+.trayLabel {
+  font-size: var(--ovl-fs-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.trayHint {
+  margin: 0;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+/* ═══════════════════════════ 5. Text len pre čítačku ══════════════════════ */
+
+/*
+ * Priznanie „nevieme" je v tabuľke pomlčka a pomlčku čítačka NEPREČÍTA —
+ * riadok by znel ako prázdny. `.srOnly` je preto nositeľ toho istého slova
+ * pre asistenčné technológie: rovnaký význam, iný kanál (§4 bod 1 kontraktu
+ * V6 — priznania smú byť krajšie, nie tichšie).
+ *
+ * `clip-path` namiesto starého `clip: rect()`: `clip` je zrušená vlastnosť
+ * a Safari na nej ticho zabúda na `position: absolute`.
+ */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

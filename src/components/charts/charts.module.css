@@ -359,3 +359,71 @@
     transparent 5px
   );
 }
+
+/* ── Plocha grafu v ChartCard (D135, D143, V6a) ─────────────────────────── */
+
+/*
+ * TU NIE JE RÁM. Rám, hlavičku a odsadenie kreslí `Panel` z `frame.module.css`
+ * a `ChartCard` ho používa — druhá, takmer rovnaká ohraničená plocha by bola
+ * presne ten dvojník, ktorý D142 zakazuje. Zostávajú štyri veci, ktoré `Panel`
+ * nemá a mať nemá: výška plochy grafu, kostra počas načítavania, miesto pre
+ * vetu namiesto grafu a výrez pre čítačku.
+ *
+ * Prečo nie `.chart` z `globals.css`: tá trieda je rám INLINE SVG grafov z V1
+ * a nesie predpis `.chart svg[role='img'] { width: 100% }`. Recharts kreslí SVG
+ * s vlastnou šírkou a bez role — ten predpis by sa mu buď nechytil (mlčky,
+ * náhodou), alebo by ho po pridaní role rozbil.
+ *
+ * ČO SA TU SMIE TICHO POKAZIŤ
+ * ───────────────────────────
+ *
+ *  1. **Výška prestane byť token.** `--chart-h` a `--chart-h-sm` sú `clamp()`
+ *     a držia graf čitateľný na 13" aj na 27". Kto sem napíše `height: 300px`,
+ *     rozviaže graf od zvyšku rodiny a na malom displeji zje obsah pod sebou.
+ *
+ *  2. **Plocha začne rásť podľa dát.** `min-height` = `height`:
+ *     `ResponsiveContainer` Rechartsu meria rodiča, takže rám bez pevnej výšky
+ *     sa zbalí na nulu a graf zmizne bez jediného hlásenia.
+ *
+ *  3. **Prepis pre čítačku sa stane viditeľným.** `.srOnly` NIE JE
+ *     `display: none` a ani `visibility: hidden` — obe by prepis vzali aj
+ *     čítačke a graf by zostal bez jediného prístupného zdroja čísel. Je to
+ *     výrez 1 × 1 px mimo toku. Kto to „upratá" na `display: none`, spraví
+ *     každý graf v appke neprístupným a nič to nenahlási.
+ */
+
+/* Plocha grafu. Pevná výška z tokenu — pozri bod 2 v hlavičke bloku. */
+.cardBody {
+  position: relative;
+  height: var(--chart-h);
+  min-height: var(--chart-h);
+}
+
+.cardBodySm {
+  height: var(--chart-h-sm);
+  min-height: var(--chart-h-sm);
+}
+
+/*
+ * Kostru načítavania kreslí `LoadingState` z rodiny stavov a jej rozmery sú
+ * v `states.module.css` — druhá kostra tu vzniknúť nemá. `.cardBody` ju obopne
+ * len preto, aby výšku držal RÁM: bez toho obsah po dočítaní skočí.
+ *
+ * Chyba, nemerané a prázdno výšku grafu ZÁMERNE nedržia: vetu netreba
+ * centrovať do 380 px prázdna a rodina stavov má vlastný vycentrovaný stĺpec
+ * (`.ovl-empty`). Vlastná stavová plocha tu preto tiež nie je.
+ */
+
+/* Výrez pre čítačku obrazovky. Pozri bod 3 v hlavičke bloku — toto sa nesmie
+   zmeniť na `display: none`. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

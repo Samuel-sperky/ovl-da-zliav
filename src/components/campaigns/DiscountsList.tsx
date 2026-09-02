@@ -122,7 +122,7 @@ import {
 } from '@/components/campaigns/zlavy-api';
 import { repeatDiscountHref } from '@/components/campaigns/presets-model';
 import { useRefreshable } from '@/components/layout/refresh';
-import EmptyState from '@/components/ui/EmptyState';
+import EmptyState from '@/components/states/EmptyState';
 import Note from '@/components/ui/Note';
 import { FlagMark, SigMark, type SigVariant } from '@/components/ui/StatusMark';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';

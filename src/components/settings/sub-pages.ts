@@ -29,14 +29,28 @@
  *  3. **Červená zóna NIE JE karta.** Maže oba kľúče a ruší čakajúce zľavy;
  *     na rozcestník sa nedostane ani ako dlaždica (bod 14). Vedie k nej jediný
  *     odkaz zo spodku podstránky s brzdami a tam je ešte za rozklikom.
- *  4. **Štruktúra je JEDNA.** Rozcestník, podstránky, bočné kotvy aj preklad
- *     starých odkazov čítajú `SETTINGS_PAGES`. Druhá kópia by sa rozišla
- *     a odkazy by viedli inam, než kam ukazujú.
+ *  4. **Štruktúra je JEDNA.** Rozcestník, podstránky, bočné kotvy, omrvinková
+ *     cesta (D138) aj preklad starých odkazov čítajú `SETTINGS_PAGES`. Druhá
+ *     kópia by sa rozišla a odkazy by viedli inam, než kam ukazujú.
  *
  * Čistý modul — žiadny React, žiadny fetch. Aby sa dal celý dokázať testom.
  *
  * Vlastník: V12.
  */
+
+/**
+ * Koreň Nastavení — rozcestník. Jedno miesto pre jeho názov aj cestu.
+ *
+ * Existuje kvôli omrvinke (D138): tá kreslí prvý krok „Nastavenia" a keby si
+ * ten názov napísala sama, mohla by o mesiac volať rozcestník inak než sa volá
+ * on sám. Omrvinka, ktorá pomenuje stránku inak než jej nadpis, je horšia než
+ * žiadna. Preto to slovo čítajú OBAJA — `SettingsIndex` do `h1`, omrvinka do
+ * prvého kroku — a `subPagePath()` odtiaľ berie aj predponu cesty.
+ */
+export const SETTINGS_ROOT: { readonly label: string; readonly path: string } = {
+  label: 'Nastavenia',
+  path: '/nastavenia',
+};
 
 /** Jedna kotva — sekcia, na ktorú vedie odkaz. */
 export interface SettingsAnchor {
@@ -168,7 +182,27 @@ export const INDEX_PAGES: readonly SettingsPage[] = SETTINGS_PAGES.filter((page)
 
 /** Cesta na podstránku. Jediné miesto, kde sa cesta skladá zo slugu. */
 export function subPagePath(slug: SettingsPageSlug): string {
-  return `/nastavenia/${slug}`;
+  return `${SETTINGS_ROOT.path}/${slug}`;
+}
+
+/**
+ * Omrvinková cesta na podstránku: rozcestník → táto stránka (D138).
+ *
+ * Žije TU, nie v komponente, z toho istého dôvodu ako bod 4 hlavičky: keby si
+ * ju podstránka skladala sama, vznikla by druhá kópia štruktúry a časom by
+ * ukazovala inam než rozcestník. Posledný krok cesty NEMÁ — omrvinka ju
+ * poslednému kroku aj tak zahodí (`Breadcrumb.tsx`, bod 1).
+ *
+ * Tvar `{ label, href? }` je zámerne štruktúrny, nie importovaný typ: tento
+ * modul je čistý a na komponent sa nevie ani typom.
+ */
+export function settingsTrail(
+  slug: SettingsPageSlug,
+): readonly { readonly label: string; readonly href?: string }[] {
+  const page = pageBySlug(slug);
+  const root = { label: SETTINGS_ROOT.label, href: SETTINGS_ROOT.path };
+  if (page === null) return [root];
+  return [root, { label: page.title }];
 }
 
 /** Podstránka podľa slugu, alebo `null` pri neznámom. Fail-closed. */

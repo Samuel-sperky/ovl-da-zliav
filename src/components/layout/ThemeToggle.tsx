@@ -3,8 +3,8 @@
 /**
  * Aura Zľavy — prepínač témy v hlavičke (V3, ARCHITEKTURA §0).
  *
- * Jedno okrúhle tlačidlo `.tglt` úplne vpravo. Svetlá téma je predvolená,
- * takže v nej ponúka mesiac (= prepni na tmavú) a v tmavej slnko.
+ * Jedno okrúhle tlačidlo `.tglt` úplne vpravo. V svetlej téme ponúka mesiac
+ * (= prepni na tmavú) a v tmavej slnko.
  *
  * `aria-label` hovorí CIEĽ, nie stav („Prepnúť na tmavú tému"). Stav by
  * čítačke nepovedal, čo klik urobí, a používateľ by musel hádať — presne to
@@ -12,11 +12,11 @@
  * TLAČIDLO, ikona zostáva `aria-hidden`; inak by sa prečítalo dvakrát.
  *
  * Prepínač píše explicitnú voľbu do `localStorage` aj na `<html>`; kým žiadna
- * voľba nie je, atribút na `<html>` chýba a tému určuje systém. Na serveri sa
+ * voľba nie je, tému určuje systém a atribút stampuje bootstrap. Na serveri sa
  * teda nedá vedieť, čo používateľ uvidí — preto sa prvý render robí vždy ako
- * svetlý a zosúladenie beží až v `useEffect`. Blikanie tým nevzniká: farby
- * mení CSS, nie tento komponent, a `THEME_BOOTSTRAP_SCRIPT` nastaví atribút
- * pred prvým paintom.
+ * TMAVÝ (predvolená téma po D145, do V6a to bol svetlý) a zosúladenie beží až
+ * v `useEffect`. Blikanie tým nevzniká: farby mení CSS, nie tento komponent,
+ * a `THEME_BOOTSTRAP_SCRIPT` nastaví atribút pred prvým paintom.
  *
  * Neukladá nič na server a nič neposiela do auditu — je to čisto vizuálna
  * voľba jedného prehliadača.
@@ -33,18 +33,23 @@ import {
 } from '@/components/layout/theme';
 
 function readTheme(): Theme {
-  if (typeof document === 'undefined') return 'light';
+  if (typeof document === 'undefined') return 'dark';
   const attr = document.documentElement.getAttribute('data-theme');
   const stored = parseStoredTheme(attr);
+  /* Keď `matchMedia` nie je, odpovedáme TMAVÁ — nie preto, že to systém hlási,
+     ale preto, že presne to vtedy kreslí CSS: holý `:root` je po D145 tmavý.
+     Do V6a tu stálo `false`, čo bola tá istá úvaha pri obrátenej predvolenej
+     téme. Keby tu zostalo, tlačidlo by v tmavej appke ponúkalo „prepnúť na
+     tmavú". */
   const systemDark =
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(prefers-color-scheme: dark)').matches
-      : false;
+      : true;
   return effectiveTheme(stored, systemDark);
 }
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>('light');
+  const [theme, setTheme] = useState<Theme>('dark');
 
   useEffect(() => {
     setTheme(readTheme());

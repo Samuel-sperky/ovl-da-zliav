@@ -146,7 +146,7 @@ import type { SavedFilter } from '@/components/products/saved-filters';
 import { readSavedFilters, removeFilter, saveFilter } from '@/components/products/saved-filters';
 import SoldCoverageNote from '@/components/products/SoldCoverageNote';
 import { useSoldCoverage } from '@/components/products/sold-coverage';
-import EmptyState from '@/components/ui/EmptyState';
+import EmptyState from '@/components/states/EmptyState';
 import Note from '@/components/ui/Note';
 import { LOGIC_TIME_ZONE } from '@/lib/domain/dates';
 import { formatDateTimeSk } from '@/lib/ui/format';

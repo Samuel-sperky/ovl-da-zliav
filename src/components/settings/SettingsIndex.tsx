@@ -46,7 +46,12 @@ import { TONE_SIG_CLASS } from '@/components/settings/blockers-view';
 import { ToneSigMark } from '@/components/ui/StatusMark';
 import { cardState, type CardFacts } from '@/components/settings/index-cards';
 import { SETTINGS_CSS } from '@/components/settings/styles';
-import { INDEX_PAGES, subPagePath, subPagePathForAnchor } from '@/components/settings/sub-pages';
+import {
+  INDEX_PAGES,
+  SETTINGS_ROOT,
+  subPagePath,
+  subPagePathForAnchor,
+} from '@/components/settings/sub-pages';
 
 export function SettingsIndex() {
   const router = useRouter();
@@ -94,7 +99,10 @@ export function SettingsIndex() {
     <div className="set-page" data-testid="settings-index">
       <style>{SETTINGS_CSS}</style>
 
-      <h1 className="page">Nastavenia</h1>
+      {/* Názov sa berie zo `SETTINGS_ROOT`, nie z literálu — omrvinka na
+          podstránkach kreslí prvý krok z toho ISTÉHO miesta, takže sa nemôže
+          stať, že cesta volá rozcestník inak než on sám seba (D138). */}
+      <h1 className="page">{SETTINGS_ROOT.label}</h1>
       {/* Že je pod každou kartou napísané, čo sa za ňou deje, je vidieť na
           kartách samých — bol to popis obrazovky na obrazovke. */}
       <p className="set-lead">Štyri otázky, štyri stránky. Nič sa tu nezapisuje do eshopu.</p>

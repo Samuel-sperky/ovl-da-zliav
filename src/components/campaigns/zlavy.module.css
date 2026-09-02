@@ -811,8 +811,11 @@
  * (sivá); červená sa berie z existujúceho tokenu a používa sa VÝHRADNE na
  * stratu dát a zastavený zápis (architektúra §4).
  */
+/* `-ink`, nie plný tón: je to SLOVO, a plný `--st-critical` má v svetlej téme
+   na papieri pod závojom 4,02 : 1 (dizajn-kontrast.spec.ts). Stmaviť sa
+   nesmie — pod protanopiou by splynul s „obmedzuje". */
 .flagCritical {
-  color: var(--st-critical);
+  color: var(--st-critical-ink);
 }
 
 .busy {

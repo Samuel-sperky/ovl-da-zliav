@@ -12,11 +12,11 @@
  *     istá farba. Tu sa vyžaduje odstup ΔE ≥ 8 naprieč normálnym videním,
  *     deuteranopiou, protanopiou aj tritanopiou.
  *
- *  B. **Rozídené témy.** Tmavá téma je v `globals.css` deklarovaná DVAKRÁT
- *     (`@media (prefers-color-scheme: dark)` a `:root[data-theme='dark']`).
- *     Kto opraví len jednu, dostane appku, ktorá vyzerá inak podľa toho, či si
- *     tmavú vypýtal systém alebo prepínač. Test vyžaduje zhodu do posledného
- *     znaku.
+ *  B. **Rozídené témy.** Tmavá aj svetlá sa merajú TOU ISTOU sadou tvrdení,
+ *     lebo tmavá sa neodvodzuje preklopením svetlej. Do V6a bola tmavá
+ *     deklarovaná dvakrát (media query + atribút) a bol tu navýše blok, či
+ *     sú tie dve kópie zhodné; po D145 nesie tmavú holý `:root` a kópia nie
+ *     je žiadna.
  *
  *  C. **Teal ako stav.** Značkový akcent sa nesmie priblížiť k žiadnemu stavu,
  *     inak „prebieha" a „tlačidlo" splynú. Akcent je preto v meraní ako
@@ -52,9 +52,12 @@ const CSS = readFileSync(
  * Telo CSS bloku, ktorý začína danou hlavičkou.
  *
  * `musiObsahovat` je nutnosť, nie pohodlie: `:root {` je v `globals.css`
- * DVAKRÁT — raz pre primitívy rodiny (`--aura-teal-*`) a raz pre tokeny
- * svetlej témy. Bez rozlíšenia by test čítal ten prvý, nenašiel v ňom stavy
- * a tváril sa, že paleta neexistuje.
+ * PIATIKRÁT — tokenová vrstva ho má päť blokov (T1 invarianty, T2 tmavá,
+ * T4 tokeny grafov, T5 derivované) plus alias blok. Bez rozlíšenia by test
+ * čítal prvý (T1, geometria a typografia), nenašiel v ňom stavy a tváril sa,
+ * že paleta neexistuje. Kotva `--st-critical:` je S DVOJBODKOU zámerne:
+ * `--st-critical-tint` v T5 obsahuje `--st-critical` ako podreťazec, takže
+ * bez nej by sa dal nájsť aj derivovaný blok.
  */
 function block(head: string, musiObsahovat?: string): string {
   let from = 0;
@@ -97,8 +100,8 @@ function resolve(body: string, token: string, depth = 0): string {
   const m = v.match(/^var\((--[a-z0-9-]+)\)$/i);
   if (m) return resolve(body, m[1]!, depth + 1);
   if (/^#[0-9a-f]{3,8}$/i.test(v)) return v;
-  // Tokeny svetlej vrstvy (napr. --deep) žijú v koreňovom `:root`.
-  const root = block(':root {', '--st-critical');
+  // Tokeny svetlej témy (napr. --deep) žijú v jej vlastnom bloku.
+  const root = block(':root[data-theme="light"] {', '--st-critical');
   if (root !== body) {
     try {
       return resolve(root, token, depth + 1);
@@ -109,18 +112,22 @@ function resolve(body: string, token: string, depth = 0): string {
   throw new Error(`token ${token} nie je hex ani var(): ${v}`);
 }
 
-const SVETLA = block(':root {', '--st-critical');
-const TMAVA_SYSTEM = block(":root:not([data-theme='light']) {");
-const TMAVA_RUCNE = block(":root[data-theme='dark'] {");
+/* Od tokenovej vrstvy V6a (D145) nesie holý `:root` TMAVÚ tému — je
+   predvolená. Svetlá téma je prepis pod `:root[data-theme="light"]`, takže
+   kotva svetlej palety musí ukazovať tam. Kým sa kotva neposunula, tento test
+   čítal prvý `:root {` so stavmi, čo je po V6a tmavý blok, a meral tmavé
+   hodnoty proti svetlým očakávaniam.
 
-/** Tokeny, ktoré musia byť v oboch tmavých deklaráciách zhodné. */
-const TEMOVE_TOKENY = [
-  '--paper', '--paper2', '--paper3', '--ink', '--ink2', '--dim',
-  '--line', '--line2', '--track', '--sel', '--selbar-bg', '--selbar-fg',
-  '--surface', '--surface-raised',
-  '--st-critical', '--st-attention', '--st-progress', '--st-good', '--st-idle',
-  '--production-bg', '--production-fg',
-] as const;
+   TMAVÁ JE ODTERAZ DEKLAROVANÁ RAZ. Do V6a stála dvakrát — pod
+   `@media (prefers-color-scheme: dark)` s guardom `:not([data-theme=light])`
+   a pod `:root[data-theme='dark']` — a tento súbor mal celý describe blok
+   „obe deklarácie musia sedieť do posledného znaku" (bod B v hlavičke). Ten
+   blok zanikol spolu s druhou deklaráciou: kopírovanie bola cena za to, že
+   žiadna farba nemá jedinú definíciu v media query, a po obrátení tém už
+   media query pre tmavú nie je. Kto tmavú vráti do media query, musí to
+   tvrdenie vrátiť s ňou. */
+const SVETLA = block(':root[data-theme="light"] {', '--st-critical:');
+const TMAVA = block(':root {', '--st-critical:');
 
 function stavy(body: string): Record<string, string> {
   return {
@@ -135,7 +142,7 @@ function stavy(body: string): Record<string, string> {
 
 const TEMY = [
   { nazov: 'svetlá', body: SVETLA },
-  { nazov: 'tmavá', body: TMAVA_RUCNE },
+  { nazov: 'tmavá', body: TMAVA },
 ] as const;
 
 /* ────────────────────────────────────────────────────────────────────── */
@@ -147,14 +154,6 @@ describe('meranie farieb — kontrola samotnej matematiky', () => {
       const v = t.actual();
       expect(v).toBeGreaterThanOrEqual(t.expect[0]);
       expect(v).toBeLessThanOrEqual(t.expect[1]);
-    });
-  }
-});
-
-describe('tmavá téma je deklarovaná dvakrát a musí sedieť', () => {
-  for (const token of TEMOVE_TOKENY) {
-    it(`${token} je v oboch tmavých deklaráciách rovnaký`, () => {
-      expect(raw(TMAVA_SYSTEM, token)).toBe(raw(TMAVA_RUCNE, token));
     });
   }
 });

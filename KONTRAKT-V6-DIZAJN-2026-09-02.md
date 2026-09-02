@@ -82,6 +82,33 @@ porušuje, takže sú vynútené mechanicky"*.
 | **D140** | **Tri sprinty za sebou**, nie jeden beh: V6a tokeny a primitíva → V6b obrazovky → V6c verifikácia a brána. | Voľba Samuela. Limit session už dnes dvakrát zhodil celý beh; pri 40 agentoch naraz je to najpravdepodobnejší koniec. |
 | **D141** | **Dôkaz dizajnu je Samuelov preklik.** Agenti dokazujú testami a statickým renderom; na konci dostane zoznam obrazoviek na preklik. | Voľba Samuela. Screenshoty vyžadujú zobrazený panel prehliadača a to sa dnes podarilo raz z troch pokusov — nebudem tvrdiť, že vyzerá dobre niečo, čo som nevidel. |
 
+## 3b. Revízia po čítaní disku (2. 9. 2026, pred spustením V6a)
+
+Kontrakt vyššie hovorí „portovať 16 primitív". Čítanie repa to musí opraviť,
+lebo `src/components/ui/` **už existuje** a má 19 súborov:
+
+```
+ActionFailure  BudgetMeter  Button  Charts  Countdown  Drawer  EmptyState
+ErrorMessage   Icon  LockBadge  Note  RunbookPanel  StatTile  StatusMark
+StatusPill     ToneBadge  blocker-look  chart-language  primitives.module.css
+```
+
+Slepý port by teda vedľa `StatTile.tsx` postavil `StatCard.tsx`. Presne to
+zakazuje docblock v `primitives.module.css`, ktorý si tento repo napísal sám:
+*„druhá, takmer rovnaká sada tried by sa o mesiac rozišla s prvou"*.
+
+| # | Rozhodnutie | Dôvod |
+|---|---|---|
+| **D142** | **Portuje sa TVAR a PRAVIDLO, nie súbor.** Kde miestny komponent existuje, `aura-roadmap` ho **rozšíri**, nevytvorí dvojníka. Deväť zlúčení: `StatTile`←StatCard · `StatusPill`←Pill · `ToneBadge`←Badge · `BudgetMeter`←ProgressBar · `Charts`+`chart-language`←ChartCard+useChartTheme · `ActionFailure`←ErrorState · `Button` · `Drawer` · `EmptyState`. **Štrnásť naozaj nových:** DeltaPill, BarList, Table, Pagination, Toolbar, Panel, PageHeader, Tabs, Segmented, Chip, LoadingState, NoResultsState, ForbiddenState, Breadcrumb. | Zlúčenie je práca, dvojník je dlh. Miestne komponenty nesú pravidlá tejto appky (tri kanály, priznania) a tie sa portom stratiť nesmú. |
+| **D143** | **`aura-roadmap` nemá Tailwind** — primitíva stoja na semantických triedach v jednom 605-riadkovom `globals.css`. Tu ide vzhľad primitív do **CSS modulov vedľa komponentu** (`src/components/ui/*.module.css`), nie do `globals.css`. | Konvencia tohto repa už je taká (`primitives.module.css`, `zlavy.module.css`, `charts.module.css`) a je lepšia: triedy sú lokálne, takže sa nedá omylom prepísať cudzia obrazovka. Navyše dovoľuje agentom pracovať paralelne bez zápasu o jeden súbor. |
+| **D144** | **Strážny test (D132) číta `globals.css` AJ všetky `*.module.css`.** | Následok D143: keby čítal len `globals.css`, hex by sa presunul do modulov a test by zostal zelený. To je presne pasca „čo test vyňal z kontroly, nestráži NIKTO". |
+| **D145** | **`:root` nesie TMAVÉ tokeny, `:root[data-theme="light"]` ich prepisuje** — obrátene než `aura-roadmap`. | D131 hovorí, že tmavá je predvolená. Keby `:root` niesol svetlé, každý načítaný dokument by blikol svetlou, kým sa atribút nenastaví. |
+| **D146** | **Žiadny `lucide-react`.** Ikonové propy portovaných komponentov berú `ReactNode`, nie `LucideIcon`; ikony dodá miestny `Icon.tsx`. | Nová závislosť len pre typ propu sa nevyplatí, keď repo má vlastný ikonový modul. |
+| **D147** | **`rgba()` je povolená VÝHRADNE v bloku tokenov** (`--overlay`, `--shadow-*`), inde nikdy. Tónovanie iba `color-mix()`. | Repo má dnes 0 `rgba()` a 47 `color-mix()`. Presne to pravidlo má `aura-roadmap` a je vynútené testom — tu smie byť ešte prísnejšie, lebo sa nezačína z dlhu. |
+
+Počet agentov V6a sa **nemení** (12): zlúčenia sú menej písania, ale viac
+čítania, takže rozpočet je ten istý.
+
 ## 4. Čo je NEDOTKNUTEĽNÉ
 
 Samuel označil štyri veci a **redizajn ich smie spraviť krajšími, nie
@@ -124,7 +151,7 @@ tichšími**:
 | # | Kritérium | Ako sa dokazuje |
 |---|---|---|
 | K1 | Token vrstva existuje; **0 surových hexov** mimo bloku tokenov | strážny test D132 |
-| K2 | Každý token má hodnotu pre tmavú aj svetlú tému | strážny test |
+| K2 | ~~Každý token má hodnotu pre tmavú aj svetlú tému~~ → **každý token, ktorý sa rozkladá na LITERÁLNU farbu, existuje v oboch témach; odvodený (`var()`, `color-mix()`) sa duplikovať NESMIE a téma-invariantný je vymenovaný** | strážny test |
 | K3 | Strážny test zakazuje `rgba()`, `!important` a surový hex — a je mutačne overený | mutácia musí zčervenať |
 | K4 | 16 primitív a 5 stavov existuje, má slovenské texty a **použité sú** (nie len portované) | grep volajúcich + testy |
 | K5 | Jeden jazyk grafov: `ChartCard` nad všetkými, `PriceHistogram` v ňom, pravidlo osi na JEDNOM mieste | grep + test |
@@ -198,4 +225,45 @@ rozhoduje — návrh token vrstvy, adversariálna verifikácia, brána a review.
 
 ## 9. Výsledok
 
-_(dopĺňa sa počas sprintov)_
+### V6a — tokeny a primitíva (2. 9. 2026, 12/12 agentov, 2,84 M tokenov)
+
+**Zmerané, nie prevzaté z reportu:** `npm run typecheck` a `npm run lint`
+čisté, **223 súborov / 4613 testov zelených v izolácii** (pred sprintom
+212/4106, teda **+11 súborov a +507 tvrdení**). Žiadny iný vitest nebežal,
+takže beh je dôkaz.
+
+| K | Stav | Ako som to overil SÁM |
+|---|---|---|
+| K1 | **áno** | vlastný parser: **0 surových hexov** mimo `:root` blokov, **0 `rgba()`** mimo tokenov |
+| K2 | **áno, po oprave kritéria** | pozri nižšie — kritérium bolo hrubšie než implementácia |
+| K3 | **áno** | **vlastná mutácia**, nezávislá od agentovej: hex v `ui/kpi.module.css` → padne pravidlo 1; `!important` → padne pravidlo 3. Vždy **1 z 26**, nie plošne. To potvrdzuje D144 — test naozaj číta moduly, nie len `globals.css` |
+| K5 | čiastočne | `ChartCard` + `useChartTheme` stoja, tri kópie pravidla osi zlúčené; obrazovky ich ešte nepoužívajú (V6b) |
+| K7 | **áno** | 2034 párov v tmavej, 1999 v svetlej; najhoršie **4,89 : 1** (tmavá) a **4,79 : 1** (svetlá); tri tokeny opravené, nie test |
+| K13 | **áno** | `recharts ^3.10.1` pridaný, `lucide-react` NIE (D146) |
+
+**K2 bolo napísané príliš nahrubo a implementácia je lepšia než kritérium.**
+Zo 151 tokenov v tmavej je 64 prepísaných vo svetlej a 87 nie — ale rozbor
+ukázal, že to je správne: **31 je odvodených** cez `var()` (tému dedia samy,
+duplikát by bol chyba), **48 sú rozmery, časy a písma** (téma-invariantné
+z povahy) a **8 literálnych farieb** je zámerne téma-invariantných —
+`--gold-fill`, `--gold-line`, `--brand-fill`, `--brand-fill-hover`,
+`--on-gold`, `--on-brand-fill` a dva čierne operandy tónovania. Presne tú
+istú výnimku má `aura-roadmap` napísanú v komentári. Kritérium je preto
+prepísané, nie odškrtnuté.
+
+**Čo agenti pridali nad kontrakt a je to správne:** `UnmeasuredState.tsx`
+ako **šiesty** stavový komponent. D134 hovoril o piatich, ale táto appka má
+tretiu možnosť pri každom čísle a rozdiel medzi „nič tu nie je" a „nemerali
+sme to" si vlastný stav zaslúži. Ponechané.
+
+**Chyba, ktorú našlo overenie drôtovania, nie testy:** `layout.tsx` mal
+docblock „Téma: SVETLÁ je predvolená", pravdivý pred obrátením tém a prežil
+ho — kým `theme.ts` aj `globals.css` hovoria tmavá. Tá istá trieda chyby ako
+UTC docblock v `src/db/pool.ts`. Opravené ručne. `theme.ts` si pritom sám
+všimol pascu, ktorú kontrakt nepomenoval: po obrátení tém znamená *zmazanie*
+atribútu „vždy tmavá", takže bootstrap musí `light` stampovať výslovne, inak
+človek so svetlým OS dostane tmavú appku bez toho, aby si o ňu povedal.
+
+**Otvorené do V6b:** obrazovky ešte primitíva nepoužívajú (K4 je „existujú",
+nie „sú použité"), `.ovl-*` sa zatiaľ nemazalo (K11), a K8/K9/K12/K14
+čakajú na V6b a preklik.

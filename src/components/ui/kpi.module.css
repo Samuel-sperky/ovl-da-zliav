@@ -1,0 +1,222 @@
+/*
+ * Aura Zľavy — VZHĽAD KPI SKUPINY (`StatTile`, `DeltaPill`, `BarList`; D143).
+ *
+ * Prečo tu a nie v `globals.css`: D143. Triedy sú lokálne, takže sa nedá
+ * omylom prepísať cudzia obrazovka, a dva agenti nemusia zápasiť o jeden
+ * 4000-riadkový súbor. Farby, rozmery aj časy sú VÝHRADNE tokeny z vrstvy na
+ * začiatku `globals.css` — ani jeden hex, ani jedna `rgba()` (D147).
+ *
+ * ČO TU ZÁMERNE NIE JE
+ * --------------------
+ *  · **Telo dlaždice.** Geometriu (`.kpis` mriežka, `.kpi` výplň, `.k` / `.v` /
+ *    `.s` tri riadky) vlastní `globals.css` a `StatTile` ju DEDÍ — to je celý
+ *    dôvod, prečo sa `StatCard` z `aura-roadmap` nepostavil vedľa nej (D142).
+ *    Tu je len to, čo dlaždici naozaj chýbalo: vlas zdôraznenia, riadok
+ *    hodnoty so smerom a tichšia pomlčka.
+ *  · **Dráha a šrafovanie pásu.** Kreslí ich `RowBar` v `charts.module.css`
+ *    (`.rowBar`, `.rowBarFill`, `.rowBarUnknown`). `BarList` ho POUŽÍVA; druhé
+ *    šrafovanie by znamenalo, že „toto sme nemerali" vyzerá v rebríku inak než
+ *    v koláči a v čiare (D126).
+ *
+ * TRI KANÁLY, KTORÉ TU MAJÚ SVOJU FARBU
+ * -------------------------------------
+ * Tón nesie ROVNAKÝ atribút na koreni pilulky ako značka a slovo v jej tele —
+ * jedna hodnota, tri kanály. Nikdy sa nemôže stať, že pilulka zčervená a text
+ * vedľa nej zostane pokojný. Predvolený tón je `idle`: appka smer NEHODNOTÍ,
+ * kým jej volajúci nepovie, či je rast dobrá správa.
+ *
+ * ZDÔRAZNENIE NIE JE STAV
+ * -----------------------
+ * `data-accent` je teal alebo zlatá a ani jedno nikdy nekóduje stav
+ * (stráži `test/unit/paleta.spec.ts`). Vlas hovorí „na túto dlaždicu sa pozri
+ * prvú", nie „tu je problém" — na to je stavová škála `--st-*`.
+ *
+ * Vlastník: V6a, KPI skupina.
+ */
+
+/* ═══════════════════ 1. Dlaždica (StatTile) ═══════════════════════════════ */
+
+/*
+ * Vlas zdôraznenia. `box-shadow: inset` a nie `border-top`: dlaždice stoja
+ * v mriežke `.kpis` s 1 px medzerami a orámovaním, takže pribudnutý okraj by
+ * jednu bunku posunul o 2 px oproti susedom.
+ */
+.tile[data-accent='accent'] {
+  box-shadow: inset 0 2px 0 0 var(--brand);
+}
+
+.tile[data-accent='gold'] {
+  box-shadow: inset 0 2px 0 0 var(--gold-line);
+}
+
+/* Popisok a jeho ikona v jednom riadku. Ikona je vpravo a je DEKORÁCIA. */
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+}
+
+.headIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--dim);
+}
+
+/*
+ * Hodnota a smer na JEDNEJ účiare. `baseline` je tu nosné: keby sa pilulka
+ * zarovnala na stred, pri 22 px čísle by plávala a čítala by sa ako druhé,
+ * samostatné číslo.
+ */
+.valueRow {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--ovl-s3);
+}
+
+/*
+ * Priznanie „nevieme" musí byť VIDIEŤ ako priznanie — inak sa pomlčka číta
+ * ako nameraná hodnota v inom formáte. Selektor má tri triedy/atribúty
+ * zámerne: `.kpi .v` z `globals.css` má špecifickosť 0,2,0 a v zlepenom hárku
+ * by o farbe rozhodlo poradie súborov (presne na tom sa už raz rozišiel rad
+ * dlaždíc na Prehľade). `.valueRow .value[data-unknown]` je 0,3,0 a vyhráva
+ * bez `!important`.
+ *
+ * Dolná hranica (`≥ N`) sa NETLMÍ: je to zmerané číslo, len neúplné. Jej
+ * priznanie nesie znak `≥` v texte a veta v `title` — nie farba.
+ */
+.valueRow .value[data-unknown='ano'] {
+  color: var(--dim);
+  font-weight: 520;
+}
+
+/* ═══════════════════ 2. Pilulka smeru (DeltaPill) ═════════════════════════ */
+
+.delta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ovl-s1);
+  border: 1px solid var(--st-idle-edge);
+  border-radius: var(--r-pill);
+  background: var(--st-idle-tint);
+  padding: 2px 8px;
+  font-size: var(--ovl-fs-micro);
+  font-variant-numeric: tabular-nums lining-nums;
+  /* Číslo a slovo sa nesmú od seba zlomiť — pilulka je jedna veta. */
+  white-space: nowrap;
+  color: var(--st-idle-ink);
+}
+
+.delta[data-tone='good'] {
+  border-color: var(--st-good-edge);
+  background: var(--st-good-tint);
+  color: var(--st-good-ink);
+}
+
+.delta[data-tone='critical'] {
+  border-color: var(--st-critical-edge);
+  background: var(--st-critical-tint);
+  color: var(--st-critical-ink);
+}
+
+/* Značka dedí farbu textu — vlastnú nemá a mať nesmie. */
+.deltaGlyph {
+  flex: 0 0 auto;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/*
+ * Pomlčka „nevieme" ako značka. Je to TEXT a nie ikona zámerne: U+2014 je
+ * v Interi, ktorý appka dodáva, a je to ten istý znak, akým sa nevedomosť
+ * priznáva v tabuľkách a v grafoch. Šípky sa v tejto appke kreslia ikonami
+ * preto, že `→` v Interi NIE JE — to sa na pomlčku nevzťahuje.
+ */
+.deltaDash {
+  flex: 0 0 auto;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Číslo je hlavný obsah pilulky, slovo je jej tretí kanál — nie ozdoba. */
+.deltaValue {
+  font-weight: 620;
+}
+
+.deltaWord {
+  font-weight: 500;
+}
+
+/* ═══════════════════ 3. Rebrík porovnania (BarList) ═══════════════════════ */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovl-s3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * Riadok je mriežka o dvoch stĺpcoch — popis a číslo. Pás (`RowBar`) má vo
+ * svojom pravidle `grid-column: 1 / -1`, takže si sám sadne pod ne na celú
+ * šírku; preto tu nie je `grid-template-areas` ani tretí stĺpec.
+ */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--ovl-s3);
+  row-gap: var(--ovl-s1);
+}
+
+/*
+ * Popis sa NEZALAMUJE. Riadky rebríka sú porovnanie a jeden zalomený názov
+ * produktu by rozhodil rytmus celého stĺpca; celý text zostáva v `title`.
+ */
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ovl-fs-small);
+  color: var(--ink);
+}
+
+.value {
+  font-size: var(--ovl-fs-small);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums lining-nums;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+/* Tá istá tichšia pomlčka ako v dlaždici — priznanie vyzerá vždy rovnako. */
+.row .value[data-unknown='ano'] {
+  color: var(--dim);
+  font-weight: 520;
+}
+
+/*
+ * Poznámka riadku — tretí kanál pri pomlčke. Ide cez celú šírku POD pásom,
+ * takže sa nebije s číslom vpravo.
+ */
+.note {
+  grid-column: 1 / -1;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+/* Veta o položkách bez merania — legenda celého rebríka, nie ozdoba. */
+.listNote {
+  margin-top: var(--ovl-s3);
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+.empty {
+  font-size: var(--ovl-fs-small);
+  color: var(--dim);
+}

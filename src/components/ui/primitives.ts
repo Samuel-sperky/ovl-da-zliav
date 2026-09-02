@@ -40,6 +40,15 @@
  *    hotové percento — šírka výplne aj text `14/18` musia vychádzať z tej istej
  *    dvojice čísel, inak sa raz rozídu.
  *
+ * KDE ŽIJE PRAVIDLO TROCH KANÁLOV (V6a, D142)
+ * -------------------------------------------
+ * Tu sú slová a značky KONKRÉTNYCH úrovní (`BUDGET_LEVEL_WORD`, `TREND_WORD`)
+ * — teda platba, ktorú komponenty kreslia. Poistka „a čo keď slovo vôbec
+ * nepríde" je o jednu úroveň vyššie, v `ui/signals.ts`, a je spoločná pre celú
+ * signálnu skupinu (`ToneBadge`, `StatusPill`, `BudgetMeter`, `Chip`).
+ * Kto by si náhradné slovo napísal ešte raz sem, vyrobí druhú poistku, ktorá
+ * sa s prvou rozíde — presne to, čo tento súbor v hlavičke inde zakazuje.
+ *
  * Vlastník: U1.
  */
 import type { IconName } from '@/components/ui/Icon';

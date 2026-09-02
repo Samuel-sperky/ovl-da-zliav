@@ -1,0 +1,92 @@
+/*
+ * Aura Zľavy — geometria omrvinkovej cesty (D138, D143).
+ *
+ * PREČO TU A NIE V `globals.css`
+ * ------------------------------
+ * D143: vzhľad primitív žije v CSS module vedľa komponentu. Triedy sú potom
+ * lokálne, takže sa nedá omylom prepísať cudzia obrazovka a viac agentov môže
+ * písať primitíva naraz bez zápasu o jeden súbor.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *  1. **Žiadna vlastná farba.** Všetko z tokenov (`--dim`, `--ink2`, `--line2`,
+ *     `--accent`), takže obe témy fungujú samy a strážny test D132/D144
+ *     nenájde surový hex. Tónovanie by šlo VÝHRADNE cez `color-mix()`
+ *     (D147) — tu ho netreba ani raz.
+ *  2. **`list-style: none` má partnera v `role="list"`** na `<ol>`
+ *     v komponente. Bez neho Safari s VoiceOver zoznamu odoberie rolu a
+ *     z omrvinky sa stratí hĺbka („1 z 2"). Kto sem to pravidlo doplní inde,
+ *     nech nezabudne na rolu.
+ *  3. **Aktuálny krok sa NESKRACUJE trojbodkou.** Zalomí sa. Skrátený názov
+ *     stránky vyzerá presne ako ten správny a človek nemá ako zistiť, že
+ *     nevidí celý.
+ *  4. **Fokusový prstenec sa tu nerieši.** Odkazy ho dedia z globálneho
+ *     `a:focus-visible` (`globals.css`, §3) a druhá definícia by sa s ňou
+ *     rozišla.
+ *
+ * Vlastník: V6a.
+ */
+
+.crumbs {
+  /*
+   * Odstup je zámerne malý. Podstránky Nastavení stoja pod stropom výšky P4
+   * (max 1,5 obrazovky) a omrvinka je nový riadok navrchu KAŽDEJ z nich —
+   * pri piatich podstránkach je každý pixel tu päťkrát.
+   */
+  margin-bottom: var(--ovl-s2);
+  font-size: var(--ovl-fs-micro);
+  line-height: var(--ovl-lh-tight);
+}
+
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * Oddeľovač. Tlmenejší než oba susedné kroky — je to interpunkcia, nie údaj,
+ * a v hustom riadku by rovnako sýty znak vyzeral ako tretí krok.
+ */
+.sep {
+  padding: 0 var(--ovl-s1);
+  color: var(--line2);
+}
+
+.link {
+  color: var(--dim);
+  text-decoration: none;
+  /* Podčiarknutie sa zapína na hover, ale miesto si drží vždy — bez toho by
+     sa celý riadok pri prejazde myšou o pixel posunul. */
+  border-bottom: 1px solid transparent;
+  transition: color var(--ovl-dur-hover) var(--ovl-ease-out);
+}
+
+.link:hover {
+  color: var(--accent);
+  border-bottom-color: currentColor;
+}
+
+/*
+ * Aktuálna stránka. Silnejšia než odkazy pred ňou — cesta má gradovať k tomu,
+ * kde človek stojí, nie od toho.
+ */
+.current {
+  color: var(--ink2);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Medzikrok bez cesty (chýbajúci `href`). Vyzerá ako text, lebo text to je. */
+.plain {
+  color: var(--dim);
+}

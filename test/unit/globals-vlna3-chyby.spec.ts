@@ -103,9 +103,13 @@ function dlzka(v: string): number {
   const m = v.trim().match(/^var\((--[a-z0-9-]+)\)$/i);
   return px(m ? hodnota(KOSTRA, m[1]!) : v);
 }
-const SVETLA = blok(':root {', '--st-critical');
-const TMAVA_SYSTEM = blok(":root:not([data-theme='light']) {");
-const TMAVA_RUCNE = blok(":root[data-theme='dark'] {");
+/* Po tokenovej vrstve V6a (D145) je na holom `:root` TMAVÁ téma; svetlá je
+   prepis pod `:root[data-theme="light"]`. Tmavá je odteraz deklarovaná RAZ —
+   media query aj `[data-theme='dark']` bloky zmazal prevod hexov ako duplikát
+   tokenovej vrstvy, takže kotvy na ne už nemôžu ukazovať. Pozri
+   paleta.spec.ts. */
+const SVETLA = blok(':root[data-theme="light"] {', '--st-critical:');
+const TMAVA = blok(':root {', '--st-critical:');
 
 /** Rozvinie `var(--x)` na hex; bez toho by sa merali reťazce, nie farby. */
 function farba(telo: string, token: string, hlbka = 0): string {
@@ -387,8 +391,7 @@ describe('4 — prúžok má dráhu aj v tmavej téme', () => {
    */
   const TEMY = [
     { nazov: 'svetlá', telo: SVETLA, prah: 1.2 },
-    { nazov: 'tmavá (systémová)', telo: TMAVA_SYSTEM, prah: 1.45 },
-    { nazov: 'tmavá (ručná)', telo: TMAVA_RUCNE, prah: 1.45 },
+    { nazov: 'tmavá', telo: TMAVA, prah: 1.45 },
   ];
 
   for (const { nazov, telo, prah } of TEMY) {
@@ -408,13 +411,14 @@ describe('4 — prúžok má dráhu aj v tmavej téme', () => {
     });
   }
 
-  it('obe deklarácie tmavej témy hovoria o dráhe to isté', () => {
-    expect(farba(TMAVA_SYSTEM, '--track')).toBe(farba(TMAVA_RUCNE, '--track'));
-  });
+  /* Do V6a tu stálo tvrdenie „obe deklarácie tmavej témy hovoria o dráhe to
+     isté". Zaniklo spolu s druhou deklaráciou: tmavú nesie od D145 holý
+     `:root` a kópia v media query neexistuje. Keby sa tmavá do media query
+     vrátila, musí sa vrátiť aj to tvrdenie — práve toto bola chyba 4. */
 
   it('tmavá dráha nie je slabšia než svetlá — na tmavom podklade to nestačí', () => {
     const svetla = contrast(farba(SVETLA, '--track'), farba(SVETLA, '--paper2'));
-    const tmava = contrast(farba(TMAVA_RUCNE, '--track'), farba(TMAVA_RUCNE, '--paper2'));
+    const tmava = contrast(farba(TMAVA, '--track'), farba(TMAVA, '--paper2'));
     expect(tmava).toBeGreaterThan(svetla);
   });
 });

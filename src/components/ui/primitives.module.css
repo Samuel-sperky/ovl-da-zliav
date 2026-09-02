@@ -1,12 +1,15 @@
 /*
  * Aura Zľavy — geometria primitív priehľadnosti (U1).
  *
- * Zámerne LEN to, čo v `globals.css` naozaj chýba: merací prúžok rozpočtu,
- * stavová pilulka a smer zmeny v dlaždici. Vysvetlivka (`Note`), prázdny stav
- * (`EmptyState`), zámok (`LockBadge`) a telo dlaždice (`StatTile`) žiadny
- * vlastný vzhľad NEMAJÚ — dedia `.ovl-note`, `.ovl-empty`, `.locked-note`
- * a `.kpi`, ktoré v `globals.css` už existujú a vlastní ich V2/V3. Druhá,
- * takmer rovnaká sada tried by sa o mesiac rozišla s prvou.
+ * Zámerne LEN to, čo v `globals.css` naozaj chýba: merací prúžok rozpočtu
+ * a stavová pilulka. Vysvetlivka (`Note`), prázdny stav (`EmptyState`), zámok
+ * (`LockBadge`) a telo dlaždice (`StatTile`) žiadny vlastný vzhľad NEMAJÚ —
+ * dedia `.ovl-note`, `.ovl-empty`, `.locked-note` a `.kpi`, ktoré
+ * v `globals.css` už existujú a vlastní ich V2/V3. Druhá, takmer rovnaká sada
+ * tried by sa o mesiac rozišla s prvou.
+ *
+ * Od V6a má KPI skupina (`StatTile`, `DeltaPill`, `BarList`) vlastný súbor
+ * `ui/kpi.module.css` — pozri §3 nižšie.
  *
  * Farby sa berú výhradne z existujúcich tokenov (`--st-*`, `--track`,
  * `--barfill`, `--line2`, `--dim`). Žiadna nová farba, žiadny teal ani gold
@@ -190,36 +193,15 @@
   word-break: break-all;
 }
 
-/* ═══════════════════ 3. Smer zmeny v dlaždici (StatTile) ══════════════════ */
-
-.trend {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  font-size: var(--ovl-fs-micro);
-  font-variant-numeric: tabular-nums lining-nums;
-  color: var(--dim);
-}
-
-.trendGlyph {
-  font-weight: 700;
-  line-height: 1;
-}
-
-.trend[data-tone='good'],
-.trend[data-tone='good'] .trendGlyph {
-  color: var(--st-good-ink);
-}
-
-.trend[data-tone='critical'],
-.trend[data-tone='critical'] .trendGlyph {
-  color: var(--st-critical-ink);
-}
-
-/* Dlaždica dedí `.kpi`; toto je len odsadenie riadku so smerom pod detailom. */
-.tileTrend {
-  margin-top: 3px;
-}
+/*
+ * ═══════════════════ 3. Smer zmeny — PRESŤAHOVANÝ (V6a) ═══════════════════
+ *
+ * Tu stál riadok smeru v dlaždici (`.trend`, `.trendGlyph`, `.tileTrend`):
+ * šípka a slovo BEZ čísla a bez štvrtého stavu „zmenu nevieme". Odteraz to
+ * nesie `ui/DeltaPill.tsx` a jeho vzhľad je v `ui/kpi.module.css` (D143).
+ * Nie je to zmazaná funkcia, ale presťahovaná — dve rôzne pilulky smeru
+ * v jednej appke sú presne ten dlh, ktorý zakazuje D142.
+ */
 
 @media (prefers-reduced-motion: reduce) {
   .meterFill {

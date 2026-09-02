@@ -26,12 +26,38 @@
  * 3. **Nič sa nepočíta v JSX.** Percento aj úroveň prichádzajú z čistých
  *    funkcií v `primitives.ts`, ktoré má pod testom `ui-primitives.spec.ts`.
  *
+ * ZLÚČENIE S `ProgressBar` Z `aura-roadmap` (D142, 2. 9. 2026)
+ * ------------------------------------------------------------
+ * Predloha má `ui/ProgressBar.tsx` s pásmami `healthTone()` (zelená ≥ 100 %,
+ * jantár 60–99 %, červená < 60 %). Je to prúžok PRIPRAVENOSTI — viac je
+ * lepšie. Tento je prúžok SPOTREBY — viac je horšie. Rovnaká geometria, opačný
+ * zmysel, takže sa portovalo pravidlo, nie súbor:
+ *
+ *  · **Prišlo:** veta z predlohy „grey = no data → caller passes no bar at
+ *    all, not a grey one". Tu má tvrdšiu podobu: neznámy strop nekreslí sivý
+ *    prúžok ani prázdny prúžok, ale PLNÝ so slovom „strop vyčerpaný"
+ *    (`budgetFillPercent`, bod 3 v hlavičke `ui/primitives.ts`). Appka radšej
+ *    povie „nemám kam zapisovať", než by sľúbila kapacitu, o ktorej nevie.
+ *  · **Prišlo:** poistka na popis. Predloha má `label` len ako prístupné meno
+ *    a prázdne ho nechá byť; tu je popis viditeľný a prázdny by z prúžku
+ *    urobil dva čísla a farbu bez predmetu (`ui/signals.ts`).
+ *  · **NEPRIŠLI:** pásma `healthTone()`. Prah je tu 80 % a je to tá istá
+ *    rezerva ako `RATE_SAFETY_FACTOR` (`lib/shop/rate-limits.ts`) — nie
+ *    estetická voľba. Druhá škála prahov by sa s ňou rozišla.
+ *  · **NEPRIŠOL:** `value` / `max` ako priame percento. Šírka výplne aj text
+ *    `160/200` musia vychádzať z tej istej dvojice čísel (bod 4 v hlavičke
+ *    `ui/primitives.ts`), inak sa raz rozídu.
+ *  · **NEPRIŠIEL:** tón `ok` (zelený prúžok). Zelená by tvrdila, že spotreba
+ *    je úspech; v tejto appke je spotreba len rýchlosť.
+ *
  * Server-safe: žiadne hooky, žiadne `use client`.
  *
- * Vlastník: U1.
+ * Vlastník: U1; zlúčenie V6a.
  */
 import Icon from '@/components/ui/Icon';
 import styles from '@/components/ui/primitives.module.css';
+import signalStyles from '@/components/ui/signals.module.css';
+import { signalLabel, wordlessAttrs } from '@/components/ui/signals';
 import {
   BUDGET_LEVEL_ICON,
   BUDGET_LEVEL_WORD,
@@ -79,15 +105,33 @@ export function BudgetMeter({
   const percent = budgetFillPercent(spent, limit);
   const level = budgetLevel(spent, limit);
   const tone = budgetLevelTone(level, fullTone);
-  const ariaText = budgetAriaText(label, spent, limit, resetsAt);
+  /*
+   * Popis prechádza poistkou tretieho kanála a do vety pre čítačku ide UŽ
+   * doplnený. Keby si `budgetAriaText()` bralo pôvodný `label`, čítačka by
+   * prečítala „: 160/200, blíži sa strop" — teda dvojbodku bez predmetu.
+   */
+  const { label: word, wordless } = signalLabel(label);
+  const ariaText = budgetAriaText(word, spent, limit, resetsAt);
   // Pokojný stav sa nekomentuje — slovo „v rámci stropu" pri každom prúžku je
   // šum. Čítačka ho dostane vždy, cez `aria-valuetext`.
   const showState = level !== 'calm';
 
   return (
-    <div className={styles.meter} data-tone={tone} data-level={level} data-testid={testId}>
+    <div
+      className={styles.meter}
+      data-tone={tone}
+      data-level={level}
+      data-testid={testId}
+      {...wordlessAttrs(wordless)}
+    >
       <div className={styles.meterRow}>
-        <span className={styles.meterLabel}>{label}</span>
+        <span
+          className={
+            wordless ? `${styles.meterLabel} ${signalStyles.wordless}` : styles.meterLabel
+          }
+        >
+          {word}
+        </span>
         <span className={styles.meterCount}>{budgetCountLabel(spent, limit)}</span>
       </div>
       <div

@@ -1,0 +1,365 @@
+/*
+ * Aura Zľavy — VZHĽAD RÁMCA STRÁNKY (D133, D143; V6a, 2. 9. 2026).
+ *
+ * Plocha (`Panel`), hlavička stránky (`PageHeader`) a dva prepínače (`Tabs`,
+ * `Segmented`). Vzhľad stojí TU, vedľa komponentu, nie v `globals.css`
+ * (D143): triedy sú lokálne, takže sa nedá omylom prepísať cudzia obrazovka
+ * a štyria agenti V6a nemusia zápasiť o jeden súbor.
+ *
+ * FARBA IDE VÝHRADNE Z TOKENOV
+ * ----------------------------
+ * Žiadny surový hex, žiadne `rgba()`, žiadny `!important` (D132, D144, D147).
+ * Tónuje sa `color-mix(in srgb, var(--token) N%, transparent)`. Tento súbor
+ * číta strážny test spolu s `globals.css` — keby ho nečítal, hex by sa len
+ * presunul sem a test by zostal zelený („čo test vyňal z kontroly, nestráži
+ * NIKTO").
+ *
+ * ODKIAĽ SÚ ROZMERY — DVA ZDROJE, ZÁMERNE ZMIEŠANÉ
+ * -----------------------------------------------
+ * TVAR je z `aura-roadmap` (`.panel` / `.panel-head` / `.panel-body` /
+ * `.panel-foot`, `.page-header`, `.tabs`, `.segmented`) — teda hlavička
+ * oddelená vlasom, telo s vlastným odsadením, pätička s akciami vpravo.
+ * PRAVIDLO je miestne: **nadpis panela je POPISOK SEKCIE**, nie titulok.
+ * Predloha mu dáva `--text-lg`; tu má `--ovl-fs-eyebrow`, verzálky
+ * a `--ink2` presne ako `.sec-h h2` v `globals.css`, pretože táto appka už
+ * raz rozhodla, že **dominantou karty je ČÍSLO, nie nadpis** (D2, tri roly
+ * popiskov). Port, ktorý by nadpisy zväčšil, by tú hierarchiu zrušil na
+ * každej obrazovke naraz.
+ *
+ * PRECHODNÝ STAV, KTORÝ NIE JE MOJA CHYBA A NEMÁM HO ZAMLČAŤ
+ * ----------------------------------------------------------
+ * `globals.css` má za novou tokenovou vrstvou ešte staré bloky §1/§2 a tie
+ * v kaskáde VYHRÁVAJÚ (svetlá téma na holom `:root`). Tokeny, ktoré staré
+ * bloky nedefinujú — medzi nimi `--gold-text` — preto dnes nesú TMAVÚ
+ * hodnotu na svetlej ploche: značka v `.pageHeaderMark` bude do zmazania
+ * starých blokov bledá. Zmazanie je práca agenta „prevod hexov" (D145,
+ * poznámka na konci tokenovej vrstvy) a rámec sa medzitým na obrazovkách
+ * nekreslí — obrazovky prechádzajú na primitíva až v V6b. Nepíš to sem
+ * natvrdo ani inou farbou: obchádzka by prežila dlhšie než dôvod pre ňu.
+ *
+ * PREČO TU NIE JE FOKUSOVÝ PRSTENEC
+ * ---------------------------------
+ * `globals.css` má `button:focus-visible` globálne (2 px `--brand`,
+ * `outline-offset: 2px`). Druhá kópia vedľa by sa po prvej úprave rozišla
+ * s ostatnými tlačidlami appky. Prstenec sa tu preto NEDEFINUJE — len sa
+ * nechá miesto: `.tab` má `margin-bottom: -1px` a prstenec s odstupom 2 px
+ * mu nemá čo prekryť.
+ */
+
+/* ═══════════════════════════ 1. Panel (plocha) ════════════════════════════ */
+
+/*
+ * Hodnoty sú tie isté ako `.sec` v `globals.css` (paper2 / vlas / `--r` /
+ * `--shadow`). Je to zámer, nie lenivosť: `Panel` má `.sec` v V6b nahradiť
+ * a prechod obrazovky na primitívum nemá byť vidieť ako zmena plochy, ale
+ * ako zmena toho, odkiaľ plocha pochádza.
+ */
+.panel {
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  /* Bez toho by prilepená hlavička tabuľky v tele vytiekla za zaoblený rám. */
+  overflow: hidden;
+}
+
+/*
+ * Vnorený panel: bez tieňa a o odtieň inak. Tieň vnútri tieňa nerobí hĺbku,
+ * robí špinu — a vnorená plocha sa má od svojho hostiteľa odlíšiť tak, aby
+ * bolo jasné, ktorá je v ktorej.
+ */
+.panelSoft {
+  background: var(--paper3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  padding: var(--ovl-s4) var(--gap);
+  border-bottom: 1px solid var(--line);
+}
+
+/* Ikona pri nadpise je dekorácia — význam nesie slovo vedľa nej. */
+.panelHeadIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--dim);
+}
+
+/* `min-width: 0` — inak dlhý podtitul roztlačí hlavičku a akcie vytlačí von. */
+.panelHeadText {
+  min-width: 0;
+}
+
+/* Popisok sekcie, nie titulok — pozri hlavičku súboru (D2). */
+.panelHeadText h2,
+.panelHeadText h3 {
+  font-size: var(--ovl-fs-eyebrow);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  font-weight: 700;
+}
+
+.panelHeadSub {
+  margin: 2px 0 0;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  line-height: var(--ovl-lh-body);
+}
+
+.panelHeadActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  flex-wrap: wrap;
+}
+
+.panelBody {
+  padding: var(--ovl-s4) var(--gap);
+}
+
+/*
+ * Telo bez odsadenia — tabuľka a graf majú vlastné okraje a druhé odsadenie
+ * navrch im zmenší plochu, na ktorej sa dá čítať.
+ */
+.panelBodyFlush {
+  padding: 0;
+}
+
+.panelFoot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--ovl-s2);
+  flex-wrap: wrap;
+  padding: var(--ovl-s4) var(--gap);
+  border-top: 1px solid var(--line);
+}
+
+/* ════════════════════════ 2. Hlavička stránky ═════════════════════════════ */
+
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ovl-s4);
+  flex-wrap: wrap;
+}
+
+/*
+ * Značka pri nadpise. Zlatá je tu KATEGÓRIA (toto je Aura), nie stav —
+ * stavovú mierku nesú `--st-*` a tá sa značky nedotýka.
+ */
+.pageHeaderMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--gold-fill) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold-line) 26%, transparent);
+  color: var(--gold-text);
+}
+
+.pageHeaderText {
+  min-width: 0;
+}
+
+/* Najtichší z troch popiskov (D2) — hovorí, v ktorej oblasti človek stojí. */
+.eyebrow {
+  margin: 0 0 var(--ovl-s1);
+  font-size: var(--ovl-fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.pageHeaderText h1 {
+  font-size: var(--ovl-fs-h1);
+  line-height: var(--ovl-lh-tight);
+}
+
+/*
+ * `max-width: 68ch` — popis je veta, nie stĺpec. Na 27" monitore by riadok
+ * bez stropu prešiel celú šírku a oko by na jeho konci stratilo začiatok.
+ */
+.pageHeaderDesc {
+  margin: var(--ovl-s1) 0 0;
+  max-width: 68ch;
+  font-size: var(--ovl-fs-small);
+  color: var(--ink2);
+  line-height: var(--ovl-lh-body);
+}
+
+/*
+ * Akcie vpravo, ale `margin-left: auto` a `flex-wrap` — na úzkom okne
+ * spadnú pod nadpis a nič sa neodreže.
+ */
+.pageHeaderActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  flex-wrap: wrap;
+}
+
+/* ═════════════════════════ 3. Záložky (Tabs) ══════════════════════════════ */
+
+.tabs {
+  display: flex;
+  gap: var(--ovl-s1);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  /* Vlas hlavičky prekrýva podčiarknutie vybranej záložky, nie naopak. */
+  margin-bottom: -1px;
+  padding: var(--ovl-s3) var(--ovl-s4);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: var(--ovl-fs-table);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--ovl-dur-hover) var(--ovl-ease-out),
+    border-color var(--ovl-dur-hover) var(--ovl-ease-out);
+}
+
+.tab:hover:not(:disabled) {
+  color: var(--ink2);
+}
+
+.tab:disabled {
+  color: color-mix(in srgb, var(--dim) 60%, transparent);
+  cursor: not-allowed;
+}
+
+/*
+ * VYBRANÁ ZÁLOŽKA — TRI KANÁLY.
+ *
+ * Farba (`--ink` proti `--dim`) je len jeden z nich a sama by nestačila.
+ * Druhý je TVAR: 2 px podčiarknutie, ktoré prežije čiernobielu tlač aj
+ * deuteranopiu. Tretí je ARIA: `aria-selected="true"` na tom istom uzle,
+ * takže čítačka povie „vybrané" bez ohľadu na to, čo vidí oko.
+ *
+ * Podčiarknutie je `--accent`, nie stavová farba: výber NIE JE stav appky,
+ * je to poloha používateľa. Značková farba stav kódovať nesmie (stráži
+ * `paleta.spec.ts`) a tu ani nekóduje.
+ *
+ * Selektor stojí na `[aria-selected='true']`, nie na vlastnej triede —
+ * vzhľad tak nemá ako existovať bez atribútu pre čítačku. Trieda, ktorú by
+ * bolo možné nakresliť samu, je presne tá diera, ktorou tri kanály
+ * v tejto appke už raz vytiekli.
+ */
+.tab[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+/* Počet pri popise. Tabulárne číslice, aby sa dvojmiestne čísla zarovnali. */
+.tabCount {
+  display: inline-block;
+  min-width: 1.25rem;
+  padding: 0 var(--ovl-s1);
+  border-radius: var(--r-pill);
+  background: var(--paper3);
+  border: 1px solid var(--line);
+  color: var(--ink2);
+  font-size: var(--ovl-fs-micro);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+  text-align: center;
+}
+
+/* ══════════════════ 4. Prepínač zobrazenia (Segmented) ═══════════════════ */
+
+/*
+ * Koľajnica je tmavšia/svetlejšia než stránka a vybraný segment sa z nej
+ * ZDVIHNE (`--surface-raised` je v oboch témach svetlejší než `--paper3`).
+ * Keby bol vybraný segment naopak vnorený, prepínač by v tmavej téme
+ * vyzeral ako stlačené tlačidlo v celej svojej šírke.
+ */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--paper3);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-pill);
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  padding: var(--ovl-s1) var(--ovl-s4);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: var(--ovl-fs-small);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--ovl-dur-hover) var(--ovl-ease-out),
+    background-color var(--ovl-dur-hover) var(--ovl-ease-out);
+}
+
+.segment:hover:not(:disabled) {
+  color: var(--ink2);
+}
+
+.segment:disabled {
+  color: color-mix(in srgb, var(--dim) 60%, transparent);
+  cursor: not-allowed;
+}
+
+/*
+ * ZVOLENÝ SEGMENT — TRI KANÁLY, to isté pravidlo ako pri záložke.
+ *
+ * Farba + TVAR (zdvihnutá plocha s vlastným okrajom, teda rozdiel viditeľný
+ * aj bez farby) + ARIA (`aria-checked="true"`). Glyf sa tu zámerne NEKRESLÍ:
+ * značka, ktorá pri prepnutí pribudne a zmizne, mení šírku segmentu a celý
+ * prepínač 7/30/90 pri každom kliknutí poskočí. Túto istú otázku appka už raz
+ * riešila (`NewDiscount.tsx`, nález P3) a rozhodla ju rovnako — nesúci kanál
+ * navyše je ARIA, nie glyf.
+ */
+.segment[aria-checked='true'] {
+  background: var(--surface-raised);
+  border-color: var(--line2);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+/* Menší prepínač do hlavičky panela, kde vedľa neho stojí popisok sekcie. */
+.segmentedSm .segment {
+  padding: 2px var(--ovl-s3);
+  font-size: var(--ovl-fs-micro);
+}
+
+/* ═════════════════════════════ 5. Pohyb ═══════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  .segment {
+    transition: none;
+  }
+}

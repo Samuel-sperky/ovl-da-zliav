@@ -84,13 +84,18 @@ function resolve(body: string, token: string, depth = 0): string {
   const m = value.match(/^var\((--[a-z0-9-]+)\)$/i);
   if (m) return resolve(body, m[1]!, depth + 1);
   if (/^#[0-9a-f]{3,8}$/i.test(value)) return value;
-  const root = block(':root {', '--st-critical');
+  const root = block(':root[data-theme="light"] {', '--st-critical');
   if (root !== body) return resolve(root, token, depth + 1);
   throw new Error(`token ${token} nie je hex: ${value}`);
 }
 
-const SVETLA = block(':root {', '--st-critical');
-const TMAVA = block(":root[data-theme='dark'] {");
+/* Po tokenovej vrstve V6a (D145) je na holom `:root` TMAVÁ téma; svetlá je
+   prepis pod `:root[data-theme="light"]`. Kotva tmavej ukazovala do V6a na
+   `:root[data-theme='dark']` — to je blok, ktorý prevod hexov ZMAZAL ako
+   duplikát, takže by dnes našla KISS tiene a padla na chybajúcom `--accent`.
+   Pozri paleta.spec.ts. */
+const SVETLA = block(':root[data-theme="light"] {', '--st-critical:');
+const TMAVA = block(':root {', '--st-critical:');
 
 const TEMY = [
   { nazov: 'svetlá', body: SVETLA },

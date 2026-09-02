@@ -37,13 +37,32 @@ function lin(c: number): number {
   return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
 }
 
+/**
+ * WCAG relatívna luminancia. Vstup je 0–255 a NEMUSÍ byť celé číslo:
+ * `dizajn-kontrast.spec.ts` sem posiela farby vyhodnotené z `color-mix()`
+ * a poskladané cez alfu, ktoré celé čísla nie sú. Zaokrúhľovať ich by
+ * znamenalo merať niečo iné, než prehliadač nakreslí.
+ */
 function luminance(rgb: Rgb): number {
   return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
 }
 
+/**
+ * Kontrastný pomer dvoch NEPRIESVITNÝCH farieb v RGB.
+ *
+ * Existuje preto, že `contrast()` berie hex a hex sa nedá napísať pre farbu,
+ * ktorá vznikla z `color-mix()` alebo z prekrytia priesvitnej plochy. Kým to
+ * tu nebolo, druhý merací test by si musel vzorec napísať druhýkrát — a dve
+ * kópie vzorca sú presne to, na čo tento repo doplatil pri `MAX_DAILY_WRITE_BUDGET`.
+ * `contrast()` je odteraz len jeho hex fasáda.
+ */
+export function contrastRgb(fg: Rgb, bg: Rgb): number {
+  const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
+  return (hi! + 0.05) / (lo! + 0.05);
+}
+
 export function contrast(fg: string, bg: string): number {
-  const [hi, lo] = [luminance(hexToRgb(fg)), luminance(hexToRgb(bg))].sort((a, b) => b - a);
-  return (hi + 0.05) / (lo + 0.05);
+  return contrastRgb(hexToRgb(fg), hexToRgb(bg));
 }
 
 /* ── Simulácia farbosleposti ──────────────────────────────────────────── */

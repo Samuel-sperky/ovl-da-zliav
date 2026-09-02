@@ -45,7 +45,7 @@
  *     `emptyStateFor()` v jednom `description` 234 znakov v štyroch vetách,
  *     z toho dva pokyny v druhej osobe („Uvoľnite niektorú podmienku vľavo",
  *     „počkajte, kým sa katalóg dočíta"). Kontrakt UI bod 11 hovorí „jedna
- *     veta + jedno tlačidlo" a `ui/EmptyState.tsx` to má v hlavičke, bod 2.
+ *     veta + jedno tlačidlo" a `states/EmptyState.tsx` to má v hlavičke, bod 2.
  *     Práve tu sa to smie TICHO pokaziť: `description` je `ReactNode`, takže
  *     typ o dĺžke ani o tóne nepovie nič a odstavec sa nazbiera po vetách.
  *     Veta o tom, že zoznam je NEÚPLNÝ, zostať musí — bez nej si používateľ

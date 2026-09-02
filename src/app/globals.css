@@ -1,3 +1,489 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   TOKENOVÁ VRSTVA (V6a, D130 · D131 · D145 · D147, 2. 9. 2026)
+
+   Toto je JEDINÉ miesto v repe, kde smie stáť surová farba. Všetko pod ňou —
+   `.ovl-*`, vrstva V3, KISS aj `*.module.css` — berie farbu, rozmer a čas
+   výhradne odtiaľto. Dôvod nie je poriadkumilovnosť: appka mala 240 definícií
+   premenných a 116 surových hexov v pravidlách, takže „zmeň odtieň chyby"
+   znamenalo grep a nádej. Teraz to znamená jeden riadok.
+
+   ── PORADIE BLOKOV SA NEPREHADZUJE ──────────────────────────────────────
+     T1  paleta a invarianty      (`:root`)                    @tokens:invariant
+     T2  TMAVÁ téma               (`:root`)                    @tokens:dark
+     T3  SVETLÁ téma              (`:root[data-theme="light"]`) @tokens:light
+     T4  tokeny grafov            (invariant + obe témy)
+     T5  derivované tokeny        (`:root`)                    @tokens:derived
+
+   T2 je na HOLOM `:root`, pretože TMAVÁ je predvolená (D131, D145). Keby
+   tmavú niesol atribút, každý načítaný dokument by blikol svetlou, kým sa
+   atribút nestihne nastaviť. T3 stojí ZA T2, takže `data-theme="light"`
+   vyhráva; keby sa poradie prehodilo, svetlá téma by neexistovala.
+   T5 stojí ZA obe témy, pretože jeho hodnoty sú vzorce nad tokenmi tém —
+   pred nimi by miešal prázdno.
+
+   ── ČO JE TOKEN A ČO NIE ─────────────────────────────────────────────────
+   Token je farba, rozmer alebo čas, ktorý má zmysel na VIAC než jednej
+   obrazovke. Skratka jednej obrazovky do tejto vrstvy nepatrí — patrí do
+   `*.module.css` vedľa svojho komponentu (D143).
+
+   ── PRAVIDLO PLOCHA vs. TEXT (prevzaté z aura-roadmap) ───────────────────
+   Výplň na svojom vlastnom tóne NEDOSAHUJE 4,5 : 1 pre malé písmo, takže
+   farba má DVA tokeny, nie jeden:
+     · plocha  — `--gold-fill`, `--st-critical`, `--brand-fill`, `--seq-teal-*`
+     · text    — `--gold-text`, `--st-critical-ink`, `--accent`
+     · ink NA ploche — `--on-gold`, `--on-brand-fill`, `--on-st-critical`,
+                       `--accent-on`, `--production-fg`, `--selbar-fg`
+   Kto použije plochový token ako farbu textu, vyrobí nečitateľný popis a
+   žiadny linter ho nezastaví — zastaví ho len tento zoznam.
+
+   ── KRITÉRIUM K2, MECHANICKY ─────────────────────────────────────────────
+   Strážny test (D132, D144) číta značky `@tokens:*` v komentároch nad blokmi:
+     množina názvov v `@tokens:dark` == množina názvov v `@tokens:light`
+     (vrátane blokov grafov v T4), a názov z `@tokens:invariant`
+     ani z `@tokens:derived` sa v žiadnej téme NEOBJAVÍ.
+   Invariantný token má hodnotu v oboch témach tým, že sa v druhej neprepisuje
+   — `:root[data-theme="light"]` je ten istý element ako `:root`.
+
+   ── rgba() (D147) ────────────────────────────────────────────────────────
+   `rgba()` smie stáť VÝHRADNE v tejto vrstve a len v týchto tokenoch:
+     `--overlay` · `--shadow` · `--shadow-selbar` · `--shadow-drawer` ·
+     `--ovl-shadow` · `--ovl-shadow-raised` · `--kiss-shadow-sm` ·
+     `--kiss-shadow-md`
+   Nikde inde, v žiadnej forme — ani ako `rgb(0 0 0 / 0.35)`, čo je tá istá
+   vec inak napísaná. Tvrdenie „appka má 0 rgba()" bolo pred V6a pravopis,
+   nie fakt: `rgb(… / …)` tu bolo 19-krát. Tónuje sa výhradne
+   `color-mix(in srgb, var(--token) N%, transparent)`.
+
+   ── DVE ROVNAKÉ HODNOTY, KTORÉ SA NESMÚ ZLÚČIŤ ───────────────────────────
+   `--mask-opaque` a `--mix-shade` sú obe `#000000` a je to náhoda, nie
+   duplikát: prvé je nepriehľadnosť masky (nie farba), druhé je partner
+   miešania „stmav výplň". Keď sa jedno pohne, druhé sa hýbať NESMIE.
+   To isté platí pre svetlé `--brand-tint` a `--seq-teal-1` (obe `#e3f1f1`,
+   ale jedno je značková tinta a druhé prvý krok mierky).
+
+   ── STAV NIE JE NIKDY LEN FARBA ──────────────────────────────────────────
+   Tri kanály (farba + značka + slovo) platia nad touto vrstvou nezmenené.
+   Odstup farieb je spodná hranica, nie povolenie použiť farbu samu. Teal
+   a gold nekódujú stav; `--chart-1` je zlatá preto, že je to KATEGÓRIA
+   (rad v grafe), nie stav.
+
+   ── PREVOD JE DOKONČENÝ (2. 9. 2026) ─────────────────────────────────────
+   Do tohto dňa stáli ZA touto vrstvou jej duplikáty a v kaskáde ju prebíjali,
+   takže appka sa kreslila svetlá-predvolená a D145 NEPLATILO: historické §1
+   a §2 (paleta rodiny `--aura-*` a celá téma napísaná TRIKRÁT — svetlá na
+   holom `:root`, tmavá v `@media` a tá istá tmavá znovu pod atribútom),
+   tokeny KISS vrstvy (§13) a tri kópie geometrie kostry. Všetky sú zmazané
+   a táto vrstva je jediný zdroj farby, rozmeru aj času.
+   Spolu s tým sa zmenili dve veci mimo tohto súboru — kto tú zmenu vracia,
+   musí vrátiť aj ich:
+     1. `src/components/layout/theme.ts` — voľba „systém" už atribút NEMAŽE.
+        Po D145 je holý `:root` tmavý, takže zmazaný atribút znamená vždy
+        tmavú; bootstrap preto pri systémovo svetlej stampuje `light`.
+     2. `test/unit/{paleta,grafy-paleta,globals-vlna3-chyby}.spec.ts` — kotvy
+        tmavej témy ukazovali na zmazané bloky. Tmavá je od V6a deklarovaná
+        RAZ, takže tvrdenia „obe deklarácie hovoria to isté" zanikli spolu
+        s druhou deklaráciou.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── T1 · PALETA A INVARIANTY — @tokens:invariant ─────────────────────────
+   Tokeny, ktoré NEMAJÚ tému: geometria, čas, typografia a tie farby, ktoré
+   sú v oboch témach tá istá vec. */
+:root {
+  /* Značkové PLOCHY. Sú tmavé/svietivé samy o sebe, takže ich ink je v oboch
+     témach ten istý — meniť ich s témou by značku roztrieštilo.
+     Merané: #ffffff na #03797e = 5,20 : 1 · na #025c60 = 7,77 : 1 ·
+     #1a1410 na #d8b878 = 9,59 : 1 · na #c9a869 = 8,07 : 1. */
+  --brand-fill: #03797e;
+  --brand-fill-hover: #025c60;
+  --on-brand-fill: #ffffff;
+  --gold-fill: #d8b878;
+  --gold-line: #c9a869;
+  --on-gold: #1a1410;
+
+  /* Nepriehľadnosť masky — NIE farba. `mask-image` číta svetlosť, takže
+     `#000000` tu znamená „túto časť vrstvy nechaj". */
+  --mask-opaque: #000000;
+  /* Partner miešania pre „stmav výplň pri hoveri". Pozri --st-critical-press. */
+  --mix-shade: #000000;
+
+  /* Typografia — Inter s tabulárnymi číslicami. 'Inter Variable' je rodina
+     z @fontsource-variable/inter, ktorý sa načítava v src/app/layout.tsx:
+     písmo sa DODÁVA S APPKOU, nesťahuje sa zo siete (I6). Názov rodiny musí
+     sedieť presne — 'Inter var' nie je názov žiadnej rodiny a mlčky padal na
+     Segoe UI. */
+  --ovl-font:
+    'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --ovl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* TRI ROLY POPISKOV (D2). Popisok sekcie, popisok dlaždice a hlavička
+     stĺpca sú tri RÔZNE veci a musia sa dať rozoznať bez čítania. Kto pridá
+     štvrtú veľkosť popisku, hierarchiu zase zruší. `--ovl-fs-label-tile`
+     a `--ovl-fs-micro` majú zámerne tú istú hodnotu pri rôznej role. */
+  --ovl-fs-eyebrow: 0.6875rem;
+  --ovl-fs-label-tile: 0.75rem;
+  --ovl-fs-micro: 0.75rem;
+  --ovl-fs-small: 0.8125rem;
+  --ovl-fs-table: 0.875rem;
+  --ovl-fs-body: 0.9375rem;
+  --ovl-fs-h3: 1rem;
+  --ovl-fs-h2: 1.125rem;
+  --ovl-fs-h1: 1.5rem;
+  --ovl-fs-stat: 1.75rem;
+  --ovl-lh-tight: 1.25;
+  --ovl-lh-body: 1.5;
+
+  /* Rozostupy */
+  --ovl-s1: 0.25rem;
+  --ovl-s2: 0.375rem;
+  --ovl-s3: 0.625rem;
+  --ovl-s4: 0.875rem;
+  --ovl-s5: 1.25rem;
+  --ovl-s6: 1.75rem;
+
+  /* Rádiusy. Sú tu TRI prekrývajúce sa mierky (`--r*` z V3, `--ovl-radius*`
+     z historickej vrstvy) a zjednotiť ich znamená prekresliť 4055 riadkov —
+     preto to nie je práca V6a. Nové komponenty píšu proti `--r-sm/md/lg`. */
+  --ovl-radius: 10px;
+  --ovl-radius-sm: 6px;
+  --ovl-radius-pill: 999px;
+  --r: 9px;
+  --r-pill: 99px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+
+  /* Geometria kostry. Chróm je JEDEN vodorovný riadok; kto pridá druhý pás,
+     vráti appku tam, odkiaľ odišla. */
+  --w: 1440px;
+  --ovl-max-wide: 1180px;
+  --hdr-h: 56px;
+  --side-w: 240px;
+  --topbar-h: 44px;
+  --ovl-statusbar-h: 32px;
+  --ovl-chrome-h: calc(var(--hdr-h) + var(--ovl-statusbar-h));
+  /* Jeden rozostupový rytmus pre celú obsahovú plochu — karty sa zarovnávajú
+     preto, že všetky používajú tento krok. */
+  --gap: 16px;
+  /* Koľko sa na dolnej hrane posuvnej plochy stmieva do stratena. Pol riadku
+     tabuľky: dosť, aby bolo vidieť, že text nekončí, málo, aby zjedol riadok. */
+  --fade: 26px;
+  --ovl-meter-h: 4px;
+  --ovl-meter-h-lg: 6px;
+
+  /* Časy a krivka */
+  --ovl-dur-in: 180ms;
+  --ovl-dur-card: 160ms;
+  --ovl-dur-badge: 200ms;
+  --ovl-dur-hover: 120ms;
+  --ovl-dur-grow: 320ms;
+  --ovl-ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --kiss-transition: 180ms ease;
+  --kiss-view-in: 220ms ease;
+}
+
+/* ── T2 · TOKENY — TMAVÁ TÉMA — @tokens:dark ──────────────────────────────
+   PREDVOLENÁ téma (D131, D145), preto holý `:root`. Hodnoty nie sú nové:
+   sú to zmerané hodnoty tmavej témy tejto appky (paleta.spec.ts,
+   globals-vlna3-chyby.spec.ts), len presunuté z media query na predvolenú
+   vetvu. */
+:root {
+  color-scheme: dark;
+
+  /* Značkový teal. `--teal` svieti, `--deep` je jeho tmavý brat. */
+  --teal: #05bcc4;
+  --deep: #03797e;
+  --teal3: #7fd0d4;
+  /* Zlatá ako TEXT. Na tmavých plochách je svietivá zlatá čitateľná
+     (9,93 : 1 na --paper, 9,33 : 1 na --paper2), takže sa rovná ploche. */
+  --gold-text: #d8b878;
+  --gold2: #c9a869;
+  --accent: var(--teal);
+  --accent-on: #08201f;
+
+  /* Plochy a písmo. `--dim` je NAJSVETLEJŠIA legálna farba textu
+     (5,95 : 1 na --paper, 5,59 : 1 na --paper2) — nikdy ju nezosvetľuj. */
+  --paper: #101114;
+  --paper2: #17181c;
+  --paper3: #1e2026;
+  --ink: #eceef2;
+  --ink2: #bfc4cd;
+  --dim: #8b919b;
+  --line: #282a31;
+  --line2: #3c3e43;
+  --line-strong: var(--line2);
+  /* DRÁHA MERACIEHO PRÚŽKU. Nesie mierku: bez nej je „96/240" plný prúžok
+     a nie dve pätiny. Musí byť vidieť na karte aj na stránke. Tmavá mala
+     kedysi #212329 = 1,13 : 1 na karte a na snímke z nej nezostalo nič;
+     #3a3d45 je 1,60 : 1 na karte a 1,69 : 1 na stránke. */
+  --track: #3a3d45;
+  --sel: #152a2a;
+  --barfill: var(--teal);
+  --surface: color-mix(in srgb, var(--paper2) 62%, transparent);
+  --surface-solid: var(--paper2);
+  --surface-raised: #22242a;
+  --brand: var(--teal);
+  --brand-tint: color-mix(in srgb, var(--teal) 14%, transparent);
+
+  /* Spodná lišta výberu je tmavá v OBOCH témach — je to plávajúca akcia,
+     nie plocha stránky. `--selbar-fg-dim` je jej tichší text (12,53 : 1). */
+  --selbar-bg: #22242a;
+  --selbar-fg: #f2f3f5;
+  --selbar-fg-dim: #dfe9e8;
+
+  /* STAVOVÁ MIERKA. Nie je to paleta „červená/oranžová/zelená", ale päť
+     rozlíšiteľných stavov, zmeraných aj pri deuteranopii, protanopii
+     a tritanopii (paleta.spec.ts, ΔE ≥ 8). Vyčerpaný denný rozpočet je
+     NEUTRÁLNY (`--st-idle`), nie červený: je to informácia o rýchlosti,
+     nie chyba.
+     PLNÝ TÓN NIE JE FARBA TEXTU (zmerané 2. 9. 2026, `dizajn-kontrast.spec.ts`).
+     `--st-good` mal na `--surface-raised` 4,08 : 1 a na `--paper3` 4,29 : 1,
+     `--st-idle` 3,95 a 4,15 : 1 — a `paleta.spec.ts` ich merala LEN na
+     `--paper2`, kde tesne prešli (4,67 a 4,52), takže o tom nikto nevedel.
+     Hodnoty sa NEHÝBALI: zosvetlenie „v poriadku" a „nečinný" ich pod
+     tritanopiou a protanopiou zrazilo pod ΔE 8 od „prebieha" a „bráni", teda
+     dva rôzne stavy by časť ľudí videla ako jeden. Namiesto tónu sa pohlo to,
+     ČO KRESLÍ SLOVO: `.state.*` a `.sig.*` berú od 2. 9. 2026 `--st-*-ink`.
+     Plný tón zostáva pre okraje, pruhy, výplne a ikonové marky. */
+  --st-critical: #fa8076;
+  --st-attention: #eab254;
+  --st-progress: #8e83e8;
+  --st-good: #3d9448;
+  --st-idle: #7b818a;
+  /* Text NA plnej výplni --st-critical (potvrdzovacie tlačidlo zápisu,
+     panic). Biele písmo, ktoré tam stálo natvrdo, má na #fa8076 2,4 : 1;
+     tmavý ink má 7,12 : 1. */
+  --on-st-critical: #16181c;
+  /* Text stavu na TINTE: čistý stavový tón má na 14 % tinte ~4,1 : 1, čo pri
+     13 px bold nestačí. Mieša sa preto k --ink a dostane ≥ 4,5 : 1 na tinte
+     aj na papieri. Plný tón zostáva nedotknutý pre okraje, pruhy a marky. */
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
+
+  /* Pruh PRODUKCIA (D6) — VŽDY plný a nepriesvitný, jeho čitateľnosť je
+     bezpečnostná funkcia, nie estetika (6,06 : 1). */
+  --production-bg: #b3261e;
+  --production-fg: #fff4f2;
+
+  /* Sekvenčná teal rampa (hĺbka zľavy) — monotónna vo svetlosti. Nekóduje
+     stav, len magnitúdu. */
+  --seq-teal-1: #12312f;
+  --seq-teal-2: #12504f;
+  --seq-teal-3: #0a7076;
+  --seq-teal-4: #049199;
+  --seq-teal-5: var(--teal);
+
+  /* Závoje a tiene — jediné miesto s rgba() (D147). `--shadow` a
+     `--ovl-shadow` majú v tmavej tú istú hodnotu, ale iných volajúcich;
+     zlúčenie je práca pre obrazovky, nie pre tokeny. */
+  --overlay: rgba(0, 0, 0, 0.6);
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  --shadow-selbar: 0 -2px 14px rgba(0, 0, 0, 0.42);
+  --shadow-drawer: -6px 0 20px rgba(0, 0, 0, 0.5);
+  --ovl-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  --ovl-shadow-raised: 0 10px 30px -18px rgba(0, 0, 0, 0.8);
+  /* V tmavej nie je „malý tieň" tieň, ale vlas — tieň na tmavom nič nepovie. */
+  --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
+  --kiss-shadow-md: 0 10px 30px rgba(0, 0, 0, 0.35);
+  /* Prsteň fokusu KISS vrstvy. V tmavej je hustejší (18 % proti 14 %) — na
+     tmavom podklade sa slabší prsteň stratí a fokus prestane byť vidieť. */
+  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
+
+  /* ZÁVOJ RODINY (`body::before`). Je to DEKORÁCIA, ale kreslí sa POD text,
+     takže vstupuje do kontrastu — a preto je to token a nie percento
+     zapísané v gradiente: `dizajn-kontrast.spec.ts` si jeho silu prečíta
+     a meria text proti papieru, ktorý je ním zafarbený.
+     V tmavej téme závoj papier ZOSVETĽUJE a text na ňom je svetlý, takže
+     10 % / 8 % ukrojí z pomerov málo (najhoršie −13 %). V svetlej ho
+     ZTMAVUJE pod tmavým textom, kde je to ten istý smer ako u textu — pozri
+     hodnoty v T3, sú polovičné. Silnejší závoj = červený kontrastný test. */
+  --veil-brand: color-mix(in oklab, var(--brand) 10%, transparent);
+  --veil-gold: color-mix(in oklab, var(--gold-text) 8%, transparent);
+}
+
+/* ── T3 · TOKENY — SVETLÁ TÉMA — @tokens:light ────────────────────────────
+   Prepis TÝCH ISTÝCH názvov ako T2. Stojí za T2, takže atribút vyhráva.
+   Základňa je NEUTRÁLNA (R5): tónovaná doružova (#f7f5f7 / #e3dde4) robila
+   jediný akcent na nej špinavým. Hodnoty sú zmerané, nie odhadnuté. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --teal: #05bcc4;
+  /* Značkový teal ako TEXT (`--accent`, `--brand`, `--barfill`). Do
+     2. 9. 2026 tu stálo #03797e — tá istá hodnota ako plocha `--brand-fill`.
+     Na `--paper2` mala 5,20 : 1, ale na `--paper3` (bočný rail) 4,48 : 1
+     a na vlastnej tinte `--brand-tint` tiež 4,48 : 1, takže naklikaný chip
+     `.ovl-chip[aria-pressed='true']` bol pod hranicou. #007278 dáva 4,74 : 1
+     na tinte a 4,75 : 1 na raile. PLOCHA `--brand-fill` zostáva #03797e
+     nedotknutá — je invariantná a ink na nej sa nemeria proti tomuto tokenu
+     (pravidlo PLOCHA vs. TEXT v hlavičke). */
+  --deep: #007278;
+  --teal3: #7fd0d4;
+  /* Zlatá ako TEXT: svietivá #d8b878 má na bielej 1,9 : 1, teda nečitateľná.
+     Zlatá pre TEXT je preto tmavá (5,17 : 1 na --paper2, 4,79 : 1 na
+     --paper), kým `--gold-fill` zostáva svietivá v oboch témach. Presne toto
+     rozdelenie je dôvod, prečo svetlá téma značku nezničí.
+     Do 2. 9. 2026 to bolo #8a6417; na `--paper3` malo 4,62 : 1, ale na
+     vlastnej 14 % tinte zlatej plochy (`.pageHeaderMark` vo `frame.module.css`)
+     len 4,33 : 1 — a to je jediné miesto, kde sa tento token naozaj kreslí
+     na zlatom. */
+  --gold-text: #825c0a;
+  --gold2: #a8853c;
+  --accent: var(--deep);
+  --accent-on: #ffffff;
+
+  --paper: #f5f6f7;
+  --paper2: #ffffff;
+  --paper3: #edeef1;
+  --ink: #16181c;
+  --ink2: #3f444c;
+  /* Najsvetlejšia legálna farba textu: 5,13 : 1 na --paper, 5,55 : 1 na
+     --paper2, 4,79 : 1 na --paper3 a 4,80 : 1 na papieri pod závojom.
+     Nikdy ju nezosvetľuj — a nezosilňuj ani závoj: pri jeho pôvodných 10 %
+     mala táto farba 4,49 : 1, teda POD hranicou. */
+  --dim: #63696f;
+  --line: #dfe1e6;
+  --line2: #c7c9cd;
+  --line-strong: var(--line2);
+  /* 1,22 : 1 na bielej — dosť, aby dráha nesla mierku, málo, aby súperila. */
+  --track: #e7e9ed;
+  --sel: #eef9f9;
+  --barfill: var(--deep);
+  --surface: color-mix(in srgb, var(--paper2) 72%, transparent);
+  --surface-solid: var(--paper2);
+  --surface-raised: var(--paper2);
+  --brand: var(--deep);
+  /* Zámerne tá istá hodnota ako `--seq-teal-1`, ale iná rola — nezlučovať. */
+  --brand-tint: #e3f1f1;
+
+  --selbar-bg: #16181c;
+  --selbar-fg: #f2f3f5;
+  --selbar-fg-dim: #dfe9e8;
+
+  /* #d13228 sa NEHÝBE, aj keď ako TEXT nestačí: na `--paper3` má 4,31 : 1
+     a na papieri pod závojom 4,02 : 1. Stmavenie neprichádza do úvahy —
+     pod protanopiou by sa dostalo na ΔE 6,3 od „obmedzuje" a na 7,4 od
+     „v poriadku", čiže tri rôzne stavy by časť ľudí videla ako jednu farbu
+     (paleta.spec.ts). Slovo stavu preto kreslí `--st-critical-ink`
+     (7,09 : 1 na papieri) a plný tón zostáva výplňou, okrajom a markou. */
+  --st-critical: #d13228;
+  --st-attention: #6b4300;
+  --st-progress: #2f2585;
+  --st-good: #1a5e33;
+  --st-idle: #4f555c;
+  --on-st-critical: #ffffff;
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 70%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 70%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 70%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 70%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 70%, var(--ink));
+
+  --production-bg: #b3261e;
+  --production-fg: #ffffff;
+
+  --seq-teal-1: #e3f1f1;
+  --seq-teal-2: #a8d9da;
+  --seq-teal-3: #67bcbf;
+  --seq-teal-4: #2a9aa0;
+  --seq-teal-5: var(--deep);
+
+  --overlay: rgba(16, 18, 20, 0.45);
+  --shadow: 0 1px 2px rgba(22, 24, 28, 0.07);
+  --shadow-selbar: 0 -2px 14px rgba(0, 0, 0, 0.18);
+  --shadow-drawer: -6px 0 20px rgba(0, 0, 0, 0.1);
+  --ovl-shadow: 0 1px 2px rgba(22, 24, 28, 0.05), 0 1px 3px rgba(22, 24, 28, 0.07);
+  --ovl-shadow-raised: 0 10px 30px -16px rgba(22, 24, 28, 0.22);
+  --kiss-shadow-sm: 0 1px 2px rgba(19, 27, 26, 0.04);
+  --kiss-shadow-md: 0 10px 30px rgba(19, 27, 26, 0.07);
+  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent);
+
+  /* POLOVIČNÝ závoj (5 % / 4 % proti 10 % / 8 % v tmavej). Nie je to vkus:
+     na svetlom papieri závoj SVETLOSŤ ZNIŽUJE, teda ide tým istým smerom ako
+     tmavý text, a pri 10 % zrazil „bráni" (#d13228) na 4,04 : 1, tlmený text
+     na 4,49 : 1 a značkový teal na 4,20 : 1 — všetko pod hranicou.
+     Hodnoty závoja sa určili tak, aby padla DEKORÁCIA a nie farby, ktoré
+     nesú význam: stavová červená sa nesmie odfarbovať preto, že pod ňou leží
+     ozdobný gradient. Pri 5 % / 4 % prejde celá paleta (najhoršie 4,53 : 1)
+     a závoj je stále vidieť. */
+  --veil-brand: color-mix(in oklab, var(--brand) 5%, transparent);
+  --veil-gold: color-mix(in oklab, var(--gold-text) 4%, transparent);
+}
+
+/* ── T4 · TOKENY GRAFOV ───────────────────────────────────────────────────
+   Kategorická paleta pre `ChartCard` (D135). Osem radov je strop: deviaty
+   rad sa už nedá odlíšiť ani v legende. Farba tu značí KATEGÓRIU, nie stav —
+   preto smie byť medzi nimi zlatá, ktorá stav kódovať nesmie.
+   Medzera v dátach zostáva medzerou: šrafovaná plocha a pomlčka znamenajú
+   „toto sme nemerali" (I11) a žiadny token to nesmie prekresliť na nulu. */
+
+/* @tokens:invariant — výška grafu je rozmer, nie farba. `clamp()` drží graf
+   čitateľný na 13" aj na 27": nikdy nižší než 220 px (inak sa os stlačí do
+   nečitateľna) a nikdy vyšší než 380 px (inak vytlačí obsah pod sebou). */
+:root {
+  --chart-h: clamp(220px, 34vh, 380px);
+  --chart-h-sm: clamp(180px, 28vh, 300px);
+}
+
+/* @tokens:dark — na tmavej karte (#17181c) má každý rad 6,84–10,40 : 1,
+   najbližší pár ΔE76 = 11,3. */
+:root {
+  --chart-1: #d8b878;
+  --chart-2: #4dd9df;
+  --chart-3: #8a9cf0;
+  --chart-4: #ec988f;
+  --chart-5: #7fd6b4;
+  --chart-6: #d29ff0;
+  --chart-7: #ecba6c;
+  --chart-8: #74b0e8;
+}
+
+/* @tokens:light — svetlé rady NIE SÚ zosvetlené tmavé. Rovnaké tóny by na
+   bielej karte mali 2,0–3,6 : 1, teda pod hranicou 3 : 1 aj pre plnú výplň
+   a graf by zmizol. Tieto sú stmavené na 4,44–5,69 : 1 (najbližší pár
+   ΔE76 = 15,6), takže rad znesie aj farebný popis. */
+:root[data-theme="light"] {
+  --chart-1: #9a6f1e;
+  --chart-2: #0b7f83;
+  --chart-3: #4a5fc0;
+  --chart-4: #c2564b;
+  --chart-5: #26805c;
+  --chart-6: #9a5cc2;
+  --chart-7: #b0651a;
+  --chart-8: #3272ad;
+}
+
+/* ── T5 · DERIVOVANÉ TOKENY — @tokens:derived ─────────────────────────────
+   Jedno pravidlo pre obe témy. Tinty a okraje sa miešajú proti
+   NEPRIESVITNÉMU povrchu, aby badge a chybové panely zostali plné — ich
+   čitateľnosť je bezpečnostná funkcia (D6), nie estetika. */
+:root {
+  --st-critical-tint: color-mix(in oklab, var(--st-critical) 14%, var(--surface-solid));
+  --st-critical-edge: color-mix(in oklab, var(--st-critical) 42%, var(--surface-solid));
+  --st-attention-tint: color-mix(in oklab, var(--st-attention) 14%, var(--surface-solid));
+  --st-attention-edge: color-mix(in oklab, var(--st-attention) 42%, var(--surface-solid));
+  --st-progress-tint: color-mix(in oklab, var(--st-progress) 14%, var(--surface-solid));
+  --st-progress-edge: color-mix(in oklab, var(--st-progress) 42%, var(--surface-solid));
+  --st-good-tint: color-mix(in oklab, var(--st-good) 14%, var(--surface-solid));
+  --st-good-edge: color-mix(in oklab, var(--st-good) 42%, var(--surface-solid));
+  --st-idle-tint: color-mix(in oklab, var(--st-idle) 12%, var(--surface-solid));
+  --st-idle-edge: color-mix(in oklab, var(--st-idle) 36%, var(--surface-solid));
+
+  /* Solid červená je vyhradená potvrdzovacím tlačidlám zápisu a panic
+     buttonu; toto je jej stlačený stav. */
+  --st-critical-press: color-mix(in oklab, var(--st-critical) 82%, var(--mix-shade));
+
+  /* Vlas pod pruhom PRODUKCIA a plocha pod jeho `<code>`. */
+  --gold-hairline: color-mix(in oklab, var(--gold-line) 70%, transparent);
+  --production-code-bg: color-mix(in srgb, var(--production-fg) 16%, transparent);
+
+  /* Tichá akcia v lište výberu: lišta je tmavá v oboch témach, takže sa
+     okraj aj hover miešajú z jej vlastného písma, nie z farby stránky. */
+  --selbar-line: color-mix(in srgb, var(--selbar-fg) 22%, transparent);
+  --selbar-hover: color-mix(in srgb, var(--selbar-fg) 8%, transparent);
+}
+
 /*
  * Aura Zľavy — dizajnový systém V3 (design/v3/_v3.css + design/v3/ARCHITEKTURA.md).
  *
@@ -8,15 +494,18 @@
  *   · §14     vrstva V3 — prenos `design/v3/_v3.css`: `.hdr`, `.lvl-1/2/3`,
  *             `.sec`, `.bar`, `.tbl`, `.selbar`, `.btn`, `.chip`, … Nové
  *             obrazovky píšu VÝHRADNE proti nej.
- * Obe vrstvy zdieľajú JEDEN tokenový základ (§2), takže téma sa prepína raz a
- * platí všade. Preto tu nie sú dve palety ani dva prepínače.
+ * Obe vrstvy berú farbu, rozmer aj čas z JEDNÉHO základu — tokenovej vrstvy
+ * T1–T5 na začiatku súboru (D130). Preto tu nie sú dve palety ani dva
+ * prepínače a téma sa prepína raz.
  *
- * TÉMA: SVETLÁ je predvolená a stojí na HOLOM `:root`. Tmavá je deklarovaná
- * dvakrát — pod `@media (prefers-color-scheme: dark)` s guardom
- * `:root:not([data-theme="light"])` (systémová voľba) a pod
- * `:root[data-theme="dark"]` (ručný prepínač). Guard je tam preto, aby ručne
- * zvolená svetlá téma neprehrala so systémovou tmavou. Žiadna farba nesmie mať
- * jedinú definíciu vnútri media query — inak by v druhej téme chýbala.
+ * TÉMA SA TU UŽ NEDEKLARUJE (V6a, 2. 9. 2026). Do tohto dátumu tu stála celá
+ * paleta TRIKRÁT — svetlá na holom `:root`, tmavá v
+ * `@media (prefers-color-scheme: dark)` s guardom `:not([data-theme=light])`
+ * a tá istá tmavá znovu pod `:root[data-theme="dark"]`. Tri kópie mali dôvod
+ * (žiadna farba nesmie mať jedinú definíciu v media query), ale po tokenovej
+ * vrstve už majú len následok: stáli ZA ňou, takže ju v kaskáde prebíjali
+ * a D145 (tmavá je predvolená) neplatilo. Sú zmazané. Kto sem paletu vráti,
+ * vráti aj tri kópie tej istej hodnoty.
  *
  * Bezpečnostné výnimky z „priehľadnosti" — VŽDY plné a nepriesvitné:
  *   · pruh PRODUKCIA (D6) · stavové badge · chybové panely (`.ovl-note*`).
@@ -34,327 +523,20 @@
  */
 
 /* ══════════════════════════════════════════════════════════════════════════
-   1. Primitívy rodiny (nezávislé od témy)
+   1.–2. Paleta a téma — PRESUNUTÉ do tokenovej vrstvy (T1–T5, začiatok
+   súboru). Čísla sekcií sa zámerne nepreradili: §3–§14 sa v komentároch aj
+   v testoch citujú na desiatkach miest, takže prečíslovanie by bolo väčšia
+   a rizikovejšia zmena než celý prevod hexov.
+
+   Tu zostali len ALIASY starých názvov. Komentár, ktorý pri nich do V6a stál
+   („volajúci ich používajú"), bol NEPRAVDIVÝ: `var(--ovl-bg)` ani žiadny
+   ďalší z tejto pätnástky sa v `src/` ani `scripts/` nevyskytuje. Nemažú sa
+   v tomto kroku zámerne — prevod hexov je refaktor a mazanie mŕtveho CSS má
+   vlastného vlastníka (D139, K11). Kto ich zmaže, nech to overí grepom, nie
+   týmto odstavcom.
    ══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  --aura-teal-900: #025c60;
-  --aura-teal-700: #03797e;
-  --aura-teal-500: #05a3aa;
-  --aura-teal-400: #05bcc4;
-
-  --aura-gold-500: #d8b878;
-  --aura-gold-600: #c9a869;
-  --aura-gold-800: #8a6417;
-
-  /* Typografia — Inter s tabulárnymi číslicami (§2 bod 3).
-     'Inter Variable' je rodina z balíka @fontsource-variable/inter, ktorý sa
-     načítava v src/app/layout.tsx. Písmo sa DODÁVA S APPKOU, nie sťahuje zo
-     siete (I6). Názov rodiny musí sedieť presne — predtým tu stálo 'Inter var',
-     čo nie je názov žiadnej rodiny, takže sa mlčky padalo na Segoe UI.
-     Zvyšok zásobníka je poistka pre prípad, že sa písmo nestihne načítať. */
-  --ovl-font:
-    'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-  --ovl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
-
-  /* TRI ROLY POPISKOV (D2, 19. 8. 2026). Popisok sekcie, popisok dlaždice a
-     hlavička stĺpca sú tri RÔZNE veci a musia sa dať rozoznať bez čítania:
-       · sekcia   — pomenúva oblasť obrazovky. Najsilnejšia, tmavšia, širšie
-                    preložená. Je jej na obrazovke málo.
-       · dlaždica — pomenúva JEDNO číslo. Bez verzálok, aby číslo nad ňou
-                    zostalo dominantou; verzálky pri čísle súperia.
-       · stĺpec   — pomenúva zvislý rad. Verzálky áno (radia sa pod sebou),
-                    ale najtlmenejšia zo všetkých troch.
-     Kto pridá štvrtú veľkosť popisku, hierarchiu zase zruší. */
-  --ovl-fs-eyebrow: 0.6875rem;
-  --ovl-fs-label-tile: 0.75rem;
-  --ovl-fs-micro: 0.75rem;
-  --ovl-fs-small: 0.8125rem;
-  --ovl-fs-table: 0.875rem;
-  --ovl-fs-body: 0.9375rem;
-  --ovl-fs-h3: 1rem;
-  --ovl-fs-h2: 1.125rem;
-  --ovl-fs-h1: 1.5rem;
-  --ovl-fs-stat: 1.75rem;
-
-  --ovl-lh-tight: 1.25;
-  --ovl-lh-body: 1.5;
-
-  --ovl-s1: 0.25rem;
-  --ovl-s2: 0.375rem;
-  --ovl-s3: 0.625rem;
-  --ovl-s4: 0.875rem;
-  --ovl-s5: 1.25rem;
-  --ovl-s6: 1.75rem;
-
-  --ovl-radius: 10px;
-  --ovl-radius-sm: 6px;
-  --ovl-radius-pill: 999px;
-
-  /* Šírky obsahu (§2 bod 20) */
-  --ovl-max-wide: 1180px;
-  --ovl-max: 1100px;
-  --ovl-max-form: 720px;
-
-  --ovl-header-h: 56px;
-
-  /* Trvania animácií (§3.4) */
-  --ovl-dur-in: 180ms;
-  --ovl-dur-card: 160ms;
-  --ovl-dur-badge: 200ms;
-  --ovl-dur-hover: 120ms;
-  --ovl-dur-toast: 220ms;
-  --ovl-dur-grow: 320ms;
-  --ovl-ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
-   2. Téma — SVETLÁ (predvolená, holý `:root`) a TMAVÁ (atribút + systém)
-
-   Poradie a duplicita sú zámerné:
-     1. `:root`                                  … kompletná SVETLÁ paleta,
-     2. `@media (prefers-color-scheme: dark)`
-        `:root:not([data-theme="light"])`         … systémová tmavá,
-     3. `:root[data-theme="dark"]`                … ručne zvolená tmavá.
-   Bod 3 stojí za bodom 2, takže prepínač vyhráva v OBOCH smeroch. Tmavé
-   hodnoty sú napísané dvakrát — je to cena za to, že žiadna farba nemá jedinú
-   definíciu v media query. CSS nevie zoskupiť custom properties do balíka,
-   takže kopírovanie je jediná možnosť; keď meníš jednu, zmeň obe.
-
-   Názvoslovie: `--paper/--paper2/--paper3`, `--ink/--ink2/--dim`,
-   `--line/--line2`, `--track`, `--sel` sú tokeny V3. Zvyšok (`--surface*`,
-   `--brand*`, `--st-*`) je mostík pre historickú vrstvu `.ovl-*`, aby obe
-   vrstvy videli tú istú tému. `--accent` je jediné miesto, kde sa rieši
-   „v svetlej tmavý teal, v tmavej svietivý teal" — komponenty V3 preto NEMAJÚ
-   vlastné `[data-theme="dark"]` selektory.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-:root {
-  color-scheme: light;
-
-  --teal: #05bcc4;
-  --deep: #03797e;
-  --teal3: #7fd0d4;
-  --gold2: #a8853c;
-  --accent: var(--deep);
-  --accent-on: #ffffff;
-
-  /* Základňa je NEUTRÁLNA (R5, 19. 8. 2026). Predtým bola tónovaná doružova
-     (--paper: #f7f5f7, --line: #e3dde4) a jediný akcent na nej pôsobil
-     špinavo. Hodnoty sú zmerané, nie odhadnuté — scripts/palette-check.mjs. */
-  --paper: #f5f6f7;
-  --paper2: #ffffff;
-  --paper3: #edeef1;
-  --ink: #16181c;
-  --ink2: #3f444c;
-  --dim: #63696f;
-  --line: #dfe1e6;
-  --line2: #c7c9cd;
-  /* DRÁHA MERACIEHO PRÚŽKU. Nesie mierku: bez nej je „96/240" plný prúžok
-     a nie dve pätiny. Musí byť vidieť na `--paper2` (karta) aj na `--paper`.
-     Svetlá #e7e9ed má na bielej 1,22 : 1 a stačí; tmavá mala #212329, čo je
-     na #17181c 1,13 : 1 — na snímke `produkty-tmava.png` z nej nezostalo nič
-     a naplnená časť vyzerala ako pahýľ bez mierky. Tmavá je preto #3a3d45,
-     teda 1,60 : 1 na karte a 1,69 : 1 na stránke. Merané, nie odhadnuté —
-     `test/unit/globals-vlna3-chyby.spec.ts`. */
-  --track: #e7e9ed;
-  --sel: #eef9f9;
-  --barfill: var(--deep);
-  --shadow: 0 1px 2px rgb(22 24 28 / 0.07);
-  /* Spodná lišta výberu je tmavá aj vo svetlej téme — je to plávajúca akcia,
-     nie plocha stránky. */
-  --selbar-bg: #16181c;
-  --selbar-fg: #f2f3f5;
-
-  /* Geometria V3. `--r-sm` definuje KISS vrstva (§13) — jedna hodnota (8 px)
-     pre obe vrstvy je lepšia než dve skoro rovnaké. */
-  --r: 9px;
-  --r-pill: 99px;
-  --w: 1440px;
-  --hdr-h: 56px;
-
-  --surface: color-mix(in srgb, #ffffff 72%, transparent);
-  --surface-solid: var(--paper2);
-  --surface-raised: var(--paper2);
-  --line-strong: var(--line2);
-  --brand: var(--deep);
-  --brand-fill: var(--aura-teal-700);
-  --brand-ink: #ffffff;
-  --brand-tint: #e3f1f1;
-  --gold: var(--aura-gold-800);
-
-  --st-critical: #d13228;
-  --st-attention: #6b4300;
-  --st-progress: #2f2585;
-  --st-good: #1a5e33;
-  --st-idle: #4f555c;
-
-  --production-bg: #b3261e;
-  --production-fg: #ffffff;
-
-  /* Sekvenčná teal rampa (hĺbka zľavy) — monotónna vo svetlosti. Nekóduje
-     stav, len magnitúdu. */
-  --seq-teal-1: #e3f1f1;
-  --seq-teal-2: #a8d9da;
-  --seq-teal-3: #67bcbf;
-  --seq-teal-4: #2a9aa0;
-  --seq-teal-5: #03797e;
-
-  /* Text stavu na tinte: čistý stavový tón má na 14% tinte kontrast ~4,1:1,
-     čo pri 13 px bold nestačí. Text sa preto mieša smerom k --ink (light 70 %,
-     dark 80 %) a dostane ≥ 4,5:1 na tinte aj na papieri. Plný tón zostáva
-     nedotknutý pre okraje, pruhy a marky grafov. */
-  --st-critical-ink: color-mix(in oklab, var(--st-critical) 70%, var(--ink));
-  --st-attention-ink: color-mix(in oklab, var(--st-attention) 70%, var(--ink));
-  --st-progress-ink: color-mix(in oklab, var(--st-progress) 70%, var(--ink));
-  --st-good-ink: color-mix(in oklab, var(--st-good) 70%, var(--ink));
-  --st-idle-ink: color-mix(in oklab, var(--st-idle) 70%, var(--ink));
-
-  --ovl-shadow: 0 1px 2px rgb(22 24 28 / 0.05), 0 1px 3px rgb(22 24 28 / 0.07);
-  --ovl-shadow-raised: 0 10px 30px -16px rgb(22 24 28 / 0.22);
-}
-
-@media (prefers-color-scheme: dark) {
-  /* Guard `:not([data-theme="light"])`: kto si ručne vypýtal svetlú, dostane
-     svetlú aj na systémovo tmavom stroji. */
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-
-    --teal: #05bcc4;
-    --deep: #03797e;
-    --teal3: #7fd0d4;
-    --gold2: #c9a869;
-    --accent: var(--teal);
-    --accent-on: #08201f;
-
-    --paper:#101114;
-    --paper2:#17181c;
-    --paper3:#1e2026;
-    --ink:#eceef2;
-    --ink2:#bfc4cd;
-    --dim:#8b919b;
-    --line:#282a31;
-    --line2:#3c3e43;
-    --track:#3a3d45;
-    --sel: #152a2a;
-    --barfill: var(--teal);
-    --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
-    --selbar-bg:#22242a;
-    --selbar-fg:#f2f3f5;
-
-    --surface:color-mix(in srgb, #17181c 62%, transparent);
-    --surface-solid: var(--paper2);
-    --surface-raised:#22242a;
-    --line-strong: var(--line2);
-    --brand: var(--teal);
-    --brand-fill: var(--aura-teal-700);
-    --brand-ink: #04211f;
-    --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
-    --gold: var(--aura-gold-500);
-
-    --st-critical:#fa8076;
-    --st-attention:#eab254;
-    --st-progress:#8e83e8;
-    --st-good:#3d9448;
-    --st-idle:#7b818a;
-
-    --production-bg:#b3261e;
-    --production-fg: #fff4f2;
-
-    --seq-teal-1: #12312f;
-    --seq-teal-2: #12504f;
-    --seq-teal-3: #0a7076;
-    --seq-teal-4: #049199;
-    --seq-teal-5: #05bcc4;
-
-    --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
-    --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
-    --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
-    --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
-    --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
-
-    --ovl-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
-    --ovl-shadow-raised: 0 10px 30px -18px rgb(0 0 0 / 0.8);
-  }
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
-
-  --teal: #05bcc4;
-  --deep: #03797e;
-  --teal3: #7fd0d4;
-  --gold2: #c9a869;
-  --accent: var(--teal);
-  --accent-on: #08201f;
-
-  --paper:#101114;
-  --paper2:#17181c;
-  --paper3:#1e2026;
-  --ink:#eceef2;
-  --ink2:#bfc4cd;
-  --dim:#8b919b;
-  --line:#282a31;
-  --line2:#3c3e43;
-  --track:#3a3d45;
-  --sel: #152a2a;
-  --barfill: var(--teal);
-  --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
-  --selbar-bg:#22242a;
-  --selbar-fg:#f2f3f5;
-
-  --surface:color-mix(in srgb, #17181c 62%, transparent);
-  --surface-solid: var(--paper2);
-  --surface-raised:#22242a;
-  --line-strong: var(--line2);
-  --brand: var(--teal);
-  --brand-fill: var(--aura-teal-700);
-  --brand-ink: #04211f;
-  --brand-tint: color-mix(in srgb, #05bcc4 14%, transparent);
-  --gold: var(--aura-gold-500);
-
-  --st-critical:#fa8076;
-  --st-attention:#eab254;
-  --st-progress:#8e83e8;
-  --st-good:#3d9448;
-  --st-idle:#7b818a;
-
-  --production-bg:#b3261e;
-  --production-fg: #fff4f2;
-
-  --seq-teal-1: #12312f;
-  --seq-teal-2: #12504f;
-  --seq-teal-3: #0a7076;
-  --seq-teal-4: #049199;
-  --seq-teal-5: #05bcc4;
-
-  --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
-  --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
-  --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
-  --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
-  --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
-
-  --ovl-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
-  --ovl-shadow-raised: 0 10px 30px -18px rgb(0 0 0 / 0.8);
-}
-
-/* Derivované tinty a okraje — jedno pravidlo pre obe témy. Miešajú sa proti
-   NEPRIESVITNÉMU povrchu, aby badge a panely zostali plné. */
-:root {
-  --st-critical-tint: color-mix(in oklab, var(--st-critical) 14%, var(--surface-solid));
-  --st-critical-edge: color-mix(in oklab, var(--st-critical) 42%, var(--surface-solid));
-  --st-attention-tint: color-mix(in oklab, var(--st-attention) 14%, var(--surface-solid));
-  --st-attention-edge: color-mix(in oklab, var(--st-attention) 42%, var(--surface-solid));
-  --st-progress-tint: color-mix(in oklab, var(--st-progress) 14%, var(--surface-solid));
-  --st-progress-edge: color-mix(in oklab, var(--st-progress) 42%, var(--surface-solid));
-  --st-good-tint: color-mix(in oklab, var(--st-good) 14%, var(--surface-solid));
-  --st-good-edge: color-mix(in oklab, var(--st-good) 42%, var(--surface-solid));
-  --st-idle-tint: color-mix(in oklab, var(--st-idle) 12%, var(--surface-solid));
-  --st-idle-edge: color-mix(in oklab, var(--st-idle) 36%, var(--surface-solid));
-
-  --gold-hairline: color-mix(in oklab, var(--aura-gold-600) 70%, transparent);
-
-  /* ── Aliasy starých názvov (volajúci ich používajú, nemenia sa) ────────── */
   --ovl-bg: var(--paper);
   --ovl-surface: var(--surface-solid);
   --ovl-surface-2: var(--surface-raised);
@@ -399,7 +581,12 @@ body {
 }
 
 /* Jemný priehľadný závoj rodiny — dva veľmi mierne radiálne gradienty, aby
-   priesvitné plochy mali čo prekrývať. Bez obrázkov, bez parallaxu. */
+   priesvitné plochy mali čo prekrývať. Bez obrázkov, bez parallaxu.
+   Sila závoja je TOKEN (`--veil-brand`, `--veil-gold`) a má v každej téme
+   inú hodnotu — dôvod je v ich docblocku v T2. Tu nesmie stáť percento:
+   kontrastný test (`dizajn-kontrast.spec.ts`) meria text proti PAPIERU
+   ZAFARBENÉMU ZÁVOJOM a číta si jeho silu z tokenu. Percento napísané priamo
+   sem by sa z merania vytratilo. */
 body::before {
   content: '';
   position: fixed;
@@ -407,16 +594,8 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(
-      70rem 34rem at 12% -8%,
-      color-mix(in oklab, var(--brand) 10%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      55rem 28rem at 105% 8%,
-      color-mix(in oklab, var(--gold) 8%, transparent),
-      transparent 70%
-    );
+    radial-gradient(70rem 34rem at 12% -8%, var(--veil-brand), transparent 70%),
+    radial-gradient(55rem 28rem at 105% 8%, var(--veil-gold), transparent 70%);
 }
 
 /* Typografická hierarchia (V13) — default prehliadača už nikdy neprebije
@@ -496,7 +675,7 @@ hr {
 }
 .ovl-production-bar code {
   font-weight: 700;
-  background: rgb(255 255 255 / 0.16);
+  background: var(--production-code-bg);
   padding: 0 0.35em;
   border-radius: 4px;
   letter-spacing: 0;
@@ -835,21 +1014,25 @@ hr {
 .ovl-btn--primary {
   background: var(--brand-fill);
   border-color: var(--brand-fill);
-  color: #fff;
+  color: var(--on-brand-fill);
 }
 .ovl-btn--primary:hover:not(:disabled) {
-  background: var(--aura-teal-900);
-  border-color: var(--aura-teal-900);
+  background: var(--brand-fill-hover);
+  border-color: var(--brand-fill-hover);
 }
 /* Solid červená sa rezervuje pre potvrdzovacie tlačidlá zápisu a panic. */
+/* Farba písma tu bola napísaná natvrdo ako biela a v TMAVEJ téme to bola
+   chyba: biela má na tmavom `--st-critical` 2,4 : 1. `--on-st-critical` je
+   preto v tmavej tmavý ink (7,12 : 1) a v svetlej zostáva biela — hodnoty
+   a merania sú v T2/T3. */
 .ovl-btn--danger {
   background: var(--st-critical);
   border-color: var(--st-critical);
-  color: #fff;
+  color: var(--on-st-critical);
 }
 .ovl-btn--danger:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--st-critical) 82%, #000);
-  border-color: color-mix(in oklab, var(--st-critical) 82%, #000);
+  background: var(--st-critical-press);
+  border-color: var(--st-critical-press);
 }
 /* Tichá deštruktívna akcia v riadkoch tabuliek (V35) */
 .ovl-btn--danger-quiet {
@@ -1223,36 +1406,11 @@ input::placeholder {
    .ovl-empty-orbit .ovl-drawer-backdrop .ovl-drawer .ovl-drawer-{head,body,footer}
    ══════════════════════════════════════════════════════════════════════════ */
 
-:root {
-  /* Radius z predlohy (8/12/16/22) */
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 22px;
-  --kiss-transition: 180ms ease;
-  --kiss-view-in: 220ms ease;
-}
-
-/* Tiene sa riadia témou rovnako ako §2: SVETLÁ na holom `:root`, tmavá pod
-   systémovou voľbou (s guardom) aj pod atribútom. Predtým tu bola tmavá ako
-   default a po prechode V3 by svetlá appka dostala tmavé tiene. */
-:root {
-  --kiss-shadow-sm: 0 1px 2px rgb(19 27 26 / 0.04);
-  --kiss-shadow-md: 0 10px 30px rgb(19 27 26 / 0.07);
-  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 14%, transparent);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
-    --kiss-shadow-md: 0 10px 30px rgb(0 0 0 / 0.35);
-    --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
-  }
-}
-:root[data-theme='dark'] {
-  --kiss-shadow-sm: 0 0 0 1px color-mix(in oklab, var(--line) 55%, transparent);
-  --kiss-shadow-md: 0 10px 30px rgb(0 0 0 / 0.35);
-  --kiss-focus-ring: 0 0 0 4px color-mix(in srgb, var(--brand) 18%, transparent);
-}
+/* Tokeny tejto vrstvy žijú od V6a v tokenovej vrstve: `--r-sm/md/lg`,
+   `--kiss-transition` a `--kiss-view-in` v T1, `--kiss-shadow-sm/md`
+   a `--kiss-focus-ring` v T2 aj T3. Tu stáli trikrát (raz svetlé, dvakrát
+   tmavé) a v kaskáde prebíjali T1–T3, takže tá istá geometria mala dva domovy.
+   `--r-xl` (22 px) odišlo bez nástupcu — nemalo ani jedného volajúceho. */
 
 /* Page-head predlohy: eyebrow (gold) + titul vľavo, akcie vpravo. */
 .ovl-page-head {
@@ -1518,7 +1676,7 @@ input::placeholder {
   display: flex;
   align-items: stretch;
   justify-content: flex-end;
-  background: rgb(0 0 0 / 0.45);
+  background: var(--overlay);
   backdrop-filter: blur(3px);
 }
 .ovl-drawer {
@@ -1604,18 +1762,9 @@ input::placeholder {
    appku tam, odkiaľ odišla.
    ══════════════════════════════════════════════════════════════════════ */
 
-:root {
-  --side-w: 240px;
-  --topbar-h: 44px;
-  /* Jeden rozostupový rytmus pre celú obsahovú plochu. Karty sa zarovnávajú
-     preto, že všetky používajú tento krok — nie preto, že to niekto odmeral
-     v každej zvlášť. */
-  --gap: 16px;
-  /* Koľko sa na dolnej hrane posuvnej plochy stmieva do stratena. Pol riadku
-     tabuľky — dosť na to, aby bolo vidieť, že text nekončí, málo na to, aby
-     zjedol riadok. Pozri `.tbl-scroll` (14.6). */
-  --fade: 26px;
-}
+/* `--side-w`, `--topbar-h`, `--gap` a `--fade` žijú v T1 (rovnaké hodnoty,
+   rovnaké dôvody). Stáli aj tu a to je presne tá pasca, ktorú má repo
+   zapísanú: to isté číslo na dvoch miestach sa rozíde pri prvej zmene. */
 
 .shell {
   display: grid;
@@ -2123,15 +2272,25 @@ b.lvl-2 {
   color: var(--ink2);
   white-space: nowrap;
 }
+/* ŠKÁLA JE `--st-*-ink`, NIE `--st-*` (2. 9. 2026, dizajn-kontrast.spec.ts).
+   `.state` a `.sig` nie sú ikony — je to glyf A SLOVO pri 12,5 / 11,5 px,
+   takže platí hranica 4,5 : 1 pre malé písmo. Plné tóny ju na časti plôch
+   appky nedosahovali (`--st-idle` 3,95 : 1 na `--surface-raised`,
+   `--st-critical` 4,02 : 1 na papieri pod závojom) a spraviť ich čitateľnými
+   nešlo: posun svetlosti ich pod farbosleposťou zliepa navzájom
+   (paleta.spec.ts, ΔE ≥ 8). `--st-*-ink` je ten istý stavový tón zmiešaný
+   k `--ink` — v tmavej svetlejší, v svetlej tmavší, teda VŽDY smerom od
+   papiera. Plný tón zostáva výplňou, okrajom a ikonovou markou.
+   Kto to vráti na plný tón, vráti aj text, ktorý sa na raile nedá prečítať. */
 .state.pripravena {
-  color: var(--st-idle);
+  color: var(--st-idle-ink);
 }
 /*
  * STAVY ZLAVY (19. 8. 2026, oprava po nezavislom review).
  *
  * Do tohto datumu tu boli --accent (teal) a --gold2 (zlata), teda znackove
  * farby — hoci hlavicka tohto suboru sama hovori "teal a gold NIKDY nekoduju
- * stav". Zlata #a8853c mala navyse na bielej kontrast 3,45:1, teda pod
+ * stav". Zlata (--gold2) mala navyse na bielej kontrast 3,45:1, teda pod
  * hranicou 4,5:1 pre text, a nebola v ziadnom merani: paleta.spec.ts merala
  * len --st-* a --accent, takze o nej nikto nevedel.
  *
@@ -2139,10 +2298,10 @@ b.lvl-2 {
  * Glyf a slovo zostavaju — farba je treti nosic, nie jediny.
  */
 .state.zapisuje {
-  color: var(--st-progress);
+  color: var(--st-progress-ink);
 }
 .state.bezi {
-  color: var(--st-good);
+  color: var(--st-good-ink);
 }
 .state.skoncila {
   color: var(--dim);
@@ -2181,22 +2340,25 @@ b.lvl-2 {
   font-size: 11.5px;
   font-weight: 600;
 }
+/* Tie isté `-ink` varianty ako `.state.*` a z toho istého dôvodu — pozri
+   docblock nad `.state.pripravena`. Päť variantov sa drží pohromade zámerne:
+   keby tri brali `-ink` a dve plný tón, o mesiac by nikto nevedel prečo. */
 .sig.ok {
-  color: var(--st-good);
+  color: var(--st-good-ink);
 }
 .sig.warn {
-  color: var(--st-attention);
+  color: var(--st-attention-ink);
 }
 .sig.bad {
-  color: var(--st-critical);
+  color: var(--st-critical-ink);
 }
 /* "Prebieha" bol jediny stav bez vlastnej varianty .sig, takze sa mapoval
    na idle a splynul s "necinny". Vlna F ho pritom zmerala (12,18:1). */
 .sig.progress {
-  color: var(--st-progress);
+  color: var(--st-progress-ink);
 }
 .sig.idle {
-  color: var(--st-idle);
+  color: var(--st-idle-ink);
 }
 .sig.lock {
   color: var(--dim);
@@ -2328,8 +2490,8 @@ b.lvl-2 {
          a tvárila sa, že tam ešte niečo je.
      `box-sizing: border-box` drží celok pod tým istým stropom výšky (P4). */
   padding-bottom: var(--fade);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, var(--mask-opaque) calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to bottom, var(--mask-opaque) calc(100% - var(--fade)), transparent);
 }
 table.tbl {
   width: 100%;
@@ -2478,7 +2640,7 @@ table.tbl tr.muted td {
   color: var(--selbar-fg);
   border-radius: var(--r);
   padding: 10px 14px;
-  box-shadow: 0 -2px 14px rgb(0 0 0 / 0.18);
+  box-shadow: var(--shadow-selbar);
   margin-top: 12px;
 }
 .selbar .cnt {
@@ -2503,12 +2665,15 @@ table.tbl tr.muted td {
   gap: 8px;
   align-items: center;
 }
+/* Lišta je tmavá v OBOCH témach, takže si okraj aj hover mieša z vlastného
+   písma (`--selbar-fg`), nie z farby stránky — inak by vo svetlej téme
+   zmizli. */
 .selbar .btn.ghost {
-  color: #dfe9e8;
-  border-color: rgb(255 255 255 / 0.22);
+  color: var(--selbar-fg-dim);
+  border-color: var(--selbar-line);
 }
 .selbar .btn.ghost:hover {
-  background: rgb(255 255 255 / 0.08);
+  background: var(--selbar-hover);
 }
 
 /* ---------- 14.8 Tlačidlá, polia, chipy ---------------------------------- */
@@ -2552,8 +2717,12 @@ table.tbl tr.muted td {
 .btn.ghost {
   background: transparent;
 }
+/* POPIS berie `-ink`, OKRAJ plný tón. Nie je to nekonzistencia: 4,5 : 1 platí
+   na text, okraj je grafika s hranicou 3 : 1 — a plný tón je to, čo tlačidlu
+   dáva červený rám. Popis v plnom tóne mal v svetlej téme na papieri pod
+   závojom 4,02 : 1. */
 .btn.danger {
-  color: var(--st-critical);
+  color: var(--st-critical-ink);
   border-color: var(--st-critical);
 }
 .btn[disabled],
@@ -3062,7 +3231,7 @@ details.tech.bare {
   z-index: 35;
   background: var(--paper2);
   border-left: 1px solid var(--line);
-  box-shadow: -6px 0 20px rgb(0 0 0 / 0.1);
+  box-shadow: var(--shadow-drawer);
   padding: 16px 18px;
   overflow: auto;
 }
@@ -3175,8 +3344,8 @@ details.tech.bare {
      riešenie — pozri `.tbl-scroll` (14.6). Odsadenie panela je 16 px, do
      `--fade` teda chýba zvyšok. */
   padding-bottom: var(--fade);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade)), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, var(--mask-opaque) calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to bottom, var(--mask-opaque) calc(100% - var(--fade)), transparent);
 }
 /* Najdlhší názov v katalógu má 117 znakov a v 400 px stĺpci sa musí zalomiť
    aj vtedy, keď je jedným slovom bez medzery (D10). */
@@ -3288,9 +3457,12 @@ table.tbl tbody tr.open td:first-child {
   border-color: var(--accent);
   color: var(--accent-on);
 }
+/* V krúžku je ČÍSLO kroku pri 10,5 px, nie ikona — takže platí 4,5 : 1
+   a farbu textu nesie `-ink` (plný `--st-good` má v tmavej na
+   `--surface-raised` 4,08 : 1). Okraj zostáva plný tón: ten je grafika. */
 .steps .s.done .i {
   border-color: var(--st-good);
-  color: var(--st-good);
+  color: var(--st-good-ink);
 }
 .stepbar {
   position: sticky;
@@ -3524,12 +3696,7 @@ table.tbl tbody tr.open td:first-child {
    Vlastník: U1.
    ══════════════════════════════════════════════════════════════════════════ */
 
-:root {
-  /* Výška koľajnice meracieho prúžku rozpočtu (predloha mala 4 px). */
-  --ovl-meter-h: 4px;
-  /* Zvýraznený prúžok — v karte, kde je rozpočet hlavnou informáciou. */
-  --ovl-meter-h-lg: 6px;
-}
+/* `--ovl-meter-h` a `--ovl-meter-h-lg` žijú v T1 (rovnaké hodnoty). */
 
 /* ══════════════════════════════════════════════════════════════════════════
    Stavový pruh (L1) — `components/layout/StatusBar.tsx`
@@ -3564,13 +3731,7 @@ table.tbl tbody tr.open td:first-child {
    Vlastník: L1.
    ══════════════════════════════════════════════════════════════════════════ */
 
-:root {
-  /* Výška pruhu: jeden riadok textu 12 px so vzduchom. Merací prúžok, ktorý si
-     tu kedysi vypýtal 48 px, sa presunul do Nastavení (kontrakt UI, bod 15). */
-  --ovl-statusbar-h: 32px;
-  /* Koľko zhora zaberá lepkavý chróm dohromady (hlavička + stavový pruh). */
-  --ovl-chrome-h: calc(var(--hdr-h) + var(--ovl-statusbar-h));
-}
+/* `--ovl-statusbar-h` a `--ovl-chrome-h` žijú v T1 (rovnaké hodnoty). */
 
 .ovl-statusbar {
   position: relative;
@@ -3607,8 +3768,8 @@ table.tbl tbody tr.open td:first-child {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+  -webkit-mask-image: linear-gradient(to right, var(--mask-opaque) calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to right, var(--mask-opaque) calc(100% - 18px), transparent);
 }
 .ovl-sbar-facts::-webkit-scrollbar {
   display: none;
