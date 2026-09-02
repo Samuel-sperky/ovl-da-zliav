@@ -53,7 +53,15 @@ import {
   presetSummarySk,
   type PresetView,
 } from '@/components/campaigns/presets-model';
-import styles from '@/components/campaigns/zlavy.module.css';
+/*
+ * Vzhľad presetov býval v `zlavy.module.css`, spoločnom pre sedem obrazoviek
+ * tabu Zľavy — hoci tieto triedy kreslí VÝHRADNE rozklik sprievodcu. Po
+ * prevode sprievodcu na primitíva (D139, D143) sedia vedľa komponentu,
+ * v module obrazovky, ktorej patria. Zmazanie mŕtvych kópií zo
+ * `zlavy.module.css` patrí k tomu istému kroku, ale ten súbor v tomto sprinte
+ * prepisuje iný agent (zoznam a detail zľavy), takže je v reporte.
+ */
+import styles from '@/components/campaigns/new-discount.module.css';
 import type { TierPlan } from '@/components/campaigns/discounts-model';
 import Button from '@/components/ui/Button';
 import Note from '@/components/ui/Note';
@@ -137,7 +145,7 @@ export function PresetRow({
           </span>
         )}
       </div>
-      <div className="row">
+      <div className={styles.presetActions}>
         {/*
          * ODKAZ, nie zápis: vedie na formulár novej zľavy s predplnenými
          * poľami. Skúška naprázdno a potvrdenie sa odohrajú tam, nanovo (I3).
@@ -275,7 +283,7 @@ export function DiscountPresets({
       </summary>
       <div className={styles.foldBody}>
         {/* Čo preset ROBÍ a čo NEROBI. Jedna veta, jeden zdroj (K7). */}
-        <div className="lvl-3" data-testid="presets-note">
+        <div className={styles.presetNote} data-testid="presets-note">
           {PRESET_NOTE}
         </div>
 
@@ -291,7 +299,7 @@ export function DiscountPresets({
         )}
 
         {presets !== null && presets.length === 0 ? (
-          <div className="lvl-3 gap-t" data-testid="presets-empty">
+          <div className={styles.presetEmpty} data-testid="presets-empty">
             Zatiaľ nie je uložený ani jeden preset.
           </div>
         ) : null}

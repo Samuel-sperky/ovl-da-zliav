@@ -261,6 +261,81 @@ function modulRule(selector: string): string {
   return desktop.slice(from, to).replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Geometria POISTIEK A KĽÚČOV. Vlastný modul (D143), preto vlastný čítač —
+ * `modulRule()` vyššie je zamknutý na hárok rozcestníka a druhý parameter by
+ * z neho urobil funkciu, ktorá vyzerá ako jedna vec a je dve.
+ */
+const SECTIONS_CSS = readFileSync(
+  fileURLToPath(
+    new URL('../../src/components/settings/settings-sections.module.css', import.meta.url),
+  ),
+  'utf8',
+);
+
+/** Telo pravidla v hárku sekcií podľa PRESNÉHO selektora. */
+function sekciaRule(selector: string): string {
+  const bezKomentarov = SECTIONS_CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const desktop = bezKomentarov.slice(0, bezKomentarov.indexOf('@media'));
+  const at = desktop.lastIndexOf(`${selector} {`);
+  expect(at, `selektor ${selector} v settings-sections.module.css nie je`).toBeGreaterThan(-1);
+  const from = desktop.indexOf('{', at) + 1;
+  const to = desktop.indexOf('}', from);
+  expect(to, `pravidlo ${selector} nie je uzavreté`).toBeGreaterThan(from);
+  return desktop.slice(from, to).replace(/\s+/g, ' ').trim();
+}
+
+describe('Prevedené sekcie Nastavení: odstup a kotva prežili prevod na Panel', () => {
+  it('kotva má odstup pod prilepenou hlavičkou — inak nadpis skončí za ňou', () => {
+    /*
+     * `SETTINGS_CSS` to dával pravidlom `.set-page .sec[id]` a panel `.sec`
+     * NIE JE. Keby sa `scroll-margin-top` nepresunul, klik na `#kluce`,
+     * `#zapisy`, `#poistky` alebo `#cervena` by skončil s nadpisom sekcie
+     * schovaným za hlavičkou — a vedie na ne šesť odkazov z celej appky.
+     */
+    expect(sekciaRule('.section')).toMatch(/scroll-margin-top: 72px/);
+  });
+
+  it('odstup medzi sekciami nesie panel sám, lebo `.sec + .sec` o ňom nevie', () => {
+    expect(sekciaRule('.section')).toMatch(/margin-top: 10px/);
+  });
+
+  it('výnimku z odstupu má PRVÝ PRVOK OBALU, nie prvý `div` medzi susedmi', () => {
+    /*
+     * Toto je celá oprava, ktorú prevod odhalil. `:first-of-type` vyberá
+     * prvého svojho druhu medzi susedmi — a panel je `<div>`, kým neprevedené
+     * sekcie sú `<section>`. Kľúče (prvý `<div>` na podstránke „Na čo je
+     * napojená") tak prišli o odstup a prilepili sa na Pripojenie nad sebou,
+     * hoci prvé na stránke neboli; to isté hrozilo Zápisom a Poistkám. Pokazí
+     * sa to ticho: je to prázdne miesto, ktoré žiadny test na obsah nevidí.
+     */
+    const css = SECTIONS_CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    expect(css).toMatch(/\.section:first-child\s*\{/);
+    expect(css, '`:first-of-type` je späť — panel nie je `<section>`').not.toMatch(
+      /\.section:first-of-type\s*\{/,
+    );
+  });
+
+  it('červená plocha si mení len rám a farbu nadpisu, nie celú plochu', () => {
+    /*
+     * Plochu (pozadie, rádius, tieň) vlastní `Panel`. Druhá definícia vedľa
+     * prvej by sa po prvej úprave rozišla a Červená zóna by prestala vyzerať
+     * ako zvyšok appky — červený rám je jediný rozdiel, ktorý má byť vidieť.
+     */
+    const danger = sekciaRule('.danger');
+    expect(danger).toContain('border-color: var(--st-critical)');
+    expect(danger).not.toContain('background');
+    expect(danger).not.toContain('box-shadow');
+    /*
+     * Nadpis nesie `--st-critical-ink`, nie `--st-critical`: ten má na svetlej
+     * téme 4,31 : 1, teda pod hranicou WCAG 1.4.3. Zamietol ho
+     * `dizajn-kontrast.spec.ts`, keď pravidlo prišlo zo šablónového literálu
+     * do modulu — v literáli ho strážca kontrastu nevidel (D144).
+     */
+    expect(sekciaRule('.danger h2')).toContain('color: var(--st-critical-ink)');
+  });
+});
+
 describe('Karty rozcestníka: stav sa netlačí na spodok karty', () => {
   it('karta zdieľa riadky mriežky, takže pásma začínajú v jednej línii', () => {
     const card = modulRule('.card');
@@ -300,6 +375,20 @@ describe('Karty rozcestníka: stav sa netlačí na spodok karty', () => {
       '.card-in',
       '.card-state',
       '.card-word',
+      /*
+       * Pridané v kroku 3/3 (Poistky a kľúče). Prvé štyri odišli s prevodom
+       * sekcií na `Panel` do `settings-sections.module.css`; `.split`
+       * a `.anchor-grp*` boli mŕtve už predtým — `class="split"` ani
+       * `class="anchor-grp"` nekreslí v `.set-page` ani jeden komponent,
+       * takže sa strážila mriežka, ktorú nikto nevidel.
+       */
+      '.set-pill-row',
+      '.danger-zone',
+      '.dz-row',
+      '.dz-a',
+      '.split',
+      '.anchor-grp',
+      '.anchor-grp-t',
     ]) {
       expect(css, `mŕtvy selektor ${dead} v SETTINGS_CSS`).not.toMatch(
         new RegExp(`\\${dead}(?![\\w-])`),
@@ -308,6 +397,14 @@ describe('Karty rozcestníka: stav sa netlačí na spodok karty', () => {
     // Poistka proti príliš tolerantnému hľadaniu: `.set-page` tam BYŤ MÁ —
     // kreslí ju ešte podstránka a jej zmazanie je krok 2/3, nie tento.
     expect(css).toMatch(/\.set-page(?![\w-])/);
+    /*
+     * Druhá poistka na to isté: `.dz-link` a `.dz-open` sa menujú takmer ako
+     * zmazané `.dz-row`/`.dz-a`, ale ŽIVÉ SÚ — kreslí ich `SettingsSubPage`
+     * (odkaz do Červenej zóny a rozklik pred ňou). Mazanie „podľa predpony
+     * dz-" by ich zobralo so sebou a nespadlo by pri tom nič.
+     */
+    expect(css).toMatch(/\.dz-link(?![\w-])/);
+    expect(css).toMatch(/\.dz-open(?![\w-])/);
   });
 
   it('rozpätie karty sedí na počet pásiem, ktoré karta naozaj kreslí', async () => {

@@ -416,7 +416,20 @@ describe('Mobil — nič neskroluje doboku', () => {
   it('geometria Nastavení skladá dvojstĺpce na úzkej obrazovke', () => {
     expect(SETTINGS_CSS).toContain('@media (max-width:760px)');
     const mobile = SETTINGS_CSS.slice(SETTINGS_CSS.indexOf('@media (max-width:760px)'));
-    expect(mobile).toContain('.set-page .split{grid-template-columns:1fr}');
+    /*
+     * MERANIE PRESMEROVANÉ (V6b), NIE VYPUSTENÉ.
+     *
+     * Tretie tvrdenie tu bolo o `.set-page .split`. Tá trieda v `SETTINGS_CSS`
+     * kreslila dvojstĺpec „obsah + úzky bočný panel" — a NEKRESLILA ho nikomu:
+     * `class="split"` nemá v `.set-page` ani jeden komponent (jediný podobný
+     * názov v appke je `.catalog-split` na Produktoch a má vlastné pravidlo).
+     * Strážilo sa teda skladanie mriežky, ktorá na obrazovke neexistuje —
+     * presne to, čo D139 volá mŕtvym selektorom, a keby ju niekto „oživil",
+     * zelený test by mu potvrdil zalomenie, ktoré nikdy nikto nevidel.
+     * Trieda je zmazaná; tvrdenie prešlo na `.set-meters`, čo je dvojstĺpec,
+     * ktorý sekcia Rozpočty naozaj kreslí (dva prúžky vedľa seba).
+     */
+    expect(mobile).toContain('.set-page .set-meters{grid-template-columns:1fr}');
     expect(mobile).toContain('.set-page .kv{grid-template-columns:1fr');
   });
 

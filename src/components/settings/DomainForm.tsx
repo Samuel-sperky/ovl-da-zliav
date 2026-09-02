@@ -26,6 +26,7 @@ import { useState } from 'react';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
 import { SigMark } from '@/components/ui/StatusMark';
+import { SHOP_KEYED_LIMIT } from '@/lib/shop/rate-limits';
 import { formatDateTimeSk } from '@/lib/ui/format';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
@@ -227,9 +228,19 @@ export function DomainForm({ shopDomain, domainConfirmedAt, onSaved }: DomainFor
                     : `${connection.httpStatus ?? '—'} · ${connection.total} položiek · ${connection.latencyMs} ms`}
                 </td>
               </tr>
+              {/* ČÍSLO SA TU NEPÍŠE RUČNE (V6b).
+                  Do 2. 9. 2026 tu stál literál „20/min · 200/UTC deň". Kvótu
+                  kľúča zdvihol správca shopu 1. 9. 2026 na 150/min a 1000/deň,
+                  `SHOP_KEYED_LIMIT` sa opravil — a tento riadok nie, lebo bol
+                  DRUHÁ kópia toho istého čísla a nič ju k prvej neviazalo.
+                  Obrazovka tak mesiac tvrdila limit, ktorý shop už nemal. Je to
+                  tá istá trieda chyby, akú s tou istou kvótou spravil literál
+                  `200` v `settings.repo.ts`; odvodenie je jediná obrana. */}
               <tr>
                 <td>Limit eshopu</td>
-                <td className="mono">20/min · 200/UTC deň</td>
+                <td className="mono">
+                  {SHOP_KEYED_LIMIT.perMinute}/min · {SHOP_KEYED_LIMIT.perUtcDay}/UTC deň
+                </td>
               </tr>
             </tbody>
           </table>

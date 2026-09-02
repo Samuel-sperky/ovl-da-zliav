@@ -79,6 +79,16 @@
  * načítania: obnova, ktorá vráti tú istú sadu, nesmie zahodiť hotovú skúšku,
  * ale akákoľvek zmena produktov, ich predajnosti či ceny ju zahodiť MUSÍ.
  *
+ * **TRIEDY MODULU MUSIA V MODULE EXISTOVAŤ.** 2. 9. 2026 sa import prepol zo
+ * `zlavy.module.css` na `new-discount.module.css` (D139, D143), ale mená tried
+ * v JSX zostali staré — `styles.nz`, `styles.nzHead`, `styles.tiers`… Vo
+ * vitest to NEVIDNO: `.module.css` sa v testoch rieši Proxy-om, ktorý na
+ * KAŽDÝ kľúč vráti hašované meno, takže markup bol zelený a nula `class=
+ * "undefined"`. V prehliadači je chýbajúci kľúč `undefined`, teda
+ * `class="undefined"` — sprievodca sa rozsypal a Samuel povedal „neviem
+ * vytvoriť zľavu". Preto to stráži `test/unit/nova-zlava-selektory.spec.ts`,
+ * ktorý číta CSS ako TEXT; testovacie prostredie tú triedu chýb odhaliť nevie.
+ *
  * **`queueBlockedReason()` je celá poistka I3 na jednom mieste.** Od 19. 8.
  * 2026 je to exportovaná čistá funkcia, nie IIFE vnútri komponentu — dovtedy
  * sa pravidlo „vpísaný počet musí sedieť s výberom" nedalo otestovať, lebo
@@ -144,10 +154,6 @@ import {
   type StatusPayload,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
-/* Značka príznaku (`FlagMark`) — pravidlo troch kanálov: príznak nesie
-   farba AJ ikona AJ slovo, nikdy len farba. Import chýbal, lebo agent V6b
-   dopísal značky a session mu skončila pred importom. */
-import { FlagMark } from '@/components/ui/StatusMark';
 import {
   SOLD_WINDOWS,
   catalogFilterKey,
@@ -169,13 +175,27 @@ import { collectOperationBlockers } from '@/lib/status/blockers';
  * import: keby si obrazovka ťahala `Panel` zo súboru a `Table` z barrelu,
  * vznikli by dva spôsoby, ako dostať tú istú vec do stránky — a tretí pri
  * prvom refaktore (viď docblock `components/ui/index.ts`).
+ *
+ * Importuje sa LEN to, čo obrazovka naozaj kreslí. Agent V6b si sem natiahol
+ * celú tabuľkovú a rámcovú skupinu a session mu skončila pred prepisom, takže
+ * tu ležalo trinásť mien bez použitia; zoznam nižšie sa pri každom ďalšom
+ * primitíve dopisuje, nie predplňuje.
  */
-/* Z vrstvy V6a sa tu dnes nepoužíva NIČ. Agent V6b si naimportoval celú
-   tabuľkovú a rámcovú skupinu (`Table`, `Panel`, `PageHeader`, `Segmented`,
-   `StatTile`, `ToneBadge`, `Chip`…) a session mu skončila pred prepisom
-   sprievodcu, takže to bolo trinásť mien bez použitia. Import sa vráti vtedy,
-   keď obrazovka tie primitíva naozaj začne kresliť — nie dopredu. Jediné, čo
-   z jeho práce zostalo, je `FlagMark` pri príznakoch nižšie. */
+import {
+  Chip,
+  FilterChip,
+  Icon,
+  LockBadge,
+  Note,
+  PageHeader,
+  Panel,
+  PanelBody,
+  PanelHead,
+  StatTile,
+  Table,
+  ToneBadge,
+  type TableColumn,
+} from '@/components/ui';
 import { statusSnapshotFromPayload } from '@/lib/status/snapshot';
 import { formatDateSk, formatEur } from '@/lib/ui/format';
 import { LOCKED_DIMENSION_REASON, lockedDimensionLabels } from '@/lib/ui/locked-dimensions';
@@ -281,6 +301,57 @@ export function wizardStepStates(progress: WizardProgress): readonly WizardStepS
  * zabehnuté formulácie).
  */
 export const UNKNOWN_SOLD_PHRASE = 'pásmo sa im určiť nedá, zľavu nedostanú';
+
+/** Z čoho sa skladá veta „koľko produktov do pásiem nespadlo a prečo". */
+export interface UnknownTierNote {
+  /** `partition.unknownProductIds.length` — koľkým sa pásmo určiť nedalo. */
+  readonly unknownCount: number;
+  /** Za koľko dní sa predané kusy počítali (pravidlo pásma to hovorí nahlas). */
+  readonly soldWindowDays: number;
+  /** Veľkosť ZÁPISU — súčet pásiem. */
+  readonly discountedCount: number;
+  /** Veľkosť VÝBERU — koľko riadkov naozaj prišlo z katalógu. */
+  readonly selectedCount: number;
+}
+
+/**
+ * KOĽKO PRODUKTOV VÝBERU DO PÁSIEM NESPADLO — ČÍSLOM A S DÔVODOM (D121, I11).
+ *
+ * Do 2. 9. 2026 to obrazovka hovorila len ako príznak nad prúžkom výberu
+ * („200 má neznámy predaj"), takže v sekcii, kde človek vypĺňa percentá,
+ * nestálo NIČ o tom, prečo je súčet pásiem menší než výber. Veta preto stojí
+ * priamo nad tabuľkou pásiem a hovorí OBE čísla: koľko vypadlo a koľko sa
+ * naozaj zapíše.
+ *
+ * Prečo je to exportovaná čistá funkcia a nie výraz v JSX — rovnaký dôvod ako
+ * pri `queueBlockedReason()` a `emptySelectionText()`: riadky výberu
+ * prichádzajú až z katalógu, takže `renderToStaticMarkup` túto vetu NIKDY
+ * nezastihne a v JSX by sa nedala overiť inak než v prehliadači. Že sa veta na
+ * obrazovku naozaj dostane (`Note` s `testId="tiers-unknown-note"` nad
+ * tabuľkou pásiem), stráži `test/unit/nova-zlava-selektory.spec.ts` skupina D.
+ *
+ * `null` = niet čo povedať. Nula sa NEVYSVETĽUJE — veta „0 produktov nemá
+ * zmeraný predaj" je šum, ktorý oslabí tú istú vetu vtedy, keď platí.
+ */
+export function unknownTierNoteText(note: UnknownTierNote): string | null {
+  if (note.unknownCount <= 0) return null;
+  const kolko = `${formatCountSk(note.unknownCount)} ${pluralSk(
+    note.unknownCount,
+    'vybraný produkt nemá',
+    'vybrané produkty nemajú',
+    'vybraných produktov nemá',
+  )}`;
+  const okno = `${formatCountSk(note.soldWindowDays)} ${pluralSk(
+    note.soldWindowDays,
+    'deň',
+    'dni',
+    'dní',
+  )}`;
+  return (
+    `${kolko} predaj za ${okno} zmeraný — ${UNKNOWN_SOLD_PHRASE}. ` +
+    `Zľavu dostane ${formatCountSk(note.discountedCount)} z ${formatCountSk(note.selectedCount)}.`
+  );
+}
 
 export interface NewDiscountInitial {
   /** Konkrétne označené produkty z tabu Produkty; `null` = výber z filtra. */
@@ -912,23 +983,120 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
     soldUnknown,
   });
 
+  /*
+   * KDE SPRIEVODCA STOJÍ (V6b, 2. 9. 2026). Pás krokov je NÁVOD, nie
+   * navigácia: nekliká sa naň, lebo kroky sa nepreskakujú (I3). Stavy počíta
+   * `wizardStepStates()`, teda čistá funkcia s vlastným testom — v JSX by sa
+   * pravidlo „bez čerstvej skúšky NIE JE tretí krok na rade" nedalo overiť
+   * bez prehliadača.
+   */
+  const stepStates = wizardStepStates({
+    discountedCount,
+    planReady: (percentError === undefined || percentError === null) && windowError === null,
+    previewFresh,
+    created: created !== null,
+  });
+
+  /** Koľko produktov výberu do pásiem nespadlo — číslom a s dôvodom (D121). */
+  const unknownTierNote = unknownTierNoteText({
+    unknownCount: skippedUnknown.length,
+    soldWindowDays: filter.soldWindowDays,
+    discountedCount,
+    selectedCount: itemsCount,
+  });
+
+  /*
+   * STĹPCE TABUĽKY PÁSIEM. `colId` tu nedostáva ANI JEDEN — nie sú to stĺpce
+   * jednotnej sady (D124): pásmo, pravidlo a percento sú veličiny ROZHODNUTIA
+   * o zľave, nie popis produktu, a v tabuľke Produktov nemajú čo hľadať.
+   * `data-col` v tejto appke znamená „toto je stĺpec sady" a nič iné, takže
+   * keby ho niesli aj tieto, členstvo v sade by prestalo byť merateľné.
+   */
+  const tierColumns: readonly TableColumn<TierPlan>[] = [
+    {
+      key: 'band',
+      header: 'Pásmo',
+      cardLabel: 'Pásmo',
+      width: '96px',
+      cell: (tier) => ({
+        content: (
+          <span className={styles.band} data-ord={tier.ord}>
+            {/* Hĺbku pásma nesie priehľadnosť značky; význam nesie PÍSMENO
+                vedľa nej, takže značka je dekorácia. */}
+            <span className={styles.bandDot} aria-hidden="true" />
+            {tier.letter}
+          </span>
+        ),
+      }),
+    },
+    {
+      key: 'rule',
+      header: 'Pravidlo',
+      cardLabel: 'Pravidlo',
+      cell: (tier) => ({ content: tier.label }),
+    },
+    {
+      key: 'count',
+      header: 'Produktov',
+      cardLabel: 'Produktov',
+      align: 'right',
+      width: '112px',
+      cell: (tier) => ({ content: formatCountSk(tier.productIds.length) }),
+    },
+    {
+      key: 'percent',
+      header: 'Zľava',
+      cardLabel: 'Zľava',
+      align: 'right',
+      width: '128px',
+      cell: (tier) => ({
+        content: (
+          <span className={styles.pctCell}>
+            <input
+              className={`inp ${styles.pctInput}`}
+              inputMode="numeric"
+              value={String(tier.percent)}
+              aria-label={`Zľava pásma ${tier.letter} v percentách`}
+              onChange={(event) => {
+                const value = Number(event.target.value.replace(/[^\d]/g, ''));
+                setPercents((current) => ({
+                  ...current,
+                  [tier.bucket]: Number.isFinite(value) ? value : 0,
+                }));
+              }}
+              data-testid={`tier-percent-${tier.bucket}`}
+            />
+            %
+          </span>
+        ),
+      }),
+    },
+  ];
+
   return (
     <div data-testid="new-discount">
-      <div className={styles.nzHead}>
-        <span className={styles.nzTitle}>Nová zľava</span>
-        <input
-          className={`inp ${styles.nzName}`}
-          value={name}
-          maxLength={120}
-          placeholder={defaultName(tiers, from, to)}
-          onChange={(event) => setName(event.target.value)}
-          aria-label="Názov zľavy"
-          data-testid="discount-name"
-        />
-        <Link className={`lvl-3 ${styles.pushRight}`} href="/zlavy">
-          Zrušiť
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="Zľavy"
+        title="Nová zľava"
+        description="Vyberiete produkty, zvolíte pásma a okno platnosti — a zľava sa zapíše až po skúške naprázdno a ručne vpísanom počte."
+        actions={
+          <span className={styles.headActions}>
+            <input
+              className={`inp ${styles.name}`}
+              value={name}
+              maxLength={120}
+              placeholder={defaultName(tiers, from, to)}
+              onChange={(event) => setName(event.target.value)}
+              aria-label="Názov zľavy"
+              data-testid="discount-name"
+            />
+            <Link className="lvl-3" href="/zlavy">
+              Zrušiť
+            </Link>
+          </span>
+        }
+        testId="new-discount-head"
+      />
 
       {/*
        * Odkiaľ sú predplnené polia (D112). Veta hovorí OBE veci: čím sú
@@ -941,55 +1109,102 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         </div>
       )}
 
-      <div className={styles.nz}>
+      {/*
+       * TRI KROKY NAHLAS (V6b). Samuel povedal „neviem vytvoriť zľavu" —
+       * obrazovka mala tri karty bez poradia a nič nehovorilo, čo príde po
+       * čom ani kde človek stojí. `<ol>` a nie `<div>`: poradie je obsah, nie
+       * vzhľad, a čítačka ho tak prečíta ako zoznam s číslami.
+       *
+       * Tri kanály (kontrakt V6 §4, bod 3): ČÍSLO kroku, SLOVO stavu
+       * („hotové" / „teraz" / „potom") a až potom farba z `data-state`.
+       */}
+      <ol className={styles.steps} data-testid="new-discount-steps">
+        {WIZARD_STEPS.map((step, index) => {
+          const state = stepStates[index] ?? 'next';
+          return (
+            <li
+              key={step.key}
+              className={styles.step}
+              data-state={state}
+              data-testid={`wizard-step-${step.key}`}
+            >
+              <span className={styles.stepNum} aria-hidden="true">
+                {index + 1}
+              </span>
+              <span className={styles.stepText}>
+                <span className={styles.stepTitle}>{step.title}</span>
+                <span className={styles.stepWord}>{WIZARD_STEP_WORD[state]}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className={styles.grid}>
         {/* ── ĽAVÝ STĹPEC ─────────────────────────────────────────────── */}
-        <div className={styles.nzCol}>
+        <div className={styles.col}>
           {/* SEKCIA 1 — VÝBER PRODUKTOV */}
-          <section className="sec" data-testid="new-discount-selection">
-            <div className="sec-h">
-              <h2>Výber produktov</h2>
-              {/* `.chip.on` sa od `.chip` líši len pozadím, obrysom a farbou
-                  textu. Ktorý zdroj výberu práve platí, preto bez
-                  `aria-pressed` nie je čím prečítať. */}
-              <div className="act">
-                <button
-                  type="button"
-                  className={source === 'filter' ? 'chip on' : 'chip'}
-                  aria-pressed={source === 'filter'}
-                  onClick={() => setSource('filter')}
-                  data-testid="source-filter"
-                >
-                  Z filtra
-                </button>
-                {hasPicked ? (
-                  <button
-                    type="button"
-                    className={source === 'products' ? 'chip on' : 'chip'}
-                    aria-pressed={source === 'products'}
-                    onClick={() => setSource('products')}
-                    data-testid="source-products"
-                  >
-                    Z označených{' '}
-                    <span className="c">{formatCountSk((initial.productIds ?? []).length)}</span>
-                  </button>
-                ) : null}
-              </div>
+          <Panel data-testid="new-discount-selection">
+            <PanelHead
+              title="Výber produktov"
+              /* `Chip` nesie stav troma kanálmi naraz: značku, slovo aj
+                 `aria-pressed` (odvodené z `active`, prepísať sa nedá). */
+              actions={
+                <>
+                  <Chip
+                    label="Z filtra"
+                    active={source === 'filter'}
+                    onClick={() => setSource('filter')}
+                    testId="source-filter"
+                  />
+                  {hasPicked ? (
+                    <Chip
+                      label="Z označených"
+                      count={(initial.productIds ?? []).length}
+                      active={source === 'products'}
+                      onClick={() => setSource('products')}
+                      testId="source-products"
+                    />
+                  ) : null}
+                </>
+              }
+            />
+            <PanelBody>
+            <div className={styles.filterRow}>
+              {/* Značka platného filtra je `FilterChip`, teda `<span>`, nie
+                  tlačidlo: filter sa upravuje v Produktoch a tlačidlo, ktoré
+                  nič nerobí, je horšie než text (docblock `ui/Chip.tsx`). */}
+              {describeFilter(filter).map((chip) => (
+                <FilterChip key={chip} label={chip} active />
+              ))}
             </div>
 
-            <div className="row wrapx">
-              {describeFilter(filter).map((chip) => (
-                <span key={chip} className="chip on">
-                  {chip}
-                </span>
-              ))}
-              {lockedChips.map((chip) => (
-                <span key={chip} className="chip lock" title={LOCKED_DIMENSION_REASON}>
-                  {chip}
-                </span>
-              ))}
-              <span className="lvl-3" style={{ marginLeft: '8px' }}>
-                Obdobie
-              </span>
+            {/*
+             * ZAMKNUTÉ ROZMERY (D125). Prerušovaný okraj a ikona zámku sú dva
+             * kanály navyše k farbe, a dôvod stojí VO VETE pod riadkom, nie
+             * v `title`: tooltip sa na dotykovom zariadení nedá prečítať
+             * a priznanie „nevieme" sa schovať nesmie (I11).
+             */}
+            {lockedChips.length === 0 ? null : (
+              <>
+                <div className={styles.lockRow}>
+                  {lockedChips.map((chip) => (
+                    <span key={chip} className={styles.lockChip}>
+                      <Icon name="lock" size={0.75} />
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+                <LockBadge
+                  reason={LOCKED_DIMENSION_REASON}
+                  label="Podľa týchto rozmerov sa filtrovať nedá"
+                  testId="locked-dimensions"
+                />
+              </>
+            )}
+
+            <div className={styles.periodRow}>
+              <span className={styles.periodLabel}>Obdobie</span>
               {/*
                * `.seg button.on` sa od nevybraného líši VÝHRADNE pozadím
                * a farbou textu (`globals.css`). Bez `aria-pressed` je teda
@@ -1015,42 +1230,54 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
             </div>
 
             {/*
-             * Jeden riadok namiesto dvoch: koľko sa vyberá, z koľkých, a strop.
-             * Strop režimu sa tu neopakuje — je v tichých pravidlách pod
-             * rozklikom a keď výber oreže, hlási ho `ScopeRelease` (P6).
+             * DVE ČÍSLA, KTORÉ SA PO D121 ROZCHÁDZAJÚ (I11). „Vyberá sa" je
+             * veľkosť VÝBERU, „Zľavu dostane" je veľkosť ZÁPISU — a práve
+             * rozdiel medzi nimi je to, čo do 2. 9. 2026 človek na obrazovke
+             * nikde nevidel vedľa seba. Neznáme zrkadlo katalógu je pomlčka,
+             * nikdy nula (kontrakt UI, bod 5).
              */}
-            <div className="spread gap-t">
-              <div className="lvl-2">
-                Vyberá sa{' '}
-                <b data-testid="selected-count">
-                  {/* Prázdne zrkadlo katalógu = nevieme, nie nula (kontrakt UI, bod 5). */}
-                  {matchingUnknown && itemsCount === 0 ? '—' : formatCountSk(itemsCount)}
-                </b>{' '}
-                {matchingUnknown ? (
-                  <span className="lvl-3">z —</span>
-                ) : (
-                  <span className="lvl-3">
-                    z {formatCountSk(matching ?? 0)}{' '}
-                    {source === 'products' ? 'označených' : 'vo filtri'}
-                  </span>
-                )}
-              </div>
-              <div className="row">
-                <span className="lvl-3">Najhoršie ležiaky prvé, strop</span>
-                <input
-                  className={`inp ${styles.capInput}`}
-                  inputMode="numeric"
-                  value={capText}
-                  placeholder={formatCountSk(cap)}
-                  onChange={(event) => setCapText(event.target.value)}
-                  aria-label="Strop počtu produktov"
-                  data-testid="cap-input"
-                />
-              </div>
+            <div className={`kpis ${styles.tiles}`}>
+              <StatTile
+                label="Vyberá sa"
+                value={matchingUnknown && itemsCount === 0 ? '—' : formatCountSk(itemsCount)}
+                detail={
+                  matchingUnknown
+                    ? 'z — (zrkadlo katalógu ešte nie je načítané)'
+                    : `z ${formatCountSk(matching ?? 0)} ${
+                        source === 'products' ? 'označených' : 'vo filtri'
+                      }`
+                }
+                testId="selected-count"
+              />
+              <StatTile
+                label="Zľavu dostane"
+                value={formatCountSk(discountedCount)}
+                /* Vysvetlivka len keď má čo povedať — nulu nevysvetľujeme. */
+                detail={
+                  skippedUnknown.length === 0
+                    ? undefined
+                    : `${formatCountSk(skippedUnknown.length)} bez zmeraného predaja vypadlo`
+                }
+                testId="discounted-count"
+              />
             </div>
 
-            <div className="bar" aria-hidden="true">
-              <i
+            <div className={styles.capField}>
+              <span>Najhoršie ležiaky prvé, strop</span>
+              <input
+                className={`inp ${styles.capInput}`}
+                inputMode="numeric"
+                value={capText}
+                placeholder={formatCountSk(cap)}
+                onChange={(event) => setCapText(event.target.value)}
+                aria-label="Strop počtu produktov"
+                data-testid="cap-input"
+              />
+            </div>
+
+            <div className={styles.progress} aria-hidden="true">
+              <span
+                className={styles.progressFill}
                 style={{
                   width: `${
                     matchingUnknown || matching === null || matching === 0
@@ -1062,33 +1289,31 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
             </div>
 
             {skipped === 0 && notInCatalog === 0 && skippedUnknown.length === 0 ? null : (
-              <div className="prog-meta">
+              <div className={styles.admissions}>
                 {skipped === 0 ? null : (
-                  <span className="flag neutral" data-testid="skipped-discounted">
-                    <FlagMark tone="neutral" />
+                  <ToneBadge tone="idle" data-testid="skipped-discounted">
                     {formatCountSk(skipped)} už má zľavu podľa vlastných zápisov — vynechané
-                  </span>
+                  </ToneBadge>
                 )}
                 {/*
                   D121 (28. 8. 2026) — produkt, ktorého predaj appka NEPOZNÁ, sa
                   do pásma nezaradí a do zľavy nepôjde. Bez tohto riadku by
                   zmizol ticho: počet v dominante by nesedel s výberom a človek
                   by nevedel, prečo. Do 28. 8. 2026 taký produkt spadol do pásma
-                  „0 predaných", teda −30 %.
+                  „0 predaných", teda −30 %. Veta je JEDNA
+                  (`UNKNOWN_SOLD_PHRASE`) a tú istú nesie priznanie nad pásmami.
                 */}
                 {skippedUnknown.length === 0 ? null : (
-                  <span className="flag neutral" data-testid="skipped-unknown-sold">
-                    <FlagMark tone="neutral" />
-                    {formatCountSk(skippedUnknown.length)} má neznámy predaj — pásmo sa im
-                    určiť nedá, zľavu nedostanú
-                  </span>
+                  <ToneBadge tone="idle" data-testid="skipped-unknown-sold">
+                    {formatCountSk(skippedUnknown.length)} má neznámy predaj —{' '}
+                    {UNKNOWN_SOLD_PHRASE}
+                  </ToneBadge>
                 )}
                 {notInCatalog === 0 ? null : (
-                  <span className="flag" data-testid="missing-in-catalog">
-                    <FlagMark />
+                  <ToneBadge tone="attention" data-testid="missing-in-catalog">
                     {formatCountSk(notInCatalog)} označených appka v katalógu nevidí — zľavu
                     nedostanú
-                  </span>
+                  </ToneBadge>
                 )}
               </div>
             )}
@@ -1107,9 +1332,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               </div>
             ) : null}
             {loadError === null ? null : (
-              <div className={styles.note} role="alert">
+              <Note variant="err" testId="selection-error">
                 {loadError}
-              </div>
+              </Note>
             )}
 
             {/*
@@ -1130,32 +1355,28 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
               <SoldCoverageNote coverage={soldCoverage} windowDays={filter.soldWindowDays} />
             ) : null}
             {emptySelection ? (
-              <div className={styles.nzEmpty} data-testid="new-discount-empty">
-                <span className="lvl-2">{emptyText}</span>
-                <Link
-                  className={`btn primary sm ${styles.pushRight}`}
-                  href={`/produkty?${catalogSearchQuery(filter)}`}
-                >
+              <div className={styles.empty} data-testid="new-discount-empty">
+                <span className={styles.emptyText}>{emptyText}</span>
+                <Link className="btn primary sm" href={`/produkty?${catalogSearchQuery(filter)}`}>
                   Otvoriť Produkty
                 </Link>
               </div>
             ) : null}
-
-          </section>
+            </PanelBody>
+          </Panel>
 
           {/* SEKCIA 2 — PÁSMA A OKNO PLATNOSTI. Bez výberu sa nekreslí vôbec. */}
           {emptySelection ? null : (
-            <section className="sec" data-testid="new-discount-tiers">
-              <div className="sec-h">
-                <h2>Pásma a okno platnosti</h2>
-                <div className="act">
+            <Panel data-testid="new-discount-tiers">
+              <PanelHead
+                title="Pásma a okno platnosti"
+                actions={
                   <Link className="lvl-3" href={`/produkty?${catalogSearchQuery(filter)}`}>
                     Upraviť výber v Produktoch
                   </Link>
-                </div>
-              </div>
-
-              <>
+                }
+              />
+              <PanelBody>
                 {/* Pravidlo pásma („0 predaných za 180 dní") znie ako meraný
                     fakt o pol roku. Príkaz na zápis do ostrého shopu sa
                     podpisuje TU, takže tu musí stáť aj to, za koľko dní sú
@@ -1163,108 +1384,91 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                     zmizne. */}
                 <SoldCoverageNote coverage={soldCoverage} windowDays={filter.soldWindowDays} />
 
-                <table className={styles.tiers}>
-                  <thead>
-                    <tr>
-                      <th>Pásmo</th>
-                      <th>Pravidlo</th>
-                      <th className="n">Produktov</th>
-                      <th className="n">Zľava</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tiers.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="lvl-3">
-                          Načítavam výber…
-                        </td>
-                      </tr>
-                    ) : (
-                      tiers.map((tier) => (
-                        <tr key={tier.bucket} data-testid={`tier-${tier.bucket}`}>
-                          <td>
-                            <span className={styles.band} data-ord={tier.ord}>
-                              <i />
-                              {tier.letter}
-                            </span>
-                          </td>
-                          <td>{tier.label}</td>
-                          <td className="n">{formatCountSk(tier.productIds.length)}</td>
-                          <td className="n">
-                            <input
-                              className={`inp ${styles.pctInput}`}
-                              inputMode="numeric"
-                              value={String(tier.percent)}
-                              aria-label={`Zľava pásma ${tier.letter} v percentách`}
-                              onChange={(event) => {
-                                const value = Number(event.target.value.replace(/[^\d]/g, ''));
-                                setPercents((current) => ({
-                                  ...current,
-                                  [tier.bucket]: Number.isFinite(value) ? value : 0,
-                                }));
-                              }}
-                              data-testid={`tier-percent-${tier.bucket}`}
-                            />{' '}
-                            %
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                    {tiers.length === 0 ? null : (
-                      <tr className="sum">
-                        <td colSpan={2}>Spolu — najhoršie ležiaky prvé, po strop</td>
-                        {/* Súčet pásiem, nie veľkosť výberu: riadky nad ním
-                            hovoria o produktoch, ktoré pásmo dostali. */}
-                        <td className="n">{formatCountSk(discountedCount)}</td>
-                        <td className="n">
-                          <span className="lvl-3">
-                            {formatCountSk(tiers.length)}{' '}
-                            {pluralSk(tiers.length, 'pásmo', 'pásma', 'pásiem')}
-                          </span>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                {percentError === undefined || percentError === null ? null : (
-                  <div className={styles.note} role="alert" data-testid="tier-percent-error">
-                    {percentError}
-                  </div>
+                {/*
+                 * KOĽKO VYPADLO A PREČO — ČÍSLOM, NAD TABUĽKOU (D121, I11).
+                 * Presne tu človek vypĺňa percentá, takže presne tu musí
+                 * vedieť, že súčet pásiem je menší než výber a z akého dôvodu.
+                 */}
+                {unknownTierNote === null ? null : (
+                  <Note variant="info" testId="tiers-unknown-note">
+                    {unknownTierNote}
+                  </Note>
                 )}
 
-                <div className={`spread ${styles.winline}`}>
-                  <div className={styles.win}>
-                    <span className="lvl-3">Platí od</span>
-                    <input
-                      type="date"
-                      className="inp"
-                      value={from}
-                      onChange={(event) => {
-                        setWindowTouched(true);
-                        setFrom(event.target.value);
-                      }}
-                      aria-label="Zľava platí od"
-                      data-testid="date-from"
-                    />
-                    <span className="lvl-3">do</span>
-                    <input
-                      type="date"
-                      className="inp"
-                      value={to}
-                      onChange={(event) => {
-                        setWindowTouched(true);
-                        setTo(event.target.value);
-                      }}
-                      aria-label="Zľava platí do"
-                      data-testid="date-to"
-                    />
+                <Table
+                  caption="Pásma zľavy — pravidlo predajnosti, koľko produktov doň padlo a aké percento dostanú"
+                  columns={tierColumns}
+                  rows={tiers}
+                  rowKey={(tier) => tier.bucket}
+                  rowMeta={(tier) => ({ testId: `tier-${tier.bucket}` })}
+                  /*
+                   * Prázdna tabuľka pásiem má DVA rôzne dôvody a nesmú sa
+                   * zliať: buď sa výber ešte načítava, alebo prišiel celý
+                   * a ani jeden produkt nemá zmeraný predaj (D121). Druhá
+                   * veta je tá istá formulácia ako v priznaní nad tabuľkou.
+                   */
+                  empty={
                     <span className="lvl-3">
-                      {windowDays > 0
-                        ? `${formatCountSk(windowDays)} ${pluralSk(windowDays, 'deň', 'dni', 'dní')}`
-                        : ''}
+                      {skippedUnknown.length > 0
+                        ? `Ani jeden vybraný produkt nemá predaj za toto okno zmeraný — ${UNKNOWN_SOLD_PHRASE}.`
+                        : 'Načítavam výber…'}
                     </span>
-                  </div>
-                  <span className="lvl-3">
+                  }
+                  footer={
+                    tiers.length === 0 ? null : (
+                      <div className={styles.tierFoot} data-testid="tiers-total">
+                        <span>Spolu — najhoršie ležiaky prvé, po strop</span>
+                        {/* Súčet pásiem, nie veľkosť výberu: riadky nad ním
+                            hovoria o produktoch, ktoré pásmo dostali. */}
+                        <span className={styles.tierFootValue}>
+                          {formatCountSk(discountedCount)}
+                        </span>
+                        <span className={styles.tierFootPush}>
+                          {formatCountSk(tiers.length)}{' '}
+                          {pluralSk(tiers.length, 'pásmo', 'pásma', 'pásiem')}
+                        </span>
+                      </div>
+                    )
+                  }
+                  testId="tiers-table"
+                />
+                {percentError === undefined || percentError === null ? null : (
+                  <Note variant="err" testId="tier-percent-error">
+                    {percentError}
+                  </Note>
+                )}
+
+                <div className={styles.window}>
+                  <span className={styles.windowLabel}>Platí od</span>
+                  <input
+                    type="date"
+                    className={`inp ${styles.windowInput}`}
+                    value={from}
+                    onChange={(event) => {
+                      setWindowTouched(true);
+                      setFrom(event.target.value);
+                    }}
+                    aria-label="Zľava platí od"
+                    data-testid="date-from"
+                  />
+                  <span className={styles.windowLabel}>do</span>
+                  <input
+                    type="date"
+                    className={`inp ${styles.windowInput}`}
+                    value={to}
+                    onChange={(event) => {
+                      setWindowTouched(true);
+                      setTo(event.target.value);
+                    }}
+                    aria-label="Zľava platí do"
+                    data-testid="date-to"
+                  />
+                  <span className={styles.windowDays}>
+                    {windowDays > 0
+                      ? `${formatCountSk(windowDays)} ${pluralSk(windowDays, 'deň', 'dni', 'dní')}`
+                      : ''}
+                  </span>
+                  <span className={styles.windowPush}>
                     Rovnaké okno pre všetkých {formatCountSk(discountedCount)}
                   </span>
                 </div>
@@ -1274,9 +1478,9 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                 {windowError === null ? (
                   <div className="hint">00:00 – 23:59, čas shopu.</div>
                 ) : (
-                  <div className={styles.note} role="alert" data-testid="window-error">
+                  <Note variant="err" testId="window-error">
                     {windowError}
-                  </div>
+                  </Note>
                 )}
 
                 {/* Vzorka je vlastný komponent zámerne: rozvrh a bunky sa
@@ -1290,8 +1494,8 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
                   coverage={soldCoverage}
                   tierOfProduct={tierOfProduct}
                 />
-              </>
-            </section>
+              </PanelBody>
+            </Panel>
           )}
 
           {/*
@@ -1312,7 +1516,7 @@ export function NewDiscount({ initial }: { initial: NewDiscountInitial }) {
         </div>
 
         {/* ── PRAVÝ STĹPEC ────────────────────────────────────────────── */}
-        <div className={styles.nzCol}>
+        <div className={styles.col}>
           {/*
            * SEKCIA 2 (v pravom stĺpci) — ROZHODNUTIE. Dominanta (počet
            * produktov) a pod ňou dva dátumy zo `NewDiscountStart`; medzikroky
@@ -1557,7 +1761,7 @@ export function SampleTable({
       {/* Popis vzorky stál v prvom `<th>`. Po D124 tam stojí MENO STĹPCA
           („Referencia"), lebo hlavička jednotnej sady musí byť v každej
           tabuľke rovnaká — popis tabuľky sa preto presunul nad ňu. */}
-      <div className="hint gap-t" data-testid="sample-caption">
+      <div className={styles.sampleCaption} data-testid="sample-caption">
         Vzorka — {formatCountSk(sample.length)} z {formatCountSk(total)}
       </div>
       <div className="tbl-frame">

@@ -63,6 +63,7 @@
 import BudgetMeter from '@/components/ui/BudgetMeter';
 import Note from '@/components/ui/Note';
 import StatTile from '@/components/ui/StatTile';
+import { SHOP_KEYED_LIMIT } from '@/lib/shop/rate-limits';
 import { formatDateSk, formatDateTimeSk } from '@/lib/ui/format';
 import { formatCountSk } from '@/lib/ui/vocabulary';
 import type { CatalogView, QueueView, SettingsView } from '@/components/settings/api';
@@ -364,9 +365,21 @@ export function BudgetSection({ settings, queue, catalog }: BudgetSectionProps) 
                 <td>Zdroj spotreby</td>
                 <td className="mono">count(write_attempt) nad audit_log</td>
               </tr>
+              {/* MINÚTOVÝ STROP SA TU NEPÍŠE RUČNE (V6b).
+                  Do 2. 9. 2026 tu stálo „min. 3 s (limit 20/min)". Kvótu kľúča
+                  zdvihol správca shopu 1. 9. 2026 na 150/min, `SHOP_KEYED_LIMIT`
+                  sa opravil — a tento riadok nie, lebo bol DRUHÁ kópia toho
+                  istého čísla. Obrazovka tak tvrdila strop, ktorý shop už nemal.
+                  Pauza 3 s zostáva literálom vedome: je to PODLAHA appky
+                  (`MIN_WRITE_PAUSE_MS` v `lib/engine/executor.ts`), nie
+                  odvodenina zo stropu — zdvihnutie kvóty ju nemení a importovať
+                  ju sem nemožno, `executor.ts` číta `env` a ťahá si celý
+                  serverový graf do klientskeho balíka. */}
               <tr>
                 <td>Pauza medzi zápismi</td>
-                <td className="mono">min. 3 s (limit 20/min)</td>
+                <td className="mono">
+                  min. 3 s (strop kľúča {SHOP_KEYED_LIMIT.perMinute}/min)
+                </td>
               </tr>
               {/* Riadok existuje len vtedy, keď čísla prišli. Pomlčka by tu
                   bola menšie zlo než nula, ale aj tak by tvrdila, že rezerva

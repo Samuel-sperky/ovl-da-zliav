@@ -42,6 +42,14 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 const CSS = read('../../src/app/globals.css');
 const CHARTS_CSS = read('../../src/components/charts/charts.module.css');
 const SALES_CHART = read('../../src/components/dashboard/SalesChart.tsx');
+/* Slová grafu predaja žijú od V6b v modeli, nie v komponente — legenda sa
+   skládá z `SALES_WORDS` (`sales-chart-view.ts`) a komponent k nim dopĺňa len
+   marku a farbu. Kontrola „trend má aj slovo" preto číta model. */
+const SALES_WORDS_SRC = read('../../src/components/dashboard/sales-chart-view.ts');
+/* Zlatá trendu je od V6b v CSS module grafu (Recharts vešia `className` na
+   skupinu, kým čiaru kreslí `path` s vlastným `stroke`), takže sa musí merať
+   aj tento hárok. */
+const SALES_CHART_CSS = read('../../src/components/dashboard/sales-chart.module.css');
 const HISTOGRAM = read('../../src/components/charts/PriceHistogram.tsx');
 
 /* ═════════════════════ Čítanie skutočných tokenov ═════════════════════════ */
@@ -224,7 +232,22 @@ describe('trend nesie okrem farby aj vzor a slovo', () => {
   });
 
   it('legenda pomenúva trend slovom, nie len značkou', () => {
-    expect(SALES_CHART).toContain('trend cez uzavreté dni');
+    expect(SALES_WORDS_SRC).toContain('trend cez uzavreté dni');
+  });
+
+  it('trendová čiara Rechartsu má prerušovanie a zlatú — a obe v CSS', () => {
+    /*
+     * PRIDANÉ VO V6b. `.line.trend` v `globals.css` kreslí inline SVG grafy;
+     * graf predaja je od 2. 9. 2026 Recharts a jeho čiara je `path` vnútri
+     * skupiny, na ktorú ide `className` — vlastný prezentačný atribút `stroke`
+     * dedenie prebije. Pravidlo preto musí siahnuť na POTOMKA, inak zostane
+     * trend knižničnou modrou v oboch témach a nikde nič nespadne.
+     */
+    const pravidlo = SALES_CHART_CSS.match(/\.trendLine[^{]*\{([^}]*)\}/);
+    expect(pravidlo, 'pravidlo pre trendovú čiaru sa nenašlo').not.toBeNull();
+    expect(pravidlo![0]).toContain(':global(');
+    expect(pravidlo![1]).toContain('stroke-dasharray');
+    expect(pravidlo![1]).toMatch(/stroke:\s*var\(--gold2\)/);
   });
 });
 
@@ -232,8 +255,26 @@ describe('grafy nesiahajú na vyhradené farby', () => {
   const ZDROJE: ReadonlyArray<[string, string]> = [
     ['charts.module.css', CHARTS_CSS],
     ['SalesChart.tsx', SALES_CHART],
+    ['sales-chart-view.ts', SALES_WORDS_SRC],
     ['PriceHistogram.tsx', HISTOGRAM],
   ];
+
+  it('zlatá je v hárku grafu predaja LEN v trendovej čiare (V6b)', () => {
+    /*
+     * Zlatá je značková farba a stav ňou kódovať nesmie NIKTO — dnešok bol do
+     * 19. 8. 2026 `--gold2` a bola to chyba. Trend ju mať SMIE (odstup od
+     * série je zmeraný naprieč typmi videnia, viď vyššie), a od V6b je jeho
+     * jediný domov `sales-chart.module.css`. Meria sa preto, že tam je RAZ
+     * a v pravidle, ktoré patrí trendu — nie kdekoľvek v hárku.
+     */
+    const kod = SALES_CHART_CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+    const riadky = kod.split(/\r?\n/).filter((r) => /--gold/.test(r));
+    expect(riadky).toHaveLength(1);
+    // Hlavička pravidla, v ktorom zlatá stojí: od konca predchádzajúceho
+    // pravidla po ňu. Keby sa zlatá presunula inam, hlavička by bola iná.
+    const pred = kod.slice(0, kod.indexOf(riadky[0]!));
+    expect(pred.slice(pred.lastIndexOf('}') + 1)).toContain('.trendLine');
+  });
 
   for (const [nazov, zdroj] of ZDROJE) {
     it(`${nazov} nekreslí značkovou zlatou`, () => {

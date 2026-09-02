@@ -29,6 +29,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import NewDiscount, { type NewDiscountInitial } from '@/components/campaigns/NewDiscount';
+import styles from '@/components/campaigns/new-discount.module.css';
 import { DEFAULT_CATALOG_FILTER } from '@/components/products/catalog-filter';
 import { describeCatalogFilter } from '@/components/products/catalog-filter';
 import {
@@ -85,19 +86,54 @@ describe('A. zamknuté rozmery majú jeden zoznam', () => {
 describe('B. výber do zľavy kreslí zámky z toho istého zoznamu', () => {
   const html = sprievodca();
 
+  /*
+   * KOTVY PRESMEROVANÉ 2. 9. 2026 (V6b). Zámok sprievodcu kreslila globálna
+   * trieda `chip lock` a dôvod nesol `title=`. Po prevode obrazovky na
+   * primitíva (D139, D143) ho kreslí `styles.lockChip` z vlastného CSS modulu
+   * sprievodcu a DÔVOD sa presunul z `title` do viditeľnej vety (`LockBadge`,
+   * `data-testid="locked-dimensions"`) — tooltip sa na dotykovom zariadení
+   * prečítať nedá a priznanie „nevieme" sa schovať nesmie (I11).
+   *
+   * MERIA SA TO ISTÉ, len na novom mieste: že každý zamknutý rozmer má na
+   * obrazovke zámok, a že dôvod je na obrazovke tiež. Trieda sa berie
+   * z modulu, nie z literálu, takže sa s implementáciou nemá ako rozísť —
+   * a `chip lock` sa už NESLEDUJE zámerne: mŕtvy selektor je zelený test.
+   * Že tá trieda v module naozaj existuje, stráži
+   * `test/unit/nova-zlava-selektory.spec.ts` skupina A.
+   */
+  const lockChip = (styles as Record<string, string>)['lockChip'] as string;
+
   it('každý zamknutý rozmer je v sprievodcovi vidieť ako zámok', () => {
+    expect(lockChip, 'trieda zámku sa z modulu neprečítala').toBeTruthy();
     for (const label of lockedDimensionLabels()) {
-      const at = html.indexOf(`>${label}<`);
+      const at = html.indexOf(`${label}</span>`);
       expect(at, `zámok „${label}" v sprievodcovi chýba`).toBeGreaterThan(-1);
-      expect(html.slice(html.lastIndexOf('<span', at), at)).toContain('chip lock');
+      // Rez od otvorenia hostiteľského `<span>`: trieda aj ikona zámku musia
+      // byť V ŇOM (tri kanály — okraj, ikona, meno rozmeru).
+      const od = html.lastIndexOf(`class="${lockChip}"`, at);
+      expect(od, `„${label}" nie je v hostiteľovi so triedou zámku`).toBeGreaterThan(-1);
+      expect(html.slice(od, at), `„${label}" je zámok bez značky`).toContain('<svg');
     }
   });
 
+  it('dôvod zámku je VETA na obrazovke, nie tooltip', () => {
+    expect(html).toContain('data-testid="locked-dimensions"');
+    expect(html).toContain(LOCKED_DIMENSION_REASON);
+    // A nie je to `title=` — to bola pôvodná, na dotyku nečitateľná podoba.
+    expect(html).not.toContain(`title="${LOCKED_DIMENSION_REASON}"`);
+  });
+
   it('marža ani obrátkovosť už NIE SÚ zamknuté — Produkty podľa nich filtrujú', () => {
-    for (const zrusene of ['marža', 'obrátkovosť']) {
-      expect(html, `„${zrusene}" sa už nesmie kresliť ako zámok`).not.toContain(
-        `class="chip lock" title="${LOCKED_DIMENSION_REASON}">${zrusene}<`,
-      );
+    /*
+     * Meria sa OBSAH riadku zámkov, nie neprítomnosť starého literálu:
+     * `not.toContain` nad reťazcom, ktorý sa už vykresliť nemôže, je presne
+     * ten mŕtvy selektor, čo v Produktoch prežil mesiac ako zelený test.
+     */
+    const od = html.indexOf(`class="${lockChip}"`);
+    expect(od, 'riadok zámkov sa nevykreslil').toBeGreaterThan(-1);
+    const riadok = html.slice(od, html.indexOf('data-testid="locked-dimensions"', od));
+    for (const zrusene of ['marža', 'obrátkovosť', 'sklad', 'objednan']) {
+      expect(riadok, `„${zrusene}" sa už nesmie kresliť ako zámok`).not.toContain(zrusene);
     }
     // A stará veta o čakaní na shop zmizla úplne.
     expect(html).not.toContain('Čaká na dáta zo shopu');

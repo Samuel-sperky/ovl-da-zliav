@@ -1,422 +1,405 @@
 'use client';
 
 /**
- * Aura Zľavy — GRAF DENNÉHO PREDAJA (V1, prevzaté po V9; architektúra §1 TAB 1).
+ * Aura Zľavy — HLAVNÝ GRAF PREHĽADU: denný predaj (V1 → Recharts vo V6b).
  *
  * OTÁZKA: „koľko kusov sa predalo a hýbe sa to?" Nič viac. Jedna séria, jedna
  * os. Druhá os y je v tejto appke zakázaná — dve mierky v jednom ráme vyrobia
  * optický klam o vzťahu čísel, ktorý sa nedá odkliknúť.
  *
- * ČO GRAF O SVOJICH DÁTACH PRIZNÁVA (a ako)
- * ─────────────────────────────────────────
+ * FORMA: ČIARA, teda VÝVOJ V ČASE (D126). Nie je to voľba vzhľadu — `CHART_KINDS`
+ * je uzavretý zoznam troch foriem a každá odpovedá na inú otázku. Predaj po
+ * dňoch je čas, takže čiara; porovnanie medzi produktmi je stĺpec a to je
+ * rebríček vedľa, nie tento graf.
  *
- *  · **Nie sú to eurá.** Appka pozná počty kusov na produkt a deň; zaplatená
- *    suma patrí objednávke, nie položke. Os je v kusoch a sekcia to hovorí
- *    vetou. Dopočítať tržbu z cenníkovej ceny by bol presvedčivo vyzerajúci
- *    výmysel.
- *  · **Nie je to celý eshop.** Rad pokrýva len produkty vo výbere, nie
- *    41 000 položiek katalógu. Hovorí to popis nad rámom.
+ * ČO SA ZMENILO VO V6b (D135, D136) A ČO SA ZMENIŤ NESMELO
+ * ───────────────────────────────────────────────────────
+ * Rám, stavy, legendu, prepis pre čítačku a pätičku kreslí `ChartCard`; plochu
+ * kreslí Recharts; farby dáva `useChartTheme()`. Zmizlo vlastné inline SVG
+ * (viewBox 880 × 150), vlastná vrstva myši a vlastná legenda.
+ *
+ * NEZMIZLO ANI JEDNO PRIZNANIE (§4 kontraktu V6 — „krajšie áno, tichšie nie"):
+ *
+ *  · **Nie sú to eurá.** Os je v kusoch; zaplatená suma patrí objednávke, nie
+ *    položke (I11, D117). Hovorí to podtitul, ktorý posiela obrazovka.
+ *  · **Nie je to celý eshop.** Rad pokrýva len produkty vo výbere.
  *  · **Nemeraný deň nie je nula.** Deň, ktorý sa nestiahol, nedostane bod ani
- *    nulu — dostane šrafovaný pás, v bubline pomlčku a v legende slovo.
- *    K 24. 8. 2026 sú merané dva dni a nemeraných šestnásť; keby tých
- *    šestnásť sadlo na nulu, graf by tvrdil prepad predaja, ktorý nikto
- *    nezmeral.
- *  · **Dva body nie sú priebeh.** Pri dvoch meraniach graf prepne do režimu
- *    `pair`: dva body a obe čísla pri nich, žiadna spojnica, žiadna plocha,
- *    žiadny trend. Čiara medzi dvoma bodmi je sklon, teda trend inou rukou.
- *  · **Neúplný deň je odhad.** Deň, ktorého sťahovanie spadlo v polovici, nesie
- *    dolnú hranicu: tlmená prerušovaná značka a `≈` pred číslom (P7).
- *  · **Dnešok nie je celý deň.** Kreslí sa PRÁZDNYM bodom a bodkovanou
- *    spojnicou a do trendu nevstupuje.
+ *    nulu: v dátach je `null`, čiara sa naň preruší (`GAP_SERIES_PROPS`,
+ *    `connectNulls: false`), plocha dostane šrafovaný pás so slovom a bublina
+ *    pomlčku s vetou. NULA JE FAKT, MEDZERA JE PRIZNANIE.
+ *  · **Dva body nie sú priebeh.** Pri dvoch meraniach (`shape === 'pair'`) sa
+ *    nekreslí ani spojnica, ani plocha, ani trend — len dva body.
+ *  · **Neúplný deň je odhad.** Prerušovaný prstenec, `≈` pred číslom, `≥`
+ *    v prepise (P7).
+ *  · **Dnešok nie je celý deň.** Prázdny bod a do trendu nevstupuje.
+ *  · **Okno zľavy je NÁŠ zápis, nie stav eshopu.** Podfarbenie hovorí, že sme
+ *    zľavu na tie dni zapísali — nie že ju zákazník videl.
  *
- * KAŽDÝ STAV NESIE TRI KANÁLY: farbu, značku a slovo v legende. Ani jeden
- * z nich nie je ozdoba — šrafovanie bez slova je vzorka, ktorú si nikto
- * nespojí s výpadkom sťahovania.
+ * KAŽDÝ STAV NESIE TRI KANÁLY: farbu, značku (tvar bodu, prerušenie,
+ * šrafovanie) a SLOVO — v legende alebo v priznaní pod plochou. Marky legendy
+ * `ChartCard` sú tri (plná, prerušovaná, šrafovaná), takže prázdny bod
+ * a prerušovaný prstenec nemajú v legende marku a idú do priznaní VETOU. Dve
+ * rovnaké marky s dvoma rôznymi slovami by boli horšie než veta.
  *
  * ČO SA TU SMIE TICHO POKAZIŤ
  * ───────────────────────────
  *
- *  1. **Trendová čiara sa „upratá" na tlmenú farbu.** Kreslí ju `.line.trend`
- *     v `globals.css` zlatou `--gold2`. Vyzerá to ako značková ozdoba a láka
- *     to prepísať na `--dim` — ZMERANÉ je to naopak: `--accent` ↔ `--gold2` má
- *     naprieč všetkými typmi videnia odstup ΔE 34 až 43, kým `--accent` ↔
- *     `--dim` má pod protanopiou ΔE 4,9, teda je to pre časť ľudí tá istá
- *     farba. Zlatá je tu jediná dostupná druhá marka, ktorá obstojí.
- *     Prerušovanie a legenda sú druhý a tretí kanál — zlatá má vo svetlej téme
- *     proti karte len 3,45:1, čo pre tenkú čiaru stačí, ale rezervu nemá.
- *     Stráži to `test/unit/grafy-paleta.spec.ts`.
+ *  1. **`connectNulls` sa prepne na `true`.** Vtedy Recharts natiahne čiaru
+ *     cez šestnásť nesťahovaných dní a z priznania „toto sme nemerali" spraví
+ *     tvrdenie „medzi 6. a 22. augustom to šlo takto". Preto sa neposiela
+ *     ručne, ale rozprestrením `GAP_SERIES_PROPS` zo spoločného jazyka grafov.
  *
- *  2. **Dnešok dostane vlastnú farbu.** Do 19. 8. 2026 bol zlatý (`--gold2`).
- *     Zlatá je značková farba a v tejto appke nesmie kódovať stav ani rozdiel
- *     v dôveryhodnosti čísla. Dnešok sa preto líši TVAROM (prázdny bod), nie
- *     odtieňom. To isté platí o odhade: tlmená prerušovaná značka, nie iný
- *     odtieň série.
+ *  2. **Bod sa nakreslí aj nad medzerou.** `SeriesDot` vracia pri `units ===
+ *     null` `null`. Kruh na nule alebo v strede rámu by z medzery spravil
+ *     hodnotu.
  *
- *  3. **Priamy popisok pri každom bode.** Povolený je LEN v režime `pair`,
- *     kde sú body dva. Pri dlhšom rade sa čísla čítajú z bubliny alebo
- *     z dátovej tabuľky; číslo pri každom bode je hluk, nie informácia.
+ *  3. **Pás zľavy prekryje šrafovanie medzery.** Poradie kreslenia určujú
+ *     DÁTA (`view.underlays` — najprv zľavy, potom medzery) a tento komponent
+ *     ich mapuje v tom poradí jediným `map`. Keby si poradie vyberal sám,
+ *     nemeraný deň so zľavou by vyzeral zmeraný a test by to nemal na čom
+ *     zmerať: plocha Rechartsu je bez rozmerov (v teste vždy) neviditeľná.
  *
- *  4. **Bublina nad pásmom neznáma ukáže číslo.** Kríž nájde najbližší deň OSI,
- *     nie najbližšie meranie — nad nemeraným dňom preto ukazuje pomlčku
- *     a vetu, nie hodnotu suseda.
+ *  4. **Trend sa „upratá" na tlmenú farbu.** Kreslí ho `.trendLine`
+ *     v `sales-chart.module.css` zlatou `--gold2`; dôvod, čísla aj to, prečo
+ *     je farba v CSS a nie v propse, sú v hlavičke toho súboru.
  *
- *  5. **Bublina prežije opustenie rámu.** Kto zabudne na `onPointerLeave`,
- *     nechá na grafe visieť hodnotu dňa, nad ktorým kurzor už dávno nie je.
+ *  5. **Bublina nad medzerou ukáže hodnotu suseda.** `SalesTip` nečíta
+ *     `payload` Rechartsu (ten pri `null` neprinesie riadok), ale hľadá deň
+ *     z osi vo VLASTNÝCH riadkoch — takže nad nemeraným dňom ukáže pomlčku
+ *     a vetu, nie číslo, ktoré tam nepatrí.
  *
- * Geometriu počíta `sales-view.ts`; tu nie je ani jeden výpočet, ktorý by sa
- * nedal otestovať bez prehliadača.
+ *  6. **Popis osi sa stane kľúčom osi.** `XAxis` má `dataKey="day"` (ISO deň)
+ *     a popis kreslí `tickFormatter`. Keby kľúčom bol popis `7. 8.`, v okne
+ *     dlhšom než rok by sa zopakoval a `ReferenceArea` by si našla iný deň.
  *
- * Vlastník: V1.
+ * Geometriu a riadky počíta `sales-chart-view.ts` (čisté funkcie, testovateľné
+ * bez prehliadača); tu nie je ani jeden výpočet, ktorý by sa nedal otestovať.
+ *
+ * Vlastník: V6b, hlavný graf Prehľadu.
  */
-import { useCallback, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import {
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceArea,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
-import styles from '@/components/charts/charts.module.css';
-/*
- * Značka „nevieme" (šrafovanie) a jej id sa berú zo SPOLOČNÉHO jazyka grafov
- * (D126). Kým ich mal graf predaja vlastné, mohol ten istý vzor znamenať
- * v koláči niečo iné — a človek si návyk prenáša z obrazovky na obrazovku.
- */
+import ChartCard, {
+  ChartSummaryTable,
+  type ChartLegendEntry,
+} from '@/components/charts/ChartCard';
+import useChartTheme from '@/components/charts/useChartTheme';
+import chartStyles from '@/components/charts/charts.module.css';
+import styles from '@/components/dashboard/sales-chart.module.css';
+import {
+  salesChartView,
+  salesPointNote,
+  type SalesChartPoint,
+  type SalesLegendKind,
+} from '@/components/dashboard/sales-chart-view';
+import { axisDay, type ChartGeometry, type DiscountBand } from '@/components/dashboard/sales-view';
 import { ChartHatchPattern, useChartPatternId } from '@/components/ui/Charts';
-import { GAP_WORD } from '@/components/ui/chart-language';
-/*
- * Podfarbené okná zliav sú prvok PREHĽADU, nie grafu ako takého — zľava je
- * pojem prístrojovej dosky a nie každý graf v appke ju má čo kresliť. Ich
- * geometria preto býva vypnutá (`bands` je voliteľné) a ich vzhľad žije v CSS
- * Prehľadu, nie v spoločnej palete grafov.
- */
-import band from '@/components/dashboard/overview.module.css';
-import type { ChartGeometry, DiscountBand } from '@/components/dashboard/sales-view';
-import { CHART, axisDay } from '@/components/dashboard/sales-view';
-import { nearestPoint, pointerToViewBoxX, tipLeftPercent } from '@/components/charts/chart-hover';
+import {
+  AXIS_TICK,
+  GAP_SERIES_PROPS,
+  areaFill,
+  chartVar,
+} from '@/components/ui/chart-language';
 import { formatCountSk, pluralSk } from '@/lib/ui/vocabulary';
 
 export interface SalesChartProps {
   geometry: ChartGeometry;
-  /** Popis nad rámom — obdobie a rozsah, ktoré graf naozaj pokrýva. */
+  /** Popis pod nadpisom — obdobie a rozsah, ktoré graf naozaj pokrýva. */
   caption: string;
-  /** Text pre čítačku obrazovky; graf je obrázok, nie dekorácia. */
+  /**
+   * Veta pre čítačku obrazovky: aká je to forma a na akú otázku odpovedá.
+   * Ide do `<caption>` prepisu, lebo plocha grafu je pre čítačku tichá.
+   */
   label: string;
   /**
    * Podfarbené okná ZĽAV pod krivkou (V4, D113). Bez nich sa graf kreslí presne
    * ako predtým — pásy sú prídavok Prehľadu, nie súčasť merania.
-   *
-   * Sú to VLASTNÉ zápisy appky, nie stav eshopu (I11), a popis nad grafom to
-   * musí povedať. Súradnice počíta `discountBands()` z tej istej osi ako body;
-   * pri poradovej osi vráti prázdne pole a pás sa nekreslí.
    */
   bands?: readonly DiscountBand[];
+  /** Nadpis karty. Predvolene „Denný predaj". */
+  title?: ReactNode;
+  /**
+   * Stupeň nadpisu podľa osnovy STRÁNKY. Graf stojí v sekcii „Predaj", ktorej
+   * popisok je `h2`, takže tu je `h3` (`nadpisy-osnova.spec.ts`).
+   */
+  as?: 'h2' | 'h3';
+  /** Ovládanie v hlavičke karty (prepínač okna). Nie akcie zápisu. */
+  actions?: ReactNode;
+  /** Ďalšie priznania obrazovky pod plochu — pod tie, ktoré pridá graf sám. */
+  footer?: ReactNode;
 }
 
-type HotPoint = ChartGeometry['hover'][number];
-type LegendKind = 'line' | 'dot' | 'trend' | 'today' | 'estimate' | 'gap' | 'band';
+/**
+ * Popis dňa na osi x.
+ *
+ * Medzera je NEZLOMITELNÁ (U+00A0) a nie je to ozdoba: `Text` Rechartsu láme
+ * popisky po slovách, takže „5. 8." dokáže rozdeliť na dva riadky pod sebou —
+ * čo z jedného dátumu spraví dva. Nezlomiteľná medzera je zároveň správna
+ * slovenská typografia: deň a mesiac k sebe patria.
+ */
+function axisTick(day: string): string {
+  return axisDay(day).replace(' ', '\u00a0');
+}
 
 function pieces(value: number): string {
   return `${formatCountSk(value)} ${pluralSk(value, 'kus', 'kusy', 'kusov')}`;
 }
 
-/** Marka legendy. Kreslí sa ako SVG, lebo prerušovanú čiaru bodka nezastúpi. */
-function LegendMark({ kind, hatchId }: { kind: LegendKind; hatchId: string }) {
+/* ═══════════════════════════ 1. Značka bodu ═══════════════════════════════ */
+
+/**
+ * Bod radu. Recharts klonuje tento prvok pre každý riadok a dopĺňa `cx`, `cy`
+ * a `payload`.
+ *
+ * Rozdiel medzi meraním, dolnou hranicou a dneškom nesie TVAR (plný bod,
+ * prerušovaný prstenec, prázdny bod) — nie odtieň. Definície tvarov sú
+ * v `charts.module.css` a sú tie isté, aké kreslil inline SVG graf; zlatá ani
+ * stavová škála sa bodu nikdy nedotknú (do 19. 8. 2026 bol dnešok zlatý a bola
+ * to chyba: značková farba nesmie kódovať dôveryhodnosť čísla).
+ */
+export function SeriesDot(props: {
+  cx?: number;
+  cy?: number;
+  payload?: SalesChartPoint;
+}): ReactNode {
+  const { cx, cy, payload } = props;
+  if (payload === undefined || cx === undefined || cy === undefined) return null;
+  /* Medzera bod NEDOSTANE. Výslovné porovnanie — skrátený guard tu už raz
+     Turbopack vyhodnotil ako compile-time falsy. */
+  if (payload.units === null) return null;
+  const shape =
+    payload.kind === 'today'
+      ? chartStyles.dotOpen
+      : payload.kind === 'lower_bound'
+        ? chartStyles.dotEstimate
+        : chartStyles.dot;
+  return <circle className={shape} cx={cx} cy={cy} r={4} />;
+}
+
+/* ═══════════════════════════ 2. Bublina ═══════════════════════════════════ */
+
+/**
+ * Hodnota dňa pod kurzorom. Číta VLASTNÉ riadky podľa dňa z osi, nie `payload`
+ * Rechartsu: pri `units === null` žiadny riadok v `payload` nie je, a bublina
+ * bez vety by nad nemeraným dňom mlčala.
+ */
+export function SalesTip(props: {
+  active?: boolean;
+  label?: string | number;
+  points?: readonly SalesChartPoint[];
+}): ReactNode {
+  const { active, label, points } = props;
+  if (active !== true || points === undefined) return null;
+  const day = typeof label === 'string' ? label : null;
+  if (day === null) return null;
+  const point = points.find((row) => row.day === day);
+  if (point === undefined) return null;
+  const note = salesPointNote(point);
+
   return (
-    <svg className={styles.legendMark} width="16" height="12" viewBox="0 0 16 12" aria-hidden="true">
-      {kind === 'line' ? <line className="line" x1="0" y1="6" x2="16" y2="6" /> : null}
-      {kind === 'dot' ? <circle className={styles.dot} cx="8" cy="6" r="4" /> : null}
-      {kind === 'trend' ? <line className="line trend" x1="0" y1="6" x2="16" y2="6" /> : null}
-      {kind === 'today' ? <circle className={styles.dotOpen} cx="8" cy="6" r="4" /> : null}
-      {kind === 'estimate' ? <circle className={styles.dotEstimate} cx="8" cy="6" r="4" /> : null}
-      {kind === 'gap' ? <rect x="0" y="1" width="16" height="10" fill={`url(#${hatchId})`} /> : null}
-      {kind === 'band' ? <rect className={band.discountBand} x="0" y="1" width="16" height="10" /> : null}
-    </svg>
+    <div className={styles.tip} data-testid="sales-chart-tip">
+      <span className={styles.tipDay}>{point.label}</span>
+      <span className={styles.tipValue}>
+        {point.units === null ? '—' : `${point.lowerBound ? '≈ ' : ''}${pieces(point.units)}`}
+      </span>
+      {note === null ? null : <span className={styles.tipNote}>{note}</span>}
+    </div>
   );
 }
 
-export function SalesChart({ geometry, caption, label, bands = [] }: SalesChartProps) {
-  const frame = useRef<HTMLDivElement | null>(null);
-  const [hot, setHot] = useState<HotPoint | null>(null);
+/* ═══════════════════════════ 3. Graf ══════════════════════════════════════ */
 
+/** Marka legendy podľa druhu. Slovo dáva model, farbu paleta — nikdy hex. */
+function legendMark(kind: SalesLegendKind, series: string): Omit<ChartLegendEntry, 'label'> {
+  if (kind === 'gap') return { gap: true };
+  /* Trend je prerušovaný; jeho zlatú kreslí CSS (pozri hlavičku
+     `sales-chart.module.css`), takže farbu do marky neposielame. */
+  if (kind === 'trend') return { dashed: true };
+  if (kind === 'band') return { color: chartVar('--sel') };
+  return { color: series };
+}
+
+export function SalesChart({
+  geometry,
+  caption,
+  label,
+  bands = [],
+  title = 'Denný predaj',
+  as = 'h3',
+  actions,
+  footer,
+}: SalesChartProps) {
+  const theme = useChartTheme();
   const hatchId = useChartPatternId('sales-hatch');
+  const view = salesChartView(geometry, bands);
 
-  const onMove = useCallback(
-    (event: { clientX: number }) => {
-      const element = frame.current;
-      if (element === null) return;
-      const rect = element.getBoundingClientRect();
-      const x = pointerToViewBoxX(event.clientX, rect, CHART.width);
-      if (x === null) return;
-      setHot(nearestPoint(geometry.hover, x));
-    },
-    [geometry.hover],
-  );
-
-  const onLeave = useCallback(() => setHot(null), []);
-
-  const lastClosed = geometry.points[geometry.points.length - 1] ?? null;
-  const hasEstimate =
-    geometry.points.some((point) => point.estimate) || geometry.todayPoint?.estimate === true;
-  const showLegend =
-    geometry.trendLine !== null ||
-    geometry.todayPoint !== null ||
-    geometry.gaps.length > 0 ||
-    bands.length > 0 ||
-    hasEstimate;
-
-  /* Priamy popisok pri bode — len v režime `pair`, a nikdy nad nemeraným dňom. */
-  const labelled = geometry.mode !== 'pair' ? [] : geometry.hover.filter((p) => p.units !== null);
+  const legend: ChartLegendEntry[] = view.legend.map((item) => ({
+    label: item.label,
+    ...legendMark(item.kind, theme.accent),
+  }));
 
   return (
-    <div className={styles.frame} ref={frame}>
-      <div className="ct">{caption}</div>
-
-      {hot === null ? null : (
-        <div
-          className={styles.tip}
-          style={{
-            left: `${tipLeftPercent(hot.x, CHART.width)}%`,
-            top: `${(hot.y / CHART.height) * 100}%`,
-          }}
-          data-testid="sales-chart-tip"
-        >
-          <span className={styles.tipDay}>{axisDay(hot.day)}</span>
-          <span className={styles.tipValue}>
-            {hot.units === null ? '—' : `${hot.estimate ? '≈ ' : ''}${pieces(hot.units)}`}
-          </span>
-          {hot.units === null ? <span className={styles.tipNote}>deň sa nesťahoval</span> : null}
-          {hot.units !== null && hot.estimate ? (
-            <span className={styles.tipNote}>neúplný deň, aspoň toľko</span>
-          ) : null}
-          {hot.units !== null && hot.isToday ? (
-            <span className={styles.tipNote}>deň ešte beží</span>
-          ) : null}
-        </div>
-      )}
-
-      <svg
-        viewBox={`0 0 ${CHART.width} ${CHART.height}`}
-        role="img"
-        aria-label={label}
-        data-testid="sales-chart"
-        data-mode={geometry.mode}
-        onPointerMove={onMove}
-        onPointerLeave={onLeave}
-      >
+    <ChartCard
+      title={title}
+      subtitle={caption}
+      as={as}
+      actions={actions}
+      legend={legend}
+      testId="sales-chart"
+      srSummary={
+        <ChartSummaryTable
+          caption={label}
+          labelHead="Deň"
+          valueHead="Kusy"
+          rows={view.summaryRows}
+          format={formatCountSk}
+        />
+      }
+      footer={
+        <>
+          {view.notes.map((note) => (
+            <span key={note} data-testid="sales-chart-note">
+              {note}{' '}
+            </span>
+          ))}
+          {footer}
+        </>
+      }
+    >
+      {/* Vzor „nevieme" musí byť v `<defs>` niektorého SVG v dokumente; plocha
+          Rechartsu si vlastné `<defs>` vložiť nedá. */}
+      <svg className={styles.hatchDefs} aria-hidden="true" focusable="false">
         <defs>
-          {/* Šrafovanie nesťahovaného obdobia — nikdy plná výplň. Jedna
-              definícia pre čiaru aj koláč (`ui/Charts.tsx`). */}
           <ChartHatchPattern id={hatchId} />
         </defs>
-
-        {geometry.gridLines.map((grid, index) => (
-          <g key={grid.label}>
-            <line
-              className="ax"
-              x1={CHART.left}
-              y1={grid.y}
-              x2={CHART.right + 10}
-              y2={grid.y}
-              strokeDasharray={index === 0 ? undefined : '2 4'}
-            />
-            <text x="0" y={grid.y + 3}>
-              {grid.label}
-            </text>
-          </g>
-        ))}
-
-        {/*
-         * Okná zliav sú NAJNIŽŠIA vrstva — pod šrafovaním medzery aj pod
-         * krivkou. Poradie nie je estetika: deň, ktorý sa nesťahoval a zároveň
-         * v ňom bežala zľava, musí zostať čitateľný ako NESŤAHOVANÝ. Keby pás
-         * zľavy ležal nad šrafovaním, vyzeral by ten deň ako zmeraný.
-         */}
-        {bands.map((entry) => (
-          <g key={`zlava-${entry.id}-${entry.fromDay}`}>
-            <rect
-              className={band.discountBand}
-              x={entry.x1}
-              y={CHART.top}
-              width={Math.max(0, entry.x2 - entry.x1)}
-              height={CHART.baseline - CHART.top}
-            />
-            {/* Hrany sa kreslia len tam, kde okno naozaj začína a končí —
-                odrezaná hrana čiaru NEDOSTANE, inak by orezanie vyzeralo ako
-                koniec zľavy. */}
-            {entry.clippedStart ? null : (
-              <line
-                className={band.discountEdge}
-                x1={entry.x1}
-                y1={CHART.top}
-                x2={entry.x1}
-                y2={CHART.baseline}
-              />
-            )}
-            {entry.clippedEnd ? null : (
-              <line
-                className={band.discountEdge}
-                x1={entry.x2}
-                y1={CHART.top}
-                x2={entry.x2}
-                y2={CHART.baseline}
-              />
-            )}
-            {entry.x2 - entry.x1 < 40 ? null : (
-              <text
-                className={band.discountLabel}
-                x={(entry.x1 + entry.x2) / 2}
-                y={CHART.baseline - 4}
-                textAnchor="middle"
-              >
-                {`−${entry.percent} %`}
-              </text>
-            )}
-          </g>
-        ))}
-
-        {/* Nesťahované obdobia sa kreslia POD dáta, aby ich neprekryli. */}
-        {geometry.gaps.map((gap) => (
-          <g key={`${gap.fromDay}-${gap.toDay}`}>
-            <rect
-              className={styles.gapFill}
-              x={gap.x1}
-              y={CHART.top}
-              width={Math.max(0, gap.x2 - gap.x1)}
-              height={CHART.baseline - CHART.top}
-              fill={`url(#${hatchId})`}
-            />
-            {gap.x2 - gap.x1 < 70 ? null : (
-              <text
-                className={styles.gapLabel}
-                x={(gap.x1 + gap.x2) / 2}
-                y={CHART.top + 12}
-                textAnchor="middle"
-              >
-                {GAP_WORD}
-              </text>
-            )}
-          </g>
-        ))}
-
-        {geometry.areaPath === '' ? null : <path className="area" d={geometry.areaPath} />}
-
-        {geometry.segments.map((segment) => (
-          <polyline className="line" key={segment} points={segment} />
-        ))}
-
-        {geometry.trendLine === null ? null : (
-          <line
-            className="line trend"
-            x1={geometry.trendLine.x1}
-            y1={geometry.trendLine.y1}
-            x2={geometry.trendLine.x2}
-            y2={geometry.trendLine.y2}
-          />
-        )}
-
-        {geometry.todayPoint === null || lastClosed === null || geometry.mode === 'pair' ? null : (
-          <polyline
-            className="line proj"
-            points={`${lastClosed.x},${lastClosed.y} ${geometry.todayPoint.x},${geometry.todayPoint.y}`}
-          />
-        )}
-
-        {/*
-         * Body sa kreslia vždy, nielen v režime `pair`. Meranie je diskrétne —
-         * jeden deň, jedno číslo — a bod to hovorí; čiara medzi nimi je len
-         * pomôcka pre oko.
-         */}
-        {geometry.points.map((point) => (
-          <circle
-            className={point.estimate ? styles.dotEstimate : styles.dot}
-            key={point.day}
-            cx={point.x}
-            cy={point.y}
-            r="5"
-          />
-        ))}
-
-        {geometry.todayPoint === null ? null : (
-          <circle
-            className={styles.dotOpen}
-            cx={geometry.todayPoint.x}
-            cy={geometry.todayPoint.y}
-            r="5"
-          />
-        )}
-
-        {labelled.map((point) => (
-          <text
-            className={point.estimate ? styles.pointLabelDim : styles.pointLabel}
-            key={`hodnota-${point.day}`}
-            x={point.x}
-            y={point.y - 12}
-            textAnchor="middle"
-          >
-            {`${point.estimate ? '≈ ' : ''}${formatCountSk(point.units ?? 0)}`}
-          </text>
-        ))}
-
-        {hot === null ? null : (
-          <g>
-            <line
-              className={styles.crosshair}
-              x1={hot.x}
-              y1={CHART.top}
-              x2={hot.x}
-              y2={CHART.baseline}
-            />
-            {hot.units === null ? null : (
-              <circle className={styles.hotDot} cx={hot.x} cy={hot.y} r="6.5" />
-            )}
-          </g>
-        )}
-
-        {geometry.xLabels.map((tick) => (
-          <text key={tick.label} x={tick.x} y={CHART.height - 4} textAnchor="middle">
-            {tick.label}
-          </text>
-        ))}
       </svg>
 
-      {/*
-       * Legenda sa kreslí, len keď je v ráme viac než jedna vec. Pri jedinej
-       * sérii by bola riadkom navyše, ktorý nič nerozlišuje.
-       */}
-      {!showLegend ? null : (
-        <div className={styles.legend} data-testid="sales-chart-legend">
-          <span className={styles.legendItem}>
-            <LegendMark kind={geometry.mode === 'pair' ? 'dot' : 'line'} hatchId={hatchId} />
-            predané kusy
-          </span>
-          {geometry.trendLine === null ? null : (
-            <span className={styles.legendItem}>
-              <LegendMark kind="trend" hatchId={hatchId} />
-              trend cez uzavreté dni
-            </span>
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={view.points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+          {/* Vodorovná mriežka ustúpi dátam (`--line`); zvislá by pri kalendári
+              po dňoch vyrobila mreže, v ktorých krivka zapadne. */}
+          <CartesianGrid stroke={theme.grid} vertical={false} />
+          <XAxis
+            dataKey="day"
+            tickFormatter={axisTick}
+            tick={{ fill: theme.axis, ...AXIS_TICK }}
+            stroke={theme.axis}
+            interval="preserveStartEnd"
+            minTickGap={28}
+          />
+          <YAxis
+            /* Základňa je VŽDY nula a hranica je „pekné" číslo nad maximom —
+               jedno pravidlo osi pre celú appku (`chartScaleMax`). Useknutá os
+               je najsilnejšie skreslenie, aké sa dá urobiť. */
+            domain={[0, view.scaleMax]}
+            allowDecimals={false}
+            tick={{ fill: theme.axis, ...AXIS_TICK }}
+            stroke={theme.axis}
+            width={46}
+          />
+          <Tooltip
+            content={<SalesTip points={view.points} />}
+            cursor={{ stroke: theme.gap, strokeDasharray: '2 3' }}
+            isAnimationActive={false}
+          />
+
+          {/*
+            JEDEN `map` v poradí, ktoré dalo DÁTA (bod 3 hlavičky): najprv okná
+            zliav, potom šrafované medzery. V SVG kreslí neskorší uzol NAD
+            skorším, takže medzera zostane medzerou aj pod pásom zľavy.
+          */}
+          {view.underlays.map((area) =>
+            area.kind === 'discount' ? (
+              <ReferenceArea
+                key={area.key}
+                x1={area.fromDay}
+                x2={area.toDay}
+                fill={chartVar('--sel')}
+                fillOpacity={1}
+                label={
+                  area.label === null
+                    ? undefined
+                    : { value: area.label, position: 'insideBottom', fill: theme.axis, fontSize: 9 }
+                }
+              />
+            ) : (
+              <ReferenceArea
+                key={area.key}
+                x1={area.fromDay}
+                x2={area.toDay}
+                fill={`url(#${hatchId})`}
+                fillOpacity={1}
+                label={
+                  area.label === null
+                    ? undefined
+                    : { value: area.label, position: 'insideTop', fill: theme.axis, fontSize: 10 }
+                }
+              />
+            ),
           )}
-          {geometry.todayPoint === null ? null : (
-            <span className={styles.legendItem}>
-              <LegendMark kind="today" hatchId={hatchId} />
-              dnešok, deň ešte beží
-            </span>
+
+          {/* Hrana sa kreslí LEN tam, kde okno zľavy naozaj začína a končí:
+              odrezaná hrana čiaru nedostane, inak by orezanie vyzeralo ako
+              koniec zľavy. Ktoré hrany to sú, rozhodol model — tu je len `map`. */}
+          {view.edges.map((edge) => (
+            <ReferenceLine key={edge.key} x={edge.day} stroke={theme.gap} />
+          ))}
+
+          {/*
+            Rad. `GAP_SERIES_PROPS` je jadro I11 preložené do jazyka Rechartsu
+            a posiela sa rozprestrením, nie ručne — pozri bod 1 hlavičky.
+            V režime `pair` sa nekreslí ani čiara, ani plocha: dva body nie sú
+            priebeh a plocha sa číta ako spojitá veličina v čase.
+          */}
+          <Area
+            dataKey="units"
+            {...GAP_SERIES_PROPS}
+            isAnimationActive={false}
+            stroke={view.drawLine ? theme.accent : 'none'}
+            strokeWidth={2}
+            fill={view.drawArea ? areaFill(theme.accent) : 'none'}
+            fillOpacity={1}
+            activeDot={false}
+            dot={<SeriesDot />}
+            /*
+              Priamy popisok pri bode. Text si nesie RIADOK (`pointLabel`) a
+              model ho vyrobí len v režime `pair` — inak je `null` a Recharts
+              nemá čo napísať. Keby o tom rozhodoval komponent, pravidlo „dva
+              body áno, dlhší rad nie" by sa nedalo zmerať bez prehliadača.
+            */
+            label={{
+              dataKey: 'pointLabel',
+              position: 'top',
+              fill: theme.ink,
+              fontSize: 11,
+            }}
+          />
+
+          {!view.drawTrend ? null : (
+            <Line
+              dataKey="trend"
+              className={styles.trendLine}
+              {...GAP_SERIES_PROPS}
+              isAnimationActive={false}
+              dot={false}
+              activeDot={false}
+            />
           )}
-          {!hasEstimate ? null : (
-            <span className={styles.legendItem}>
-              <LegendMark kind="estimate" hatchId={hatchId} />
-              ≈ neúplný deň, aspoň toľko
-            </span>
-          )}
-          {geometry.gaps.length === 0 ? null : (
-            <span className={styles.legendItem}>
-              <LegendMark kind="gap" hatchId={hatchId} />
-              nesťahované dni, predaj nepoznáme
-            </span>
-          )}
-          {bands.length === 0 ? null : (
-            <span className={styles.legendItem}>
-              <LegendMark kind="band" hatchId={hatchId} />
-              okná zliav podľa našich zápisov
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+        </ComposedChart>
+      </ResponsiveContainer>
+    </ChartCard>
   );
 }
 

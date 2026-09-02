@@ -22,6 +22,28 @@
  * Preto `flop` znamená „najslabší Z PREDÁVANÝCH", nie „nepredáva sa". Odpoveď to
  * hovorí aj strojovo: `excludes.zeroSales = true` a `cohort.size`.
  *
+ * ═══ A HOVORÍ TO AJ ČÍSLOM (2. 9. 2026, D121) ═══
+ * Príznak `excludes.zeroSales: true` je pravda, ale sám o sebe je NEMERATEĽNÝ:
+ * obrazovka z neho nevie povedať, koho sa to týka — desiatich produktov, alebo
+ * štyridsiatich tisíc. A práve to je dnes rozdiel medzi „rebríček je takmer
+ * celý eshop" a „rebríček je stotina eshopu". Preto sa vracajú DVE čísla, obe
+ * zo zrkadla katalógu (`catalogRepo.counts()`):
+ *
+ *  · `excludes.unknownSales` — koľko riadkov má za okno predaj NEZNÁMY, teda
+ *    `unitsSold === null` (D121). To je „nemerali sme", nie nula.
+ *  · `excludes.measuredZeroSales` — koľko ich má nameranú NULU (vedro `none`).
+ *
+ * Sú to dve rôzne veci a zliať ich do jedného „vylúčených" by bolo presne to,
+ * čo I11 zakazuje. Obe sú `number | null` a `null` znamená „appka to číslo za
+ * TOTO okno nemá" — nie nulu:
+ *
+ *   `counts()` vie triediť len okná z `ALLOWED_SOLD_WINDOWS` a mimo nich si
+ *   okno TICHO prepíše na predvolené (`normalizeWindowDays`). Pri okne 7 dní
+ *   (cesta B) preto počty platia za 30 dní a vydávať ich za sedemdňové by bolo
+ *   vymyslené číslo. Rozhoduje o tom `excludesOf()` porovnaním
+ *   `counts.soldWindowDays` s oknom odpovede — nie druhá kópia zoznamu
+ *   povolených okien, ktorá by sa raz rozišla.
+ *
  * ═══ AKO SA OKNO POČÍTA ═══
  * Dve cesty, obe nad tými istými riadkami, len s iným plánom dotazu:
  *
@@ -63,6 +85,7 @@ import { defineRoute, type NextRouteHandler, type RouteDeps } from '@/lib/http/d
 import {
   ALLOWED_SOLD_WINDOWS,
   catalogRepo as defaultCatalogRepo,
+  type CatalogCounts,
   type CatalogSearchRow,
 } from '@/lib/repo/catalog.repo';
 import {
@@ -143,6 +166,28 @@ export interface TopProductRow {
 
 export type TopProductsReason = 'no_coverage' | 'cohort_too_large';
 
+/**
+ * Koho sa rebríček NETÝKA — príznakom aj číslom (D121, 2. 9. 2026).
+ *
+ * Príznaky sú konštanty typu, lebo to pravidlo sa nemení: nula ani nenájdený
+ * produkt do poradia nevstupujú nikdy. Čísla sú trojstavové (`number | null`),
+ * pretože ich appka za niektoré okná NEMÁ — pozri hlavičku modulu.
+ */
+export interface TopProductsExcludes {
+  zeroSales: true;
+  notFound: true;
+  /**
+   * Koľko riadkov zrkadla má za okno odpovede predaj NEZNÁMY (`unitsSold ===
+   * null`). `null` = počet za toto okno appka nemá; NIKDY nula.
+   */
+  unknownSales: number | null;
+  /**
+   * Koľko riadkov má za okno nameranú NULU (vedro `none`). Iná vec než
+   * `unknownSales` — jedno je meranie, druhé jeho absencia (I11).
+   */
+  measuredZeroSales: number | null;
+}
+
 export interface TopProductsResponse {
   today: DateOnly;
   window: WindowRange;
@@ -160,7 +205,7 @@ export interface TopProductsResponse {
    */
   cohort: { size: number };
   /** Čo do rebríčka ZÁMERNE nevstupuje — aby to obrazovka mohla povedať. */
-  excludes: { zeroSales: true; notFound: true };
+  excludes: TopProductsExcludes;
   gaps: WindowCoverage;
   rankingState: MeasurementState;
 }
@@ -204,6 +249,27 @@ function toRow(
   };
 }
 
+/**
+ * Dve čísla o vylúčených riadkoch — alebo dve `null`, keď počty platia za INÉ
+ * okno, než za aké je rebríček.
+ *
+ * Porovnáva sa `counts.soldWindowDays` (čo zrkadlo naozaj počítalo) s oknom
+ * odpovede. `counts()` si okno mimo `ALLOWED_SOLD_WINDOWS` ticho prepíše na
+ * predvolené, takže bez tejto brány by odpoveď za 7 dní niesla tridsaťdňové
+ * počty a nikto by sa to nedozvedel.
+ */
+function excludesOf(
+  counts: Pick<CatalogCounts, 'soldWindowDays' | 'soldUnknown' | 'sold'> | null,
+  windowDays: number,
+): TopProductsExcludes {
+  const base = { zeroSales: true, notFound: true } as const;
+  // Explicitné `=== null`: skrátený guard tu Turbopack už raz zahodil.
+  if (counts === null || counts.soldWindowDays !== windowDays) {
+    return { ...base, unknownSales: null, measuredZeroSales: null };
+  }
+  return { ...base, unknownSales: counts.soldUnknown, measuredZeroSales: counts.sold.none };
+}
+
 /* ═══════════════════════════════ 4. Route ═════════════════════════════════ */
 
 export function createInsightsTopProductsGet(
@@ -237,7 +303,13 @@ export function createInsightsTopProductsGet(
           top: [],
           flop: [],
           cohort: { size: 0 },
-          excludes: { zeroSales: true, notFound: true },
+          /*
+           * Kým sa `counts()` nezavolá, appka počty vylúčených NEVIE — a `null`
+           * to hovorí. Nula by tvrdila „nevylučuje sa nič", čo je pri vetve
+           * `no_coverage` (ani jeden dočítaný deň) presne naopak: vylučuje sa
+           * VŠETKO.
+           */
+          excludes: excludesOf(null, range.days),
           gaps,
           rankingState,
         };
@@ -253,6 +325,13 @@ export function createInsightsTopProductsGet(
         let topRows: Array<{ row: CatalogSearchRow; units: number }>;
         let flopRows: Array<{ row: CatalogSearchRow; units: number }>;
         let cohortSize: number;
+        /*
+         * Počty CELÉHO zrkadla, z ktorých sa odvodia čísla vylúčených. Cesta B
+         * ich má aj tak (potrebuje veľkosť kohorty), cesta A si ich vypýta
+         * zvlášť — je to tretí `SELECT` nad lokálnou databázou, žiadne volanie
+         * shopu (K8). `null` znamená „nepýtali sme sa", nie nulu.
+         */
+        let windowCounts: CatalogCounts | null = null;
 
         if (sortable) {
           /* ── Cesta A: triedi SQL. ─────────────────────────────────────── */
@@ -265,6 +344,13 @@ export function createInsightsTopProductsGet(
           };
           const desc = await catalog.search({ ...filter, sort: 'sold_desc' as const });
           const asc = await catalog.search({ ...filter, sort: 'sold_asc' as const });
+          /*
+           * BEZ `soldBuckets`: počty majú byť nad celým zrkadlom, nie nad tým,
+           * čo do rebríčka vstúpilo. S filtrom vedier by `soldUnknown` vyšlo
+           * nula — teda „netýka sa to nikoho" — a to je práve tá nepravda,
+           * ktorú toto číslo má odstrániť.
+           */
+          windowCounts = await catalog.counts({ soldWindowDays: range.days, today });
           /*
            * Riadok s neznámym predajom (`unitsSold === null`, D121) do rebríčka
            * NEVSTUPUJE — rovnaký dôvod, prečo sa neradí bez jediného dočítaného
@@ -283,9 +369,21 @@ export function createInsightsTopProductsGet(
             soldWindowDays: COHORT_WINDOW_DAYS,
             today,
           });
+          /*
+           * Počty sú za NADMNOŽINOVÉ okno (30 dní), nie za okno odpovede.
+           * Odovzdávajú sa aj tak — `excludesOf()` ich podľa
+           * `counts.soldWindowDays` zahodí na `null`. Prepočítať ich na 7 dní
+           * sa nedá a odhadnúť ich by znamenalo vymyslené číslo.
+           */
+          windowCounts = counts;
           const size = counts.sold.low + counts.sold.mid + counts.sold.high;
           if (size > COHORT_MAX) {
-            return { ...empty, reason: 'cohort_too_large', cohort: { size } };
+            return {
+              ...empty,
+              reason: 'cohort_too_large',
+              cohort: { size },
+              excludes: excludesOf(counts, range.days),
+            };
           }
 
           const cohort: CatalogSearchRow[] = [];
@@ -336,6 +434,7 @@ export function createInsightsTopProductsGet(
           top: topRows.map((entry) => toRow(entry.row, entry.units, enrichment.get(entry.row.productId))),
           flop: flopRows.map((entry) => toRow(entry.row, entry.units, enrichment.get(entry.row.productId))),
           cohort: { size: cohortSize },
+          excludes: excludesOf(windowCounts, range.days),
         };
       },
     },

@@ -15,11 +15,26 @@
  * Sekcia je jediné miesto v Nastaveniach s červeným rámom. Je to zámer:
  * červená je vyhradená pre stratu dát a zastavený zápis, takže keď ju
  * používateľ uvidí inde, vie, že ide o vážnu vec.
+ *
+ * ČO SA ZMENILO V V6b (a čo nie)
+ * ------------------------------
+ * Rám je `Panel` + `PanelHead` (D142, D143) a červeň nesie trieda `.danger`
+ * z `settings-sections.module.css` — plochu kreslí primitívum, modul jej mení
+ * len `border-color` a farbu nadpisu. Kotva `id="cervena"` zostáva.
+ *
+ * BRÁNA SA NEDOTKLA A NESMIE (D106, I3)
+ * -------------------------------------
+ * `DELETE /api/key` žiada v tele literál `KLUC UNIKOL` (`PANIC_CONFIRM_LITERAL`)
+ * a po zmazaní hesiel je to JEDINÁ brána tejto akcie. Redizajn preto nesmie
+ * zmeniť ani jedno z troch: rozklik pred poľom, doslovné opísanie textu a
+ * vypnuté tlačidlo, kým sa text nezhoduje. Krajšie áno, kratšie nie.
  */
 import { useState } from 'react';
 
+import styles from '@/components/settings/settings-sections.module.css';
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
+import { Panel, PanelBody, PanelHead } from '@/components/ui/Panel';
 import RunbookPanel from '@/components/ui/RunbookPanel';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import {
@@ -76,103 +91,109 @@ export function PanicButton({ keyPresent, onWiped }: PanicButtonProps) {
     fail(res.error);
   }
 
-  if (result) {
+  if (result !== null) {
     return (
-      <section className="sec danger-zone" id="cervena" data-testid="panic-result">
-        <div className="sec-h">
-          <h2>Kľúče sú zmazané</h2>
-        </div>
-        <p className="set-note">
-          Zrušených čakajúcich zliav: <b>{result.cancelledCampaigns}</b>. Appka
-          teraz do eshopu nezapíše nič, kým nevložíš nový kľúč. Už zapísané zľavy
-          v eshope zostanú a dobehnú.
-        </p>
-        <RunbookPanel
-          title="Čo robiť teraz"
-          steps={RUNBOOK_STEPS}
-          runbookUrl={result.runbookUrl}
-        />
-      </section>
+      <Panel
+        id="cervena"
+        className={`${styles.section} ${styles.danger}`}
+        data-testid="panic-result"
+      >
+        <PanelHead title="Kľúče sú zmazané" />
+        <PanelBody>
+          <p className="set-note">
+            Zrušených čakajúcich zliav: <b>{result.cancelledCampaigns}</b>. Appka
+            teraz do eshopu nezapíše nič, kým nevložíš nový kľúč. Už zapísané zľavy
+            v eshope zostanú a dobehnú.
+          </p>
+          <RunbookPanel
+            title="Čo robiť teraz"
+            steps={RUNBOOK_STEPS}
+            runbookUrl={result.runbookUrl}
+          />
+        </PanelBody>
+      </Panel>
     );
   }
 
   return (
-    <section className="sec danger-zone" id="cervena" data-testid="panic-button">
-      <div className="sec-h">
-        <h2>Červená zóna</h2>
-      </div>
-
-      <div className="dz-row">
-        <span>
-          Kľúč unikol — zmazať oba kľúče a zrušiť všetky čakajúce zľavy. Už
-          zapísané zľavy v eshope zostanú a dobehnú.
-        </span>
-        {!open ? (
-          <span className="dz-a">
-            {/* Rozklik nad najnebezpečnejšou akciou appky: čo sa stlačením
-                otvorí, musí byť čítačke povedané, nielen vidieť. */}
-            <Button
-              variant="danger"
-              small
-              aria-expanded={open}
-              aria-controls="panic-editor"
-              onClick={() => setOpen(true)}
-              data-testid="panic-open"
-            >
-              Kľúč unikol
-            </Button>
-          </span>
-        ) : null}
-      </div>
-
-      {!keyPresent ? (
-        <div className="dz-row lvl-3">
+    <Panel
+      id="cervena"
+      className={`${styles.section} ${styles.danger}`}
+      data-testid="panic-button"
+    >
+      <PanelHead title="Červená zóna" />
+      <PanelBody>
+        <div className={styles.dangerRow}>
           <span>
-            Teraz nie je uložený ani jeden kľúč. Zmazanie sa dá spustiť aj tak —
-            zruší čakajúce zľavy a zapíše incident do histórie.
+            Kľúč unikol — zmazať oba kľúče a zrušiť všetky čakajúce zľavy. Už
+            zapísané zľavy v eshope zostanú a dobehnú.
           </span>
+          {!open ? (
+            <span className={styles.dangerAct}>
+              {/* Rozklik nad najnebezpečnejšou akciou appky: čo sa stlačením
+                  otvorí, musí byť čítačke povedané, nielen vidieť. */}
+              <Button
+                variant="danger"
+                small
+                aria-expanded={open}
+                aria-controls="panic-editor"
+                onClick={() => setOpen(true)}
+                data-testid="panic-open"
+              >
+                Kľúč unikol
+              </Button>
+            </span>
+          ) : null}
         </div>
-      ) : null}
 
-      {open ? (
-        <div className="set-form" id="panic-editor" data-testid="panic-editor">
-          <label className="field set-w">
-            <span className="lb">Opíš presne text {PANIC_CONFIRM_LITERAL}</span>
-            <input
-              className="inp"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              disabled={busy}
-              placeholder={PANIC_CONFIRM_LITERAL}
-              data-testid="panic-confirm"
-            />
-          </label>
-          <div className="row">
-            <Button
-              variant="danger"
-              onClick={() => void submit()}
-              disabled={busy || !confirmOk}
-              disabledReason={`Najprv opíš text ${PANIC_CONFIRM_LITERAL}.`}
-              data-testid="panic-submit"
-            >
-              {busy ? 'Mažem kľúče…' : 'Zmazať kľúče a zrušiť čakajúce zľavy'}
-            </Button>
-            <Button
-              onClick={() => {
-                setOpen(false);
-                setConfirm('');
-                setFailure(null);
-              }}
-              disabled={busy}
-            >
-              Späť
-            </Button>
+        {!keyPresent ? (
+          <div className={`${styles.dangerRow} ${styles.dangerNote}`}>
+            <span>
+              Teraz nie je uložený ani jeden kľúč. Zmazanie sa dá spustiť aj tak —
+              zruší čakajúce zľavy a zapíše incident do histórie.
+            </span>
           </div>
-          <ActionFailurePanel failure={failure} testId="panic-failure" />
-        </div>
-      ) : null}
+        ) : null}
 
-    </section>
+        {open ? (
+          <div className="set-form" id="panic-editor" data-testid="panic-editor">
+            <label className="field set-w">
+              <span className="lb">Opíš presne text {PANIC_CONFIRM_LITERAL}</span>
+              <input
+                className="inp"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                disabled={busy}
+                placeholder={PANIC_CONFIRM_LITERAL}
+                data-testid="panic-confirm"
+              />
+            </label>
+            <div className="row">
+              <Button
+                variant="danger"
+                onClick={() => void submit()}
+                disabled={busy || !confirmOk}
+                disabledReason={`Najprv opíš text ${PANIC_CONFIRM_LITERAL}.`}
+                data-testid="panic-submit"
+              >
+                {busy ? 'Mažem kľúče…' : 'Zmazať kľúče a zrušiť čakajúce zľavy'}
+              </Button>
+              <Button
+                onClick={() => {
+                  setOpen(false);
+                  setConfirm('');
+                  setFailure(null);
+                }}
+                disabled={busy}
+              >
+                Späť
+              </Button>
+            </div>
+            <ActionFailurePanel failure={failure} testId="panic-failure" />
+          </div>
+        ) : null}
+      </PanelBody>
+    </Panel>
   );
 }
 

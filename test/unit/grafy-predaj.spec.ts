@@ -44,7 +44,8 @@ import SalesSection, {
   tableRows,
   toSeriesDay,
 } from '@/components/dashboard/SalesSection';
-import SalesChart from '@/components/dashboard/SalesChart';
+import SalesChart, { SeriesDot } from '@/components/dashboard/SalesChart';
+import { salesChartView } from '@/components/dashboard/sales-chart-view';
 import type { SalesDay, SalesSnapshot } from '@/components/dashboard/api';
 import type { SeriesDay } from '@/components/dashboard/sales-view';
 import {
@@ -187,20 +188,38 @@ describe('dve merania sa kreslia ako dve merania', () => {
     expect(chartGeometry(dni(MIN_TREND_POINTS), TODAY)!.trendLine).not.toBeNull();
   });
 
+  /*
+   * PRESMEROVANÉ VO V6b (2. 9. 2026). Do 2. 9. sa merali reťazce vo vykreslenom
+   * SVG (`data-mode="pair"`, `line trend`). Graf prešiel na Recharts a jeho
+   * plocha sa v teste NEKRESLÍ vôbec — `ResponsiveContainer` bez rozmerov
+   * nevykreslí ani jeden `path`, takže tvrdenie o priamych popiskoch by na SVG
+   * prešlo aj vtedy, keby popisky zmizli. Meria sa preto to, čo do grafu
+   * NAOZAJ ide: `pointLabel` v riadku (Recharts ho číta cez `label.dataKey`)
+   * a `drawTrend`. Čísla v HTML sa merajú ďalej — sú v prepise pre čítačku aj
+   * v dátovej tabuľke.
+   */
   it('obe hodnoty stoja priamo pri bodoch, pri dlhšom rade nie', () => {
     const html = render(snapshot());
-    expect(html).toContain('data-mode="pair"');
     expect(html).toContain('578');
     expect(html).toContain('495');
-    expect(html).not.toContain('line trend');
+
+    const pair = salesChartView(chartGeometry(NAMERANE, TODAY)!);
+    expect(pair.shape).toBe('pair');
+    expect(pair.points.map((point) => point.pointLabel)).toEqual(['578', '495']);
+    expect(pair.drawTrend).toBe(false);
+    expect(pair.drawLine).toBe(false);
+    expect(pair.drawArea).toBe(false);
 
     const dlhy = Array.from({ length: 7 }, (_, i) => ({
       day: `2026-08-0${i + 1}`,
       units: 10 + i,
     }));
-    const html2 = render(snapshot({ days: dlhy, today: '2026-08-20' }));
-    expect(html2).toContain('data-mode="line"');
-    expect(html2).toContain('line trend');
+    const line = salesChartView(chartGeometry(dlhy, '2026-08-20')!);
+    expect(line.shape).toBe('line');
+    // Pri dlhšom rade je popisok pri každom bode hluk, nie informácia.
+    expect(line.points.every((point) => point.pointLabel === null)).toBe(true);
+    expect(line.drawTrend).toBe(true);
+    expect(line.legend.map((item) => item.label)).toContain('trend cez uzavreté dni');
   });
 });
 
@@ -523,13 +542,15 @@ describe('trend nevzniká nad radom, ktorý má diery alebo odhady', () => {
 });
 
 describe('graf to isté priznáva aj na obrazovke', () => {
+  const geometry = chartGeometry(skutocnost(), DNES)!;
   const html = renderToStaticMarkup(
     createElement(SalesChart, {
-      geometry: chartGeometry(skutocnost(), DNES)!,
+      geometry,
       caption: '5. 8. – 22. 8. · 2 dni s údajmi · povolené produkty',
       label: 'Predané kusy povolených produktov po dňoch',
     }),
   );
+  const view = salesChartView(geometry);
 
   it('pás nesťahovaného obdobia je v ráme a je pomenovaný slovom', () => {
     // Šrafovanie je značka; bez slova v legende je to len vzorka.
@@ -538,16 +559,31 @@ describe('graf to isté priznáva aj na obrazovke', () => {
     expect(html).toContain('data-testid="sales-chart-legend"');
   });
 
-  it('v ráme nie je ani jedna spojnica — dve merania nie sú priebeh', () => {
-    expect(html).toContain('data-mode="pair"');
-    expect(html).not.toContain('<polyline');
+  /*
+   * PRESMEROVANÉ VO V6b: dve tvrdenia nižšie merali značky vo vlastnom SVG
+   * (`<polyline>`, `line trend`, počet `<circle>`). Plochu kreslí Recharts
+   * a v teste ju nekreslí vôbec (nulové rozmery), takže tie isté tvrdenia sa
+   * merajú na TELE DÁT a na značke bodu — teda na tom, z čoho plocha vzniká.
+   */
+  it('v rade nie je ani jedna spojnica — dve merania nie sú priebeh', () => {
+    expect(view.shape).toBe('pair');
+    expect(view.drawLine).toBe(false);
+    expect(view.drawArea).toBe(false);
+    expect(view.drawTrend).toBe(false);
+    // A rám naozaj nekreslí trendovú čiaru ani plnú plochu.
     expect(html).not.toContain('line trend');
+    expect(html).not.toContain('<polyline');
   });
 
   it('bodov je práve toľko, koľko meraní', () => {
-    // Iba rám grafu; legenda kreslí vlastnú marku a tá bodom nie je.
-    const ram = html.slice(html.indexOf('data-testid="sales-chart"'), html.indexOf('</svg>'));
-    expect(ram.match(/<circle/g) ?? []).toHaveLength(2);
+    const merania = view.points.filter((point) => point.units !== null);
+    expect(merania).toHaveLength(2);
+    expect(merania.map((point) => point.units)).toEqual([578, 495]);
+    // Bod dostane LEN meranie: nad medzerou vracia značka `null`, nie kruh.
+    for (const point of view.points) {
+      const dot = SeriesDot({ cx: 10, cy: 10, payload: point });
+      expect(dot === null, point.day).toBe(point.units === null);
+    }
   });
 });
 

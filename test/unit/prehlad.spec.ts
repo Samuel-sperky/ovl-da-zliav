@@ -560,7 +560,12 @@ describe('Prehľad — sekcie sa vykreslia', () => {
       }),
     );
     expect(html).toContain('<svg');
-    expect(html).toContain('line trend');
+    /* PRESMEROVANÉ VO V6b (2. 9. 2026): trendovú čiaru kreslil inline SVG
+       triedou `line trend`; od prevodu na `ChartCard` + Recharts (D135) ju
+       kreslí rad Rechartsu a v teste sa plocha nekreslí vôbec. Že trend
+       v grafe JE, hovorí odteraz jeho slovo v legende — a to je zároveň ten
+       kanál, ktorý sa nikdy stratiť nesmie (marka bez slova je obrázok). */
+    expect(html).toContain('trend cez uzavreté dni');
     expect(html).toContain('Priemer za deň');
     expect(html).toContain('Dáta k');
     expect(html).not.toContain('€');

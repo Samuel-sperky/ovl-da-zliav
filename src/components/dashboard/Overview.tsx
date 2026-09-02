@@ -16,6 +16,11 @@
  * PORADIE ZHORA (P5 — štyri sekcie sú STROP, nie cieľ)
  * ───────────────────────────────────────────────────
  *
+ *   0−−. HLAVIČKA STRÁNKY — `PageHeader` (V6b). Jedno `h1` na strom a rovnaký
+ *      zvislý rytmus zhora ako na Zľavách, Produktoch a v Nastaveniach. Do V6b
+ *      Prehľad nadpis NEMAL vôbec: obsah začínal v inej výške než ostatné tri
+ *      oblasti a čítačka na tejto stránke nemala kde začať. Hlavička nie je
+ *      sekcia — je to jeden riadok nadpisu s vetou pod ním.
  *   0−. KPI RIADOK — štyri dlaždice: predané kusy, tržba celého eshopu, bežiace
  *      zľavy, obohatené z katalógu. `KpiRow`.
  *   0. STAVOVÝ PÁS — jeden riadok: verdikt, kľúč, rozpočet, fronta. Rozklik
@@ -80,6 +85,8 @@ import StatusSection from '@/components/dashboard/StatusSection';
 import TopFlopSection from '@/components/dashboard/TopFlopSection';
 import WindowSwitch from '@/components/dashboard/WindowSwitch';
 import styles from '@/components/dashboard/overview.module.css';
+import { LoadingState } from '@/components/states';
+import { PageHeader } from '@/components/ui';
 import {
   getCampaigns,
   getInsights,
@@ -127,6 +134,21 @@ import {
 import { useRefreshable } from '@/components/layout/refresh';
 import type { EnrichStatePayload } from '@/lib/catalog/enrich-view';
 import { todayHere } from '@/lib/ui/vocabulary';
+
+/**
+ * Hlavička obrazovky. Vlastný komponent preto, aby ju vetva kostry a vetva
+ * s dátami nemohli napísať dvomi rôznymi vetami — nadpis, ktorý sa pri
+ * načítaní zmení, je ten istý druh tichého rozchodu ako dve kópie čísla.
+ */
+function OverviewHeader() {
+  return (
+    <PageHeader
+      title="Prehľad"
+      description="Čo sa predáva, čo leží a čo robia zľavy, ktoré appka zapísala."
+      testId="overview-header"
+    />
+  );
+}
 
 interface OverviewData {
   queue: QueueSnapshot | null;
@@ -227,18 +249,23 @@ export function Overview() {
     [loadWindow],
   );
 
-  // Prvé načítanie: kostra v rozmeroch hotovej obrazovky, aby sa rozloženie
-  // pod rukami nepreskladalo. Žiadne čísla — kým sa nič nevie, nič sa netvrdí.
+  /*
+   * Prvé načítanie: kostra v tvare hotovej obrazovky, aby sa rozloženie pod
+   * rukami nepreskladalo. Žiadne čísla — kým sa nič nevie, nič sa netvrdí.
+   *
+   * Od V6b to kreslí `LoadingState` z rodiny stavov (D134), nie päť ručných
+   * `.ovl-skeleton` divov s pevnými výškami v `style`: štyri dlaždice sú rad
+   * KPI, štyri bloky sú pás, predaj, rebrík a zľavy. Inline `style` navyše
+   * obchádzal tokenovú vrstvu a strážny test o ňom nevedel (D147).
+   *
+   * Hlavička sa kreslí AJ tu — je to jediná časť obrazovky, ktorá na žiadnu
+   * odpoveď nečaká, a keby dobehla až s dátami, nadpis by pod rukami poskočil.
+   */
   if (data === null) {
     return (
       <div className={styles.page} aria-busy="true">
-        {/* Rad dlaždíc: jeden rad, teda ~88 px. Kostra ho drží preto, aby pás
-            pod ním nepreskočil o výšku radu, keď dáta dobehnú. */}
-        <div className="sec ovl-skeleton" style={{ minHeight: '88px' }} />
-        <div className="sec ovl-skeleton" style={{ minHeight: '44px' }} />
-        <div className="sec ovl-skeleton" style={{ minHeight: '212px' }} />
-        <div className="sec ovl-skeleton" style={{ minHeight: '190px' }} />
-        <div className="sec ovl-skeleton" style={{ minHeight: '160px' }} />
+        <OverviewHeader />
+        <LoadingState tiles={4} blocks={4} label="Načítavam Prehľad…" />
       </div>
     );
   }
@@ -293,6 +320,8 @@ export function Overview() {
 
   return (
     <div className={styles.page} data-testid="overview">
+      <OverviewHeader />
+
       {/*
        * KPI rad je PRVÝ na obrazovke — dôvod je v hlavičke (rozhodnutie V6b).
        *

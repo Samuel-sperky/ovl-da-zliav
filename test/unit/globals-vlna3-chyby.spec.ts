@@ -19,7 +19,16 @@
  * isté, čo počíta prehliadač:
  *
  *   · pri legende sa selektor z CSS priloží na SKUTOČNE VYKRESLENÉ `<svg>`
- *     z `SalesChart` a pýta sa, ktoré z nich kreslí;
+ *     z `PriceHistogram` a pýta sa, ktoré z nich kreslí;
+ *
+ *     PRESMEROVANÉ VO V6b (2. 9. 2026): vzorku dával do 2. 9. graf predaja
+ *     (`SalesChart`). Ten prešiel na `ChartCard` + Recharts (D135), takže už
+ *     nekreslí ani `.chart`, ani `svg[role="img"]` — plochu mu robí `Panel`
+ *     a Recharts. Pravidlo `.chart svg[role='img'] { width: 100% }` v
+ *     `globals.css` ale ŽIJE a kreslí `PriceHistogram`, ktorý inline SVG v
+ *     `.chart` ráme zostal. Meria sa preto on: rovnaká chyba (marky legendy
+ *     nafúknuté na 100 %) sa dá spraviť presne tam, kde to pravidlo dopadá.
+ *     Kým graf cien neprejde tou istou cestou, je toto jeho jediný strážca.
  *   · pri rozložení sa zloží celý reťazec šírok (bočný panel → `.wrap` →
  *     stĺpec filtrov → rad) a porovná sa so súčtom flex-základov, lebo presne
  *     ten rozhoduje o zalomení radu;
@@ -38,8 +47,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import SalesChart from '@/components/dashboard/SalesChart';
-import { chartGeometry } from '@/components/dashboard/sales-view';
+import PriceHistogram from '@/components/charts/PriceHistogram';
 
 import { contrast } from '../helpers/palette-math';
 
@@ -177,31 +185,34 @@ describe('1 — `.chart svg` nesmie chytiť marky legendy', () => {
     return true;
   }
 
-  /* Štrnásť dní vrátane dneška — geometria s trendom aj s otvoreným dneškom,
-     teda legenda s viac než jednou markou. */
-  const DNES = '2026-08-24';
-  const DNI = Array.from({ length: 14 }, (_, i) => ({
-    day: `2026-08-${String(11 + i).padStart(2, '0')}`,
-    units: 8 + ((i * 5) % 7),
-  }));
-
+  /* Rozdelenie so zberným pásmom a s jedným vybraným produktom, teda legenda
+     s tromi markami: stĺpec, šrafovaný chvost a referenčná značka. */
   const HTML = renderToStaticMarkup(
-    createElement(SalesChart, {
-      geometry: chartGeometry(DNI, DNES)!,
-      caption: '11. 8. – 24. 8. · 14 dní s údajmi · povolené produkty',
-      label: 'Predané kusy povolených produktov po dňoch',
+    createElement(PriceHistogram, {
+      bins: [
+        { from: 0, to: 20, count: 1_240 },
+        { from: 20, to: 40, count: 6_800 },
+        { from: 40, to: null, count: 180 },
+      ],
+      selection: [{ productId: 4_211, price: 43 }],
+      rows: 8_220,
+      withoutPrice: 0,
+      maxPrice: 1_758.46,
+      oldestFetchedAt: '2026-07-02T10:00:00.000Z',
+      newestFetchedAt: '2026-08-18T21:30:00.000Z',
+      complete: true,
     }),
   );
 
   const VSETKY = znacky(HTML);
-  const PLOCHA = VSETKY.filter((z) => z.atributy['data-testid'] === 'sales-chart');
+  const PLOCHA = VSETKY.filter((z) => z.atributy['data-testid'] === 'price-histogram-svg');
   const MARKY = VSETKY.filter((z) => z.atributy['aria-hidden'] === 'true');
 
   it('vzorka je tá pravá — jedna plocha grafu a niekoľko mariek legendy', () => {
     expect(PLOCHA).toHaveLength(1);
     // Bez mariek by test nemal čo merať a tichým prechodom by klamal.
     expect(MARKY.length).toBeGreaterThanOrEqual(2);
-    expect(HTML).toContain('data-testid="sales-chart-legend"');
+    expect(HTML).toContain('data-testid="price-histogram-legend"');
   });
 
   it('pravidlo kreslí plochu grafu', () => {

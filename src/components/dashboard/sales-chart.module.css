@@ -1,0 +1,88 @@
+/*
+ * Aura Zľavy — HLAVNÝ GRAF PREHĽADU: to, čo Recharts nevie z tokenov (V6b).
+ *
+ * Rám, výšku plochy, legendu, prepis a pätičku kreslí `ChartCard`
+ * (`charts.module.css` + `frame.module.css`) a farby radov si graf berie
+ * z `useChartTheme()`. Tu zostávajú TRI veci, ktoré ani jeden z nich nemá:
+ *
+ *  1. **Trendová čiara.** Zlatá je v tomto repe MERANÁ voľba: `--accent` ↔
+ *     `--gold2` má naprieč typmi videnia odstup ΔE 34 až 43, kým `--accent` ↔
+ *     `--dim` má pod protanopiou 4,9, teda je to pre časť ľudí tá istá farba
+ *     (`grafy-paleta.spec.ts`). `chart-language.ts` §7 preto hovorí, že rad
+ *     Rechartsu dostane TRIEDU, nie farbu — a je to jediná cesta, ako sa zlatá
+ *     nedostane ako reťazec do `.tsx` (kde ju ten istý test zakazuje, aby ňou
+ *     nikto nezakódoval STAV, ako to do 19. 8. 2026 robil dnešok).
+ *
+ *     Prečo `:global(.recharts-curve)`: Recharts vešia `className` na skupinu
+ *     `<g class="recharts-layer recharts-line …">`, ale samotnú čiaru kreslí
+ *     `<path stroke="#3182bd">` — vlastný prezentačný atribút, ktorý dedenie
+ *     `stroke` zo skupiny PREBIJE. Trieda na skupine sa preto musí dostať až
+ *     na potomka; inak by trend zostal knižničnou modrou v oboch témach a
+ *     nikde by nič nespadlo. Zmerané v prehliadači jsdom, nie odhadnuté.
+ *
+ *  2. **Šrafovanie „nevieme".** Vzor musí byť v `<defs>` nejakého SVG
+ *     v dokumente; plocha Rechartsu si vlastné `<defs>` vložiť nedá, takže
+ *     stojí vedľa nej vo vlastnom nulovom SVG. `position: absolute` je tu
+ *     nosné: `ResponsiveContainer` meria RODIČA a rodič s pevnou výškou
+ *     (`--chart-h`) by o výšku tohto SVG pretiekol.
+ *
+ *  3. **Bublina s hodnotou.** Farby nesie paleta (`tooltipBg`, `tooltipInk`,
+ *     `tooltipBorder`), tu je len geometria a tri riadky textu. `charts.module.css`
+ *     má vlastnú `.tip`, ale tá si polohu počíta sama (`position: absolute` +
+ *     `translate`), lebo v inline SVG grafe ju umiestňoval komponent. Recharts
+ *     umiestňuje obal bubliny sám, takže tá istá trieda by ju odsunula o pol
+ *     šírky mimo kurzor.
+ *
+ * Žiadny surový hex, žiadne `rgba()`, žiadny `!important` (D147).
+ */
+
+/* ── 1. Trendová čiara ─────────────────────────────────────────────────── */
+
+.trendLine :global(.recharts-curve) {
+  stroke: var(--gold2);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  fill: none;
+}
+
+/* ── 2. Definícia šrafovania vedľa plochy ──────────────────────────────── */
+
+.hatchDefs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ── 3. Bublina s hodnotou ─────────────────────────────────────────────── */
+
+.tip {
+  pointer-events: none;
+  background: var(--paper2);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm);
+  box-shadow: var(--ovl-shadow);
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+
+.tipDay {
+  display: block;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+.tipValue {
+  display: block;
+  font-size: var(--ovl-fs-small);
+  color: var(--ink);
+  font-weight: 620;
+}
+
+/* Riadok pod hodnotou, keď hodnota nie je celý meraný deň. Nikdy sa nevynechá:
+   pomlčka bez vety je zvláštne miesto v grafe, nie priznanie. */
+.tipNote {
+  display: block;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}

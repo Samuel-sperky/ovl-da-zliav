@@ -251,6 +251,21 @@ export interface TopFlopView {
    */
   unknownDays: number | null;
   rankingState: 'measured' | 'lower_bound' | 'unknown';
+  /**
+   * KOĽKÝCH produktov sa týka to, že do rebríčka nevstupujú, pretože appka ich
+   * predaj za okno NEMERALA (`unitsSold === null`, D121). `null` = odpoveď to
+   * číslo nedala; nula by tvrdila „netýka sa to nikoho".
+   *
+   * Bez tohto čísla je veta „produkt bez nameraného predaja tu nie je" síce
+   * pravdivá, ale nemerateľná — človek z nej nevie, či je rebríček obrazom
+   * eshopu, alebo jeho stotinou.
+   */
+  unknownSales: number | null;
+  /**
+   * To isté pre produkty s NAMERANOU nulou. Sú to dve rôzne veci a appka ich
+   * zliať nesmie: jedno je meranie, druhé jeho absencia (I11).
+   */
+  measuredZeroSales: number | null;
 }
 
 export function parseTopFlop(raw: unknown): TopFlopView | null {
@@ -258,6 +273,7 @@ export function parseTopFlop(raw: unknown): TopFlopView | null {
   if (root === null) return null;
   const cohort = asRecord(root.cohort);
   const gaps = asRecord(root.gaps);
+  const excludes = asRecord(root.excludes);
   const state = root.rankingState;
   const reason = root.reason;
   return {
@@ -278,6 +294,14 @@ export function parseTopFlop(raw: unknown): TopFlopView | null {
     unknownDays: gaps === null ? null : count(gaps, 'unknownDays'),
     rankingState:
       state === 'measured' || state === 'lower_bound' ? state : ('unknown' as const),
+    /*
+     * Rovnaké fail-closed pravidlo ako `gaps`: chýbajúce `excludes` je „appka
+     * to nevie", nie „netýka sa to nikoho". Server tie čísla za niektoré okná
+     * poslať NEMÔŽE (počty zrkadla platia len za povolené okná predajnosti), a
+     * práve preto sa tu nesmú dopĺňať nulou.
+     */
+    unknownSales: excludes === null ? null : count(excludes, 'unknownSales'),
+    measuredZeroSales: excludes === null ? null : count(excludes, 'measuredZeroSales'),
   };
 }
 

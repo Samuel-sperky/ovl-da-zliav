@@ -3,8 +3,8 @@
 /**
  * Aura Zľavy — SEKCIA PREHĽADU: predaj (V9, architektúra §1 TAB 1).
  *
- * Vľavo tri čísla, vpravo čiarový graf s trendovou čiarou, pod tým jeden
- * riadok o čerstvosti dát. Žiadna veta o príčine — čísla stoja vedľa seba
+ * Vľavo tri čísla, vpravo karta s čiarovým grafom a trendovou čiarou, pod tým
+ * jeden riadok o čerstvosti dát. Žiadna veta o príčine — čísla stoja vedľa seba
  * a záver si robí človek (P8).
  *
  * ── Prečo sa sekcia volá „Predaj" a nie „Tržby" ─────────────────────────────
@@ -52,7 +52,33 @@
  * tohto rozlíšenia by prehľad ukázal dva dni predaja a potom šestnásť dní
  * tvrdej nuly — teda prepad, ktorý sa nikdy nestal.
  *
- * Vlastník: V9, graf V1.
+ * ── Prevod grafu na `ChartCard` + Recharts (V6b, 2. 9. 2026, D135/D136) ─────
+ *
+ * Sekcia zostala sekciou: popisok „Predaj" je ďalej `h2`, tri čísla vľavo
+ * počítajú z toho istého poľa a riadok o čerstvosti dát je jeden. Zmenil sa
+ * PRAVÝ stĺpec — graf už nie je vlastné inline SVG v `.chart` ráme, ale karta
+ * `ChartCard` (`Panel` + legenda + prepis pre čítačku + pätička s priznaniami).
+ * Nadpis karty je preto `h3`: nad ním stojí `h2` sekcie a preskočený stupeň by
+ * čítačka ohlásila (`nadpisy-osnova.spec.ts`).
+ *
+ * TRI VECI, KTORÉ SA PRI TOM ZÁMERNE NEZMENILI:
+ *
+ *  1. **Prázdny stav je VETA, nie prázdny graf.** Rad s menej než dvoma
+ *     meraniami sa nekreslí vôbec — `ChartCard` by síce vedel nakresliť
+ *     `EmptyState`, ale tá veta hovorí navyše PODMIENKU („keď budú stiahnuté
+ *     aspoň dva dni"), a tú by rám nevedel.
+ *  2. **Dátová tabuľka pod grafom zostáva rozklikom.** `ChartCard` má povinný
+ *     `srSummary` (prepis pre čítačku, dva stĺpce), ale `ChartTable` má tretí
+ *     stĺpec POZNÁMKA — a v ňom vety „nesťahované, 16 dní", „neúplný deň,
+ *     aspoň toľko", „deň stiahnutý, predaj žiadny". Prepis existuje teda
+ *     dvakrát a je to zámer: oba čítajú tie isté riadky (`geometry`), takže sa
+ *     nemajú ako rozísť, a zrušiť ten viditeľný by znamenalo vziať priznania
+ *     tomu, kto číta očami.
+ *  3. **Veta o chýbajúcich dňoch zostáva pod grafom v sekcii.** Je to tvrdenie
+ *     o POKRYTÍ, nie o ráme grafu, a v `sales-gap-note` ju hľadajú testy aj
+ *     runbooky.
+ *
+ * Vlastník: V9, graf V6b.
  */
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -434,7 +460,14 @@ export function SalesSection({
           </div>
         </div>
 
-        <div className={`chart ${styles.chartPlain}`}>
+        {/*
+          Stĺpec grafu. Rám, stavy, legendu a prepis nesie od V6b `ChartCard`
+          (D135) vnútri `SalesChart` — vlastná `.chart` plocha tu preto UŽ NIE
+          JE a `.chartPlain` sa zmazala s ňou (D139). Prázdny stav zostáva
+          VETOU: prázdny graf s vykreslenou nulovou čiarou by tvrdil, že sa
+          nepredalo nič.
+        */}
+        <div className={styles.chartCell}>
           {geometry === null ? (
             <div className="empty">
               <div className="t">Denný priebeh zatiaľ nemáme</div>

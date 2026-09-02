@@ -240,6 +240,21 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   s `UTC_TIMESTAMP()` alebo s UTC reťazcom, je preto tichá chyba. Chovanie sa
   zámerne nemení (prepnutie by prepísalo význam už uložených dátumov) — čítaj
   dnešný docblock v `src/db/pool.ts`.
+- **CSS moduly sú v testoch NEOMYLNÉ, a preto slepé.** Vitest rieši
+  `.module.css` Proxy-om, ktorý na KAŽDÝ kľúč vráti hašované meno — `styles.nz`
+  je v teste `_nz_e472ea` aj vtedy, keď v module žiadne `.nz` neexistuje.
+  V prehliadači je ten istý kľúč `undefined`, teda `class="undefined"`.
+  Prežilo to 2. 9. 2026 celý deň: prepnutý import v `NewDiscount.tsx`
+  (`zlavy.module.css` → `new-discount.module.css`) nechal v JSX staré mená a
+  **11 z 15 kľúčov v module nebolo** — dvojstĺpcová mriežka, hlavička, obe
+  karty, tabuľka pásiem, okno platnosti, prázdny stav a každá chybová veta sa
+  rozsypali na jeden stĺpec neštýlovaného textu. To je celé „neviem vytvoriť
+  zľavu". **Typecheck, lint ani 4651 testov to nemali ako zachytiť** a
+  vykreslený markup o tom nepovie nič (`class="undefined"` sa v ňom nenájde
+  ani raz, lebo Proxy dodá hash). Jediná cesta je **čítať CSS ako TEXT** a
+  porovnať množinu použitých kľúčov s množinou deklarovaných tried — v oboch
+  smeroch. Robí to `test/unit/nova-zlava-selektory.spec.ts`; pri prepnutí
+  importu CSS modulu je taký test POVINNÝ.
 - **Čo test vyňal z kontroly, nestráži NIKTO.** `nastavenia-v12.spec.ts` si
   kotvu `odhlasenie` vyňal zo zoznamu identifikátorov s tým, že „kryje ju e2e";
   e2e ju nekryla, a keď D99 zmazalo `SignOut.tsx`, rozcestník Nastavení mesiac

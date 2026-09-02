@@ -1,0 +1,184 @@
+/*
+ * Aura Zľavy — geometria POISTIEK A KĽÚČOV (V6b, D139, D143).
+ *
+ * Sekcie, ktoré prešli na `Panel`: Kľúče, Zápisy do eshopu, Poistky a Červená
+ * zóna. Plochu (pozadie, vlas, rádius, tieň, odsadenie hlavičky a tela) kreslí
+ * `ui/frame.module.css`; tu je len to, čo panel sám vedieť nemôže — odstup
+ * medzi sekciami, kotva pod prilepenou hlavičkou stránky a tri mriežky, ktoré
+ * existujú výhradne na tejto obrazovke.
+ *
+ * PREČO TU A NIE V `SETTINGS_CSS`
+ * -------------------------------
+ * To isté ako pri rozcestníku (`settings-index.module.css`): triedy v
+ * šablónovom literáli sú GLOBÁLNE, takže `.dz-row` sa dala prepísať
+ * odkiaľkoľvek, a `<style>` blok so sebou nosil 12 kB pravidiel pre sekcie,
+ * ktoré stránka nekreslí. D143 to obracia — vzhľad ide vedľa komponentu.
+ * `SETTINGS_CSS` zostáva pre sekcie, ktoré na primitíva ešte neprešli
+ * (Pripojenie, Rozsah, Rozpočty, Obohacovanie, História, Zamknuté funkcie);
+ * ich triedy sa preto nemazali. Zmazané sú VÝHRADNE tie, ktoré po prevode
+ * nekreslí už nikto (D139) — zoznam a dôvod sú v `styles.ts`.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *
+ *  1. **Žiadna vlastná farba.** Všetko z tokenov (`--ink2`, `--dim`, `--line`,
+ *     `--st-critical`), takže obe témy fungujú samy a strážca D132/D144/D147
+ *     nenájde hex, `rgba()` ani `!important`. Tónovanie by šlo výhradne cez
+ *     `color-mix()`; tu ho netreba ani raz.
+ *
+ *  2. **Kotva musí prežiť prevod.** `SETTINGS_CSS` dával odstup pod prilepenú
+ *     hlavičku pravidlom `.set-page .sec[id]` — a panel `.sec` nie je, takže
+ *     bez `.section` nižšie by odkaz na `#kluce` skončil s nadpisom sekcie
+ *     schovaným za hlavičkou. Po appke vedie na tieto kotvy šesť odkazov
+ *     (`sub-pages.ts`, bod 2), takže je to funkcia, nie kozmetika.
+ *
+ *  3. **Odstup platí aj na hranici starého a nového.** Na jednej podstránke
+ *     stoja panely vedľa sekcií `.sec`, ktoré na primitíva ešte neprešli.
+ *     `.sec + .sec` (globals) o panelovi nevie, takže odstup nesie `.section`
+ *     sám — s výnimkou prvej sekcie, kde ho už dal nadpis stránky. Kto by
+ *     margin presunul na `.section + .section`, vyrobí dieru presne na tej
+ *     hranici, ktorá dnes na obrazovke naozaj je.
+ *
+ *  4. **Červená je vyhradená.** `.danger` smie nosiť len Červená zóna (strata
+ *     dát) a zámok zápisov. Kto ju dá tretej sekcii, zoberie jej význam —
+ *     vyčerpaný rozpočet červený nie je (K2).
+ *
+ * Vlastník: V6b (Nastavenia, krok 3/3: Poistky a kľúče).
+ */
+
+/*
+ * Sekcia prevedená na `Panel`.
+ *
+ * `margin-top` je bezpodmienečný a odoberá si ho len panel, ktorý je v svojom
+ * obale PRVÝ — pozri bod 3 hlavičky. Hodnota je tá istá ako
+ * `.set-page .sec + .sec` v `SETTINGS_CSS` (10 px, nie 12 px z `globals.css`):
+ * pri piatich sekciách na jednej podstránke je to 60 px odstupov, ktoré
+ * rozhodujú o strope P4.
+ *
+ * PREČO `:first-child` A NIE `:first-of-type` (oprava pri prevode)
+ * ---------------------------------------------------------------
+ * `:first-of-type` vyberá prvého SVOJHO DRUHU medzi susedmi, a panel je
+ * `<div>`, kým neprevedené sekcie sú `<section>`. Na podstránke „Na čo je
+ * napojená" tak Kľúče (prvý `<div>` medzi susedmi) prišli o odstup a prilepili
+ * sa na Pripojenie nad sebou — hoci prvé na stránke neboli. To isté by sa
+ * stalo Zápisom pod Rozsahom a Poistkám pod Zamknutými funkciami. `:first-child`
+ * sa pýta na to, na čo sa pýtať treba: „je to prvý prvok v obale?" — a preto
+ * správne mlčí na podstránke Červenej zóny, kde panel v `<details>` prvý je.
+ * Pokazí sa to ticho: je to prázdne miesto, ktoré žiadny test na obsah nevidí.
+ */
+.section {
+  margin-top: 10px;
+  /* Prilepená hlavička appky meria 72 px; bez toho kotva skočí pod ňu. */
+  scroll-margin-top: 72px;
+}
+
+.section:first-child {
+  margin-top: 0;
+}
+
+/*
+ * Pilulka spojenia a veta k nej vedľa seba. Veta si drží vlastnú šírku
+ * (`flex-basis`), takže sa pri úzkom okne zalomí pod pilulku celá, nie po
+ * jednom slove.
+ */
+.pillRow {
+  display: flex;
+  gap: var(--ovl-s4);
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: var(--ovl-s3);
+}
+
+.pillRow > p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+
+/*
+ * Priznanie „kľúč na zápis chýba" a čo to blokuje. Značka so slovom stojí nad
+ * vetou, nie vedľa nej: veta má tri riadky a badge zarovnaný k jej stredu by
+ * sa čítal ako popiska stĺpca.
+ */
+.blocked {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ovl-s2);
+  margin-bottom: var(--ovl-s3);
+}
+
+.blocked > p {
+  margin: 0;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  line-height: var(--ovl-lh-body);
+}
+
+/* ─────────────────────────── Červená zóna ────────────────────────────────── */
+
+/*
+ * Jediná plocha v Nastaveniach s červeným rámom. `border-color` prepisuje
+ * `--line` z `.panel` špecifickosťou dvoch tried na tom istom prvku, nie
+ * poradím importov — poradie by sa pri prvom refaktore prehodilo a rám by
+ * zošedol bez toho, aby čokoľvek spadlo.
+ */
+.danger {
+  border-color: var(--st-critical);
+}
+
+/*
+ * PREČO NADPIS NIE JE `--st-critical` (nájdené prevodom, 2. 9. 2026)
+ * -----------------------------------------------------------------
+ * Do V6b tu stálo `color: var(--st-critical)` — v pravidle
+ * `.set-page .danger-zone .sec-h h2` v šablónovom literáli `styles.ts`.
+ * Presun do modulu ho prvý raz podrobil `dizajn-kontrast.spec.ts` (K7),
+ * a ten ho zamietol: na svetlej téme má `--st-critical` proti `--paper3`
+ * a proti závojom 4,31–4,38 : 1, teda POD hranicou WCAG 1.4.3 (4,5). Text
+ * najvážnejšej sekcie v appke bol o pol stupňa horšie čitateľný než zvyšok
+ * obrazovky — a nikto to nevidel, lebo `styles.ts` je reťazec a strážca
+ * kontrastu číta `globals.css` a `*.module.css` (D144).
+ *
+ * `--st-critical-ink` je ten istý červený odtieň primiešaný do `--ink`, teda
+ * presne token, ktorý appka na ČERVENÝ TEXT má (`.ovl-badge--critical`,
+ * `.sig.bad`). Rám ostáva `--st-critical`: hranicu plochy WCAG 1.4.3
+ * nemeria, tam je kanálom silueta, nie čítanie.
+ */
+.danger h2 {
+  color: var(--st-critical-ink);
+}
+
+/*
+ * Riadok červenej zóny: veta vľavo, rozklik vpravo. Vlas nad riadkom oddeľuje
+ * dva riadky od seba, prvý ho nemá.
+ */
+.dangerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  padding: var(--ovl-s2) 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--ovl-fs-small);
+  color: var(--ink2);
+  flex-wrap: wrap;
+}
+
+.dangerRow:first-of-type {
+  border-top: 0;
+}
+
+/* Tlmený riadok — hovorí o stave, nie o akcii (napr. „ani jeden kľúč nie je"). */
+.dangerNote {
+  color: var(--dim);
+  font-size: var(--ovl-fs-micro);
+}
+
+.dangerAct {
+  margin-left: auto;
+}
+
+@media (max-width: 760px) {
+  /* Na úzkej obrazovke sa rozklik postaví pod vetu, nie za jej pravý okraj. */
+  .dangerAct {
+    margin-left: 0;
+  }
+}

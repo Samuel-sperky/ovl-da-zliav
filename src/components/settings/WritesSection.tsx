@@ -35,9 +35,20 @@
  * dôvod je o jedno kliknutie ďalej. Kto ho vráti na povrch, poruší P2; stráži
  * to `test/unit/text-zapisy-povrch.spec.ts` nad vykresleným markupom.
  *
- * Vlastník: V12.
+ * ČO SA ZMENILO V V6b (a čo nie)
+ * ------------------------------
+ * Rám je `Panel` + `PanelHead` (D142, D143) a riadok s pilulkou má geometriu
+ * v `settings-sections.module.css` namiesto globálnej `.set-pill-row`. Kotva
+ * `id="zapisy"` zostáva. Tabuľka troch podmienok, vety zo servera, odkazy
+ * „Prejsť na to" ani technický detail sa nezmenili — a stav v bunke nesie
+ * ďalej `TONE_SIG_CLASS` + `ToneSigMark` z toho istého dôvodu, aký je
+ * zapísaný v hlavičke `KeysSection.tsx`.
+ *
+ * Vlastník: V12 (rámec a primitíva: V6b).
  */
+import styles from '@/components/settings/settings-sections.module.css';
 import Note from '@/components/ui/Note';
+import { Panel, PanelBody, PanelHead } from '@/components/ui/Panel';
 import StatusPill from '@/components/ui/StatusPill';
 import Icon from '@/components/ui/Icon';
 import { ToneSigMark } from '@/components/ui/StatusMark';
@@ -191,151 +202,149 @@ export function WritesSection({ status, settings }: WritesSectionProps) {
   const blocked = conditions.some((c) => c.tone === 'critical' || c.tone === 'attention');
 
   return (
-    <section className="sec" id="zapisy" data-testid="writes-section">
-      <div className="sec-h">
-        <h2>Zápisy do eshopu</h2>
-        <div className="act lvl-3">Musia platiť všetky tri naraz</div>
-      </div>
-
-      <div className="set-pill-row">
-        <StatusPill
-          tone={enabled === true ? 'good' : enabled === false ? 'critical' : 'attention'}
-          label={
-            enabled === true
-              ? 'Appka smie zapisovať'
-              : enabled === false
-                ? 'Appka teraz nezapíše nič'
-                : 'Stav zápisov zatiaľ neviem'
-          }
-          detail={settings.shopDomain}
-          testId="writes-pill"
-        />
-        {/* Povrch nesie tvrdenie, nie výklad (P2, strop 90 znakov). Čo sa stane
-            s čakajúcimi zľavami a v akom poradí fronta zapisuje, stojí pod
-            rozklikom na konci sekcie. */}
-        <p className="set-note">
-          {blocked
-            ? 'Kým niektorá podmienka neplatí, fronta počká; nič sa nezapíše napoly.'
-            : 'Všetky tri podmienky platia. Fronta zapisuje podľa denného rozpočtu.'}
-        </p>
-      </div>
-
-      {enabled === false ? (
-        <Note variant="warn" testId="writes-disabled-note">
-          <b>Nie je to chyba</b> — vypnutý zápis je zámer. Prepne ho správca
-          v konfigurácii appky.
-        </Note>
-      ) : null}
-
-      <div className="tbl-frame">
-        <table className="tbl plain">
-          <thead>
-            <tr>
-              <th>Podmienka</th>
-              <th>Stav</th>
-              <th>Čo s tým</th>
-            </tr>
-          </thead>
-          <tbody data-testid="writes-conditions">
-            {conditions.map((condition) => (
-              <tr key={condition.key} data-testid={`writes-condition-${condition.key}`}>
-                <td className="name">{condition.label}</td>
-                <td data-l="Stav">
-                  <span className={TONE_SIG_CLASS[condition.tone]}>
-                    <ToneSigMark tone={condition.tone} />
-                    {condition.state}
-                  </span>
-                </td>
-                <td data-l="Čo s tým">
-                  {condition.what === null ? (
-                    <span className="lvl-3">netreba nič</span>
-                  ) : (
-                    <>
-                      <div>{condition.what}</div>
-                      {condition.nextStep === null ? null : (
-                        <div className="lvl-3">{condition.nextStep}</div>
-                      )}
-                      {condition.anchor === null ? null : (
-                        <a className="set-jump" href={condition.anchor}>
-                          Prejsť na to
-                        </a>
-                      )}
-                      {condition.assumed ? (
-                        <div className="lvl-3">{ASSUMED_MARK}</div>
-                      ) : null}
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="tbl-foot">
-          <span>Appka zľavu nikdy nezruší. Zapísaná zľava vyprší sama.</span>
-          {/* Vysvetlenie k `≈ predpoklad` v bunkách. Raz pre celú obrazovku,
-              nie pri každej podmienke — inak je to trikrát ten istý odsek. */}
-          {conditions.some((condition) => condition.assumed) ? (
-            <span data-testid="writes-assumed-note">
-              <Icon name={TONE_ICON.attention} size={0.85} /> {ASSUMED_NOTE}
-            </span>
-          ) : null}
+    <Panel id="zapisy" className={styles.section} data-testid="writes-section">
+      <PanelHead title="Zápisy do eshopu" subtitle="Musia platiť všetky tri naraz" />
+      <PanelBody>
+        <div className={styles.pillRow}>
+          <StatusPill
+            tone={enabled === true ? 'good' : enabled === false ? 'critical' : 'attention'}
+            label={
+              enabled === true
+                ? 'Appka smie zapisovať'
+                : enabled === false
+                  ? 'Appka teraz nezapíše nič'
+                  : 'Stav zápisov zatiaľ neviem'
+            }
+            detail={settings.shopDomain}
+            testId="writes-pill"
+          />
+          {/* Povrch nesie tvrdenie, nie výklad (P2, strop 90 znakov). Čo sa stane
+              s čakajúcimi zľavami a v akom poradí fronta zapisuje, stojí pod
+              rozklikom na konci sekcie. */}
+          <p className="set-note">
+            {blocked
+              ? 'Kým niektorá podmienka neplatí, fronta počká; nič sa nezapíše napoly.'
+              : 'Všetky tri podmienky platia. Fronta zapisuje podľa denného rozpočtu.'}
+          </p>
         </div>
-      </div>
 
-      <details className="tech">
-        <summary>Technický detail</summary>
-        <div className="body">
-          {/* Sem sa vo vlne 2 presunuli tri vysvetľujúce odstavce z povrchu
-              (P6). Prvý je viazaný na stav — dôvod vypnutého zápisu nemá čo
-              vysvetľovať vtedy, keď zápis beží. */}
-          {enabled === false ? (
-            <p data-testid="writes-why-disabled">
-              Appka sa dodáva s vypnutým zápisom zámerne, aby prvý ostrý zápis do
-              produkčného eshopu nevznikol omylom. Povolenie zapisovať žije
-              v konfigurácii appky na počítači, nie v databáze — preto tu nie je
-              a nikdy nebude prepínač, ktorý by ho zapol.
-            </p>
-          ) : null}
-          <p data-testid="writes-why-queue">
-            Kým niektorá z troch podmienok neplatí, nič sa nestratí: zľavy, ktoré
-            čakajú vo fronte, sa zapíšu hneď, ako podmienka začne platiť. Fronta
-            potom ide jeden produkt za druhým, podľa denného rozpočtu.
-          </p>
-          <p data-testid="writes-why-expiry">
-            Že appka zľavu nikdy nezruší, platí bez ohľadu na tieto tri podmienky.
-            Zapísaná zľava vyprší sama v deň, ktorý má nastavený.
-          </p>
-          <table>
-            <tbody>
+        {enabled === false ? (
+          <Note variant="warn" testId="writes-disabled-note">
+            <b>Nie je to chyba</b> — vypnutý zápis je zámer. Prepne ho správca
+            v konfigurácii appky.
+          </Note>
+        ) : null}
+
+        <div className="tbl-frame">
+          <table className="tbl plain">
+            <thead>
               <tr>
-                <td>Súbor s konfiguráciou</td>
-                <td className="mono">.env</td>
+                <th>Podmienka</th>
+                <th>Stav</th>
+                <th>Čo s tým</th>
               </tr>
-              <tr>
-                <td>Povolenie zápisu</td>
-                <td className="mono">WRITES_ENABLED=true</td>
-              </tr>
-              <tr>
-                <td>Druhá polovica poistky</td>
-                <td className="mono">NODE_ENV=production</td>
-              </tr>
-              <tr>
-                <td>Po zmene</td>
-                <td>appku treba reštartovať, inak zmena neplatí</td>
-              </tr>
-              <tr>
-                <td>Zámok appky</td>
-                <td>
-                  {status?.writes.locked === true
-                    ? `zamknuté od ${formatDateTimeSk(status.writes.lockedAt)}`
-                    : 'otvorený'}
-                </td>
-              </tr>
+            </thead>
+            <tbody data-testid="writes-conditions">
+              {conditions.map((condition) => (
+                <tr key={condition.key} data-testid={`writes-condition-${condition.key}`}>
+                  <td className="name">{condition.label}</td>
+                  <td data-l="Stav">
+                    <span className={TONE_SIG_CLASS[condition.tone]}>
+                      <ToneSigMark tone={condition.tone} />
+                      {condition.state}
+                    </span>
+                  </td>
+                  <td data-l="Čo s tým">
+                    {condition.what === null ? (
+                      <span className="lvl-3">netreba nič</span>
+                    ) : (
+                      <>
+                        <div>{condition.what}</div>
+                        {condition.nextStep === null ? null : (
+                          <div className="lvl-3">{condition.nextStep}</div>
+                        )}
+                        {condition.anchor === null ? null : (
+                          <a className="set-jump" href={condition.anchor}>
+                            Prejsť na to
+                          </a>
+                        )}
+                        {condition.assumed ? (
+                          <div className="lvl-3">{ASSUMED_MARK}</div>
+                        ) : null}
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
+          <div className="tbl-foot">
+            <span>Appka zľavu nikdy nezruší. Zapísaná zľava vyprší sama.</span>
+            {/* Vysvetlenie k `≈ predpoklad` v bunkách. Raz pre celú obrazovku,
+                nie pri každej podmienke — inak je to trikrát ten istý odsek. */}
+            {conditions.some((condition) => condition.assumed) ? (
+              <span data-testid="writes-assumed-note">
+                <Icon name={TONE_ICON.attention} size={0.85} /> {ASSUMED_NOTE}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </details>
-    </section>
+
+        <details className="tech">
+          <summary>Technický detail</summary>
+          <div className="body">
+            {/* Sem sa vo vlne 2 presunuli tri vysvetľujúce odstavce z povrchu
+                (P6). Prvý je viazaný na stav — dôvod vypnutého zápisu nemá čo
+                vysvetľovať vtedy, keď zápis beží. */}
+            {enabled === false ? (
+              <p data-testid="writes-why-disabled">
+                Appka sa dodáva s vypnutým zápisom zámerne, aby prvý ostrý zápis do
+                produkčného eshopu nevznikol omylom. Povolenie zapisovať žije
+                v konfigurácii appky na počítači, nie v databáze — preto tu nie je
+                a nikdy nebude prepínač, ktorý by ho zapol.
+              </p>
+            ) : null}
+            <p data-testid="writes-why-queue">
+              Kým niektorá z troch podmienok neplatí, nič sa nestratí: zľavy, ktoré
+              čakajú vo fronte, sa zapíšu hneď, ako podmienka začne platiť. Fronta
+              potom ide jeden produkt za druhým, podľa denného rozpočtu.
+            </p>
+            <p data-testid="writes-why-expiry">
+              Že appka zľavu nikdy nezruší, platí bez ohľadu na tieto tri podmienky.
+              Zapísaná zľava vyprší sama v deň, ktorý má nastavený.
+            </p>
+            <table>
+              <tbody>
+                <tr>
+                  <td>Súbor s konfiguráciou</td>
+                  <td className="mono">.env</td>
+                </tr>
+                <tr>
+                  <td>Povolenie zápisu</td>
+                  <td className="mono">WRITES_ENABLED=true</td>
+                </tr>
+                <tr>
+                  <td>Druhá polovica poistky</td>
+                  <td className="mono">NODE_ENV=production</td>
+                </tr>
+                <tr>
+                  <td>Po zmene</td>
+                  <td>appku treba reštartovať, inak zmena neplatí</td>
+                </tr>
+                <tr>
+                  <td>Zámok appky</td>
+                  <td>
+                    {status?.writes.locked === true
+                      ? `zamknuté od ${formatDateTimeSk(status.writes.lockedAt)}`
+                      : 'otvorený'}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </PanelBody>
+    </Panel>
   );
 }
 

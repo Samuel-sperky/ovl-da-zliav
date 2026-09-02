@@ -30,7 +30,25 @@
  * ktorá na primitíva prechádza samostatne. Kto ju prevedie, zmaže ich s ňou —
  * dovtedy to nie je mŕtve CSS, ale živý rám druhej obrazovky.
  *
- * Vlastník: V12 (rozcestník odišiel do modulu: V6b).
+ * DRUHÝ ODCHOD: POISTKY A KĽÚČE (V6b, krok 3/3)
+ * ---------------------------------------------
+ * Na `Panel` prešli štyri sekcie — Kľúče, Zápisy do eshopu, Poistky a Červená
+ * zóna — a ich geometria je v `settings-sections.module.css` (D143). Zmazané
+ * sú preto triedy, ktoré po prevode nekreslí UŽ NIKTO (D139):
+ * `.set-pill-row` (Zápisy), `.danger-zone`, `.dz-row` a `.dz-a` (Červená
+ * zóna). K nim tri, ktoré mŕtve boli už predtým a prevod to len odhalil:
+ * `.split` a `.anchor-grp` / `.anchor-grp-t` — `class="split"` ani
+ * `class="anchor-grp"` nevykresľuje v `.set-page` ani jeden komponent
+ * (bočný stĺpec kotiev zanikol s rozcestníkom). Overené grepom nad `src/`.
+ *
+ * Čo NEODIŠLO a prečo: `.kv`, `.set-form`, `.set-note`, `.set-w`, `.stack`,
+ * `.set-jump`, `.locked-list`, `.audit-scroll`, `.tbl*` aj `.sec` kreslia
+ * ďalej sekcie, ktoré na primitíva neprešli (Pripojenie, Rozsah, Rozpočty,
+ * Obohacovanie, História, Zamknuté funkcie) a formuláre vnútri prevedených
+ * sekcií. Mazať ich podľa toho, že „tá sekcia je hotová", by zhaslo vzhľad
+ * susednej obrazovky bez toho, aby čokoľvek spadlo.
+ *
+ * Vlastník: V12 (rozcestník odišiel do modulu: V6b; Poistky a kľúče: V6b).
  */
 
 export const SETTINGS_CSS = `
@@ -57,10 +75,10 @@ export const SETTINGS_CSS = `
 .set-page .set-grp{font-size:11px;font-weight:700;letter-spacing:.08em;
   text-transform:uppercase;color:var(--ink);margin:14px 0 6px}
 .set-page .set-grp:first-of-type{margin-top:12px}
-.set-page .anchor-grp{display:flex;flex-direction:column;gap:1px}
-.set-page .anchor-grp + .anchor-grp{margin-top:8px}
-.set-page .anchor-grp-t{font-size:10.5px;font-weight:700;letter-spacing:.07em;
-  text-transform:uppercase;color:var(--dim);padding:4px 10px 2px}
+/* Triedy .anchor-grp a .anchor-grp-t (skupiny kotiev v bočnom stĺpci) tu stáli
+   do V6b. Bočný stĺpec zanikol už s rozcestníkom na podstránky a od vtedy ich
+   nekreslil ani jeden komponent — grep nad src/ nenašiel ani jedno použitie.
+   Mŕtve boli teda skôr, prevod ich len odhalil (D139, K11). */
 /* Odkaz „prejsť tam" v bunke tabuľky — text, nie tlačidlo: v hustej tabuľke
    by päť tlačidiel pod sebou prekričalo samotné vety. */
 .set-page .set-jump{font-size:12px;color:var(--accent);text-decoration:none;
@@ -70,9 +88,11 @@ export const SETTINGS_CSS = `
    obrazovka to má ukázať aj rozložením, nie len textom. */
 .set-page .set-meters{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;
   margin:10px 0 12px;align-items:start}
-.set-page .set-pill-row{display:flex;gap:14px;align-items:flex-start;
-  flex-wrap:wrap;margin-bottom:10px}
-.set-page .set-pill-row .set-note{flex:1 1 320px;margin:0}
+/* Trieda .set-pill-row (pilulka spojenia a veta k nej) tu stála do V6b. Sekcia
+   Zápisy do eshopu prešla na Panel a riadok kreslí .pillRow
+   v settings-sections.module.css (D143). Tu po nej nesmie zostať ani riadok —
+   mŕtvy selektor by pri ďalšej oprave vyzeral ako to, čo obrazovku kreslí
+   (D139, K11). */
 /* Hlavička sekcie sa na úzkej obrazovke zalomí a dlhý popis tlačidla s ňou —
    inak by jediné dlhé tlačidlo vytlačilo celú stránku doboku. */
 .set-page .sec-h{flex-wrap:wrap}
@@ -109,16 +129,17 @@ export const SETTINGS_CSS = `
 .set-page .locked-list .lf-m{color:var(--dim);font-size:12px}
 .set-page table.tbl.plain td{white-space:normal}
 .set-page table.tbl td.act{text-align:right;white-space:nowrap}
-.set-page .split{display:grid;grid-template-columns:1fr 300px;gap:16px;
-  align-items:start}
+/* Trieda .split (obsah a úzky bočný panel vedľa seba) tu stála do V6b a
+   nekreslila nič: class="split" nemá v .set-page ani jeden komponent, jediný
+   podobný názov v appke je .catalog-split na Produktoch a ten má vlastné
+   pravidlo. Bola mŕtva, nie budúca (D139, K11). */
 .set-page .stack{display:flex;flex-direction:column;gap:8px}
-.set-page .danger-zone{border-color:var(--st-critical)}
-.set-page .danger-zone .sec-h h2{color:var(--st-critical)}
-.set-page .dz-row{display:flex;align-items:center;gap:12px;padding:8px 0;
-  border-top:1px solid var(--line);font-size:13px;color:var(--ink2);
-  flex-wrap:wrap}
-.set-page .dz-row:first-of-type{border-top:0}
-.set-page .dz-row .dz-a{margin-left:auto}
+/* Triedy .danger-zone, .dz-row a .dz-a tu stáli do V6b. Červená zóna prešla na
+   Panel a jej červený rám, riadky aj odsadenie rozkliku žijú v
+   settings-sections.module.css (.danger, .dangerRow, .dangerAct, D143). Tu po
+   nich nesmie zostať ani riadok — mŕtvy selektor by pri ďalšej oprave vyzeral
+   ako to, čo obrazovku kreslí (D139, K11). POZOR: .dz-link a .dz-open ZOSTÁVAJÚ,
+   kreslí ich SettingsSubPage (odkaz do zóny a rozklik pred ňou). */
 /* Okno histórie. 340 px bolo pri piatich sekciách na jednej podstránke
    nesplatiteľné: „Čo sa už stalo a ako appku zastaviť" merala 1772 px, teda
    1,97 obrazovky proti stropu P4 (1,5). História má 21 strán a vlastné
@@ -175,11 +196,11 @@ export const SETTINGS_CSS = `
 .set-page .dz-open[open]>summary{margin-bottom:10px}
 
 @media (max-width:760px){
-  .set-page .split{grid-template-columns:1fr}
+  /* .split a .dz-a tu stáli do V6b — prvá bola mŕtva, druhá odišla do
+     settings-sections.module.css, kde má vlastné mobilné pravidlo (D139). */
   .set-page .set-meters{grid-template-columns:1fr}
   .set-page .kv{grid-template-columns:1fr;gap:2px}
   .set-page .kv .k{margin-top:8px}
-  .set-page .dz-row .dz-a{margin-left:0}
   .set-page .set-w{max-width:100%}
 }
 `;

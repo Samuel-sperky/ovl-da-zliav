@@ -36,6 +36,7 @@ import { describe, expect, it } from 'vitest';
 
 import CampaignsSection from '@/components/dashboard/CampaignsSection';
 import SalesChart from '@/components/dashboard/SalesChart';
+import { salesChartView } from '@/components/dashboard/sales-chart-view';
 import SalesSection from '@/components/dashboard/SalesSection';
 import StatusBand from '@/components/dashboard/StatusBand';
 import TopFlopSection from '@/components/dashboard/TopFlopSection';
@@ -126,6 +127,15 @@ function rank(patch: Partial<TopFlopView> = {}): TopFlopView {
     cohortSize: 0,
     unknownDays: 0,
     rankingState: 'measured',
+    /*
+     * Počty vylúčených sú predvolene „nevieme" (D121, 2. 9. 2026) — nie nula.
+     * Prípravok, ktorý by tu mal nuly, by tvrdil „netýka sa to nikoho" v každom
+     * teste, ktorý o vylúčených nič nemeria. Že sa čísla naozaj vypisujú a že
+     * ich odpoveď servera nesie, meria `test/unit/prehlad-rebrik.spec.ts`
+     * a `test/integration/insights-v4.spec.ts`.
+     */
+    unknownSales: null,
+    measuredZeroSales: null,
     ...patch,
   };
 }
@@ -175,19 +185,23 @@ describe('A. nesťahovaný deň sa nezleje do nuly ani pod pásom zľavy', () =>
     expect(geometry!.hover.map((point) => point.units)).toEqual([578, 495, 40]);
   });
 
+  /*
+   * PRESMEROVANÉ VO V6b (2. 9. 2026): do 2. 9. sa poradie čítalo z polohy
+   * reťazcov `discountBand` a `url(#sales-hatch)` vo vykreslenom SVG. Plochu
+   * kreslí od V6b Recharts a v teste ju nekreslí VÔBEC (nulové rozmery), takže
+   * ten istý test by po prevode prešiel aj s obráteným poradím. Poradie je
+   * preto DÁTA (`view.underlays`) a komponent ich mapuje jediným `map` v tom
+   * poradí — meria sa teda to, čo o poradí rozhoduje.
+   */
   it('pás sa v značkách kreslí PRED šrafovaním diery, teda pod ním', () => {
-    const html = renderToStaticMarkup(
-      createElement(SalesChart, {
-        geometry: geometry!,
-        caption: 'test',
-        label: 'test',
-        bands: discountBands(geometry!, [
-          { id: 7, name: 'Letná', percent: 20, dateFrom: '2026-08-06', dateTo: TODAY },
-        ]),
-      }),
+    const view = salesChartView(
+      geometry!,
+      discountBands(geometry!, [
+        { id: 7, name: 'Letná', percent: 20, dateFrom: '2026-08-06', dateTo: TODAY },
+      ]),
     );
-    const band = html.indexOf('discountBand');
-    const hatch = html.indexOf('url(#sales-hatch');
+    const band = view.underlays.findIndex((area) => area.kind === 'discount');
+    const hatch = view.underlays.findIndex((area) => area.kind === 'gap');
     expect(band).toBeGreaterThan(-1);
     expect(hatch).toBeGreaterThan(-1);
     /*
@@ -218,7 +232,10 @@ describe('A. nesťahovaný deň sa nezleje do nuly ani pod pásom zľavy', () =>
       createElement(SalesChart, { geometry: geometry!, caption: 'test', label: 'test' }),
     );
     expect(html).not.toContain('okná zliav');
-    expect(html).not.toContain('discountBand');
+    // A ani jeden podklad zľavy v dátach — pás bez okna by bol vymyslený.
+    expect(salesChartView(geometry!).underlays.some((area) => area.kind === 'discount')).toBe(
+      false,
+    );
   });
 
   it('pás sedí na kalendár: 6.–19. 8. začína na dni 6., nie na hrane rámu', () => {
@@ -536,14 +553,57 @@ describe('C. rebríček je len o produktoch, o ktorých appka niečo vie', () =>
     expect(html).not.toContain('0 kusov');
   });
 
+  /*
+   * PRESMEROVANÉ V6b (2. 9. 2026): prípravok dostal RIADKY.
+   *
+   * Test tvrdí dve veci — priznanie „produkt bez predaja tu nie je" a názov
+   * stĺpca „najslabší z predávaných". Do V6b mu stačil prázdny `rank()`, lebo
+   * sekcia stĺpce kreslila aj bez jediného riadku, teda dvakrát tú istú vetu
+   * „Za toto okno nemáme ani jeden nameraný predaj." vedľa seba. Od V6b je celý
+   * prázdny rebrík JEDEN stavový panel (`EmptyState` pri dočítanom okne,
+   * `UnmeasuredState` inak — pozri hlavičku `TopFlopSection`), takže hlavička
+   * stĺpca v prázdnom stave neexistuje. Tvrdenia sa NEOSLABILI: sú tie isté a
+   * merajú sa nad rebríkom, ktorý riadky naozaj má, čo je aj stav, v ktorom môže
+   * flop klamať.
+   */
   it('sekcia POVIE, že produkt bez predaja tam nie je — inak flop klame', () => {
     const html = renderToStaticMarkup(
-      createElement(TopFlopSection, { data: rank(), windowDays: 30 }),
+      createElement(TopFlopSection, {
+        data: rank({
+          top: rankRows([{ ...ZERO, units: 42 }]),
+          flop: rankRows([{ ...ZERO, productId: 116, units: 1 }]),
+          cohortSize: 2,
+        }),
+        windowDays: 30,
+      }),
     );
     expect(html).toContain('Produkt bez nameraného predaja');
     expect(html).toContain('Ležiaky sú v Produktoch');
     // Stĺpec sa menuje presne tým, čo je — „najslabší z predávaných".
     expect(html).toContain('Najmenej predané z predávaných');
+  });
+
+  /*
+   * Prázdny rebrík ROZLIŠUJE „nula" od „nemerali sme" (D134, I11). Zliať ich do
+   * jednej vety by na dočítanom okne zamlčalo tvrdenie o eshope a na
+   * nedočítanom by ho VYMYSLELO.
+   */
+  it('prázdny rebrík pri dočítanom okne je NULA, pri nedočítanom „nemerali sme"', () => {
+    const docitane = renderToStaticMarkup(
+      createElement(TopFlopSection, { data: rank(), windowDays: 30 }),
+    );
+    expect(docitane).toContain('data-story="prazdno"');
+    expect(docitane).toContain('Ani jeden nameraný predaj');
+
+    const nedocitane = renderToStaticMarkup(
+      createElement(TopFlopSection, {
+        data: rank({ rankingState: 'lower_bound', unknownDays: 9 }),
+        windowDays: 30,
+      }),
+    );
+    expect(nedocitane).toContain('data-story="nemerane"');
+    // A nikde netvrdí nulu predaja — to je práve to, čo appka nezmerala.
+    expect(nedocitane).not.toContain('Ani jeden nameraný predaj');
   });
 
   it('nedočítané okno robí dolnú hranicu aj z PORADIA, nie len zo súčtov', () => {

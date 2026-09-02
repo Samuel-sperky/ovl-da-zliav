@@ -29,12 +29,25 @@
  * hľadal očami značku, v pokojnom stave nenašiel odpoveď a musel prečítať
  * odstavec. Odteraz nesú tri kanály obe vetvy; poučenie o tom, čo sa stane
  * pri zrýchlení, zostáva vetou pod značkou, kam patrí.
+ *
+ * TRI KANÁLY NESIE OD V6b `ToneBadge`, NIE RUČNÁ `.sig`
+ * ----------------------------------------------------
+ * Do V6b tu stálo `<span className="sig ok"><SigMark variant="ok" />…`, teda
+ * farba, značka a slovo poskladané ručne z troch kusov — a slovník bol vlastný
+ * (`ok` / `bad`) namiesto tónov appky (`good` / `critical`). `ToneBadge` je to
+ * isté pravidlo ako primitívum: značku vyberá `TONE_ICON` z jedného slovníka
+ * a chýbajúce slovo o sebe povie samo (`ui/signals.ts`), čo ručná dvojica
+ * nedokázala. Vzniknúť tým nemôže druhý vykresľovač stavu — v tejto sekcii
+ * (Poistky) je zámok jediný stav; tabuľkové bunky Kľúčov a Zápisov si `.sig`
+ * nechávajú a dôvod je v hlavičke `KeysSection.tsx`.
+ *
+ * Vlastník: A16 (tri kanály: šprint 20; primitívum: V6b).
  */
 import { useState } from 'react';
 
 import ActionFailurePanel from '@/components/ui/ActionFailure';
 import Button from '@/components/ui/Button';
-import { SigMark } from '@/components/ui/StatusMark';
+import ToneBadge from '@/components/ui/ToneBadge';
 import { describeActionFailure, type ActionFailure } from '@/lib/ui/action-failure';
 import { unlockWrites } from '@/components/settings/api';
 
@@ -82,10 +95,9 @@ export function UnlockWritesForm({
     return (
       <div className="stack" data-testid="unlock-writes-form">
         <div className="row">
-          <span className="sig ok" data-testid="unlock-writes-state">
-            <SigMark variant="ok" />
+          <ToneBadge tone="good" data-testid="unlock-writes-state">
             Zápisy nie sú zastavené
-          </span>
+          </ToneBadge>
         </div>
         <p className="lvl-3">
           Keby appka začala zapisovať rýchlejšie, než je bezpečné, zastaví sa
@@ -98,10 +110,9 @@ export function UnlockWritesForm({
   return (
     <div className="stack" data-testid="unlock-writes-form">
       <div className="row">
-        <span className="sig bad" data-testid="unlock-writes-state">
-          <SigMark variant="bad" />
+        <ToneBadge tone="critical" data-testid="unlock-writes-state">
           Zápisy sú zastavené
-        </span>
+        </ToneBadge>
       </div>
       <p className="set-note">
         Dôvod: {writesLockedReason ?? 'appka zapisovala rýchlejšie, než je bezpečné'}. Kým

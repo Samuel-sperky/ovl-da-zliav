@@ -76,11 +76,14 @@ import UnlockWritesForm from '@/components/settings/UnlockWritesForm';
 import type { KeyMetaView, SettingsView } from '@/components/settings/api';
 
 import {
+  NAJKRATSIE_SLOVO,
   hostitelia,
   maFarbu as maFarbuVCss,
   overTriKanaly as overTriKanalyVCss,
   pocetZnaciek,
   text,
+  uzly,
+  znackaJePrva,
 } from '../helpers/znacky';
 
 const noop = () => {};
@@ -290,49 +293,100 @@ describe('Rozsah zliav — ktorý rozsah platí', () => {
 
 /* ════════════════════════ 4. Zámok zápisov ═══════════════════════════════ */
 
+/**
+ * MERANIE JE OD V6b PRESMEROVANÉ, NIE OSLABENÉ.
+ *
+ * Do V6b kreslil zámok tri kanály RUČNE — `<span className="sig ok">` plus
+ * `<SigMark variant="ok" />` — takže ho našiel `stavoveUzly` (rodina
+ * `.sig`/`.flag`/`.state`). V6b ho previedol na primitívum `ToneBadge`
+ * (dôvod je v hlavičke `UnlockWritesForm.tsx`: jeden slovník tónov a poistka
+ * na chýbajúce slovo, ktorú ručná dvojica nemala). Hostiteľ sa tým premenoval
+ * na `.ovl-badge .ovl-badge--<tón>` a rodina `.sig` ho už nevidí.
+ *
+ * Tvrdia sa preto tie isté TRI KANÁLY na novom uzle, nič sa nevypustilo:
+ * FARBA — trieda nesie tón a `.ovl-badge--<tón>` má v `globals.css` naozaj
+ * `color: var(--…)`; ZNAČKA — vnútri uzla je práve jedna `<svg class="ovl-ic">`
+ * a stojí PRED slovom; SLOVO — po odstránení značky zostane text. Navrch
+ * pribudlo tvrdenie, ktoré starý tvar zmerať nedokázal: uzol NESMIE nesť
+ * príznak `data-signal-wordless`, teda že slovo naozaj prišlo z volajúceho
+ * a nie z náhrady (`ui/signals.ts`).
+ *
+ * Zvyšok tohto súboru na `.sig` zostáva a je to zámer: tabuľkové bunky Kľúčov
+ * a Zápisov si starý tvar nechávajú, aby na jednej obrazovke nestáli dva
+ * vykresľovače stavu (`KeysSection.tsx`, „PREČO STAV V TABUĽKE NIE JE
+ * ToneBadge"). Kto ich raz prevedie, presmeruje aj ich — nie zmaže.
+ */
+const BADGE_TON = /ovl-badge--([a-z]+)/;
+
+/** Uzol značky `ToneBadge` s daným `data-testid`. Prázdny nález je pád. */
+function badge(html: string, testId: string) {
+  const najdene = uzly(html).filter(
+    (u) => u.triedy.includes('ovl-badge') && u.atributy['data-testid'] === testId,
+  );
+  expect(najdene.length, `značka „${testId}" nie je práve jedna`).toBe(1);
+  return najdene[0]!;
+}
+
+/** Má `.ovl-badge--<tón>` v `globals.css` naozaj farbu? */
+function badgeMaFarbu(ton: string): boolean {
+  return new RegExp(`\\.ovl-badge--${ton}\\s*\\{[^}]*color:\\s*var\\(--`, 'm').test(GLOBALS);
+}
+
+/** Tri kanály na značke `ToneBadge` — to isté meranie, iný hostiteľ. */
+function overTriKanalyZnacky(html: string, testId: string, kde: string): void {
+  const u = badge(html, testId);
+
+  // FARBA
+  const ton = BADGE_TON.exec(u.triedy.join(' '))?.[1] ?? null;
+  expect(ton, `${kde}: značka bez tónu (${u.triedy.join(' ')})`).not.toBeNull();
+  expect(badgeMaFarbu(ton!), `${kde}: tón ${ton!} nemá v globals.css farbu`).toBe(true);
+
+  // ZNAČKA — práve jedna a pred slovom.
+  expect(pocetZnaciek(u), `${kde}: značka nie je práve jedna`).toBe(1);
+  expect(znackaJePrva(u), `${kde}: značka stojí za slovom`).toBe(true);
+
+  // SLOVO — a je to slovo volajúceho, nie náhrada za chýbajúce.
+  expect(text(u).length, `${kde}: stav bez slova`).toBeGreaterThanOrEqual(NAJKRATSIE_SLOVO);
+  expect(u.atributy['data-signal-wordless'], `${kde}: slovo chýbalo`).toBeUndefined();
+}
+
 describe('Zámok zápisov — pokojný aj zamknutý stav', () => {
-  it('zamknuté má farbu, značku aj slovo', () => {
-    overTriKanaly(
-      renderToStaticMarkup(
-        createElement(UnlockWritesForm, {
-          writesLocked: true,
-          writesLockedReason: 'appka zapisovala rýchlejšie, než je bezpečné',
-          onUnlocked: noop,
-        }),
-      ),
-      ['unlock-writes-state'],
-      'UnlockWritesForm / zamknuté',
+  const markup = (locked: boolean) =>
+    renderToStaticMarkup(
+      createElement(UnlockWritesForm, {
+        writesLocked: locked,
+        writesLockedReason: locked ? 'appka zapisovala rýchlejšie, než je bezpečné' : null,
+        onUnlocked: noop,
+      }),
     );
+
+  it('zamknuté má farbu, značku aj slovo', () => {
+    overTriKanalyZnacky(markup(true), 'unlock-writes-state', 'UnlockWritesForm / zamknuté');
   });
 
   it('pokojný stav nie je holá veta — nesie tie isté tri kanály', () => {
-    overTriKanaly(
-      renderToStaticMarkup(
-        createElement(UnlockWritesForm, {
-          writesLocked: false,
-          writesLockedReason: null,
-          onUnlocked: noop,
-        }),
-      ),
-      ['unlock-writes-state'],
-      'UnlockWritesForm / odomknuté',
-    );
+    overTriKanalyZnacky(markup(false), 'unlock-writes-state', 'UnlockWritesForm / odomknuté');
   });
 
   it('oba stavy sa od seba líšia slovom, nielen farbou', () => {
-    const slovo = (locked: boolean) =>
-      text(
-        stavoveUzly(
-          renderToStaticMarkup(
-            createElement(UnlockWritesForm, {
-              writesLocked: locked,
-              writesLockedReason: null,
-              onUnlocked: noop,
-            }),
-          ),
-        )[0]!,
-      );
+    const slovo = (locked: boolean) => text(badge(markup(locked), 'unlock-writes-state'));
     expect(slovo(true)).not.toBe(slovo(false));
+  });
+
+  it('tóny sú POMENOVANÉ, nie len rôzne — zámok je červený, pokoj zelený', () => {
+    /*
+     * Pribudlo pri prevode na `ToneBadge` (V6b) a je to zosilnenie, nie
+     * presun: staré meranie (`overTriKanaly`) sa pýtalo len „má ten tón
+     * v `globals.css` farbu?", takže `good` sa dalo vymeniť za `idle`
+     * a nespadlo nič. Overil som to mutáciou. Pritom sú to dve rôzne
+     * tvrdenia: `idle` znamená „appka to nezmerala", kým tu appka stav
+     * zámku POZNÁ — a zastavené zápisy sú jedna z dvoch vecí v appke, ktoré
+     * SMÚ byť červené (druhá je strata dát). Tón je tu význam, nie odtieň.
+     */
+    const ton = (locked: boolean) =>
+      BADGE_TON.exec(badge(markup(locked), 'unlock-writes-state').triedy.join(' '))?.[1] ?? null;
+    expect(ton(true)).toBe('critical');
+    expect(ton(false)).toBe('good');
   });
 });
 

@@ -293,11 +293,18 @@
   grid-template-columns: 1fr;
 }
 
-/* Graf v Prehľade nemá vlastný rám — rámom je sekcia. */
-.chartPlain {
-  border: 0;
-  box-shadow: none;
-  padding: 0 0 0 8px;
+/*
+ * Stĺpec grafu v sekcii „Predaj".
+ *
+ * Do V6b tu bola `.chartPlain`, ktorá `.chart` z `globals.css` odobrala rám,
+ * tieň a odsadenie — graf bol vlastné inline SVG a rámom mu bola sekcia. Od
+ * V6b kreslí rám `ChartCard` (`Panel`, D135), takže `.chart` sa tu nepoužíva
+ * vôbec a `.chartPlain` sa zmazala s obrazovkou (D139). Zostal stĺpec mriežky,
+ * ktorý drží `min-width: 0`: bez neho by `ResponsiveContainer` Rechartsu
+ * roztlačil mriežku a ľavý stĺpec s číslami by sa stratil za okrajom.
+ */
+.chartCell {
+  min-width: 0;
 }
 
 /* ───────────────────────────── Prekážky ─────────────────────────────────── */
@@ -477,20 +484,14 @@
  * v oboch témach; značková zlatá ani stavová škála sem NESMÚ — okno zľavy nie
  * je stav dát a nemá právo si vziať farbu, ktorá stav kóduje.
  */
-.discountBand {
-  fill: var(--sel);
-}
-
-.discountEdge {
-  stroke: var(--line2);
-  stroke-width: 1;
-  fill: none;
-}
-
-.discountLabel {
-  fill: var(--dim);
-  font-size: 9px;
-}
+/*
+ * PÁS ZĽAVY UŽ NIE JE CSS (V6b, D139). Podfarbenie, hranu aj popisok kreslí
+ * `ReferenceArea` a `ReferenceLine` Rechartsu a farby si berú z palety grafov
+ * (`useChartTheme()`), lebo Recharts vešia `className` na skupinu, kým výplň
+ * nesie prezentačný atribút potomka — trieda by ju neprebila. `.discountBand`,
+ * `.discountEdge` a `.discountLabel` sa preto zmazali; kto ich bude hľadať,
+ * nájde ich v `SalesChart.tsx` ako props.
+ */
 
 /* ─────────────────────────── Top a flop rebríček ────────────────────────── */
 
@@ -510,39 +511,28 @@
   min-width: 0;
 }
 
-.rankList {
-  display: flex;
-  flex-direction: column;
-  margin: 6px 0 0;
-  padding: 0;
-  list-style: none;
-}
+/*
+ * ZMAZANÉ V6b (D139): `.rankList`, `.rankRow`, `.rankName` a `.rankNote`.
+ *
+ * Riadky rebríka kreslí od V6b `BarList` z `components/ui` a geometriu riadku,
+ * pás aj tlmenú poznámku vlastní `ui/kpi.module.css`. Nechať tu druhú, takmer
+ * rovnakú sadu tried je presne to, čo zakazuje docblock v
+ * `ui/primitives.module.css`: o mesiac by sa rozišla s prvou.
+ *
+ * `.rankGrid` a `.rankCol` zostávajú — to je rozloženie DVOCH stĺpcov vedľa
+ * seba, ktoré primitívum nepozná (a `.rankGrid` má aj pravidlo v mediálnom
+ * dotaze nižšie).
+ */
 
-.rankRow {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 2px 10px;
-  align-items: baseline;
-  padding: 5px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.rankRow:last-child {
-  border-bottom: 0;
-}
-
-.rankName {
+/*
+ * Odkaz na produkt v riadku rebríka. Skracuje sa tromi bodkami, aby dlhý názov
+ * nerozhodil mriežku riadku — pás aj číslo majú v `BarList` svoje miesto.
+ */
+.rankLink {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Pomlčka „nevieme" pri neobohatenom produkte — tlmená, nikdy červená. */
-.rankNote {
-  grid-column: 1 / -1;
-  color: var(--dim);
-  font-size: var(--ovl-fs-micro);
 }
 
 /* ────────────────────── Denná tržba eshopu (D117) ───────────────────────── */

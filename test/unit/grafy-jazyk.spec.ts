@@ -38,6 +38,7 @@ import { describe, expect, it } from 'vitest';
 import type { CatalogDistributionResponse } from '@/app/api/insights/catalog-distribution/route';
 import { niceCount } from '@/components/charts/price-bins';
 import SalesChart from '@/components/dashboard/SalesChart';
+import { salesChartView } from '@/components/dashboard/sales-chart-view';
 import { tableRows } from '@/components/dashboard/SalesSection';
 import TopFlopSection, { ThinWithPie } from '@/components/dashboard/TopFlopSection';
 import { chartGeometry, niceCeiling } from '@/components/dashboard/sales-view';
@@ -412,6 +413,14 @@ describe('čiara — nesťahovaný deň nedostane bod ani nulu', () => {
     { day: '2026-08-23', units: 7 },
   ];
 
+  /*
+   * PRESMEROVANÉ VO V6b (2. 9. 2026): graf prešiel na `ChartCard` + Recharts
+   * (D135) a jeho plocha sa v teste nekreslí — `ResponsiveContainer` bez
+   * rozmerov nevykreslí ani `path`, ani `circle`. Šrafovanie a slovo sa preto
+   * merajú tam, kde po prevode žijú: vzor je v `<defs>` vedľa plochy, slovo
+   * v legende a v priznaní pod ňou, a POČET bodov je vlastnosť radu — riadok
+   * s `null` bod nedostane. Tvrdenie sa nezmenilo, zmenil sa nosič.
+   */
   it('graf kreslí šrafovaný pás a slovo zo SPOLOČNÉHO jazyka', () => {
     const geometry = chartGeometry(series, TODAY);
     expect(geometry).not.toBeNull();
@@ -421,10 +430,22 @@ describe('čiara — nesťahovaný deň nedostane bod ani nulu', () => {
     const html = renderToStaticMarkup(
       createElement(SalesChart, { geometry, caption: 'test', label: 'test' }),
     );
-    expect(html).toContain('url(#sales-hatch');
+    // Vzor „nevieme" je v dokumente a je to TEN ISTÝ vzor ako v koláči.
+    expect(html).toContain('id="sales-hatch');
     expect(html).toContain(GAP_WORD);
+
+    const view = salesChartView(geometry);
+    // Šrafovaný pás je pás DNÍ, nie ozdoba — a je to tá istá diera, akú
+    // priznáva geometria.
+    expect(view.underlays.filter((area) => area.kind === 'gap')).toHaveLength(
+      geometry.gaps.length,
+    );
+    expect(view.underlays.some((area) => area.label === GAP_WORD)).toBe(true);
     // Bodov je toľko, koľko je MERANÍ — nie koľko je dní na osi.
-    expect((html.match(/<circle/g) ?? []).length).toBe(geometry.points.length);
+    expect(view.points.filter((point) => point.units !== null).length).toBe(
+      geometry.points.length,
+    );
+    expect(view.points.length).toBeGreaterThan(geometry.points.length);
   });
 
   it('tabuľka pod grafom pomenúva dieru tým istým slovom ako graf', () => {
@@ -463,6 +484,11 @@ describe('top a flop — stĺpce z jednej mierky', () => {
     cohortSize: 3,
     unknownDays: 0,
     rankingState: 'measured',
+    /* Koho sa rebrík netýka — číslom (D121, 2. 9. 2026). Tento blok meria
+       stĺpce a mierku, takže tu tie počty len musia BYŤ; že sa naozaj
+       vypisujú, meria `test/unit/prehlad-rebrik.spec.ts`. */
+    unknownSales: 41_000,
+    measuredZeroSales: 345,
   };
 
   const html = renderToStaticMarkup(createElement(TopFlopSection, { data, windowDays: 30 }));

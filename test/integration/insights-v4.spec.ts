@@ -585,16 +585,20 @@ function searchResult(rows: CatalogSearchRow[], total = rows.length): CatalogSea
   };
 }
 
-function counts(cohort: number): CatalogCounts {
+function counts(
+  cohort: number,
+  over: { soldUnknown?: number; soldWindowDays?: number } = {},
+): CatalogCounts {
+  const soldUnknown = over.soldUnknown ?? 0;
   return {
     total: 41_348,
-    sold: { none: 41_348 - cohort, low: cohort, mid: 0, high: 0 },
-    soldUnknown: 0,
+    sold: { none: 41_348 - cohort - soldUnknown, low: cohort, mid: 0, high: 0 },
+    soldUnknown,
     neverDiscounted: 41_348,
     discountedNow: 0,
     shopDiscountedNow: 0,
     enrichedRows: 0,
-    soldWindowDays: 30,
+    soldWindowDays: over.soldWindowDays ?? 30,
     soldFrom: '2026-07-21' as DateOnly,
     soldTo: TODAY,
     lockedFilters: [],
@@ -605,6 +609,8 @@ function counts(cohort: number): CatalogCounts {
 interface TopWorld {
   searchCalls: Array<Record<string, unknown>>;
   enrichCalls: number[][];
+  /** Filtre, s ktorými route žiadala počty zrkadla (D121, čísla vylúčených). */
+  countsCalls: Array<Record<string, unknown>>;
 }
 
 async function callTop(
@@ -615,9 +621,13 @@ async function callTop(
     cohort?: number;
     enrichment?: Map<number, CatalogEnrichmentRecord>;
     query?: string;
+    /** Koľko riadkov zrkadla má za okno predaj NEZNÁMY (D121). */
+    soldUnknown?: number;
+    /** Za aké okno zrkadlo počty naozaj spočítalo — pozri `excludesOf()`. */
+    countsWindowDays?: number;
   } = {},
 ): Promise<{ data: TopProductsResponse; world: TopWorld }> {
-  const world: TopWorld = { searchCalls: [], enrichCalls: [] };
+  const world: TopWorld = { searchCalls: [], enrichCalls: [], countsCalls: [] };
   const rows = opts.rows ?? [];
   const handler = createInsightsTopProductsGet(
     {
@@ -633,7 +643,13 @@ async function callTop(
           );
           return searchResult(sorted.slice(0, filter.perPage ?? 50), rows.length);
         },
-        counts: async () => counts(opts.cohort ?? rows.length),
+        counts: async (filter) => {
+          world.countsCalls.push({ ...filter });
+          return counts(opts.cohort ?? rows.length, {
+            soldUnknown: opts.soldUnknown,
+            soldWindowDays: opts.countsWindowDays,
+          });
+        },
         enrichmentFor: async (ids) => {
           world.enrichCalls.push([...ids]);
           const out = new Map<number, CatalogEnrichmentRecord>();
@@ -674,7 +690,17 @@ describe('GET /api/insights/top-products — kto do rebríčka patrí', () => {
     expect(data.top.map((row) => row.productId)).toEqual([11, 12]);
     expect(data.flop.map((row) => row.productId)).toEqual([13, 12]);
     expect(data.cohort.size).toBe(3);
-    expect(data.excludes).toEqual({ zeroSales: true, notFound: true });
+    /*
+     * Príznaky NEZOSLABLI a pribudli k nim ČÍSLA (D121, 2. 9. 2026). Tvrdenie
+     * je ďalej `toEqual`, teda nad CELÝM objektom: keby sa niektoré číslo
+     * prestalo posielať, test to musí zhodiť, nie prehliadnuť.
+     */
+    expect(data.excludes).toEqual({
+      zeroSales: true,
+      notFound: true,
+      unknownSales: 0,
+      measuredZeroSales: 41_345,
+    });
 
     // Vedro `none` (nula predaných) sa do dotazu nedostane ANI RAZ.
     for (const call of world.searchCalls) {
@@ -763,6 +789,91 @@ describe('GET /api/insights/top-products — kto do rebríčka patrí', () => {
     expect(second?.marginPercent).toBeNull();
     expect(second?.qty).toBeNull();
     expect(second?.enriched).toBe(false);
+  });
+
+  /* ═════ D121 v TELE ODPOVEDE, nie len v modeli (2. 9. 2026) ═══════════════
+   *
+   * Príznak `excludes.zeroSales: true` je pravda a je NEMERATEĽNÝ: obrazovka
+   * z neho nevie, či sa vylúčenie týka desiatich produktov, alebo štyridsiatich
+   * tisíc. Preto odpoveď nesie dve čísla a preto sa merajú TU — na tele
+   * odpovede. D121 raz už end-to-end neplatil práve preto, že sa meral len
+   * model (`/api/catalog/search` posielala `unitsSold: 0` namiesto `null`).
+   */
+  it('odpoveď hovorí ČÍSLOM, koľkých produktov sa vylúčenie týka', async () => {
+    const { data, world } = await callTop({
+      rows: [catalogRow(11, 40), catalogRow(12, 7)],
+      cohort: 2,
+      soldUnknown: 38_900,
+      query: '?window=30',
+    });
+
+    expect(data.available).toBe(true);
+    // „Nemerali sme" a „namerali sme nulu" sú DVE čísla, nie jedno.
+    expect(data.excludes.unknownSales).toBe(38_900);
+    expect(data.excludes.measuredZeroSales).toBe(41_348 - 2 - 38_900);
+    // Ani jedno z nich nie je nula len preto, že sa pole nepridalo.
+    expect(data.excludes.unknownSales).not.toBeNull();
+
+    /*
+     * Počty sa žiadajú za OKNO ODPOVEDE a BEZ filtra vedier. S vedrami
+     * `low/mid/high` by `soldUnknown` vyšlo nula — teda „netýka sa to nikoho" —
+     * a to je práve tá nepravda, ktorú číslo má odstrániť.
+     */
+    expect(world.countsCalls).toHaveLength(1);
+    expect(world.countsCalls[0]?.soldWindowDays).toBe(30);
+    expect(world.countsCalls[0]?.soldBuckets).toBeUndefined();
+  });
+
+  it('počty za INÉ okno sú `null`, nie vydávané za okno odpovede', async () => {
+    /*
+     * `counts()` vie triediť len okná z `ALLOWED_SOLD_WINDOWS` a mimo nich si
+     * okno TICHO prepíše na predvolené. Pri okne 7 dní (cesta B) preto počty
+     * platia za 30 dní; poslať ich ako sedemdňové by bolo vymyslené číslo.
+     */
+    const { data } = await callTop({
+      rows: [catalogRow(11, 50), catalogRow(12, 9)],
+      days: [sale(11, '2026-08-18', 50), sale(12, '2026-08-17', 9)],
+      soldUnknown: 38_900,
+      query: '?window=7',
+    });
+
+    expect(data.window.days).toBe(7);
+    expect(data.available).toBe(true);
+    expect(data.excludes.unknownSales).toBeNull();
+    expect(data.excludes.measuredZeroSales).toBeNull();
+    // Príznaky platia ďalej — vylučuje sa, len sa nevie koľkých.
+    expect(data.excludes.zeroSales).toBe(true);
+  });
+
+  it('bez jediného dočítaného dňa sú počty `null` — vylučuje sa VŠETKO', async () => {
+    const { data, world } = await callTop({
+      sync: [syncDay('2026-08-19', 'partial', 0)],
+      rows: [catalogRow(11, 40)],
+      soldUnknown: 41_348,
+    });
+    expect(data.reason).toBe('no_coverage');
+    expect(data.excludes.unknownSales).toBeNull();
+    expect(data.excludes.measuredZeroSales).toBeNull();
+    // Nula by tvrdila „nevylučuje sa nič", a pritom sa vylučuje celý katalóg.
+    expect(world.countsCalls).toHaveLength(0);
+  });
+
+  it('rozchod okna počtov a okna rebríčka zhodí čísla, nie tvrdenie', async () => {
+    /*
+     * Poistka proti tichému rozchodu: keby zrkadlo počty spočítalo za iné okno
+     * než za aké je rebríček (a stalo by sa to práve rozšírením
+     * `ALLOWED_SOLD_WINDOWS`), route ich MUSÍ zahodiť. Rozhoduje o tom
+     * `counts.soldWindowDays`, nie druhá kópia zoznamu povolených okien.
+     */
+    const { data } = await callTop({
+      rows: [catalogRow(11, 40)],
+      soldUnknown: 12,
+      countsWindowDays: 90,
+      query: '?window=30',
+    });
+    expect(data.available).toBe(true);
+    expect(data.excludes.unknownSales).toBeNull();
+    expect(data.excludes.measuredZeroSales).toBeNull();
   });
 
   it('medzera okna sa priznáva aj vtedy, keď rebríček vyjde', async () => {
