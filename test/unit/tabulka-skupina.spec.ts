@@ -30,7 +30,8 @@
  *
  * Vlastník: V6a, skupina „Tabuľka" (D133, D137).
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createElement, type ReactNode } from 'react';
@@ -53,7 +54,7 @@ import {
   ToolbarSpacer,
 } from '@/components/ui/Toolbar';
 import styles from '@/components/ui/tables.module.css';
-import { pageTokens as pageTokensZKatalogu } from '@/components/products/CatalogTable';
+
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
@@ -487,14 +488,35 @@ describe('pageTokens — výpustky namiesto 827 čísel', () => {
     expect(pageTokens(2, 827)).toEqual([1, 2, 3, 'gap', 827]);
   });
 
-  it('DVE KÓPIE JEDNÉHO PRAVIDLA sa nesmú rozísť (kým V6b tú starú nezmaže)', () => {
-    for (const pages of [1, 3, 7, 8, 12, 100, 827]) {
-      for (const page of [1, 2, 3, Math.ceil(pages / 2), pages]) {
-        expect(pageTokens(page, pages), `strana ${page} z ${pages}`).toEqual(
-          pageTokensZKatalogu(page, pages),
-        );
+  /*
+   * ZMENA 2. 9. 2026 (V6b, D139). Toto tvrdenie sa do V6b volalo „DVE KÓPIE
+   * JEDNÉHO PRAVIDLA sa nesmú rozísť (kým V6b tú starú nezmaže)" a porovnávalo
+   * `pageTokens()` z `ui/Pagination` s druhou kópiou v `CatalogTable`. V6b tú
+   * starú zmazal — presne ako názov predpokladal — takže porovnávať sa už nedá
+   * s čím.
+   *
+   * Tvrdenie sa preto nezrušilo, ale OBRÁTILO: stráži, že druhá kópia
+   * NEVZNIKNE ZNOVA. Keby sa len zmazalo, pravidlo by nestrážil nikto, a to je
+   * pasca, ktorú má tento repo zapísanú menovite („čo test vyňal z kontroly,
+   * nestráži NIKTO").
+   */
+  it('pravidlo stránkovača má JEDEN domov — druhá kópia sa nevrátila', () => {
+    const najdene: string[] = [];
+    const chod = (dir: string): void => {
+      for (const polozka of readdirSync(dir, { withFileTypes: true })) {
+        const cesta = join(dir, polozka.name);
+        if (polozka.isDirectory()) {
+          chod(cesta);
+          continue;
+        }
+        if (!/[.]tsx?$/.test(polozka.name)) continue;
+        if (cesta.endsWith(join('ui', 'Pagination.tsx'))) continue;
+        const zdroj = readFileSync(cesta, 'utf8');
+        if (/export\s+(?:function|const)\s+pageTokens\W/.test(zdroj)) najdene.push(cesta);
       }
-    }
+    };
+    chod('src');
+    expect(najdene, 'pageTokens smie exportovať iba ui/Pagination').toEqual([]);
   });
 });
 

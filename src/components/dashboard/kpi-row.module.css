@@ -1,0 +1,30 @@
+/*
+ * Aura Zľavy — GEOMETRIA KPI RIADKU PREHĽADU (D136, D143, D147).
+ *
+ * Zámerne LEN rozloženie. Výplň dlaždice, tri riadky (`.k` / `.v` / `.s`),
+ * orámovanie aj medzery mriežky vlastní `.kpis` / `.kpi` v `globals.css`
+ * a `StatTile` ich DEDÍ — druhá, takmer rovnaká sada tried by sa o mesiac
+ * rozišla s prvou (docblock `primitives.module.css`). Vlas zdôraznenia
+ * a pilulka smeru žijú v `ui/kpi.module.css`, teda vedľa komponentov, ktoré
+ * ich kreslia.
+ *
+ * Ani jeden hex, ani jedna `rgba()`, ani jedno `!important` (D147) — tu nie je
+ * ani jedna farba, lebo tento súbor o farbách nerozhoduje.
+ *
+ * PREČO PEVNÉ ŠTYRI STĹPCE A NIE `auto-fit`
+ * -----------------------------------------
+ * `.kpis` z globals má `repeat(auto-fit, minmax(150px, 1fr))`. Pri šírkach
+ * medzi ~620 a ~800 px z toho vyjdú TRI bunky a štvrtá sa zlomí do druhého
+ * riadku — a rad, ktorý má odpovedať „číslo najprv" (D136), sa vtedy prečíta
+ * ako tri čísla a jedna osamotená dlaždica pod nimi. Štyri diely držia rad
+ * radom; bunky sú `minmax(0, 1fr)`, takže dlhá hodnota stĺpec nerozšíri, ale
+ * sa v ňom zalomí.
+ *
+ * `:global(.kpis)` v selektore NIE JE ozdoba — je to ten istý dôvod, aký má
+ * `.figs` v `overview.module.css`: samotná `.row` má rovnakú špecifickosť ako
+ * `.kpis` z globals a v jednom zlepenom hárku by rozhodlo poradie súborov.
+ * Dvojica tried vyhrá bez `!important`.
+ */
+:global(.kpis).row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}

@@ -1,0 +1,152 @@
+/*
+ * Aura Zľavy — ČO JE NA TABUĽKE PRODUKTOV MIESTNE (V6b, D137, D139, D143).
+ *
+ * PREČO TENTO SÚBOR VZNIKOL
+ * ─────────────────────────
+ * Tabuľka katalógu prešla na `Table` z `components/ui` (D137). Geometria
+ * skupiny — rám, posuvná plocha, hustota riadku, prilepenie, tri stavy bunky,
+ * pätka — žije v `ui/tables.module.css` a TU sa neopakuje. Zostávajú len tri
+ * veci, ktoré sú vlastnosťou TEJTO obrazovky a primitívu do API nepatria:
+ *
+ *  1. **Pevná mriežka stĺpcov** (D10, bod 1). Pri automatickom rozložení meria
+ *     prehliadač všetky názvy na stránke a najdlhší z nich rozhodne, kde
+ *     začne stĺpec Cena — čísla sa teda pri každom prelistovaní posunú inam
+ *     a oko ich hľadá odznova. Pri 825 stránkach je to 825 rôznych mriežok.
+ *     `table-layout: fixed` to zastaví; `min-width` je to, čo dvanásť stĺpcov
+ *     radšej pošle do vodorovného posuvu, než by si zjedli obsah navzájom.
+ *  2. **Stĺpec so zaškrtávacím políčkom a značka otvoreného riadku.** Sada
+ *     stĺpcov `Table` nemá „ktorý riadok práve popisuje panel vpravo" (K1)
+ *     a pridávať to do primitívu kvôli jednej obrazovke by bolo API na jedno
+ *     použitie. Značka je preto prúžok v prvej bunke a nesie ju CSS.
+ *  3. **Meno produktu ako rozklik.** Je to tlačidlo v bunke, takže výpustku
+ *     musí mať ono, nie bunka: `text-overflow` na `<td>` nedosiahne text
+ *     vnútri blokového potomka.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * ───────────────────────
+ *  A. **Referencia sa NESKRACUJE** (D122). Nemá `truncate`, nemá `overflow`,
+ *     a je to zámer: orezaný identifikátor je iný identifikátor. Dostane len
+ *     tabuľkové číslice, aby sa stĺpec dal skenovať zvisle.
+ *  B. **Prúžok otvoreného riadku je DRUHÝ kanál, nie jediný.** Prvý je
+ *     `aria-current` na tlačidle názvu (čítačka), tretí je samotný panel
+ *     vpravo. Podfarbenie riadku ustupuje výberu (`data-selected`) — „pôjde
+ *     do zľavy" je iná informácia a prekryť sa nesmie.
+ *  C. **Farba sa tu nevyrába** (D132, D144, D147): žiadny surový hex, žiadna
+ *     `rgba()`, žiadny `!important`. Len tokeny a `color-mix()`.
+ *  D. **Stlmené meno je priznanie, nie ozdoba.** Riadok bez názvu má v mene
+ *     `#id` a bunka to hlási cez `data-value="unknown"`; tlačidlo si nesie
+ *     vlastnú farbu, takže bez pravidla nižšie by priznanie zostalo vyzerať
+ *     ako hodnota.
+ *
+ * Vlastník: V6b, obrazovka Produkty (tabuľka).
+ */
+
+/* ═══════════════════════════ 1. Rám v rade obrazovky ═════════════════════ */
+
+/*
+ * Tabuľka je dominanta radu `.catalog-split` (P1): tri diely jej, dva panelu
+ * detailu. Základ 350 px a `min-width: 0` z primitívu sú to, čo jej dovolí sa
+ * naozaj stlačiť — bez nich ju vnútorná šírka obsahu vytlačí z radu a panel
+ * spadne pod tabuľku aj na 1440 px. Do V6b to isté hovorilo pravidlo
+ * `.catalog-split > .tbl-frame` v `globals.css`; s prechodom na `Table` odišla
+ * trieda `.tbl-frame` a s ňou aj to pravidlo (D139).
+ */
+.catalog {
+  flex: 3 1 350px;
+}
+
+/* ═══════════════════════════ 2. Pevná mriežka (D10) ══════════════════════ */
+
+/*
+ * Šírky stĺpcov nesie hlavička (`width` na `<th>`), pevné rozloženie ich robí
+ * záväznými. `min-width` je súčet pevných šírok plus 194 px na názov: pod ňou
+ * sa tabuľka posúva VODOROVNE vo vlastnej ploche (`.scroll` v primitíve),
+ * nestláča sa a stránka pod ňou stojí (P4).
+ *
+ * Číslo je odvodené, nie odhadnuté: 34 + 120 + 100 + 112 + 104 + 104 + 104 +
+ * 112 + 124 + 132 + 92 = 1138 px pevných, zvyšok do 1332 px je názov.
+ */
+.catalog table {
+  table-layout: fixed;
+  min-width: 1332px;
+}
+
+/* ═══════════════════════════ 3. Prvý stĺpec: výber a otvorený riadok ═════ */
+
+/* Zaškrtávacie pole je úzke a nepotrebuje odsadenie sprava — vedľa neho stojí
+   referencia, nie ďalšie číslo. */
+.catalog th[data-col='select'],
+.catalog td[data-col='select'] {
+  padding-right: 0;
+  padding-left: 10px;
+}
+
+/* Kotva pre prúžok otvoreného riadku; prúžok je absolútny v tejto bunke. */
+.catalog td[data-col='select'] {
+  position: relative;
+}
+
+/*
+ * Riadok, ktorý panel vpravo práve popisuje (K1). Prúžok stojí v PRVOM
+ * stĺpci, a ten je prilepený — takže je vidieť aj vtedy, keď je tabuľka
+ * odrolovaná k marži.
+ */
+.openMark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+/*
+ * Podfarbenie celého otvoreného riadku. `:not([data-selected='true'])` je to
+ * isté pravidlo, aké malo `table.tbl tbody tr.open:not(.on) td`: `--sel`
+ * hovorí „pôjde do zľavy" a to je iná informácia, ktorú prekryť nesmieme.
+ */
+.catalog tbody tr:has(.openMark):not([data-selected='true']) > td {
+  background: var(--paper3);
+}
+
+/* ═══════════════════════════ 4. Referencia (D122) ════════════════════════ */
+
+/* Tabuľkové číslice bez zarovnania doprava: referencia je identifikátor, nie
+   veličina, takže sa porovnáva po znakoch odhora, nie po jednotkách odzadu. */
+.catalog td[data-col='reference'] {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* ═══════════════════════════ 5. Meno ako rozklik ═════════════════════════ */
+
+/*
+ * Tlačidlo dedí písmo bunky a pridáva len dôraz mena. Výpustku má ONO —
+ * `text-overflow` na `<td>` sa k textu vnútri blokového potomka nedostane.
+ * `white-space` sa nediktuje: dedí sa z bunky, takže užšie rozloženie ho
+ * môže zalomiť bez jedinej media query.
+ */
+.nameBtn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 550;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.nameBtn:hover {
+  text-decoration: underline;
+}
+
+/* Bod D hlavičky — priznanie „názov nevieme" (`#id`) sa stlmí aj v tlačidle. */
+.catalog td[data-value='unknown'] .nameBtn {
+  color: var(--dim);
+  font-weight: 400;
+}

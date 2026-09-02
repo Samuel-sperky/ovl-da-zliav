@@ -30,7 +30,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { ItemsTable } from '@/components/campaigns/DiscountDetail';
-import { LeadTiers, PickRow, WatchSection } from '@/components/campaigns/DiscountsList';
+import { discountColumns, LeadTiers, WatchSection } from '@/components/campaigns/DiscountsList';
 import type { QueueSnapshotView } from '@/components/campaigns/queue-model';
 import type {
   DiscountItemView,
@@ -168,8 +168,25 @@ function fronta(patch: Partial<QueueSnapshotView> = {}): QueueSnapshotView {
   };
 }
 
+/*
+ * ZMENA 2. 9. 2026 (V6b). Riadok rebríka kreslil vlastný `PickRow`; vo V6b sa
+ * z neho stali stĺpce pre primitív `Table` (`discountColumns()`). Merané fakty
+ * nižšie sa NEZMENILI — „zapísané 948 z 1 180" musí zostať v jednom
+ * nedeliteľnom uzle, lebo presne tento reťazec snímkovač odrezal na
+ * „zapísané 948 z ".
+ *
+ * Vykresľujú sa BUNKY, nie celá `Table`: tvrdenia sa týkajú toho, čo vyrobia
+ * stĺpce, a nie prop-plochy tabuľky. Keby test staval celú `Table`, pri každej
+ * zmene jej API by padal na niečom, čo vôbec nemeria.
+ */
 const riadok = (row: DiscountRow) =>
-  renderToStaticMarkup(createElement(PickRow, { row, selected: false }));
+  discountColumns(null)
+    .map((column) =>
+      renderToStaticMarkup(
+        createElement('div', null, column.cell(row, 0).content as never),
+      ),
+    )
+    .join('');
 
 /* ═══════ 1. Percento sa nesmie dotknúť stavu (chyba 1) ════════════════════ */
 

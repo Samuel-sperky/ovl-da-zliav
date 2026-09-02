@@ -28,7 +28,10 @@
  *    živom markupe. Zvyšných päť kotiev (`covie`, `pripojenie`, `historia`,
  *    `cervena`, plus overenie celého zoznamu) meria oddiel D tohto súboru —
  *    štyri z nich vykreslením, takže to nie je grep nad zdrojom.
- *  · Existenciu routy nemeria nikto iný v repe; je to celý oddiel C.
+ *  · Existenciu routy meria oddiel D tohto súboru a oddiel E
+ *    `nastavenia-rozcestnik.spec.ts` (štyri karty rozcestníka). MERAČ je
+ *    jeden — `test/helpers/routy.ts` — zámerne: dve chôdze po strome
+ *    `src/app` by sa rozišli a obe merania by zostali zelené.
  *  · Skutočný vzhľad omrvinky (výška, kontrast) je Samuelov preklik (D141).
  *
  * Vykresľuje sa `renderToStaticMarkup` — žiadny prehliadač, žiadna databáza,
@@ -36,9 +39,6 @@
  *
  * Vlastník: V6a.
  */
-import { readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -73,6 +73,7 @@ import {
   Breadcrumb,
   breadcrumbSteps,
 } from '@/components/ui/Breadcrumb';
+import { APP_ROUTY, odkazyZMarkupu, routaExistuje } from '../helpers/routy';
 
 /** Rozcestník volá `useRouter()` kvôli prekladu starých kotiev. */
 vi.mock('next/navigation', () => ({
@@ -327,56 +328,31 @@ describe('Podstránky Nastavení — omrvinka nahradila „← Nastavenia"', () 
     // nepatrí, hoci podstránka je piata).
     expect(SETTINGS_PAGES.filter((page) => page.onIndex)).toHaveLength(4);
     const index = render(createElement(SettingsIndex));
-    expect(pocet(index, /class="set-card"/)).toBe(4);
+    /*
+     * Karty sa od V6b počítajú podľa `data-testid`, nie podľa triedy
+     * `.set-card` — tá bola globálna a odišla so `SETTINGS_CSS` (D139).
+     * `(?!state-)` je tu podstatné: stavový riadok každej karty nesie
+     * `settings-card-state-<slug>` a bez toho vylúčenia by ich test spočítal
+     * osem a tvrdil, že je všetko v poriadku.
+     */
+    expect(pocet(index, /data-testid="settings-card-(?!state-)[a-z-]+"/)).toBe(4);
   });
 });
 
 /* ═══════════ D. Žiadny odkaz Nastavení nevedie do prázdna ═════════════════ */
 
-/** Cesty, ktoré appka naozaj obsluhuje — odvodené zo stromu `src/app`. */
-function routy(): readonly string[] {
-  const koren = resolve(process.cwd(), 'src/app');
-  const out: string[] = [];
-  const chod = (dir: string, useky: readonly string[]) => {
-    for (const zapis of readdirSync(dir, { withFileTypes: true })) {
-      if (zapis.isDirectory()) {
-        // Zoskupenie `(nazov)` Next z adresy vypúšťa, do cesty teda nepatrí.
-        const dalsie = /^\(.+\)$/.test(zapis.name) ? useky : [...useky, zapis.name];
-        chod(join(dir, zapis.name), dalsie);
-      } else if (zapis.name === 'page.tsx' || zapis.name === 'route.ts') {
-        out.push(`/${useky.join('/')}`);
-      }
-    }
-  };
-  chod(koren, []);
-  return out;
-}
-
-const ROUTY = routy();
-
-/** Obsluhuje appka túto adresu? Dynamický úsek `[id]` prijme čokoľvek. */
-function routaExistuje(href: string): boolean {
-  const cesta = href.split('#')[0].split('?')[0];
-  const chcem = (cesta === '' ? '/' : cesta).split('/');
-  return ROUTY.some((routa) => {
-    const mam = routa.split('/');
-    if (mam.length !== chcem.length) return false;
-    return mam.every((usek, i) => (/^\[.+\]$/.test(usek) ? chcem[i] !== '' : usek === chcem[i]));
-  });
-}
-
-/** Vnútorné odkazy z markupu. Vonkajšie (`https:`, `mailto:`) sa netýkajú. */
-function odkazy(markup: string): readonly string[] {
-  return [...markup.matchAll(/href="([^"]*)"/g)]
-    .map((m) => m[1])
-    .filter((href) => href.startsWith('/'));
-}
+/*
+ * Chôdza po strome `src/app` a preklad `href` → „obsluhuje to appka?" žijú
+ * v `test/helpers/routy.ts`. Odtiaľ ich číta aj `nastavenia-rozcestnik.spec.ts`
+ * (oddiel E) — dve kópie MERAČA by sa rozišli a obe merania by pritom zostali
+ * zelené, takže by sa nedalo zistiť, ktoré klame.
+ */
 
 describe('odkazy Nastavení vedú na routy, ktoré existujú', () => {
   it('meranie vôbec niečo našlo', () => {
-    expect(ROUTY.length).toBeGreaterThan(10);
-    expect(ROUTY).toContain('/nastavenia');
-    expect(ROUTY).toContain('/');
+    expect(APP_ROUTY.length).toBeGreaterThan(10);
+    expect(APP_ROUTY).toContain('/nastavenia');
+    expect(APP_ROUTY).toContain('/');
     // Poistka proti príliš tolerantnému porovnávaniu: vymyslená cesta padne.
     expect(routaExistuje('/nastavenia/tato-stranka-neexistuje')).toBe(false);
     expect(routaExistuje('/zlavy/ABC123')).toBe(true);
@@ -416,7 +392,7 @@ describe('odkazy Nastavení vedú na routy, ktoré existujú', () => {
     ];
     let najdene = 0;
     for (const { kde, markup } of obrazovky) {
-      for (const href of odkazy(markup)) {
+      for (const href of odkazyZMarkupu(markup)) {
         najdene += 1;
         expect(routaExistuje(href), `${kde}: odkaz ${href} vedie do prázdna`).toBe(true);
       }

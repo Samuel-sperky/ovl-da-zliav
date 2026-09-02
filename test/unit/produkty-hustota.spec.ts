@@ -33,7 +33,11 @@ import { describe, expect, it } from 'vitest';
 
 import CatalogFilters from '@/components/products/CatalogFilters';
 import CatalogStatusPanel from '@/components/products/CatalogStatusPanel';
-import CatalogTable, { PageJump } from '@/components/products/CatalogTable';
+import CatalogTable from '@/components/products/CatalogTable';
+/* Skok na stranu bol vlastný `PageJump` v CatalogTable; vo V6b ho nesie
+   `ui/Pagination` (prop `jumpFromPages`). Tvrdenie nižšie meria to isté
+   pravidlo na novom mieste — pole musí POVEDAŤ, aký rozsah prijme. */
+import Pagination from '@/components/ui/Pagination';
 import CatalogTiles from '@/components/products/CatalogTiles';
 import {
   DEFAULT_CATALOG_FILTER,
@@ -415,7 +419,17 @@ describe('D10 — skok na stránku nikam nehádže', () => {
   });
 
   it('pole hovorí, aký rozsah prijme', () => {
-    const html = renderToStaticMarkup(createElement(PageJump, { pages: 825, onPage: () => {} }));
+    /* 825 strán po 50 riadkoch = 41 250 zhôd. `jumpFromPages: 1` vynúti skok
+       aj pri malom počte, aby test nemeral prah, ale samotné pole. */
+    const html = renderToStaticMarkup(
+      createElement(Pagination, {
+        page: 1,
+        pageSize: 50,
+        total: 41_250,
+        jumpFromPages: 1,
+        onPageChange: () => {},
+      }),
+    );
     expect(html).toContain('1 – 825');
     expect(html).toContain('Prejsť');
   });

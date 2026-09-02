@@ -96,7 +96,7 @@ import DiscountPresets from '@/components/campaigns/DiscountPresets';
 import NewDiscountConfirm from '@/components/campaigns/NewDiscountConfirm';
 import NewDiscountStart from '@/components/campaigns/NewDiscountStart';
 import ScopeRelease from '@/components/campaigns/ScopeRelease';
-import styles from '@/components/campaigns/zlavy.module.css';
+import styles from '@/components/campaigns/new-discount.module.css';
 import {
   alarmingCards,
   cardOfBlocker,
@@ -144,6 +144,10 @@ import {
   type StatusPayload,
 } from '@/components/campaigns/zlavy-api';
 import { useRefreshable } from '@/components/layout/refresh';
+/* Značka príznaku (`FlagMark`) — pravidlo troch kanálov: príznak nesie
+   farba AJ ikona AJ slovo, nikdy len farba. Import chýbal, lebo agent V6b
+   dopísal značky a session mu skončila pred importom. */
+import { FlagMark } from '@/components/ui/StatusMark';
 import {
   SOLD_WINDOWS,
   catalogFilterKey,
@@ -160,7 +164,18 @@ import {
 } from '@/components/products/sold-coverage';
 import { addDays, diffDays, maxAllowedTo } from '@/lib/domain/dates';
 import { collectOperationBlockers } from '@/lib/status/blockers';
-import { FlagMark } from '@/components/ui/StatusMark';
+/*
+ * JEDNA CESTA K PRIMITÍVAM (V6b). Barrel `components/ui` je zámerne jediný
+ * import: keby si obrazovka ťahala `Panel` zo súboru a `Table` z barrelu,
+ * vznikli by dva spôsoby, ako dostať tú istú vec do stránky — a tretí pri
+ * prvom refaktore (viď docblock `components/ui/index.ts`).
+ */
+/* Z vrstvy V6a sa tu dnes nepoužíva NIČ. Agent V6b si naimportoval celú
+   tabuľkovú a rámcovú skupinu (`Table`, `Panel`, `PageHeader`, `Segmented`,
+   `StatTile`, `ToneBadge`, `Chip`…) a session mu skončila pred prepisom
+   sprievodcu, takže to bolo trinásť mien bez použitia. Import sa vráti vtedy,
+   keď obrazovka tie primitíva naozaj začne kresliť — nie dopredu. Jediné, čo
+   z jeho práce zostalo, je `FlagMark` pri príznakoch nižšie. */
 import { statusSnapshotFromPayload } from '@/lib/status/snapshot';
 import { formatDateSk, formatEur } from '@/lib/ui/format';
 import { LOCKED_DIMENSION_REASON, lockedDimensionLabels } from '@/lib/ui/locked-dimensions';
@@ -191,6 +206,81 @@ const MAX_PAGES = Math.ceil(HARD_MAX_PRODUCTS / PAGE_SIZE) + 2;
 
 /** Predvolená dĺžka okna zľavy v dňoch (D12 preset 14 dní). */
 const DEFAULT_WINDOW_DAYS = 14;
+
+/* ═══════════════════════ tri kroky sprievodcu ═════════════════════════════ */
+
+/**
+ * TRI KROKY, KTORÉ SPRIEVODCA UKAZUJE NAHLAS (V6b, 2. 9. 2026).
+ *
+ * PREČO TO VZNIKLO: Samuel povedal „neviem vytvoriť zľavu". Obrazovka mala
+ * tri karty bez poradia — výber, pásma, rozhodnutie — a nič nehovorilo, čo
+ * príde po čom ani kde človek práve stojí. Kto nevedel, že skúška naprázdno
+ * je POVINNÝ krok pred zaradením (I3), videl len vypnuté tlačidlo bez príčiny.
+ *
+ * Pás krokov je NÁVOD, nie navigácia: nedá sa naň klikať, lebo kroky sa
+ * nepreskakujú. Zoradenie je zhodné s poradím podmienok v
+ * `queueBlockedReason()` — tá istá príčinnosť, dvakrát tá istá pravda.
+ */
+export const WIZARD_STEPS = [
+  { key: 'vyber', title: 'Výber produktov' },
+  { key: 'pasma', title: 'Pásma a okno platnosti' },
+  { key: 'zapis', title: 'Skúška naprázdno a potvrdenie' },
+] as const;
+
+/** Stav jedného kroku. Slovo je DRUHÝ kanál k číslu a farbe (kontrakt V6 §4). */
+export type WizardStepState = 'done' | 'now' | 'next';
+
+/** Slovo pre stav kroku — čítačka aj monochromatická snímka ho prečítajú. */
+export const WIZARD_STEP_WORD: Readonly<Record<WizardStepState, string>> = {
+  done: 'hotové',
+  now: 'teraz',
+  next: 'potom',
+};
+
+/** Z čoho sa rozhoduje, v ktorom kroku sprievodca stojí. */
+export interface WizardProgress {
+  /**
+   * Koľko produktov by zľavu NAOZAJ dostalo — súčet pásiem, nie veľkosť
+   * výberu (D121). Krok 1 nie je hotový tým, že sa niečo označilo: produkt
+   * s neznámym predajom je vo výbere, ale do zápisu nejde.
+   */
+  readonly discountedCount: number;
+  /** Percentá pásiem aj okno platnosti sú bez chyby. */
+  readonly planReady: boolean;
+  /** Skúška naprázdno sedí na PRÁVE ZOBRAZENÝ výber (I3). */
+  readonly previewFresh: boolean;
+  /** Zľava už je zaradená do fronty — sprievodca dobehol. */
+  readonly created: boolean;
+}
+
+/**
+ * Stav troch krokov, v poradí `WIZARD_STEPS`.
+ *
+ * Je to čistá funkcia a nie výraz v JSX zámerne: pravidlo „kým nie je čo
+ * zapísať, tretí krok NIE JE na rade" je to isté pravidlo ako brána I3
+ * v `queueBlockedReason()`, a keby žilo v JSX, nedalo by sa overiť bez
+ * prehliadača. `previewFresh` nerobí z tretieho kroku „hotové": hotový je
+ * až po zaradení do fronty — dovtedy chýba ručne vpísaný počet, teda posledná
+ * brzda pred produkčným eshopom.
+ */
+export function wizardStepStates(progress: WizardProgress): readonly WizardStepState[] {
+  if (progress.created) return ['done', 'done', 'done'];
+
+  const hasWrite = progress.discountedCount > 0;
+  if (!hasWrite) return ['now', 'next', 'next'];
+  if (!progress.planReady) return ['done', 'now', 'next'];
+  return ['done', 'done', 'now'];
+}
+
+/**
+ * Prečo produkt s neznámym predajom zľavu nedostane — JEDNA formulácia (D121).
+ *
+ * Stojí v priznaní nad tabuľkou pásiem aj v prázdnej tabuľke pásiem. Dve
+ * kópie tej istej vety by sa po prvej úprave rozišli a obrazovka by o tom
+ * istom fakte hovorila dvakrát inak (kontrakt V6 §4, bod 1: priznania majú
+ * zabehnuté formulácie).
+ */
+export const UNKNOWN_SOLD_PHRASE = 'pásmo sa im určiť nedá, zľavu nedostanú';
 
 export interface NewDiscountInitial {
   /** Konkrétne označené produkty z tabu Produkty; `null` = výber z filtra. */

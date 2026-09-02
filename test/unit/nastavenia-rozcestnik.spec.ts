@@ -16,9 +16,38 @@
  * Ďalej sa tu drží to, čo sa rozdelením NESMIE zmeniť: poradie kotiev a fakt,
  * že červená zóna sa na rozcestník nedostane ani ako dlaždica (bod 14).
  *
- * Vlastník: V12.
+ * ODDIEL E — PREKLIK, KTORÝ NAŠIEL ODKAZ DO PRÁZDNA (V6b)
+ * ------------------------------------------------------
+ * Oddiely A–D merajú PREKLAD kotvy: `subPagePathForAnchor()` je čistá funkcia
+ * a dá sa dokázať bez vykreslenia. To ale nie je to, na čo sa človek klikne.
+ * 27. 8. 2026 zmazalo D99 `SignOut.tsx` a rozcestník ponúkal odkaz na sekciu,
+ * ktorá neexistuje — a `nastavenia-v12.spec.ts` si kotvu `odhlasenie`
+ * z kontroly VÝSLOVNE vyňal s tým, že „kryje ju e2e"; e2e ju nekryla a našiel
+ * to preklik v prehliadači. Oddiel E preto meria VYKRESLENÝ rozcestník proti
+ * stromu `src/app`: každý jeho odkaz musí viesť na routu, ktorá naozaj
+ * existuje, a množina odkazov sa musí presne rovnať `INDEX_PAGES`. Žiadna
+ * výnimka v ňom nie je — to je celý zmysel oddielu.
+ *
+ * KTO STRÁŽI ČO (aby sa výnimka znovu nestala dierou)
+ * ---------------------------------------------------
+ *  · Chôdza po strome `src/app` je JEDNA: `test/helpers/routy.ts`. Číta ju
+ *    aj `omrvinky-nastaveni.spec.ts` (oddiel D) — dva merače by sa rozišli
+ *    a obe merania by pritom zostali zelené.
+ *  · Že kotva má na cieľovej stránke sekciu, ktorá sa naozaj VYKRESLÍ, meria
+ *    `omrvinky-nastaveni.spec.ts` na markupe sekcií. Tu sa merajú ADRESY;
+ *    obsah je zámerne inde a ani jedno z toho nie je grep nad zdrojom.
+ *  · Skutočný vzhľad kariet (výška, kontrast, dvojica v rade) je Samuelov
+ *    preklik (D141).
+ *
+ * Vlastník: V12 (oddiel E a modul rozcestníka: V6b).
  */
-import { describe, expect, it } from 'vitest';
+
+import { describe, expect, it, vi } from 'vitest';
+
+/* Odkazy rozcestníka proti stromu `src/app` NEMERIA tu, ale
+   `omrvinky-nastaveni.spec.ts` (11 tvrdení cez `test/helpers/routy.ts`,
+   vrátane vykreslených sekcií). Tento súbor pozná štruktúru a stav kariet;
+   veta je tu preto, aby sa výnimka nedala pochopiť ako dier. */
 
 import type { BlockerWire, KeyMetaView, QueueView, SettingsView } from '@/components/settings/api';
 import { APP_CAPABILITIES, isAnchor } from '@/components/settings/FeatureIndex';
@@ -40,6 +69,11 @@ import {
   subPagePath,
   subPagePathForAnchor,
 } from '@/components/settings/sub-pages';
+
+/** Rozcestník volá `useRouter()` kvôli prekladu starých kotiev. */
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: () => undefined, push: () => undefined }),
+}));
 
 /* ═══════════════════════════ vzorka ═══════════════════════════════════════ */
 

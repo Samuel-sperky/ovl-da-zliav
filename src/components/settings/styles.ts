@@ -16,13 +16,31 @@
  * Farby sa berú VÝHRADNE z premenných systému, takže tmavá téma funguje
  * automaticky a nie je tu ani jedna natvrdo napísaná farba.
  *
- * Vlastník: V12.
+ * KTO TENTO BLOK OD V6b JEŠTE VKLÁDÁ
+ * ----------------------------------
+ * Už len `SettingsSubPage.tsx`. **Rozcestník ho nevkladá** — prešiel na
+ * primitíva `PageHeader` + `Panel` a jeho geometria žije v
+ * `settings-index.module.css` (D143). Jeho triedy sú odtiaľto ZMAZANÉ v tom
+ * istom kroku (D139): `.set-lead`, `.set-cards`, `.set-card`, `.card-lead`,
+ * `.card-in`, `.card-state`, `.card-word`. Na ich mieste zostali komentáre
+ * s tým, kam sa presunuli — mŕtvy selektor by pri ďalšej oprave vyzeral ako
+ * to, čo obrazovku kreslí (K11).
+ *
+ * `.set-page` a `h1.page` zostávajú ZÁMERNE: kreslí ich ešte podstránka,
+ * ktorá na primitíva prechádza samostatne. Kto ju prevedie, zmaže ich s ňou —
+ * dovtedy to nie je mŕtve CSS, ale živý rám druhej obrazovky.
+ *
+ * Vlastník: V12 (rozcestník odišiel do modulu: V6b).
  */
 
 export const SETTINGS_CSS = `
 .set-page h1.page{font-size:15px;font-weight:640;margin-bottom:4px}
-.set-page .set-lead{font-size:12.5px;color:var(--dim);line-height:1.55;
-  margin-bottom:12px;max-width:70ch}
+/* Trieda .set-lead (veta pod nadpisom ROZCESTNÍKA) tu stála do V6b. Rozcestník
+   prešiel na PageHeader + Panel a jeho vetu kreslí prop "description" tej
+   hlavičky (vzhľad v ui/frame.module.css, D143) — a POZOR, tento reťazec je
+   šablónový literál, spätné apostrofy sa doň nedajú. Tu po nej nesmie zostať ani
+   riadok — mŕtvy selektor by pri ďalšej oprave vyzeral ako to, čo obrazovku
+   kreslí (D139, K11). Podstránky vetu nekreslia vôbec (viď SettingsSubPage). */
 /* Rytmus podstránky. 14 px bolo VIAC než 12 px spoločného systému — pri
    piatich sekciách na jednej stránke to je 60 px odstupov navyše proti
    zvyšku appky. 10 px drží sekcie oddelené a stránku pod stropom P4. */
@@ -130,45 +148,14 @@ export const SETTINGS_CSS = `
 .set-page .ovl-drawer pre.mono{white-space:pre-wrap;overflow-wrap:anywhere}
 
 /* ─────────────────── Rozcestník: štyri karty (bod 13) ──────────────────── */
-/* Dve v rade pri plnej šírke, jedna pod druhou na polovici obrazovky. Karta je
-   celá klikateľná — nie odkaz v rohu, ktorý sa musí trafiť. */
-/* Karta má štyri pásma pod sebou: nadpis, veta, kotvy, stav. Mriežka kariet
-   ich zdieľa cez „subgrid", takže rovnaké pásmo má vo VŠETKÝCH kartách
-   rovnakú výšku a všetky štyri stavy začínajú v jednej línii.
-   PREČO NIE „margin-top:auto" (oprava 24. 8. 2026)
-   Predtým bola karta stĺpcový flex a stav sa tlačil na spodok. Karty v jednom
-   riadku mriežky sú rovnako vysoké, takže tá s kratším textom si celý rozdiel
-   nechala ako prázdno MEDZI kotvami a čiarou nad stavom — na karte „Čo sa už
-   stalo…" to bolo 45 px proti 8 px na susednej. A cieľ sa aj tak nedosiahol:
-   spodkom zarovnaný stav s rôznym počtom riadkov (veta + slovo verzus len
-   veta) začínal v každej karte inde. Subgrid zarovnáva ZAČIATKY pásiem, takže
-   prázdno padne pod stav, kam nikoho neruší.
-   Keby prehliadač „subgrid" nepoznal, deklarácia prepadne a karta zostane
-   obyčajnou štvorriadkovou mriežkou — stavy nebudú v línii, ale diera
-   nevznikne. Stráži to „nastavenia-suvislost.spec.ts". */
-.set-page .set-cards{display:grid;grid-template-columns:1fr 1fr;
-  grid-auto-rows:auto;gap:12px;margin-top:14px}
-.set-page .set-card{display:grid;grid-template-rows:subgrid;grid-row:span 4;
-  row-gap:8px;align-content:start;
-  background:var(--paper2);border:1px solid var(--line);border-radius:var(--r);
-  padding:14px 16px;box-shadow:var(--shadow);text-decoration:none;color:inherit;
-  transition:border-color .12s ease,transform .12s ease}
-.set-page .set-card:hover{border-color:var(--accent);transform:translateY(-1px)}
-.set-page .set-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.set-page .set-card h2{font-size:13.5px;font-weight:640;color:var(--ink);
-  letter-spacing:0;text-transform:none;line-height:1.35}
-.set-page .set-card .card-lead{font-size:12px;color:var(--dim);line-height:1.5}
-/* Stav karty. Začína vo všetkých kartách v jednej línii (pásmo subgridu
-   vyššie), aby sa štyri stavy dali prečítať jedným pohybom oka, nie štyrmi. */
-.set-page .set-card .card-state{align-self:start;padding-top:8px;
-  border-top:1px solid var(--line);display:flex;flex-direction:column;gap:3px;
-  width:100%}
-.set-page .set-card .card-state .sig{align-items:flex-start;line-height:1.45;
-  text-align:left}
-.set-page .set-card .card-word{font-size:11px;color:var(--dim);
-  padding-left:15px}
-.set-page .set-card .card-in{font-size:11px;color:var(--dim);
-  display:flex;flex-wrap:wrap;gap:4px 8px}
+/* Triedy .set-cards, .set-card, .card-lead, .card-in, .card-state a .card-word
+   tu stáli do V6b. Rozcestník prešiel na primitíva PageHeader + Panel a jeho
+   mriežka, karta aj stavový riadok žijú v settings-index.module.css (D143) —
+   vrátane pásiem „subgrid", ktoré držia štyri stavy v jednej línii, a
+   vysvetlenia, prečo to nie je „margin-top:auto". Tu po nich nesmie zostať ani
+   riadok: mŕtvy selektor by pri ďalšej oprave vyzeral ako to, čo obrazovku
+   kreslí (D139, K11). Mriežku a pásma stráži „nastavenia-suvislost.spec.ts",
+   ktorý ich odteraz čita z modulu, nie z tohto reťazca. */
 
 /* ─────────────────── Podstránka: návrat a hlavička ─────────────────────── */
 /* Trieda .sub-back (odkaz „← Nastavenia") tu stála do V6. Nahradila ju
@@ -190,7 +177,6 @@ export const SETTINGS_CSS = `
 @media (max-width:760px){
   .set-page .split{grid-template-columns:1fr}
   .set-page .set-meters{grid-template-columns:1fr}
-  .set-page .set-cards{grid-template-columns:1fr}
   .set-page .kv{grid-template-columns:1fr;gap:2px}
   .set-page .kv .k{margin-top:8px}
   .set-page .dz-row .dz-a{margin-left:0}

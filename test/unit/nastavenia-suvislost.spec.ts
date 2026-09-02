@@ -19,10 +19,16 @@
  * ČO SA TU NESMIE POKAZIŤ
  * -----------------------
  *  A. **Meria sa výsledok, nie zdrojový text.** Mriežky sa čítajú ako
- *     deklarácie zo `SETTINGS_CSS` (rozobraté na stopy, nie hľadané ako
- *     reťazec), obsah ako vykreslené HTML rozdelené na povrch a rozklik.
- *     Hľadanie reťazca v zdroji by prešlo aj vtedy, keby sa pravidlo
- *     nepoužilo na nič.
+ *     deklarácie (rozobraté na stopy, nie hľadané ako reťazec), obsah ako
+ *     vykreslené HTML rozdelené na povrch a rozklik. Hľadanie reťazca
+ *     v zdroji by prešlo aj vtedy, keby sa pravidlo nepoužilo na nič.
+ *
+ *     DVA HÁRKY, DVA ČITAČE (V6b): mriežka podstránok žije ďalej v
+ *     `SETTINGS_CSS` (minifikovaný šablónový literál, `rule()` nižšie),
+ *     mriežka ROZCESTNÍKA sa presunula do `settings-index.module.css`
+ *     (D139, D143) a má vlastný čitač `modulRule()`. Kto by kartu meral
+ *     v `SETTINGS_CSS`, meral by zmazané pravidlo — preto je oddiel 2
+ *     doplnený tvrdením, že tá stará sada tried je naozaj preč.
  *  B. **Skrátenie stránky nesmie zjesť obsah.** Každá veta, ktorá zmizla
  *     z povrchu, sa musí dať nájsť pod rozklikom (P6). Zoznam zamknutých
  *     funkcií pod rozklik NESMIE — je to jediné miesto v celej appke, kde
@@ -36,6 +42,9 @@
  *
  * Vlastník: UX4.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -221,42 +230,113 @@ describe('Riadky stropov: vysvetlenie stojí pri hodnote, nie pol obrazovky ďal
 
 /* ══════════ 2. Karta rozcestníka nemá dieru medzi kotvami a stavom ════════ */
 
+/**
+ * Geometria rozcestníka. Od V6b je v CSS MODULE vedľa komponentu (D143), nie
+ * v šablónovom literáli `SETTINGS_CSS` — pravidlá sú tam formátované, takže
+ * `rule()` vyššie (šitý na minifikovaný literál) na ne nesedí.
+ */
+const INDEX_CSS = readFileSync(
+  fileURLToPath(
+    new URL('../../src/components/settings/settings-index.module.css', import.meta.url),
+  ),
+  'utf8',
+);
+
+/**
+ * Telo pravidla modulu podľa PRESNÉHO selektora. Bez komentárov (tento hárok
+ * v nich cituje vlastné triedy) a bez media query (`.cards` je v nej prepísaná
+ * pre úzku obrazovku a čítalo by sa ako jednostĺpcové).
+ */
+function modulRule(selector: string): string {
+  const bezKomentarov = INDEX_CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const desktop = bezKomentarov.slice(0, bezKomentarov.indexOf('@media'));
+  const at = desktop.lastIndexOf(`${selector} {`);
+  expect(at, `selektor ${selector} v settings-index.module.css nie je`).toBeGreaterThan(-1);
+  const from = desktop.indexOf('{', at) + 1;
+  const to = desktop.indexOf('}', from);
+  expect(to, `pravidlo ${selector} nie je uzavreté`).toBeGreaterThan(from);
+  return desktop.slice(from, to).replace(/\s+/g, ' ').trim();
+}
+
 describe('Karty rozcestníka: stav sa netlačí na spodok karty', () => {
   it('karta zdieľa riadky mriežky, takže pásma začínajú v jednej línii', () => {
-    const card = rule('.set-page .set-card');
-    expect(card).toContain('grid-template-rows:subgrid');
-    expect(card).toMatch(/grid-row:span \d+/);
+    const card = modulRule('.card');
+    expect(card).toContain('grid-template-rows: subgrid');
+    expect(card).toMatch(/grid-row: span \d+/);
+    /*
+     * `subgrid` zdieľa riadky RODIČA — keby ich mriežka kariet nevlastnila,
+     * nemá karta čo zdieľať a deklarácia je ozdoba.
+     */
+    expect(modulRule('.cards')).toContain('grid-auto-rows: auto');
   });
 
-  it('stav už nie je tlačený nadol — `margin-top:auto` je preč', () => {
+  it('stav už nie je tlačený nadol — `margin-top: auto` je preč', () => {
     /*
      * `margin-top:auto` v stĺpcovom flexe zožral celý rozdiel výšok kariet
      * a položil ho MEDZI kotvy a čiaru nad stavom. Cieľ (stavy v jednej
      * línii) sa tým aj tak nedosiahol: spodkom zarovnané bloky s rôznym
      * počtom riadkov začínajú každý inde.
      */
-    expect(rule('.set-page .set-card .card-state')).not.toContain('margin-top:auto');
+    expect(modulRule('.state')).not.toContain('margin-top: auto');
+  });
+
+  it('stará globálna sada tried karty je zo `SETTINGS_CSS` ZMAZANÁ (D139, K11)', () => {
+    /*
+     * Toto je celá cena za presun. Keby staré pravidlá v `SETTINGS_CSS`
+     * zostali, mala by appka dve sady tried pre tú istú kartu — a mŕtvy
+     * selektor pri ďalšej oprave vyzerá presne ako to, čo obrazovku kreslí.
+     * Komentáre sa odstrihnú zámerne: autor v nich SMIE napísať, kam sa
+     * trieda presunula, a test mu to nesmie zakázať.
+     */
+    const css = SETTINGS_CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    for (const dead of [
+      '.set-lead',
+      '.set-cards',
+      '.set-card',
+      '.card-lead',
+      '.card-in',
+      '.card-state',
+      '.card-word',
+    ]) {
+      expect(css, `mŕtvy selektor ${dead} v SETTINGS_CSS`).not.toMatch(
+        new RegExp(`\\${dead}(?![\\w-])`),
+      );
+    }
+    // Poistka proti príliš tolerantnému hľadaniu: `.set-page` tam BYŤ MÁ —
+    // kreslí ju ešte podstránka a jej zmazanie je krok 2/3, nie tento.
+    expect(css).toMatch(/\.set-page(?![\w-])/);
   });
 
   it('rozpätie karty sedí na počet pásiem, ktoré karta naozaj kreslí', async () => {
     /*
-     * `grid-row:span 4` a štyri deti karty sú jedna vec zapísaná dvakrát.
+     * `grid-row: span 4` a štyri deti karty sú jedna vec zapísaná dvakrát.
      * Keby niekto na kartu pridal piate pásmo, subgrid by ho vytlačil mimo
      * zdieľaných riadkov a karta by sa rozišla so susedou. Preto sa počet
      * pásiem MERIA na vykreslenej karte, nie predpokladá.
      */
     const { SettingsIndex } = await import('@/components/settings/SettingsIndex');
     const markup = renderToStaticMarkup(createElement(SettingsIndex));
-    const cards = markup.split('class="set-card"').slice(1);
-    expect(cards).toHaveLength(4);
+    const span = Number(/grid-row: span (\d+)/.exec(modulRule('.card'))![1]);
 
-    const span = Number(/grid-row:span (\d+)/.exec(rule('.set-page .set-card'))![1]);
-    for (const card of cards) {
-      const body = card.slice(0, card.indexOf('</a>'));
-      const slots = ['<h2', 'class="card-lead"', 'class="card-in"', 'class="card-state"'].filter(
-        (slot) => body.includes(slot),
-      );
-      expect(slots, `karta nemá všetky pásma: ${slots.join(', ')}`).toHaveLength(span);
+    /*
+     * Karta sa adresuje `data-testid`-om, nie triedou. `(?!state-)` je tu
+     * podstatné: stavový riadok každej karty nesie `settings-card-state-…`
+     * a bez toho vylúčenia by test našiel osem kariet a bol by zelený.
+     */
+    const karty = [...markup.matchAll(/data-testid="settings-card-(?!state-)([a-z-]+)"/g)];
+    expect(karty).toHaveLength(4);
+
+    for (const [i, m] of karty.entries()) {
+      const from = m.index;
+      const to = i + 1 < karty.length ? karty[i + 1]!.index : markup.length;
+      const body = markup.slice(from, to);
+      const slots = [
+        'class="cardTitle"',
+        'class="lead"',
+        'class="sections"',
+        'class="state"',
+      ].filter((slot) => body.includes(slot));
+      expect(slots, `karta ${m[1]} nemá všetky pásma: ${slots.join(', ')}`).toHaveLength(span);
     }
   });
 });

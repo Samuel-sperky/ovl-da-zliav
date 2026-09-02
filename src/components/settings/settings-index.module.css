@@ -1,0 +1,215 @@
+/*
+ * Aura Zľavy — geometria ROZCESTNÍKA NASTAVENÍ (V6b, D139, D143).
+ *
+ * PREČO TU A NIE V `SETTINGS_CSS`
+ * -------------------------------
+ * Rozcestník mal svoju geometriu v šablónovom literáli `settings/styles.ts`,
+ * ktorý sa vkladal do stránky ako `<style>` blok. Bolo to vedomé rozhodnutie
+ * V12 (výhradné vlastníctvo `globals.css` iným agentom), ale malo dve ceny:
+ * rozcestník so sebou nosil 12 kB pravidiel pre sekcie, ktoré nekreslí, a
+ * jeho triedy boli GLOBÁLNE — `.set-card` sa dala prepísať odkiaľkoľvek.
+ * D143 to obracia: vzhľad ide do CSS modulu vedľa komponentu, takže triedy
+ * sú lokálne a `SettingsIndex.tsx` už žiadny `<style>` blok nevkladá.
+ *
+ * Súbor sa menuje podľa KOMPONENTU, nie podľa priečinka (`settings.module.css`
+ * by si nárokoval celú oblasť), lebo podstránky a Poistky prechádzajú na
+ * primitíva samostatne a dva agenti nemajú prepisovať jeden hárok.
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * -----------------------
+ *
+ *  1. **Žiadna vlastná farba.** Všetko z tokenov (`--ink`, `--ink2`, `--dim`,
+ *     `--line`, `--accent`), takže obe témy fungujú samy a strážca D132/D144
+ *     nenájde surový hex. Tónovanie by šlo VÝHRADNE cez `color-mix()` (D147);
+ *     tu ho netreba ani raz.
+ *
+ *  2. **Nič, čo kreslí `Panel`.** Plochu (pozadie, vlas, rádius, tieň) vlastní
+ *     `frame.module.css`. Tento hárok panelu iba dodáva mriežku, vnútorný
+ *     okraj a odozvu na myš — druhá definícia plochy vedľa prvej by sa po
+ *     prvej úprave rozišla a karta by prestala vyzerať ako zvyšok appky.
+ *     Jediná výnimka je `border-color` pri prejdení myšou a tá vyhráva
+ *     špecifickosťou (`.card:hover`), nie poradím importov.
+ *
+ *  3. **Stav karty nemá farbu ani veľkosť.** Nesie ju globálna trieda `.sig`
+ *     (`TONE_SIG_CLASS`), lebo pravidlo troch kanálov — farba + značka + slovo
+ *     — má v appke JEDNO miesto. Tu sa `.sig` len zalomí naľavo, aby dve vety
+ *     pod sebou nezačínali v strede.
+ *
+ *  4. **Zlatá sa na popisky nepoužíva.** Značka je kategória, nie stav; karta
+ *     je akcia, takže jej jediný akcent je `--accent` (D19).
+ *
+ * Vlastník: V6b (Nastavenia, krok 1/3).
+ */
+
+/*
+ * Hlavička a mriežka kariet pod sebou. Zámerne flex a nie `.ovl-stack`:
+ * ten má `align-items: flex-start` a mriežka by sa scvrkla na šírku obsahu.
+ */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovl-s5);
+}
+
+/*
+ * Dve karty v rade pri plnej šírke, jedna pod druhou na úzkej obrazovke.
+ *
+ * `grid-auto-rows: auto` je tu kvôli `subgrid` nižšie: karta si nárokuje
+ * štyri riadky TEJTO mriežky, takže riadky musia patriť mriežke a nie karte.
+ */
+.cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: auto;
+  gap: var(--ovl-s4);
+}
+
+/*
+ * Jedna karta = jedna otázka. Štyri pásma pod sebou: nadpis, veta, sekcie,
+ * stav — a všetky štyri karty ich zdieľajú cez `subgrid`, takže rovnaké
+ * pásmo má vo VŠETKÝCH kartách rovnakú výšku a všetky štyri stavy začínajú
+ * v jednej línii.
+ *
+ * PREČO NIE „margin-top: auto" (oprava 24. 8. 2026, prenesená do V6b)
+ * Predtým bola karta stĺpcový flex a stav sa tlačil na spodok. Karty v jednom
+ * riadku mriežky sú rovnako vysoké, takže tá s kratším textom si celý rozdiel
+ * nechala ako prázdno MEDZI sekciami a čiarou nad stavom — na karte „Čo sa už
+ * stalo…" to bolo 45 px proti 8 px na susednej. A cieľ sa aj tak nedosiahol:
+ * spodkom zarovnaný stav s rôznym počtom riadkov (veta + slovo verzus len
+ * veta) začínal v každej karte inde. `subgrid` zarovnáva ZAČIATKY pásiem,
+ * takže prázdno padne pod stav, kam nikoho neruší.
+ *
+ * Keby prehliadač `subgrid` nepoznal, deklarácia prepadne a karta zostane
+ * obyčajnou štvorriadkovou mriežkou — stavy nebudú v línii, ale diera
+ * nevznikne. Počet pásiem proti `span` stráži `nastavenia-suvislost.spec.ts`.
+ *
+ * `position: relative` je nosič pre `.hit::after` — celoplošný terč odkazu.
+ */
+.card {
+  position: relative;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 4;
+  row-gap: var(--ovl-s3);
+  align-content: start;
+  padding: var(--ovl-s4) var(--gap);
+  transition:
+    border-color var(--ovl-dur-hover) var(--ovl-ease-out),
+    transform var(--ovl-dur-card) var(--ovl-ease-out);
+}
+
+/*
+ * Odozva na myš je na CELEJ karte, nie na odkaze v nadpise — terč, ktorý sa
+ * musí trafiť, je horší než terč, ktorý sa netreba hľadať.
+ */
+.card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+/*
+ * Nadpis karty. Väčší než veta pod ním a menší než `h1` hlavičky stránky
+ * (`--ovl-fs-h1`), takže hierarchia ide od nadpisu stránky ku kartám a nie
+ * naopak. `letter-spacing` a `text-transform` sa vynulujú zámerne: `h2` má
+ * v appke inde rolu POPISKU SEKCIE (verzálky, riedko), tu je to titulok.
+ */
+.cardTitle {
+  margin: 0;
+  font-size: var(--ovl-fs-body);
+  font-weight: 600;
+  line-height: var(--ovl-lh-tight);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+/*
+ * Odkaz v nadpise. Prístupný názov odkazu je názov karty — nie celý jej obsah
+ * — a pseudoprvok nižšie z neho robí terč na celú plochu.
+ *
+ * PREČO NIE `<Link>` OKOLO CELEJ KARTY: `subgrid` potrebuje, aby boli pásma
+ * PRIAMYMI deťmi karty. Odkaz navrchu by pridal medzičlánok a štyri pásma by
+ * sa prestali zdieľať s ostatnými kartami.
+ *
+ * Fokusový prstenec sa tu NEDEFINUJE — odkazy ho dedia z globálneho
+ * `a:focus-visible` (`globals.css`, §3) a druhá kópia by sa s ňou rozišla.
+ * Prstenec kreslí text nadpisu, nie celú kartu: `Panel` má `overflow: hidden`,
+ * takže prstenec na celoplošnom terči by sa odstrihol.
+ */
+.hit {
+  color: inherit;
+  text-decoration: none;
+}
+
+.hit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* Jedna veta o tom, na čo karta odpovedá. */
+.lead {
+  margin: 0;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  line-height: var(--ovl-lh-body);
+}
+
+/*
+ * Čo je za kartou. Zámerne obyčajné `<span>`-y a NIE `Chip`: čip je
+ * `<button>` s `aria-pressed` a tlačidlo vnútri odkazu je rozbitý terč —
+ * čítačka by ohlásila ovládací prvok, ktorý sa nedá prepnúť.
+ */
+.sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ovl-s1) var(--ovl-s3);
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+/*
+ * Stav karty. Začína vo všetkých kartách v jednej línii (pásmo `subgrid`
+ * vyššie), aby sa štyri stavy dali prečítať jedným pohybom oka, nie štyrmi.
+ * Vlas nad ním oddeľuje TVRDENIE O ESHOPE od popisu karty — nad čiarou je,
+ * čo karta je, pod čiarou, čo sa za ňou práve deje.
+ */
+.state {
+  align-self: start;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ovl-s1);
+  padding-top: var(--ovl-s3);
+  border-top: 1px solid var(--line);
+}
+
+/*
+ * Veta stavu je viacriadková. `.sig` je inak jednoriadkový signál zarovnaný
+ * na stred, takže by sa značka postavila do stredu odstavca.
+ */
+.state :global(.sig) {
+  align-items: flex-start;
+  text-align: left;
+  line-height: var(--ovl-lh-body);
+}
+
+/*
+ * Čo s tým, jedným slovom. Odsadenie 15 px je ŠIRKA ZNAČKY PLUS MEDZERA
+ * v `.sig` (ikona `size: 0.85` a `gap: 5px`), takže slovo začína pod prvým
+ * písmenom vety, nie pod jej značkou. Keby sa značka zmenila, toto číslo sa
+ * musí zmeniť s ňou — inak sa riadok rozíde o pár pixelov a nikto si to
+ * nevšimne inak než porovnaním.
+ */
+.word {
+  padding-left: 15px;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  line-height: var(--ovl-lh-body);
+}
+
+@media (max-width: 760px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}

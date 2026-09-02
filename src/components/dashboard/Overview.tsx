@@ -89,12 +89,15 @@ import {
   type OverviewWindow,
 } from '@/components/dashboard/overview-model';
 import { overviewChecks, overviewVerdict } from '@/components/dashboard/overview-verdict';
+import { previousWindowAnchor } from '@/components/dashboard/kpi-row-model';
 import {
   getRevenueDaily,
+  getSalesWindow,
   getTimelineWindow,
   getTopFlop,
   getWriteActivity,
   type RevenueDailyView,
+  type SalesWindowView,
   type TimelineWindowView,
   type TopFlopView,
   type WriteActivityDayView,
@@ -123,6 +126,15 @@ interface WindowData {
   revenue: RevenueDailyView | null;
   rank: TopFlopView | null;
   activity: WriteActivityDayView[] | null;
+  /** Súčet kusov za okno — hodnota prvej dlaždice KPI riadku (D136). */
+  sold: SalesWindowView | null;
+  /**
+   * To isté za PREDCHÁDZAJÚCE okno rovnakej dĺžky. Je to jediné „oproti čomu"
+   * pre pilulky smeru: bez neho by museli navždy hovoriť „zmenu nevieme".
+   * Nie je to nový endpoint — je to tá istá route s iným `?anchor=`.
+   */
+  soldBefore: SalesWindowView | null;
+  revenueBefore: RevenueDailyView | null;
 }
 
 export function Overview() {
@@ -156,13 +168,26 @@ export function Overview() {
    * v rozkliku — teda niečo, o čo vôbec nežiadal.
    */
   const loadWindow = useCallback(async (days: OverviewWindow) => {
-    const [timeline, revenue, rank, activity] = await Promise.all([
-      getTimelineWindow(days),
-      getRevenueDaily(days),
-      getTopFlop(days),
-      getWriteActivity(days),
-    ]);
-    setWindowData({ timeline, revenue, rank, activity });
+    /*
+     * Kotva predchádzajúceho okna sa počíta TU, z „dneška" v logickom pásme,
+     * a nie z odpovede aktuálneho okna — inak by predchádzajúce okno muselo
+     * čakať na to aktuálne a zmena prepínača by mala dve kolá namiesto
+     * jedného. Cena je, že sa kotva môže na hrane polnoci s dňom servera
+     * rozísť o deň; preto model porovnanie pripustí len vtedy, keď okná na
+     * seba naozaj naväzujú (`windowsAdjoin()`), a inak povie „zmenu nevieme".
+     */
+    const before = previousWindowAnchor(todayHere(), days);
+    const [timeline, revenue, rank, activity, sold, soldBefore, revenueBefore] =
+      await Promise.all([
+        getTimelineWindow(days),
+        getRevenueDaily(days),
+        getTopFlop(days),
+        getWriteActivity(days),
+        getSalesWindow(days),
+        before === null ? Promise.resolve(null) : getSalesWindow(days, before),
+        before === null ? Promise.resolve(null) : getRevenueDaily(days, before),
+      ]);
+    setWindowData({ timeline, revenue, rank, activity, sold, soldBefore, revenueBefore });
   }, []);
 
   // Registrácia do spoločného obnovovania. Hook si zámerne NESLEDUJE identitu

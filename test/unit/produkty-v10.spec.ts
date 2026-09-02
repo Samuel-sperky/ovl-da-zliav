@@ -28,7 +28,11 @@ import { describe, expect, it } from 'vitest';
 import CatalogFilters from '@/components/products/CatalogFilters';
 import type { CatalogCountsView } from '@/components/products/catalog-api';
 import CatalogPanel from '@/components/products/CatalogPanel';
-import CatalogTable, { pageTokens } from '@/components/products/CatalogTable';
+import CatalogTable from '@/components/products/CatalogTable';
+/* `pageTokens()` sa vo V6b presťahovala do `ui/Pagination` — CatalogTable
+   mal jej DRUHÚ kópiu a tá zmizla zámerne (D139). Pravidlo sa nezmenilo,
+   len má jeden domov, takže test ho stráži tam. */
+import { pageTokens } from '@/components/ui/Pagination';
 import ProductDetailPanel from '@/components/products/ProductDetailPanel';
 import { productColumn } from '@/lib/ui/product-columns';
 import SelectionBar from '@/components/products/SelectionBar';

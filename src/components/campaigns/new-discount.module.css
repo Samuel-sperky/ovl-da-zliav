@@ -1,0 +1,518 @@
+/*
+ * Aura Zľavy — VZHĽAD SPRIEVODCU NOVOU ZĽAVOU (V6b, D139, D143, D147).
+ *
+ * PREČO VLASTNÝ MODUL A NIE `zlavy.module.css`
+ * --------------------------------------------
+ * `zlavy.module.css` je spoločný pre sedem obrazoviek tabu Zľavy a sprievodca
+ * si v ňom držal štrnásť tried, ktoré nikto iný nepoužíval (`nz`, `nzCol`,
+ * `nzHead`, `nzTitle`, `nzName`, `nzEmpty`, `tiers`, `band`, `pctInput`,
+ * `capInput`, `win`, `winline`, `pushRight`, presetové riadky). Po prevode na
+ * primitíva (`PageHeader`, `Panel`, `Segmented`, `Chip`, `Table`) z nich väčšina
+ * stratila volajúceho; D143 hovorí, že nový vzhľad ide do modulu VEDĽA
+ * komponentu, takže tu je. Zmazanie mŕtvych tried zo `zlavy.module.css` patrí
+ * k tomu istému kroku (D139) — v tomto sprinte ten súbor prepisuje iný agent
+ * (zoznam a detail zľavy), preto je zoznam v reporte, nie v tomto diffe.
+ *
+ * FARBA IDE VÝHRADNE Z TOKENOV (D147, strážca `dizajn-tokeny-strazca.spec.ts`)
+ * --------------------------------------------------------------------------
+ * Žiadny surový hex, žiadne `rgba()`, žiadny `!important`. Tónuje sa
+ * `color-mix(in srgb, var(--token) N%, transparent)`.
+ *
+ * TRI KANÁLY (kontrakt V6 §4, bod 3)
+ * ----------------------------------
+ * Nič v tomto súbore nenesie stav SAMOU farbou. Krok sprievodcu má číslo,
+ * slovo aj farbu; zamknutý rozmer má ikonu zámku, meno aj prerušovaný okraj;
+ * priznania kreslí `ToneBadge` (ikona + slovo + tón). Kto tu pridá pravidlo,
+ * ktoré rozlišuje len odtieňom, pravidlo poruší — CSS o tom mlčí, ale
+ * `signaly-tri-kanaly.spec.ts` nie.
+ *
+ * Vlastník: V6b (oblasť Nová zľava, krok 1 — sprievodca).
+ */
+
+/* ═══════════════════════ 1. Hlavička a názov zľavy ════════════════════════ */
+
+/*
+ * Názov zľavy stojí v akciách `PageHeader`-a, teda vedľa titulku obrazovky —
+ * je to meno TEJTO zľavy, nie pole jedného kroku, a v kroku 1 by tvrdilo, že
+ * patrí k výberu produktov.
+ */
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  flex-wrap: wrap;
+}
+
+.name {
+  width: 260px;
+  max-width: 100%;
+}
+
+/* ═══════════════════════ 2. Tri kroky sprievodcu ══════════════════════════ */
+
+/*
+ * PREČO TENTO PÁS VÔBEC EXISTUJE
+ * Samuel povedal „neviem vytvoriť zľavu". Obrazovka mala tri karty bez poradia
+ * a bez slova o tom, čo príde po čom — človek nevedel, či už niečo zapísal.
+ * Pás je NÁVOD, nie navigácia: nedá sa naň klikať, lebo kroky sa nepreskakujú
+ * (I3 — bez skúšky naprázdno a bez ručne vpísaného počtu sa nezapíše nič).
+ */
+.steps {
+  display: flex;
+  gap: var(--ovl-s2);
+  flex-wrap: wrap;
+  margin: 0 0 var(--gap);
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: var(--ovl-s3) var(--ovl-s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--paper2);
+  font-size: var(--ovl-fs-small);
+  color: var(--dim);
+}
+
+/* Číslo kroku. Je to PRVÝ z troch kanálov a nesie poradie, nie stav. */
+.stepNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line2);
+  background: var(--paper3);
+  color: var(--ink2);
+  font-size: var(--ovl-fs-micro);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stepText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.stepTitle {
+  color: var(--ink2);
+  font-weight: 600;
+}
+
+/* Druhý kanál: SLOVO. „teraz" / „hotové" / „potom" sa dá prečítať aj nahlas. */
+.stepWord {
+  font-size: var(--ovl-fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+}
+
+/* Tretí kanál: farba a plocha. Nikdy nestojí sama — viď dve triedy nad ňou. */
+.step[data-state='now'] {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+
+.step[data-state='now'] .stepNum {
+  border-color: var(--brand);
+  background: var(--brand-fill);
+  color: var(--on-brand-fill);
+}
+
+.step[data-state='now'] .stepTitle {
+  color: var(--ink);
+}
+
+.step[data-state='now'] .stepWord {
+  color: var(--brand);
+}
+
+.step[data-state='done'] .stepWord {
+  color: var(--st-good-ink);
+}
+
+.step[data-state='next'] {
+  border-style: dashed;
+}
+
+.step[data-state='next'] .stepWord {
+  color: var(--dim);
+}
+
+/* ═══════════════════════ 3. Dva stĺpce obrazovky ══════════════════════════ */
+
+/*
+ * Ľavý stĺpec je PRÍPRAVA (výber, pásma, okno), pravý je ROZHODNUTIE (skúška
+ * naprázdno, potvrdenie, prekážky). Šírka pravého je pevná, lebo v ňom stojí
+ * pole ručne vpísaného počtu a to sa nesmie preliať pod dominantu.
+ */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 476px;
+  gap: var(--gap);
+  align-items: start;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+/* Pod ~1180 px sa rozhodnutie posunie POD prípravu, nie do stlačeného stĺpca. */
+@media (max-width: 1180px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ═══════════════════════ 4. Výber produktov ═══════════════════════════════ */
+
+/* Čipy filtra a zámky. Jeden riadok, ktorý sa zalamuje — nie dva zoznamy. */
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  flex-wrap: wrap;
+}
+
+.periodRow {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  flex-wrap: wrap;
+  margin-top: var(--ovl-s3);
+}
+
+.periodLabel {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  font-weight: 600;
+}
+
+/*
+ * ZAMKNUTÝ ROZMER (D125). Prerušovaný okraj a ikona zámku sú dva kanály navyše
+ * k farbe; dôvod NIE JE v `title`, ale vo vete pod riadkom (`LockBadge`) —
+ * tooltip sa na dotykovom zariadení nedá prečítať a priznanie „nevieme" sa
+ * schovať nesmie (I11).
+ */
+.lockRow {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  flex-wrap: wrap;
+  margin-top: var(--ovl-s3);
+}
+
+.lockChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  padding: 3px var(--ovl-s3);
+  border: 1px dashed var(--line2);
+  border-radius: var(--r-pill);
+  color: var(--dim);
+  font-size: var(--ovl-fs-micro);
+  font-weight: 600;
+}
+
+/* KPI pás výberu — `.kpis` z `globals.css` dáva mriežku, tu len odstup. */
+.tiles {
+  margin-top: var(--ovl-s4);
+}
+
+/* Strop počtu produktov. Pole je úzke, lebo je to číslo, nie veta. */
+.capField {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  margin-top: var(--ovl-s4);
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+.capInput {
+  width: 96px;
+  text-align: right;
+}
+
+/* Prúžok naplnenia výberu. Dráha nesie mierku — bez nej je plný prúžok lož. */
+.progress {
+  height: 6px;
+  width: 100%;
+  margin-top: var(--ovl-s3);
+  border-radius: var(--r-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--barfill);
+}
+
+/* Priznania „koľko vypadlo a prečo". Kreslí ich `ToneBadge`, tu je len rad. */
+.admissions {
+  display: flex;
+  gap: var(--ovl-s3);
+  flex-wrap: wrap;
+  margin-top: var(--ovl-s4);
+}
+
+.busy {
+  margin-top: var(--ovl-s3);
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+/*
+ * D14 — prázdny výber je JEDEN RIADOK v karte výberu, nie vycentrovaná karta.
+ * Appka je dnes bez `shop_write` kľúča (R4), takže toto je BEŽNÝ stav a musí
+ * vyzerať ako plnohodnotná odpoveď: veta o dôvode a jedna cesta von.
+ */
+.empty {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s4);
+  flex-wrap: wrap;
+  margin-top: var(--ovl-s4);
+  padding-top: var(--ovl-s4);
+  border-top: 1px solid var(--line);
+}
+
+.emptyText {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: var(--ovl-fs-small);
+  color: var(--ink2);
+  line-height: var(--ovl-lh-body);
+}
+
+/* ═══════════════════════ 5. Pásma a okno platnosti ════════════════════════ */
+
+/* Písmeno pásma so značkou hĺbky. Hĺbku nesie priehľadnosť, nie odtieň. */
+.band {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.bandDot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--deep);
+}
+
+.band[data-ord='2'] .bandDot {
+  opacity: 0.62;
+}
+
+.band[data-ord='3'] .bandDot {
+  opacity: 0.34;
+}
+
+.band[data-ord='4'] .bandDot {
+  opacity: 0.2;
+}
+
+.pctCell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ovl-s1);
+  justify-content: flex-end;
+}
+
+.pctInput {
+  width: 70px;
+  text-align: right;
+}
+
+/* Súčtový riadok pod tabuľkou pásiem — veľkosť ZÁPISU, nie výberu (D121). */
+.tierFoot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ovl-s3);
+  flex-wrap: wrap;
+  padding: var(--ovl-s3) var(--gap);
+  border-top: 1px solid var(--line);
+  font-size: var(--ovl-fs-small);
+  color: var(--ink2);
+}
+
+.tierFootValue {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.tierFootPush {
+  margin-left: auto;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+/* Okno platnosti: dve dátumové polia v jednom riadku, oddelené vlasom. */
+.window {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  flex-wrap: wrap;
+  margin-top: var(--ovl-s4);
+  padding-top: var(--ovl-s4);
+  border-top: 1px solid var(--line);
+}
+
+.windowLabel {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.windowInput {
+  width: 148px;
+}
+
+.windowDays {
+  font-size: var(--ovl-fs-micro);
+  color: var(--ink2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.windowPush {
+  margin-left: auto;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+/* Popis vzorky. Stojí NAD tabuľkou, lebo v hlavičke musí byť meno stĺpca. */
+.sampleCaption {
+  margin-top: var(--ovl-s5);
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+/* ═══════════════════════ 6. Presety (D112, P5) ════════════════════════════ */
+
+/*
+ * Presety sú pod rozklikom, teda MIMO počtu sekcií (P5). `<details>` a nie
+ * `Panel` s prepínačom zámerne: rozklik ovláda prehliadač, takže funguje
+ * klávesnicou aj bez JavaScriptu a nemá vlastný stav, ktorý by sa rozišiel.
+ */
+.fold {
+  background: var(--paper2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+}
+
+.fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s3);
+  padding: var(--ovl-s4) var(--gap);
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--ovl-fs-eyebrow);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--ink2);
+}
+
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Značka rozkliku je GLYF, nie farba — zatvorené a otvorené sa musí dať
+   rozoznať aj na monochromatickej snímke. */
+.fold > summary::before {
+  content: '▸';
+  font-size: var(--ovl-fs-micro);
+  letter-spacing: 0;
+  color: var(--dim);
+}
+
+.fold[open] > summary::before {
+  content: '▾';
+}
+
+.fold > summary:hover {
+  color: var(--ink);
+}
+
+.foldBody {
+  padding: 0 var(--gap) var(--ovl-s4);
+}
+
+.presetNote {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  line-height: var(--ovl-lh-body);
+}
+
+.presetList {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--ovl-s3);
+}
+
+.presetRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ovl-s4);
+  padding: var(--ovl-s3) 0;
+  border-top: 1px solid var(--line);
+}
+
+.presetName {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.presetActions {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  flex-wrap: wrap;
+}
+
+.presetSave {
+  display: flex;
+  align-items: center;
+  gap: var(--ovl-s2);
+  margin-top: var(--ovl-s4);
+  padding-top: var(--ovl-s3);
+  border-top: 1px solid var(--line);
+}
+
+.presetSave .presetInput {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.presetEmpty {
+  margin-top: var(--ovl-s3);
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
