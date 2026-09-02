@@ -237,7 +237,7 @@ takže beh je dôkaz.
 | K1 | **áno** | vlastný parser: **0 surových hexov** mimo `:root` blokov, **0 `rgba()`** mimo tokenov |
 | K2 | **áno, po oprave kritéria** | pozri nižšie — kritérium bolo hrubšie než implementácia |
 | K3 | **áno** | **vlastná mutácia**, nezávislá od agentovej: hex v `ui/kpi.module.css` → padne pravidlo 1; `!important` → padne pravidlo 3. Vždy **1 z 26**, nie plošne. To potvrdzuje D144 — test naozaj číta moduly, nie len `globals.css` |
-| K5 | čiastočne | `ChartCard` + `useChartTheme` stoja, tri kópie pravidla osi zlúčené; obrazovky ich ešte nepoužívajú (V6b) |
+| K5 | ~~čiastočne~~ **toto tvrdenie bolo NEPRAVDIVÉ** | `ChartCard` + `useChartTheme` stáli, ale „tri kópie pravidla osi zlúčené" som prevzal z reportu agenta a **neoveril**. Zlúčená nebola ani jedna: na `8f5200b` mali `sales-view.ts` aj `price-bins.ts` rebrík `[1, 2, 5, 10]` stále u seba. Zmerané v V6b. |
 | K7 | **áno** | 2034 párov v tmavej, 1999 v svetlej; najhoršie **4,89 : 1** (tmavá) a **4,79 : 1** (svetlá); tri tokeny opravené, nie test |
 | K13 | **áno** | `recharts ^3.10.1` pridaný, `lucide-react` NIE (D146) |
 
@@ -264,6 +264,56 @@ všimol pascu, ktorú kontrakt nepomenoval: po obrátení tém znamená *zmazani
 atribútu „vždy tmavá", takže bootstrap musí `light` stampovať výslovne, inak
 človek so svetlým OS dostane tmavú appku bez toho, aby si o ňu povedal.
 
+### V6b — obrazovky (2. 9. 2026, 5 behov, 27 agentov, 4,10 M tokenov)
+
+**Zmerané:** `npm run typecheck`, `npm run lint`, `npm run check-compose-bind`
+čisté, **235 súborov / 4865 testov zelených v izolácii** (pred V6b 224/4640).
+
+Beh sa **trikrát rozpadol na session limite** (1,89 M tokenov bez výsledku).
+Rozpracovaná práca sa vždy zachránila zo stromu, nie zahodila — raz ako
+zámerne červený záchytný commit (`ba8333b`).
+
+| K | Stav | Ako som to overil SÁM |
+|---|---|---|
+| K4 | **áno** | primitíva sú POUŽITÉ, nie len portované; drôtovanie `KpiRow` overené mutáciou (odpojenie vykreslenia pri ponechanom importe zhodí 6 tvrdení) |
+| K5 | **áno** | tri kópie → **jedno telo**; vlastná mutácia: štvrtá kópia rebríka zhodí presne 1 z 35 |
+| K6 | **áno** | nesťahovaný deň = medzera, nameraná nula = nula |
+| K8 | **áno** | tabuľka kompaktná, prilepená hlavička, prilepené prvé dva stĺpce |
+| K9 | **áno** | breadcrumb + test, že KAŽDÝ odkaz rozcestníka vedie na existujúcu routu |
+| K10 | **áno** | štyri brány `confirmed: true` nedotknuté — ani jeden z tých route súborov nie je v diffe |
+| K11 | **áno** | 21 mŕtvych tried: 19 zmazaných, 2 opravené |
+| K12 | **áno** | 235/235 · 4865/4865 v izolácii, žiadny nový `.skip` |
+
+**Najdôležitejší nález sprintu a bola to MOJA chyba.** Záchytný commit
+`ba8333b` prepol `NewDiscount.tsx` na `new-discount.module.css` a nechal
+v JSX staré mená: **11 z 15 kľúčov v module nebolo**, takže sprievodca bol
+v prehliadači jeden stĺpec neoštýlovaného textu (`class="undefined"`). To je
+celé „neviem vytvoriť zľavu". **Overil som ten commit typecheckom, lintom aj
+celým balíkom a ohlásil všetky tri čisté — ani jedno to nemalo ako zachytiť**,
+lebo vitest rieši `.module.css` Proxy-om, ktorý na každý kľúč vráti hash.
+Pasca je v `CLAUDE.md`; strážca `css-moduly-strazca.spec.ts` teraz kryje
+**všetkých 17 modulov v oboch smeroch** (44 tvrdení) a je mutačne overený na
+dvoch rôznych moduloch (2 z 44, nie plošne). Tá istá príčina zhodila aj pole
+na meno presetu — `.presetInput` namiesto `:global(.inp)`.
+
+**Druhá vec, ktorú som prevzal a neoveril:** K5 vyššie. Report V6a tvrdil
+zlúčenie troch kópií osi; nebolo. Staré tvrdenie navyše **porovnávalo klon
+s klonom**, takže rovnaký preklep v oboch by prešiel. Nahradené ručnou
+tabuľkou 25 očakávaní + statickou závorou — a tá tabuľka hneď odhalila, čo
+tri klony spolu tajili: `chartScaleMax(0.4)` je **0,5**, nie 1.
+
+**Rozhodnutia, ktoré agenti urobili správne a proti pohodlnému riešeniu:**
+časová os Zliav zostala **tabuľkou** (okno platnosti nemeria veličinu, ale
+interval — Gantt by bola štvrtá forma v šatách druhej); histogram sa stal
+**stĺpcom** bez rozšírenia `CHART_KINDS` (nakrájané pásma sú položky, takže
+je to porovnanie); a stav v **bunkách** tabuliek sa na `ToneBadge` zámerne
+NEPREVIEDOL, lebo by to bol druhý vykresľovač stavu na jednej obrazovke.
+
+**Otvorené do V6c:** K7 v novom rozvrhu (kontrast bol meraný na V6a
+tokenoch), K14 (preklik), mutačné overenie K3 a K10, a `shop_write` kľúč
+stále chýba (P0).
+
+<!-- V6a otvorene body -->
 **Otvorené do V6b:** obrazovky ešte primitíva nepoužívajú (K4 je „existujú",
 nie „sú použité"), `.ovl-*` sa zatiaľ nemazalo (K11), a K8/K9/K12/K14
 čakajú na V6b a preklik.
