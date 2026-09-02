@@ -16,6 +16,8 @@
  * PORADIE ZHORA (P5 — štyri sekcie sú STROP, nie cieľ)
  * ───────────────────────────────────────────────────
  *
+ *   0−. KPI RIADOK — štyri dlaždice: predané kusy, tržba celého eshopu, bežiace
+ *      zľavy, obohatené z katalógu. `KpiRow`.
  *   0. STAVOVÝ PÁS — jeden riadok: verdikt, kľúč, rozpočet, fronta. Rozklik
  *      nesie pôvodnú sekciu „Stav" so všetkými jej kontrolami a tlačidlami.
  *      Otvorí sa SÁM, keď verdikt nie je `ok`.
@@ -30,6 +32,25 @@
  *
  * Pás ani prekážky nie sú sekcie: pás je jeden riadok a prekážky sa v pokoji
  * nekreslia vôbec. Sekcie sú teda tri, v najhoršom prípade štyri.
+ *
+ * ROZHODNUTIE (V6b, 2. 9. 2026): KPI RIADOK STOJÍ **NAD** STAVOVÝM PÁSOM
+ * ─────────────────────────────────────────────────────────────────────
+ * D136 znie „riadok KPI kariet hore, hlavný graf pod nimi" a možnosť „stavový
+ * pás najprv" Samuel VÝSLOVNE ODMIETOL: kým je všetko zelené, bol by to prázdny
+ * pás na najlepšom mieste obrazovky. Rad preto dostáva prvé miesto a pás padá
+ * o jedno nižšie.
+ *
+ * Nie je to estetika, je to fold. Pás sa SÁM otvorí pri každom verdikte okrem
+ * `ok` (bod 2 v hlavičke `StatusBand`) a dnes — bez `shop_write` kľúča — je
+ * nezelený verdikt BEŽNÝ stav. Rad pod pásom by teda v obvyklom stave začínal
+ * až pod rozbalenou sekciou „Stav", teda presne tam, kam D113 odsun predaja už
+ * raz zakázalo. Nad pásom má rad výšku jedného radu dlaždíc a je vždy prvý.
+ *
+ * Pás sa NEZMAZAL ani neoslabil a stále nesie celú sekciu „Stav" pod rozklikom;
+ * z jeho hlavičky platí ďalej všetko — vrátane toho, že `BlockersSection` stojí
+ * MIMO rozkliku hneď pod ním. Dvojica pás + prekážky zostala nerozdelená, takže
+ * prekážka je aj s radom nad ňou stále nad ohybom: rad je štyri dlaždice
+ * v jednom rade, nie sekcia.
  *
  * OKNO 7 / 30 / 90 JE JEDNO PRE CELÚ OBRAZOVKU (predvolene 30). Graf, rebríček
  * aj tržba sa musia pýtať na to isté obdobie — tri čísla za tri rôzne obdobia
@@ -52,6 +73,7 @@ import { useCallback, useState } from 'react';
 
 import BlockersSection from '@/components/dashboard/BlockersSection';
 import CampaignsSection from '@/components/dashboard/CampaignsSection';
+import KpiRow from '@/components/dashboard/KpiRow';
 import SalesSection from '@/components/dashboard/SalesSection';
 import StatusBand from '@/components/dashboard/StatusBand';
 import StatusSection from '@/components/dashboard/StatusSection';
@@ -210,6 +232,9 @@ export function Overview() {
   if (data === null) {
     return (
       <div className={styles.page} aria-busy="true">
+        {/* Rad dlaždíc: jeden rad, teda ~88 px. Kostra ho drží preto, aby pás
+            pod ním nepreskočil o výšku radu, keď dáta dobehnú. */}
+        <div className="sec ovl-skeleton" style={{ minHeight: '88px' }} />
         <div className="sec ovl-skeleton" style={{ minHeight: '44px' }} />
         <div className="sec ovl-skeleton" style={{ minHeight: '212px' }} />
         <div className="sec ovl-skeleton" style={{ minHeight: '190px' }} />
@@ -268,6 +293,32 @@ export function Overview() {
 
   return (
     <div className={styles.page} data-testid="overview">
+      {/*
+       * KPI rad je PRVÝ na obrazovke — dôvod je v hlavičke (rozhodnutie V6b).
+       *
+       * Odkiaľ berie štyri veci, ktoré si nepýta zvlášť:
+       *  · `calm` je TEN ISTÝ objekt, aký dostáva `StatusSection` v rozkliku
+       *    (`calmNumbers(rows, today)`). Druhý výpočet by sa s ním rozišiel
+       *    a obrazovka by o bežiacich zľavách hovorila dvomi číslami.
+       *  · `enrich` je `data.enrich` z hlavného načítania (`getEnrichState()`),
+       *    teda ani jedno nové volanie na obrazovku (K8) a žiadne volanie shopu.
+       *  · okenné dlaždice berú `sold` / `soldBefore` / `revenue` /
+       *    `revenueBefore` z `windowData` — `undefined`, kým sa okno ťahá.
+       *
+       * `undefined` sa tu NESMIE zliať s `null`: prvé je „nežiadali sme"
+       * (a vtedy sa medzera v dátach NEPRIZNÁVA), druhé je „odpoveď sa nedala
+       * prečítať" a to dlaždica povedať MUSÍ. Preto explicitné `=== null`.
+       */}
+      <KpiRow
+        windowDays={windowDays}
+        sold={windowData === null ? undefined : windowData.sold}
+        soldBefore={windowData === null ? undefined : windowData.soldBefore}
+        revenue={windowData === null ? undefined : windowData.revenue}
+        revenueBefore={windowData === null ? undefined : windowData.revenueBefore}
+        calm={calm}
+        enrich={data.enrich}
+      />
+
       <StatusBand
         verdict={verdict}
         keyPresent={data.status === null ? null : data.status.apiKey.present}

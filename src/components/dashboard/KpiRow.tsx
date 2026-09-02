@@ -6,6 +6,14 @@
  * miesto čísla, rozhoduje `kpi-row-model.ts` — tu je len vykreslenie, aby sa
  * pravdivosť radu dala dokázať bez prehliadača.
  *
+ * ═══ KDE RAD STOJÍ: NAD STAVOVÝM PÁSOM (rozhodnutie V6b, 2. 9. 2026) ═══
+ * Rad je PRVÝ prvok Prehľadu, pás „Stav" je pod ním. Možnosť „stavový pás
+ * najprv" Samuel odmietol (prázdny pás na najlepšom mieste), a pás sa navyše
+ * SÁM otvorí pri každom verdikte okrem `ok` — dnes, bez `shop_write` kľúča, je
+ * to bežný stav, takže rad pod pásom by obvykle začínal až pod rozbalenou
+ * sekciou „Stav". Celý rozbor je v hlavičke `Overview.tsx`, kde poradie
+ * obrazovky žije; tu je len odkaz, aby nevznikli dve verzie toho istého.
+ *
  * ═══ PRIMITÍVA, NIE VLASTNÉ TRIEDY (K4) ═══
  * Dlaždicu kreslí `ui/StatTile` a smer `ui/DeltaPill` — obe z vrstvy V6a.
  * Vlastný „kpi" blok tu NEVZNIKÁ: geometriu (`.kpis` mriežka, `.kpi` výplň,
