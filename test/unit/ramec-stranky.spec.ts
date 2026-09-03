@@ -76,6 +76,49 @@ const CSS = bezKomentarov(CSS_SUROVE);
 
 /* ═══════════════════ 1. Pohyb klávesnicou ako čistá funkcia ═══════════════ */
 
+/**
+ * ZOZNAM KLÁVESOV JE SĽUB, NIE POZNÁMKA (doplnené 3. 9. 2026).
+ *
+ * Tvrdenia nižšie cyklia `for (const key of TAB_MOVE_KEYS)`, takže SKRÁTENIE
+ * toho zoznamu ich neurobí červenými — len tichšími. Verifikácia V6c to
+ * overila: `TAB_MOVE_KEYS` zmenšené na jedinú klávesu nechalo celý balík
+ * zelený, hoci tablist by odvtedy na `End` nereagoval a nikto by sa to
+ * nedozvedel. Konštanta sa preto pripína menovite a v OBA smery: čo je
+ * v zozname, musí hýbať; čo v ňom nie je, hýbať nesmie.
+ */
+describe('zoznamy klávesov sú pripnuté menovite, nie cyklom nad sebou', () => {
+  it('`TAB_MOVE_KEYS` je práve tá štvorica a nič viac', () => {
+    expect([...TAB_MOVE_KEYS]).toEqual(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
+    for (const key of TAB_MOVE_KEYS) expect(nextTabIndex(key, 4, 1), key).not.toBe(null);
+  });
+
+  it('`RADIO_MOVE_KEYS` je práve tá šestica a nič viac', () => {
+    expect([...RADIO_MOVE_KEYS]).toEqual([
+      'ArrowLeft',
+      'ArrowRight',
+      'ArrowUp',
+      'ArrowDown',
+      'Home',
+      'End',
+    ]);
+    for (const key of RADIO_MOVE_KEYS) expect(nextRadioIndex(key, 4, 1), key).not.toBe(null);
+  });
+
+  it('čo v zozname NIE JE, tým prepínač nehýbe', () => {
+    /* Druhý smer: bez neho by zoznam mohol rásť o klávesy, ktoré appka
+       používateľovi zoberie zo stránky (`PageDown`, `Tab`). */
+    const NAV = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Tab', 'Enter', ' ', 'Escape'];
+    for (const key of NAV) {
+      if (!(TAB_MOVE_KEYS as readonly string[]).includes(key)) {
+        expect(nextTabIndex(key, 4, 1), key).toBe(null);
+      }
+      if (!(RADIO_MOVE_KEYS as readonly string[]).includes(key)) {
+        expect(nextRadioIndex(key, 4, 1), key).toBe(null);
+      }
+    }
+  });
+});
+
 describe('nextTabIndex — vodorovný tablist', () => {
   it('šípky obiehajú dokola, Home a End skáču na kraje', () => {
     expect(nextTabIndex('ArrowRight', 3, 0)).toBe(1);

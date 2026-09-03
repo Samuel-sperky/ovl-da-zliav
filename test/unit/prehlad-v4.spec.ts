@@ -147,7 +147,9 @@ function revenue(patch: Partial<RevenueDailyView> = {}): RevenueDailyView {
     to: TODAY,
     scope: 'eshop',
     series: [],
+    dayStates: null,
     missingDays: 0,
+    emptyDays: 0,
     hasGap: false,
     ...patch,
   };
@@ -325,9 +327,13 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
   const WINDOW = ['2026-08-17', '2026-08-18', TODAY];
 
   it('dočítaný deň je meranie bez značky', () => {
-    const days = revenueDays(WINDOW, [
-      { day: '2026-08-17', totalPaidSum: '412.50', ordersCount: 9, dayComplete: true },
-    ]);
+    const days = revenueDays(
+      WINDOW,
+      [{ day: '2026-08-17', totalPaidSum: '412.50', ordersCount: 9, dayComplete: true }],
+      // Odpoveď o prečítaných nulách nič nepovedala — deň bez riadku preto
+      // zostáva „nevieme". Nula sa z ticha nevyrobí (fail-closed).
+      null,
+    );
     expect(days[0]).toEqual({
       day: '2026-08-17',
       amount: '412.50',
@@ -339,9 +345,11 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
 
   /** JADRO ZLIATIA B: bez `≈` je rozbehnutý deň nerozoznateľný od hotového. */
   it('nedočítaný deň je DOLNÁ HRANICA a nesie `≈`', () => {
-    const days = revenueDays(WINDOW, [
-      { day: TODAY, totalPaidSum: '88.00', ordersCount: 2, dayComplete: false },
-    ]);
+    const days = revenueDays(
+      WINDOW,
+      [{ day: TODAY, totalPaidSum: '88.00', ordersCount: 2, dayComplete: false }],
+      null,
+    );
     const row = days[2]!;
     expect(row.state).toBe('lower_bound');
     expect(row.text).toBe('≈ 88.00');
@@ -349,9 +357,13 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
   });
 
   it('deň BEZ riadku je „nevieme" — pomlčka, nikdy `0.00`', () => {
-    const days = revenueDays(WINDOW, [
-      { day: '2026-08-17', totalPaidSum: '412.50', ordersCount: 9, dayComplete: true },
-    ]);
+    const days = revenueDays(
+      WINDOW,
+      [{ day: '2026-08-17', totalPaidSum: '412.50', ordersCount: 9, dayComplete: true }],
+      // Odpoveď o prečítaných nulách nič nepovedala — deň bez riadku preto
+      // zostáva „nevieme". Nula sa z ticha nevyrobí (fail-closed).
+      null,
+    );
     for (const row of days.slice(1)) {
       expect(row.state).toBe('unknown');
       expect(row.amount).toBeNull();
@@ -362,7 +374,7 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
   });
 
   it('riadok na KAŽDÝ deň okna — chýbajúci deň sa nevynechá bez slova', () => {
-    expect(revenueDays(WINDOW, []).map((row) => row.day)).toEqual(WINDOW);
+    expect(revenueDays(WINDOW, [], null).map((row) => row.day)).toEqual(WINDOW);
   });
 
   it('sekcia povie, že posledný deň sa dopočítava a NIE JE to pokles', () => {
@@ -381,6 +393,7 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
               sum: '853.50',
               sumState: 'lower_bound',
               lowerBoundDays: 1,
+              measuredZeroDays: [],
             },
           ],
         }),
@@ -404,6 +417,7 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
               sum: '412.50',
               sumState: 'lower_bound',
               lowerBoundDays: 0,
+              measuredZeroDays: [],
             },
           ],
           missingDays: 2,
@@ -426,6 +440,7 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
               sum: '10.00',
               sumState: 'measured',
               lowerBoundDays: 0,
+              measuredZeroDays: [],
             },
           ],
         }),
@@ -476,7 +491,7 @@ describe('B. čiastočný deň tržby je označený a chýbajúci deň nie je nu
       hasGap: false,
     });
     expect(parsed!.series[0]!.days[0]!.dayComplete).toBe(false);
-    expect(revenueDays([TODAY], parsed!.series[0]!.days)[0]!.state).toBe('lower_bound');
+    expect(revenueDays([TODAY], parsed!.series[0]!.days, null)[0]!.state).toBe('lower_bound');
   });
 });
 

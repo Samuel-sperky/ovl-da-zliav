@@ -46,6 +46,7 @@ import {
   CHART_RAMP_VARS,
   CHART_SERIES_VARS,
   GAP_SERIES_PROPS,
+  GAP_WORD,
   areaFill,
   chartRowText,
   chartRows,
@@ -205,10 +206,27 @@ describe('A3. veta o medzerách — mlčí, keď nie je čo priznať', () => {
         { label: 'c', value: null },
       ]),
     );
-    expect(sentence).not.toBeNull();
-    expect(sentence).toContain('2');
-    expect(sentence).toContain('nesťahované');
-    expect(sentence).toContain('medzera');
+    /*
+     * MERIA SA CELÁ VETA, nie to, či sa v nej niekde vyskytuje dvojka
+     * (posilnené 3. 9. 2026). Do tohto dňa tu stálo `toContain('2')` a mutácia
+     * `formatCountSk(count)` → `count * 11` prežila: „22 bodov grafu je
+     * nesťahované" tvrdenie splnilo, hoci hovorilo o jedenásťkrát väčšej
+     * medzere. Počet v priznaní je číslo o dátach, takže sa meria presne.
+     */
+    expect(sentence).toBe(`2 body grafu je ${GAP_WORD} — kreslí sa medzera, nie nula.`);
+  });
+
+  it('počet v priznaní je POČET MEDZIER, nie prepočet — a plurál sa mení s ním', () => {
+    const gaps = (count: number): string | null =>
+      gapLegendSentence(
+        chartRows(
+          Array.from({ length: count + 1 }, (_unused, i) =>
+            i === 0 ? { label: 'm', value: 1 } : { label: `g${i}`, value: null },
+          ),
+        ),
+      );
+    expect(gaps(1)).toBe(`1 bod grafu je ${GAP_WORD} — kreslí sa medzera, nie nula.`);
+    expect(gaps(5)).toBe(`5 bodov grafu je ${GAP_WORD} — kreslí sa medzera, nie nula.`);
   });
 });
 

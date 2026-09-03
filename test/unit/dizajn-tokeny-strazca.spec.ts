@@ -364,6 +364,87 @@ describe('pravidlo 1 — surový hex len v bloku tokenov (K1)', () => {
 });
 
 /* ───────────────────────────────────────────────────────────────────────────
+   1b. Pomenovaná farba je surová farba (D147, doplnené 3. 9. 2026)
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * DIERA, KTORÚ TENTO BLOK ZATVÁRA.
+ *
+ * Pravidlá 1 až 3 hľadali hex, `rgba()`, `hsl()` a `!important` — teda presne
+ * to, čo D147 vymenúva. Pomenovaná farba (`tomato`, `darkslategray`, `white`)
+ * nie je ani jedno z toho, a pritom je to tá istá vec: literálna farba mimo
+ * tokenovej vrstvy. Verifikácia V6c to overila dvoma mutáciami:
+ *
+ *  · `tables.module.css` `var(--line2)` → `tomato` PREŽILO celý balík,
+ *  · `states.module.css` `var(--dim)` → `darkslategray` zčervenalo len
+ *    kontrastný test, a ten hlási „neviem vyhodnotiť", nie „porušené pravidlo".
+ *
+ * Zoznam je celých 148 mien z CSS Color 4 vrátane `rebeccapurple`. Nie je to
+ * vzorka: keby chýbalo jediné meno, bola by to znova diera tej istej triedy.
+ *
+ * DVE PRESNOSTI, BEZ KTORÝCH BY TO BOL FALŠUJÚCI GREP:
+ *  1. Lookaround `(?<![\w-])` / `(?![\w-])` — bez neho by `var(--gold-line)`,
+ *     `prefers-reduced-motion` aj `!important` hlásili porušenie („gold",
+ *     „red", „tan" sú podreťazce).
+ *  2. Meria sa len HODNOTA DEKLARÁCIE (`propertyAt() !== null`). `.tile
+ *     [data-accent='gold']` je selektor a hodnota atribútu — nie farba;
+ *     zakázať ho by znamenalo prepisovať zmysluplné dátové atribúty.
+ */
+const CSS_NAMED_COLORS: readonly string[] = [
+  'aliceblue', 'antiquewhite', 'aqua', 'aquamarine', 'azure', 'beige', 'bisque', 'black',
+  'blanchedalmond', 'blue', 'blueviolet', 'brown', 'burlywood', 'cadetblue', 'chartreuse',
+  'chocolate', 'coral', 'cornflowerblue', 'cornsilk', 'crimson', 'cyan', 'darkblue', 'darkcyan',
+  'darkgoldenrod', 'darkgray', 'darkgreen', 'darkgrey', 'darkkhaki', 'darkmagenta',
+  'darkolivegreen', 'darkorange', 'darkorchid', 'darkred', 'darksalmon', 'darkseagreen',
+  'darkslateblue', 'darkslategray', 'darkslategrey', 'darkturquoise', 'darkviolet', 'deeppink',
+  'deepskyblue', 'dimgray', 'dimgrey', 'dodgerblue', 'firebrick', 'floralwhite', 'forestgreen',
+  'fuchsia', 'gainsboro', 'ghostwhite', 'gold', 'goldenrod', 'gray', 'green', 'greenyellow',
+  'grey', 'honeydew', 'hotpink', 'indianred', 'indigo', 'ivory', 'khaki', 'lavender',
+  'lavenderblush', 'lawngreen', 'lemonchiffon', 'lightblue', 'lightcoral', 'lightcyan',
+  'lightgoldenrodyellow', 'lightgray', 'lightgreen', 'lightgrey', 'lightpink', 'lightsalmon',
+  'lightseagreen', 'lightskyblue', 'lightslategray', 'lightslategrey', 'lightsteelblue',
+  'lightyellow', 'lime', 'limegreen', 'linen', 'magenta', 'maroon', 'mediumaquamarine',
+  'mediumblue', 'mediumorchid', 'mediumpurple', 'mediumseagreen', 'mediumslateblue',
+  'mediumspringgreen', 'mediumturquoise', 'mediumvioletred', 'midnightblue', 'mintcream',
+  'mistyrose', 'moccasin', 'navajowhite', 'navy', 'oldlace', 'olive', 'olivedrab', 'orange',
+  'orangered', 'orchid', 'palegoldenrod', 'palegreen', 'paleturquoise', 'palevioletred',
+  'papayawhip', 'peachpuff', 'peru', 'pink', 'plum', 'powderblue', 'purple', 'rebeccapurple',
+  'red', 'rosybrown', 'royalblue', 'saddlebrown', 'salmon', 'sandybrown', 'seagreen', 'seashell',
+  'sienna', 'silver', 'skyblue', 'slateblue', 'slategray', 'slategrey', 'snow', 'springgreen',
+  'steelblue', 'tan', 'teal', 'thistle', 'tomato', 'turquoise', 'violet', 'wheat', 'whitesmoke',
+  'white', 'yellowgreen', 'yellow',
+];
+
+const namedColorRe = (): RegExp =>
+  new RegExp(`(?<![\\w-])(?:${CSS_NAMED_COLORS.join('|')})(?![\\w-])`, 'g');
+
+describe('pravidlo 1b — pomenovaná farba mimo tokenovej vrstvy je porušenie (D147)', () => {
+  it('zoznam mien je úplný a vzor rozlišuje farbu od podreťazca', () => {
+    // 148 mien z CSS Color 4. Menej znamená dieru, viac znamená preklep.
+    expect(new Set(CSS_NAMED_COLORS).size).toBe(148);
+    const match = (text: string): string | null => namedColorRe().exec(text)?.[0] ?? null;
+    expect(match('color: tomato;')).toBe('tomato');
+    expect(match('  background: darkslategray;')).toBe('darkslategray');
+    // A tri podreťazce, ktoré v tomto repe naozaj stoja v CSS:
+    expect(match('box-shadow: inset 0 2px 0 0 var(--gold-line);')).toBeNull();
+    expect(match('@media (prefers-reduced-motion: reduce) {')).toBeNull();
+    expect(match('animation: none !important;')).toBeNull();
+  });
+
+  it('žiadna pomenovaná farba v hodnote deklarácie, v ŽIADNOM hárku', () => {
+    const offenders = scan(namedColorRe())
+      .filter((h) => insideTokenBlock(h.sheet, h.offset) === null)
+      // Hodnota deklarácie, nie selektor: `[data-accent='gold']` farba nie je.
+      .filter((h) => propertyAt(h.sheet, h.offset) !== null)
+      .map((h) => `${at(h.sheet, h.offset)} → ${propertyAt(h.sheet, h.offset)}: ${h.text}`);
+    expect(
+      offenders,
+      'pomenovaná farba je literálna farba — patrí do tokenu, nie do pravidla (D147)',
+    ).toEqual([]);
+  });
+});
+
+/* ───────────────────────────────────────────────────────────────────────────
    2. rgba() len v enumerovaných tokenoch (D147)
    ─────────────────────────────────────────────────────────────────────────── */
 

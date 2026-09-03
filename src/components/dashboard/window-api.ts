@@ -34,6 +34,7 @@
  */
 import {
   asRecord,
+  readCode as code,
   readCount as count,
   readNumber as num,
   readText as str,
@@ -120,6 +121,43 @@ export interface RevenueSeriesView {
    * to, čo `sumState: 'lower_bound'` popiera.
    */
   lowerBoundDays: number | null;
+  /**
+   * Dni okna BEZ riadku tejto meny, ktoré sa ale DOČÍTALI — teda MERANÁ NULA:
+   * „čítali sme celý deň a v tejto mene nebolo nič" (route `measuredZeroDays`,
+   * migrácia 0016).
+   *
+   * `null` = odpoveď ten zoznam vôbec nenesie. Vtedy taký deň zostáva
+   * „nevieme" a dostane pomlčku — fail-closed do priznania, nikdy do nuly.
+   * Prázdne pole je NAOPAK meranie: „ani jeden deň okna takýto nie je".
+   */
+  measuredZeroDays: string[] | null;
+}
+
+/** Čím je jeden deň okna. Štyri stavy servera, prenesené bez zliatia. */
+export type RevenueDayKnowledgeView = 'measured' | 'empty' | 'lower_bound' | 'unknown';
+
+const REVENUE_DAY_KNOWLEDGE: readonly RevenueDayKnowledgeView[] = [
+  'measured',
+  'empty',
+  'lower_bound',
+  'unknown',
+];
+
+/**
+ * Jeden deň okna a to, čo o ňom appka naozaj vie (route `dayStates[]`).
+ *
+ * Je to stav CELÉHO DŇA cez všetky meny, nie stav jedného menového radu —
+ * preto sa nesmie zamieňať s `RevenueSeriesView.measuredZeroDays`, ktorý
+ * hovorí o jednej mene.
+ */
+export interface RevenueDayStateView {
+  day: string;
+  state: RevenueDayKnowledgeView;
+  /**
+   * Počet objednávok dňa z príznaku prečítanosti. `null` = stav appka nemá;
+   * nula je MERANÝ fakt „čítali sme a objednávka nebola" (I11).
+   */
+  ordersSeen: number | null;
 }
 
 export interface RevenueDailyView {
@@ -130,11 +168,23 @@ export interface RevenueDailyView {
   scope: 'eshop';
   series: RevenueSeriesView[];
   /**
+   * Riadok pre KAŽDÝ deň okna tak, ako ho pomenoval server. `null` = odpoveď
+   * `dayStates` nenesie; prázdne pole by tvrdilo „okno nemá ani jeden deň".
+   */
+  dayStates: RevenueDayStateView[] | null;
+  /**
    * Dni okna, ku ktorým nie je riadok v ŽIADNEJ mene. Nikdy nuly — a `null`,
    * keď odpoveď zoznam chýbajúcich dní vôbec nenesie: sekcia potom priznanie
    * medzery nezamlčí len preto, že nevie zrátať, koľkých dní sa týka.
    */
   missingDays: number | null;
+  /**
+   * POČET dní okna, ktoré appka PREČÍTALA a nepredalo sa v nich nič (route
+   * `emptyDays`). Nula je meranie „taký deň v okne nie je"; `null` znamená,
+   * že odpoveď ten zoznam nenesie, a vtedy sa o prečítaných nulách NETVRDÍ
+   * nič — dni samé zostanú pomlčkou, čo je priznanie, nie nula.
+   */
+  emptyDays: number | null;
   /** `null` = odpoveď o medzere nič nepovedala; nie je to „medzera nie je". */
   hasGap: boolean | null;
 }
@@ -176,7 +226,35 @@ function parseRevenueSeries(raw: unknown): RevenueSeriesView | null {
     sumState:
       state === 'measured' || state === 'lower_bound' ? state : ('unknown' as const),
     lowerBoundDays: count(row, 'lowerBoundDays'),
+    measuredZeroDays: dayList(row.measuredZeroDays),
   };
+}
+
+/**
+ * Zoznam dátumov z odpovede. `null` = pole tam nie je alebo nie je poľom;
+ * nečitateľný prvok sa VYNECHÁ, nie dosadí — deň, ktorý sa nedá prečítať,
+ * potom zostane „nevieme" a dostane pomlčku.
+ */
+function dayList(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
+  for (const entry of raw) if (typeof entry === 'string' && entry !== '') out.push(entry);
+  return out;
+}
+
+/**
+ * Jeden riadok `dayStates[]`. Neznámy kód stavu riadok ZAHODÍ — vykresliť
+ * surový kód K10 zakazuje a dosadiť za neho `measured` by z nevedomosti
+ * spravilo meranie.
+ */
+function parseRevenueDayState(raw: unknown): RevenueDayStateView | null {
+  const row = asRecord(raw);
+  if (row === null) return null;
+  const day = str(row, 'day');
+  const state = code(row, 'state', REVENUE_DAY_KNOWLEDGE);
+  if (day === null || state === null) return null;
+  // Nula je MERANÝ počet objednávok; nečitateľné pole je `null`, nie nula.
+  return { day, state, ordersSeen: count(row, 'ordersSeen') };
 }
 
 /**
@@ -205,13 +283,33 @@ export function parseRevenueDaily(raw: unknown): RevenueDailyView | null {
   }
   // Odpoveď bez zoznamu chýbajúcich dní NEZNAMENÁ, že nechýba ani jeden.
   const missing = Array.isArray(root.missing) ? root.missing.length : null;
+  /*
+   * `dayStates` a `emptyDays` sa čítajú od 3. 9. 2026 — dovtedy ich parser
+   * ZAHADZOVAL, hoci route obe posielala. Deň, ktorý appka PREČÍTALA a nič sa
+   * v ňom nepredalo, tak prišiel na obrazovku ako deň, ktorý nemerala:
+   * `revenueDays()` mu dal `unknown` a pomlčku. To je I11 naopak — appka
+   * priznávala nevedomosť o niečom, čo zmerala, a robila svoje pokrytie dát
+   * HORŠÍM, než je. Nameraná nula je fakt, medzera je priznanie; zliať sa
+   * nesmú ani v tomto smere.
+   */
+  const states = Array.isArray(root.dayStates) ? root.dayStates : null;
+  const dayStates: RevenueDayStateView[] | null = states === null ? null : [];
+  if (states !== null && dayStates !== null) {
+    for (const entry of states) {
+      const row = parseRevenueDayState(entry);
+      if (row !== null) dayStates.push(row);
+    }
+  }
+  const empty = Array.isArray(root.emptyDays) ? root.emptyDays.length : null;
   return {
     today,
     from,
     to,
     scope: 'eshop',
     series,
+    dayStates,
     missingDays: missing,
+    emptyDays: empty,
     hasGap: tri(root, 'hasGap'),
   };
 }

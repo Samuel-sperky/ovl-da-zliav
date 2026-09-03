@@ -47,6 +47,19 @@
  *     plochy vnútri inej priesvitnej plochy, statický parser to nevidí.
  *     Merania nad všetkými plochami stránky sú horná hranica tohto rizika;
  *     zvyšok stráži preklik (D141), nie tento súbor.
+ *
+ *     KONKRÉTNY ŽIVÝ PRÍPAD (zmerané ručne 3. 9. 2026, verifikácia V6c):
+ *     `signals.module.css { .chipCount }` nastavuje `color: var(--dim)` a
+ *     pozadie NEMÁ, kým tint pod kurzorom nesie susedné pravidlo
+ *     `{ .chip:hover }`. Test tie dve pravidlá neskladá, takže meria `--dim`
+ *     na čistých plochách (prejde), nie na tinte nad nimi. Nad `--paper2` je
+ *     to 4,71 (tmavá) / 4,82 (svetlá), nad `--paper` ale **4,46 v svetlej —
+ *     teda POD hranicou**. Dnes je to latentné: `Chip` s počtom kreslí len
+ *     `PanelHead` (`NewDiscount.tsx`), a ten stojí na `--paper2`. Prvý
+ *     `Chip count` v `Toolbar`-e (`tables.module.css { .toolbarSticky }`,
+ *     plocha `--paper`) tú hranicu prekročí a TENTO test to nenahlási.
+ *     Zložiť to mechanicky by znamenalo poznať vnorenie selektorov; kým to
+ *     nevie, drží to táto veta a preklik, nie zelený test.
  *  2. **Geometria závoja `body::before`.** Test počíta s jeho DEKLAROVANOU
  *     silou (`--veil-brand`, `--veil-gold`), teda s najhorším bodom gradientu.
  *     Na obrazovke je slabší (stredy oboch gradientov ležia mimo výrezu),
@@ -362,6 +375,20 @@ function plochy(tokeny: Map<string, string>): Record<string, Rgba> {
     '--surface-raised': t('var(--surface-raised)'),
     '--surface nad --paper': nad(priesvitna, papier),
     '--surface nad závojom': nad(priesvitna, zavojBrand),
+    /*
+     * DOPLNENÉ 3. 9. 2026 — dve plochy, ktoré text naozaj nesú a v meraní
+     * neboli:
+     *
+     *  · `--sel` je pozadie VYBRANÉHO riadku tabuľky (`tables.module.css`
+     *    `.rowSelected > .cell` farbu textu nenastavuje, takže celý taký
+     *    riadok — bunka, pomlčka, dolná hranica — stál mimo K7),
+     *  · `--surface-solid` nesie PRILEPENÝ stĺpec. Dnes je to `var(--paper2)`,
+     *    takže vyzeral krytý — ale len náhodou: deň, keď dostane vlastnú
+     *    hodnotu, by prilepená bunka prestala byť meraná bez jediného
+     *    červeného tvrdenia. Menovaná plocha to zatvára dopredu.
+     */
+    '--sel': t('var(--sel)'),
+    '--surface-solid': t('var(--surface-solid)'),
   };
 }
 
@@ -474,13 +501,43 @@ interface Par {
 
 const PRESKOC_FARBU = new Set(['inherit', 'currentcolor', 'unset', 'initial', 'revert']);
 
+/**
+ * TEXT V SVG SA PÍŠE `fill`, NIE `color` (doplnené 3. 9. 2026).
+ *
+ * Do tohto dňa test čítal VÝHRADNE `color:`, takže popisky osi grafu
+ * (`charts.module.css { .axisTick }` → `fill: var(--dim)`, na obrazovke okolo
+ * 7 px) a poradové čísla dielov koláča (`{ .pieOrder }` → `fill: var(--ink)`)
+ * neboli v K7 zmerané ANI RAZ. Bol to celý druh textu mimo dozoru — a pritom
+ * ten najmenší, teda ten, ktorý na kontrast doplatí prvý.
+ *
+ * Rozlíšenie „`fill` je text" verzus „`fill` je grafika" NIE JE ručný zoznam:
+ * pravidlo, ktoré kreslí text, si v tom istom mieste nastavuje aj písmo
+ * (`font-size`, `font-family`, `font-weight`). Marka, výsek ani mriežka
+ * písmo nemajú. Zoznam by starnul; táto podmienka nie.
+ *
+ * `fill`/`stroke` BEZ písma sa naďalej nemeria — je to netextová grafika
+ * s hranicou 3 : 1 (WCAG 1.4.11) a stráži ju `grafy-paleta.spec.ts` pre marky
+ * grafu. Že je to len ČIASTOČNÉ krytie, je napísané v hlavičke tohto súboru.
+ */
+const PISMO = ['font-size', 'font-family', 'font-weight'];
+
+/** Farba TEXTU pravidla — `color`, alebo `fill` v pravidle, ktoré nesie písmo. */
+function farbaTextu(p: Pravidlo): string | undefined {
+  const c = p.dekl.get('color');
+  if (c !== undefined) return c;
+  const fill = p.dekl.get('fill');
+  if (fill === undefined) return undefined;
+  return PISMO.some((v) => p.dekl.has(v)) ? fill : undefined;
+}
+
 /** Pravidlá, ktoré nastavujú farbu textu a dajú sa vyhodnotiť. */
 const TEXTOVE = PRAVIDLA.filter((p) => {
   if (p.obal.some((o) => o.startsWith('@keyframes'))) return false;
-  const c = p.dekl.get('color');
+  const c = farbaTextu(p);
   if (c === undefined) return false;
   if (PRESKOC_FARBU.has(c.toLowerCase())) return false;
   if (c === 'transparent') return false; // .ovl-skeleton — plocha bez textu
+  if (c.toLowerCase() === 'none') return false; // `fill: none` nekreslí nič
   return true;
 });
 
@@ -526,7 +583,7 @@ function paryPre(tokeny: Map<string, string>): { pary: Par[]; hodnota: Map<strin
   };
 
   for (const p of TEXTOVE) {
-    const textV = p.dekl.get('color')!;
+    const textV = farbaTextu(p)!;
     const alfa = alfaTextu(p);
     const hranica = hranicaPre(p);
     const kde = `${p.subor} { ${p.selektor} }`;
@@ -712,10 +769,11 @@ describe.each(MERANIA)('$nazov téma — kontrast každého páru text/plocha', 
    ═════════════════════════════════════════════════════════════════════════ */
 
 describe('žiadna farba textu neuteká z merania', () => {
-  it('každý token použitý ako `color` je aspoň v jednom páre', () => {
+  it('každý token použitý ako farba textu je aspoň v jednom páre', () => {
     const pouzite = new Set<string>();
     for (const p of TEXTOVE) {
-      for (const m of p.dekl.get('color')!.matchAll(/--[a-z0-9-]+/g)) pouzite.add(m[0]);
+      // `farbaTextu()`, nie `color` — text v SVG nesie farbu vo `fill`.
+      for (const m of farbaTextu(p)!.matchAll(/--[a-z0-9-]+/g)) pouzite.add(m[0]);
     }
     const merane = new Set<string>();
     for (const par of MERANIA[0]!.pary) {
@@ -723,6 +781,21 @@ describe('žiadna farba textu neuteká z merania', () => {
     }
     const mimo = [...pouzite].filter((t) => !merane.has(t)).sort();
     expect(mimo, 'token kreslí text a nikto ho nemeria').toEqual([]);
+  });
+
+  it('text v SVG sa meria; grafika bez písma zostáva na 3 : 1 inde', () => {
+    /*
+     * Bez tohto tvrdenia by sa rozšírenie z 3. 9. 2026 dalo odobrať bez
+     * jediného červeného testu — a popisky osi (7 px na obrazovke) by znova
+     * vypadli z K7 úplne. Preto sa menuje, čo v pároch BYŤ MUSÍ.
+     */
+    const kde = MERANIA[0]!.pary.map((p) => p.kde);
+    expect(kde.some((k) => k.includes('.axisTick')), 'popisok osi nie je v meraní').toBe(true);
+    expect(kde.some((k) => k.includes('.pieOrder')), 'číslo dielu nie je v meraní').toBe(true);
+    /* A druhý smer: výsek koláča ani mriežka písmo nemajú, takže to NIE JE
+       text. Merať ich hranicou 4,5 : 1 by z grafiky spravilo odstavec. */
+    expect(kde.some((k) => k.includes('.pieWedge'))).toBe(false);
+    expect(kde.some((k) => k.includes('.gridLine'))).toBe(false);
   });
 
   it('sila závoja je token, nie číslo v gradiente', () => {

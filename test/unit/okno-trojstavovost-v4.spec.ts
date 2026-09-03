@@ -228,7 +228,7 @@ describe('4. tržbové polia okna dosadenú nulu tiež nemajú', () => {
     const row = parsed.series[0]!.days[0]!;
     expect(row.ordersCount).toBeNull();
     expect(row.ordersCount).not.toBe(0);
-    expect(revenueDays([TODAY], parsed.series[0]!.days)[0]!.ordersCount).toBeNull();
+    expect(revenueDays([TODAY], parsed.series[0]!.days, null)[0]!.ordersCount).toBeNull();
   });
 
   it('nečitateľné `lowerBoundDays` je `null` — nula by tvrdila „okno je celé"', () => {

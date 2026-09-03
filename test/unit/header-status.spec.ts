@@ -182,22 +182,74 @@ function layoutSources(): readonly { path: string; code: string }[] {
   return out;
 }
 
+/**
+ * PRIMITÍVA SÚ TIEŽ CHRÓM (doplnené 3. 9. 2026).
+ *
+ * Skener meral len `src/components/layout/`. V6a k nemu pridal celú vrstvu
+ * `src/components/ui/` — a tam už bod 4 nestrážil nikto: verifikácia V6c
+ * vložila `setInterval(…, 30_000)` do `StatusPill.tsx` a celý balík zostal
+ * zelený. Je to presne pasca „grep nad priečinkom A nepovie nič o diere
+ * v priečinku B": primitívum s vlastným časovačom obnovuje čísla po celej
+ * appke naraz a nikto o tom nevie.
+ */
+const CHROME_DIRS: readonly string[] = ['src/components/layout', 'src/components/ui'];
+
+/**
+ * Jediná povolená výnimka, a je vymenovaná: `Countdown` odpočítava čas, takže
+ * tikať MUSÍ — bez tiku by zobrazoval zmrznutý údaj a to je horšie než pohyb.
+ * Nič sa tým neobnovuje: komponent nesiaha na sieť, len prepočíta rozdiel.
+ */
+const TIMER_ALLOWED: readonly string[] = ['src/components/ui/Countdown.tsx'];
+
+function chromeSources(): readonly { path: string; code: string }[] {
+  const out: { path: string; code: string }[] = [];
+  for (const dir of CHROME_DIRS) {
+    const full = resolve(process.cwd(), dir);
+    for (const entry of readdirSync(full, { withFileTypes: true })) {
+      if (!entry.isFile() || !/\.(ts|tsx)$/.test(entry.name)) continue;
+      const file = join(full, entry.name);
+      out.push({
+        path: relative(process.cwd(), file).split('\\').join('/'),
+        /* Komentáre von: docblocky v tomto repe o zakázaných veciach PÍŠU
+           (`refresh.ts` má v hlavičke vetu „v tomto module nie je
+           `setInterval`") a naivný grep by ich označil za porušenie. */
+        code: readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' '),
+      });
+    }
+  }
+  return out;
+}
+
 describe('kontrakt UI, bod 4 — nič sa v chróme neobnovuje samo', () => {
   const sources = layoutSources();
+  const chrome = chromeSources();
 
   it('sanity — skener naozaj číta chróm', () => {
     expect(sources.length).toBeGreaterThan(5);
     expect(sources.some((f) => f.path.endsWith('StatusBar.tsx'))).toBe(true);
+    // A skener časovačov musí vidieť AJ primitíva, inak stráži polovicu chrómu.
+    expect(chrome.length).toBeGreaterThan(sources.length);
+    expect(chrome.some((f) => f.path === 'src/components/ui/StatusPill.tsx')).toBe(true);
+    expect(chrome.some((f) => f.path === 'src/components/ui/Countdown.tsx')).toBe(true);
   });
 
-  it('žiadny modul chrómu nespúšťa časovač', () => {
-    const hits = sources
+  it('žiadny modul chrómu ani primitívum nespúšťa časovač', () => {
+    const hits = chrome
       .filter((f) => /\b(setInterval|setTimeout|requestAnimationFrame)\s*\(/.test(f.code))
+      .filter((f) => !TIMER_ALLOWED.includes(f.path))
       .map((f) => f.path);
     expect(
       hits.join('\n'),
       'čísla sa obnovujú výhradne na vyžiadanie — pozri components/layout/refresh.ts',
     ).toBe('');
+  });
+
+  it('vymenovaná výnimka nesmie hniť — `Countdown` časovač naozaj má', () => {
+    /* Keby `Countdown` tikať prestal, zoznam výnimiek by kryl prázdno a druhá
+       vec, ktorá doň pribudne, by prešla bez povšimnutia. */
+    const countdown = chrome.find((f) => f.path === 'src/components/ui/Countdown.tsx');
+    expect(countdown).toBeDefined();
+    expect(countdown!.code).toMatch(/\bsetInterval\s*\(/);
   });
 
   it('tlačidlo Obnoviť je v celej appke presne jedno', () => {

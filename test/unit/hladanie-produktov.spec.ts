@@ -642,6 +642,16 @@ interface RouteWorld {
   readonly shop?: FakeShopOptions;
   readonly mirror?: readonly number[];
   readonly budget?: ReadBudget;
+  /**
+   * `factsFor()` NEVRÁTI riadok pre dohľadaný produkt.
+   *
+   * Vetva `fact === undefined` v route je poistka pre presne tento prípad
+   * a do 3. 9. 2026 ju nespúšťal ani jeden test: fake vždy vyrobil riadok pre
+   * každé ID, takže mutácie `? null` → `? 0` (predaj) a `?? false` → `?? true`
+   * (vlastné zľavy) nechali celý balík zelený. Tá vetva je pritom to jediné,
+   * čo pri chýbajúcom fakte stojí medzi appkou a vymysleným číslom.
+   */
+  readonly factsMissing?: boolean;
 }
 
 function routeDepsFor(world: RouteWorld): {
@@ -710,14 +720,18 @@ function routeDepsFor(world: RouteWorld): {
         ...lookupCatalog,
         search: async (filter) => searchResult(filter),
         factsFor: async (productIds) => ({
-          facts: new Map(
-            [...productIds].map((id) => [
-              id,
-              // D121 — appka o predaji za okno NEVIE (dva dočítané dni zo 180),
-              // takže fakty hovoria `null`. Route to NESMIE zliať na nulu.
-              { unitsSold: null, everDiscounted: false, discountedNow: false },
-            ]),
-          ),
+          facts:
+            world.factsMissing === true
+              ? new Map()
+              : new Map(
+                  [...productIds].map((id) => [
+                    id,
+                    // D121 — appka o predaji za okno NEVIE (dva dočítané dni zo
+                    // 180), takže fakty hovoria `null`. Route to NESMIE zliať
+                    // na nulu.
+                    { unitsSold: null, everDiscounted: false, discountedNow: false },
+                  ]),
+                ),
           soldWindowDays: 180,
           soldFrom: '2026-02-18',
           soldTo: '2026-08-17',
@@ -837,6 +851,39 @@ describe('GET /api/catalog/search — hľadanie na obrazovke', () => {
     expect(rows.find((row) => row.productId === 41)?.unitsSold).toBeNull();
     // A nikde ani jedna nula — tá by bola meraný fakt o nepredaní.
     expect(rows.map((row) => row.unitsSold)).not.toContain(0);
+  });
+
+  /*
+   * D121 — VETVA „FAKT VÔBEC NEPRIŠIEL". Doplnené 3. 9. 2026 po verifikácii
+   * V6c: mutácie `fact === undefined ? null` → `? 0` a `?? false` → `?? true`
+   * PREŽILI celý balík, lebo fake `factsFor()` vracal riadok pre každé ID
+   * a poistná vetva sa nikdy nevykonala. Test vyššie („neznámy predaj ide ako
+   * `null`") meria vetvu, kde fakt JE a hovorí `null` — to je iný riadok kódu.
+   *
+   * Keď fakt nepríde, appka o produkte nevie NIČ: ani predaj, ani to, či mu
+   * kedy sama zapísala zľavu. Nula predaných by bola meranie o eshope a
+   * `everDiscounted: true` tvrdenie o VLASTNOM zápise, ktorý sa nestal (I11).
+   */
+  it('bez riadku z `factsFor()` nedostane produkt ani nulu, ani vymyslenú históriu', async () => {
+    const { body } = await callSearch('?q=C16.19&lookup=1', {
+      page: [],
+      factsMissing: true,
+      shop: {
+        ids: [30582],
+        total: 1,
+        products: { 30582: { name: 'Náramok C16.19', price: 24.5 } },
+      },
+    });
+
+    const row = body.data.data.find((entry) => entry.productId === 30582);
+    expect(row?.origin).toBe('shop');
+    expect(row?.unitsSold).toBeNull();
+    expect(row?.unitsSold).not.toBe(0);
+    /* Vlastné zľavy sú tvrdenie o NAŠICH zápisoch. Bez faktu sa nesmie tvrdiť
+       ani jedna — `true` by z chýbajúceho riadku spravilo históriu. */
+    const flags = row as unknown as { everDiscounted: boolean; discountedNow: boolean };
+    expect(flags.everDiscounted).toBe(false);
+    expect(flags.discountedNow).toBe(false);
   });
 
   it('ten istý produkt sa nezobrazí dvakrát', async () => {

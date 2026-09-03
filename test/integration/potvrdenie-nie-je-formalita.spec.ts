@@ -295,6 +295,129 @@ describe('D. `acknowledgements` je v schéme povinné a `irreversible` je liter�
   });
 });
 
+/* ═══ F. Pásma v tele musia sedieť s POTVRDENÝM tokenom (K3) ══════════════ */
+
+/**
+ * `assertTiersMatchToken()` je tretí krok tej istej brány: token povie, čo
+ * človek videl a potvrdil, a telo zápisu nesmie do `campaign_tiers` uložiť iné
+ * percento. Bez tejto kontroly by sa dal potvrdiť náhľad s 25 % a zapísať
+ * pásmo s 30 % — položky by zlacneli podľa tokenu, ale zoznamy zliav a súhrn
+ * po pásmach by hovorili číslo, ktoré nikto nepotvrdil.
+ *
+ * DOPLNENÉ 3. 9. 2026. Verifikácia V6c našla, že ODPOJENIE tohto volania
+ * (`assertTiersMatchToken(...)` zmazané z route) nechalo CELÝ balík zelený —
+ * kontrolu nemeralo ani jedno tvrdenie a `tiers_mismatch` sa v testoch
+ * nevyskytoval ani raz. Bola to teda brána, ktorú by prvý refaktor odniesol
+ * bez jediného červeného testu.
+ *
+ * Kontrola beží ZA `verify()`, takže token sa pri odmietnutí spáli — to je
+ * zámer (telo bolo v rozpore s potvrdeným náhľadom, nie neúplné) a preto sa tu
+ * o jednorazovosti netvrdí nič. Meria sa to, čo je podstatné: 4xx, kód chyby
+ * a NULA zápisov na shop.
+ */
+describe('F. pásmo, ktoré nebolo v potvrdenom náhľade, sa NEZAPÍŠE (K3)', () => {
+  /** Telo zápisu s pásmami — potvrdenie je platné, sporné sú len pásma. */
+  const bodyWithTiers = (
+    token: string,
+    tiers: ReadonlyArray<{ ord: number; label: string; percent: number }>,
+  ) => ({
+    previewToken: token,
+    name: 'Zľava s pásmami',
+    mode: 'eager' as const,
+    tiers: tiers.map((tier) => ({ ...tier })),
+    acknowledgements: { irreversible: true },
+  });
+
+  it('percento, ktoré token nenesie, je 4xx `tiers_mismatch` a nula zápisov', async () => {
+    const w = world();
+    const token = await freshToken(w);
+    mock.state.recordedRequests.length = 0;
+
+    const post = createCampaignsPost(w.deps, actorRouteDeps());
+    const res = await parse(
+      await post(
+        makeRequest(
+          'POST',
+          '/api/campaigns',
+          // Náhľad bol na 25 % (`PERCENT`), telo chce zapísať 30 %.
+          bodyWithTiers(token, [{ ord: 1, label: 'Všetko', percent: 30 }]),
+        ),
+      ),
+    );
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(JSON.stringify(res.body)).toContain('tiers_mismatch');
+    // Na shop nesmie odísť ANI JEDEN request — nemá sa ako stať `setReduction`.
+    expect(mock.state.writeRequests()).toHaveLength(0);
+    expect(w.campaigns.size).toBe(0);
+  });
+
+  it('pásmo z potvrdeného náhľadu, ktoré v tele CHÝBA, je tiež odmietnutie', async () => {
+    const w = world();
+
+    /* Náhľad s DVOMA pásmami — token potom nesie percento pre každý produkt. */
+    const preview = createPreviewPost(w.deps, actorRouteDeps());
+    const previewRes = await parse(
+      await preview(
+        makeRequest('POST', '/api/campaigns/preview', {
+          productIds: [...IDS],
+          percent: PERCENT,
+          from: FROM,
+          to: TO,
+          kind: 'new',
+          tiers: [
+            { ord: 1, label: 'Vrchné', percent: PERCENT, productIds: [IDS[0]] },
+            { ord: 2, label: 'Spodné', percent: 10, productIds: [IDS[1]] },
+          ],
+        }),
+      ),
+    );
+    expect(previewRes.status, 'skúška naprázdno sama musí prejsť').toBe(200);
+    const token = (previewRes.body.data as { previewToken: string }).previewToken;
+    mock.state.recordedRequests.length = 0;
+
+    const post = createCampaignsPost(w.deps, actorRouteDeps());
+    const res = await parse(
+      await post(
+        makeRequest(
+          'POST',
+          '/api/campaigns',
+          // Spodné pásmo (10 %) sa v tele „stratilo".
+          bodyWithTiers(token, [{ ord: 1, label: 'Vrchné', percent: PERCENT }]),
+        ),
+      ),
+    );
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(JSON.stringify(res.body)).toContain('tiers_mismatch');
+    expect(mock.state.writeRequests()).toHaveLength(0);
+    expect(w.campaigns.size).toBe(0);
+  });
+
+  it('meradlo nie je pokazené — pásma zhodné s tokenom PREJDÚ a zapíšu', async () => {
+    const w = world();
+    const token = await freshToken(w);
+    mock.state.recordedRequests.length = 0;
+
+    const post = createCampaignsPost(w.deps, actorRouteDeps());
+    const res = await parse(
+      await post(
+        makeRequest(
+          'POST',
+          '/api/campaigns',
+          bodyWithTiers(token, [{ ord: 1, label: 'Všetko', percent: PERCENT }]),
+        ),
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(w.campaigns.size).toBe(1);
+    expect(mock.state.writeRequests()).toHaveLength(IDS.length);
+  });
+});
+
 /* ═══ E. Čo skúška UKÁZALA, to sa aj zapíše ═══════════════════════════════ */
 
 /**

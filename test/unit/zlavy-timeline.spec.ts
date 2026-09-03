@@ -46,6 +46,9 @@ import {
   type TimelineCampaign,
   type TimelineView,
 } from '@/components/campaigns/timeline-model';
+/* Pomlčka sa v tvrdeniach NEPÍŠE ručne: `NEVIEME` je jediné miesto, kde je
+   znak definovaný, a mutácia jeho hodnoty má zčervenať tam, nie tu. */
+import { NEVIEME } from '@/lib/ui/product-label';
 
 /** Os desiatich dní — na nej sú percentá kontrolovateľné z hlavy. */
 const RANGE = { from: '2026-08-01', to: '2026-08-10', today: '2026-08-06' };
@@ -273,6 +276,16 @@ describe('E. tabuľka osi kreslí polohu, hrany a tri stavy prekryvu', () => {
     expect(nevieme).toContain('data-value="unknown"');
     expect(nevieme).toContain('nevieme');
     expect(nevieme).not.toContain('neprekrýva sa');
+    /*
+     * A TERAZ SAMOTNÝ ZNAK V BUNKE (K10, verifikácia V6c, mutácia M26).
+     * Tvrdenia vyššie merali len STROJOVÉ priznanie (`data-value` a slovo pre
+     * čítačku), takže `{NEVIEME}` → `{'0'}` v tejto bunke prešlo zelené: appka
+     * by očiam ukázala nulu prekryvov, ktorú nikdy nezmerala, a pritom by sa
+     * čítačke stále priznávala. Priznanie musí byť VO VŠETKÝCH TROCH kanáloch.
+     */
+    expect(nevieme).toContain(`data-testid="timeline-unknown-1">${NEVIEME}</span>`);
+    expect(nevieme).toContain(`data-testid="timeline-unknown-2">${NEVIEME}</span>`);
+    expect(nevieme).not.toMatch(/data-testid="timeline-unknown-1">[^<]*\d/);
   });
 
   it('bez suseda v čase je „neprekrýva sa" MERANÝ fakt, aj bez známych produktov', () => {
@@ -320,6 +333,15 @@ describe('E. tabuľka osi kreslí polohu, hrany a tri stavy prekryvu', () => {
     );
     expect(mimoOs).toContain('data-testid="timeline-row-9"');
     expect(mimoOs).toContain('data-value="unknown"');
+    /*
+     * A ZNAK V BUNKE „Na osi" (K10, mutácia M27). Bez tohto tvrdenia prešlo
+     * `content: NEVIEME` → `'0 %'` zelené — bunka by tvrdila NULOVÚ zľavu na
+     * osi, teda číslo namiesto priznania, a `data-value="unknown"` by to
+     * naďalej nazývalo pomlčkou. Riadok má jedinú neznámu bunku (v čase sa
+     * s ničím nekríži), takže sa tu meria práve tá.
+     */
+    expect(mimoOs).toContain(`data-value="unknown">${NEVIEME}<`);
+    expect(mimoOs).not.toMatch(/data-value="unknown">[^<]*\d/);
   });
 
   it('prázdna os hovorí vetu, nie prázdny rám', () => {

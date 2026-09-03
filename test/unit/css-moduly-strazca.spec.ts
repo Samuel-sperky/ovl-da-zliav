@@ -58,9 +58,14 @@
  *     buď kľúče vypísať, alebo tento strážca rozšíriť. Mlčky prejsť to
  *     nemôže — inak by sa práve tou cestou vrátil `class="undefined"`.
  *  2. **Globálne triedy v `:global(…)`** (`.inp`, `.btn`, `.n`, `num`, `sec`).
- *     Nie sú exportom modulu, takže ich tento súbor z merania VYNÍMA.
- *     Namiesto neho ich strážia `test/unit/mrtve-triedy.spec.ts` (mŕtva
- *     vrstva `.ovl-*` v `globals.css`) a `test/unit/globals-vlna3-chyby.spec.ts`.
+ *     Nie sú exportom modulu, takže z merania kľúčov (skupiny B a D) sú
+ *     VYŇATÉ. Od 3. 9. 2026 ale NIE SÚ bez dozoru: skupina F tvrdí, že každá
+ *     trieda v `:global(…)` naozaj existuje v `globals.css`. Doplnené po
+ *     verifikácii V6c, ktorá zistila, že mutácia `:global(.inp)` →
+ *     `:global(.inpXX)` v `new-discount.module.css` PREŽILA celý balík — a to
+ *     je presne chyba, ktorá 2. 9. 2026 vzala štýl poľu na meno presetu.
+ *     Druhý smer (kto tú globálnu triedu v JSX nastavuje) zostáva na
+ *     `test/unit/mrtve-triedy.spec.ts` a `test/unit/globals-vlna3-chyby.spec.ts`.
  *  3. **`data-*` atribúty v selektoroch.** Selektor môže byť „použitý" a
  *     pritom mŕtvy, keď atribút nikto nevypisuje — tak zmizlo odsadenie
  *     prvej bunky v Produktoch (`[data-col='select']`). Statické meranie
@@ -312,6 +317,71 @@ describe('D. mŕtva trieda v module je dlh, nie neškodnosť', () => {
         mrtve,
         `tieto triedy ${module.path} nikto nekreslí — buď ich použi, alebo zmaž (D139, K11). ` +
           'Ak selektor cieli na GLOBÁLNU triedu, patrí do `:global(…)`',
+      ).toEqual([]);
+    });
+  }
+});
+
+/* ═════════ F. `:global(.x)` musí mieriť na triedu, ktorá existuje ═══════ */
+
+/**
+ * Mená tried vnútri `:global(…)` — teda to, čím modul zasahuje do GLOBÁLNEJ
+ * vrstvy. Selektor môže byť syntakticky bezchybný a pritom nekresliť nič, keď
+ * cieľová trieda neexistuje; v prehliadači sa to prejaví ako „vyzerá to
+ * neoštýlované" a v teste nijako.
+ */
+export function globalClassRefs(css: string): ReadonlySet<string> {
+  const noComments = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const out = new Set<string>();
+  for (const m of noComments.matchAll(/:global\s*\(([^()]*)\)/g)) {
+    for (const c of m[1]!.matchAll(/\.(-?[A-Za-z_][A-Za-z0-9_-]*)/g)) out.add(c[1]!);
+  }
+  return out;
+}
+
+/**
+ * Triedy, ktoré `globals.css` niesť NEMÁ, pretože ich kreslí cudzia knižnica.
+ * Zoznam je vymenovaný, nie vzorový: nová výnimka si vyžaduje riadok tu, takže
+ * sa nedá pridať potichu.
+ */
+const THIRD_PARTY_GLOBALS: readonly string[] = [
+  // Recharts (D135) si mená tried vyrába sám; my ich len dolaďujeme.
+  'recharts-curve',
+];
+
+const GLOBALS_CSS = 'src/app/globals.css';
+
+describe('F. globálna trieda v module existuje aj v globals.css', () => {
+  const globalne = declaredClasses(read(GLOBALS_CSS));
+
+  it('poistka: globals.css a odkazy `:global(…)` sa naozaj načítali', () => {
+    /* Bez tejto poistky by pokazený parser urobil zo skupiny F prázdny
+       zoznam — a prázdny zoznam je vždy zelený. */
+    expect(globalne.size, 'globals.css nemá ani triedu — parser nečíta').toBeGreaterThan(50);
+    expect(globalne.has('inp')).toBe(true);
+    expect(globalne.has('btn')).toBe(true);
+    const odkazy = MODULE_PATHS.flatMap((p) => [...globalClassRefs(read(p))]);
+    expect(odkazy.length, 'ani jeden `:global(…)` — pravidlo by strážilo prázdno').toBeGreaterThan(
+      8,
+    );
+  });
+
+  it('parser berie meno z vnútra `:global(…)`, nie z okolia selektora', () => {
+    const found = globalClassRefs('.rail :global(.inp), .x :global(td.num) { flex: 1 }');
+    expect([...found].sort()).toEqual(['inp', 'num']);
+    // Komentár o zmazanej triede nie je živý selektor (`:global(tr.sum)`).
+    expect([...globalClassRefs('/* :global(tr.sum) bolo tu */ .a { gap: 0 }')]).toEqual([]);
+  });
+
+  for (const path of MODULE_PATHS) {
+    it(`${path}: každá trieda v \`:global(…)\` existuje`, () => {
+      const chybajuce = [...globalClassRefs(read(path))]
+        .filter((name) => !globalne.has(name) && !THIRD_PARTY_GLOBALS.includes(name))
+        .sort();
+      expect(
+        chybajuce,
+        `tieto globálne triedy v globals.css NIE SÚ, takže selektor v ${path} nekreslí nič — ` +
+          'buď preklep v mene, buď trieda zmizla z globálnej vrstvy (D139, K11)',
       ).toEqual([]);
     });
   }

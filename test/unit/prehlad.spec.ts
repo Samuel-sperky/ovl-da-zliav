@@ -50,6 +50,7 @@ import {
   trendPercent,
 } from '@/components/dashboard/sales-view';
 import { chartScaleMax } from '@/components/ui/chart-language';
+import { NEVIEME } from '@/lib/ui/product-label';
 
 const TODAY = '2026-08-10';
 
@@ -438,10 +439,22 @@ describe('Prehľad — hranica voči Produktom', () => {
   /**
    * Architektúra §1: „Tabuľka produktov — Prehľad NIKDY, Produkty vždy."
    * Bez tohto testu sa hranica rozpustí prvým „veď to je len malý zoznam".
+   *
+   * PRIMITÍVUM SA POČÍTA TIEŽ (doplnené 3. 9. 2026). Vzor hľadal len značky
+   * malými písmenami, takže od V6a stačilo napísať `<Table …>` a hranicu by
+   * prekročil práve ten spôsob, ktorý je odvtedy najpohodlnejší — strážca by
+   * pri tom zostal zelený. Verifikácia V6c to overila mutáciou: vykreslený
+   * `<Table>` v Prehľade tento test NEZOBUDIL.
+   *
+   * `<ChartTable>` (prepis grafu pre čítačku) sa tým nezakazuje: nie je to
+   * tabuľka produktov a vzor `<Table\b` ho nechytí, lebo `<ChartTable`
+   * značkou `Table` nezačína.
    */
-  it('nikde v Prehľade nie je tabuľka', () => {
+  it('nikde v Prehľade nie je tabuľka — ani značka, ani primitívum', () => {
     const hits = sources()
-      .filter((file) => /<table|<thead|<tbody|ovl-table|\btbl-/.test(file.code))
+      .filter((file) =>
+        /<table|<thead|<tbody|ovl-table|\btbl-|<Table\b|components\/ui\/Table/.test(file.code),
+      )
       .map((file) => file.path);
     expect(hits.join(', ')).toBe('');
   });
@@ -580,6 +593,56 @@ describe('Prehľad — sekcie sa vykreslia', () => {
     // Nadpis hovorí to, čo sekcia meria: kusy, nie tržbu v eurách.
     expect(html).toContain('<h2>Predaj</h2>');
     expect(html).not.toContain('<h2>Tržby</h2>');
+  });
+
+  /**
+   * TRI ČÍSLA NAD GRAFOM PRIZNÁVAJÚ, KEĎ NEMERALI (§4 bod 1, K10).
+   *
+   * Doplnené 3. 9. 2026 po verifikácii V6c: mutácia pomlčky v dlaždici
+   * „Priemer za deň" na `pieces(0)` neprebudila ANI JEDNO tvrdenie v repe.
+   * Appka by pri prázdnom pokrytí (dnešný stav — `shop_write` kľúč chýba)
+   * napísala „0 kusov za deň" ako meranie o eshope, ktoré nikdy neurobila.
+   * Priznanie je tu jediný pravdivý obsah, takže sa meria znakom, nie dojmom.
+   *
+   * Znak sa neopisuje ručne — `NEVIEME` je jediné miesto, kde žije (D116).
+   */
+  it('tri čísla nad grafom sú pomlčky, keď appka nemerala — nikdy nuly', () => {
+    const html = renderToStaticMarkup(
+      createElement(SalesSection, {
+        sales: {
+          today: TODAY,
+          coverage: {
+            syncEnabled: true,
+            from: null,
+            to: null,
+            daysCovered: 0,
+            lastSyncedAt: null,
+            hasData: true,
+          },
+          windowUnits: 0,
+          unitsPerDay: null,
+          recentUnits: null,
+          previousUnits: null,
+          days: [],
+        },
+      }),
+    );
+
+    const values = [...html.matchAll(/<div class="v num">([^<]*)</g)].map((m) => m[1]);
+    expect(values).toHaveLength(3);
+    expect(values).toEqual([NEVIEME, NEVIEME, NEVIEME]);
+    // Ani jedna číslica: „0 kusov" a „0 %" sú tvrdenia o eshope, nie o appke.
+    for (const value of values) expect(value).not.toMatch(/\d/);
+    /* Ani podpisy pod tromi číslami nesmú niesť číslicu — „bez uzavretého dňa"
+       je veta, „0 uzavretých dní" by bolo meranie. (Hlavička sekcie sa tu
+       nemeria: `windowUnits` je číslo zo servera, nie dopočet obrazovky.) */
+    const notes = [...html.matchAll(/<div class="s">([^<]*)</g)].map((m) => m[1]);
+    expect(notes).toHaveLength(3);
+    for (const note of notes) expect(note).not.toMatch(/\d/);
+    // A podpis pod číslom hovorí PREČO, aby pomlčka nebola len znak.
+    expect(html).toContain('denný priebeh zatiaľ nemáme');
+    expect(html).toContain('bez uzavretého dňa');
+    expect(html).toContain('obdobie zatiaľ nevieme');
   });
 
   it('bez pokrytia predaja je jedna veta a jedno tlačidlo, nie nuly', () => {

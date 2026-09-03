@@ -709,14 +709,22 @@ export function discountBands(
  * počtom kusov: `total_paid` nesie poštovné, kupóny a zľavy, takže „cena za
  * kus" z neho je vymyslené číslo (I11).
  */
-export type RevenueDayState = 'measured' | 'lower_bound' | 'unknown';
+export type RevenueDayState = 'measured' | 'measured_zero' | 'lower_bound' | 'unknown';
+
+/**
+ * Nameraná nula ako text. Rovnaké rozlíšenie ako `DECIMAL(12,2)` na serveri,
+ * takže prečítaná nula vyzerá presne ako každá iná prečítaná suma — je to
+ * meranie, nie zástupný znak.
+ */
+export const REVENUE_ZERO = '0.00';
 
 /** Jeden deň okna pripravený na vykreslenie. Chýbajúci deň NIE JE nula. */
 export interface RevenueDayView {
   day: string;
   /**
    * Suma ako string z odpovede (`DECIMAL`), nikdy float. `null` = deň nemáme
-   * a jeho tržbu NEPOZNÁME.
+   * a jeho tržbu NEPOZNÁME. Pri `measured_zero` je to `0.00` — deň sa
+   * DOČÍTAL a v tejto mene v ňom nebolo nič, čo je meraný fakt.
    */
   amount: string | null;
   state: RevenueDayState;
@@ -746,8 +754,23 @@ export interface RevenueRowInput {
  * TU SA ROZHODUJE, ČI ROZBEHNUTÝ DEŇ VYZERÁ AKO PREPAD. `dayComplete: false`
  * znamená, že sťahovanie zoznamu objednávok sa nedočítalo — súčet je teda
  * dolná hranica a NESMIE sa postaviť vedľa dočítaných dní ako rovnocenné
- * číslo. Dostane `state: 'lower_bound'` a značku `≈`; deň bez riadku dostane
- * pomlčku, nie nulu.
+ * číslo. Dostane `state: 'lower_bound'` a značku `≈`.
+ *
+ * A ROVNAKO SA TU ROZHODUJE, ČI PREČÍTANÝ DEŇ VYZERÁ AKO NEMERANÝ (oprava
+ * 3. 9. 2026). Deň bez riadku má DVE úplne rôzne príčiny a rozlíšiť ich vie
+ * len server:
+ *
+ *  · deň je v `measuredZeroDays` ⇒ DOČÍTALI SME HO a v tejto mene v ňom
+ *    nebolo nič. `measured_zero`, suma `0.00`, žiadna pomlčka.
+ *  · inak ⇒ `unknown` a pomlčka.
+ *
+ * Do 3. 9. 2026 sem prvá vetva nedorazila (parser `measuredZeroDays` vôbec
+ * nečítal), takže KAŽDÝ deň bez riadku dostal pomlčku. Appka tým priznávala
+ * nevedomosť o dni, ktorý zmerala — I11 naopak: pokrytie dát vyzeralo horšie,
+ * než naozaj je. Nameraná nula je fakt, medzera je priznanie.
+ *
+ * `measuredZeroDays === null` znamená „odpoveď to nepovedala" a je fail-closed
+ * do pomlčky: nula sa tu NIKDY nevyrobí z ticha, len z výslovného zoznamu.
  *
  * `windowDays` je zoznam dní okna v kalendárnom poradí — zostavuje ho volajúci
  * z `window.from`/`window.to`, aby sa tu nemuseli sčítavať milisekundy (letný
@@ -756,13 +779,26 @@ export interface RevenueRowInput {
 export function revenueDays(
   windowDays: readonly string[],
   rows: readonly RevenueRowInput[],
+  measuredZeroDays: readonly string[] | null,
 ): RevenueDayView[] {
   const byDay = new Map<string, RevenueRowInput>();
   for (const row of rows) byDay.set(row.day, row);
+  const zeros = new Set<string>(measuredZeroDays === null ? [] : measuredZeroDays);
 
   return windowDays.map((day) => {
     const row = byDay.get(day);
     if (row === undefined) {
+      if (zeros.has(day)) {
+        /* Prečítaný deň bez objednávky v tejto mene. Nula je MERANÁ, takže
+           dostane číslo aj počet objednávok — nie pomlčku a nie `null`. */
+        return {
+          day,
+          amount: REVENUE_ZERO,
+          state: 'measured_zero' as const,
+          text: REVENUE_ZERO,
+          ordersCount: 0,
+        };
+      }
       return { day, amount: null, state: 'unknown' as const, text: NEVIEME, ordersCount: null };
     }
     const complete = row.dayComplete === true;

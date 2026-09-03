@@ -311,7 +311,10 @@ function Revenue({
         </span>
       ) : (
         revenue.series.map((series) => {
-          const days = revenueDays(list, series.days);
+          /* Prečítaná nula je MERANIE, nie medzera — a rozlíšiť ich vie len
+             server (`measuredZeroDays`). `null` = odpoveď to nepovedala,
+             a vtedy taký deň zostane pomlčkou. */
+          const days = revenueDays(list, series.days, series.measuredZeroDays);
           const last = days[days.length - 1];
           /* Súčet je meranie LEN pri dočítanom okne; inak je to dolná hranica
              a musí to byť vidieť pred číslom, nie až v poznámke pod ním. */
@@ -325,6 +328,15 @@ function Revenue({
               {series.sumState === 'lower_bound' ? ' · aspoň toľko, časť dní nemáme celú' : ''}
               {last !== undefined && last.state === 'lower_bound'
                 ? ` · posledný deň sa ešte dopočítava (${last.text} ${series.currency}), nie je to pokles`
+                : ''}
+              {/*
+                Prečítaný deň bez objednávky NIE JE medzera. Kým sa
+                `measuredZeroDays` nečítal, posledný deň okna v takom stave
+                mlčal presne ako deň, ktorý appka nemerala — a to bolo
+                priznanie nevedomosti o zmeranom fakte (I11 naopak).
+              */}
+              {last !== undefined && last.state === 'measured_zero'
+                ? ` · posledný deň sme prečítali celý a v tejto mene sa nepredalo nič (${last.text} ${series.currency})`
                 : ''}
             </span>
           );
@@ -343,6 +355,18 @@ function Revenue({
       ) : revenue.missingDays === 0 ? null : (
         <span className="lvl-3" data-testid="revenue-gap" data-mode="measured">
           {`${dayCount(revenue.missingDays)} okna appka nemá — tržbu za ne nepoznáme, nie je to nula`}
+        </span>
+      )}
+      {/*
+        DRUHÁ STRANA TEJ ISTEJ VETY, a je to oprava z 3. 9. 2026: appka
+        prečítané prázdne dni zamlčiavala, takže vlastné pokrytie dát
+        ukazovala horšie, než je. Ticho tu znamená len „nie je čo povedať" —
+        pri `null` odpoveď zoznam nenesie a dni samé zostávajú pomlčkou, čo je
+        priznanie; pri nule je NAMERANÉ, že taký deň v okne nie je.
+      */}
+      {revenue.emptyDays === null || revenue.emptyDays === 0 ? null : (
+        <span className="lvl-3" data-testid="revenue-empty" data-mode="measured">
+          {`${dayCount(revenue.emptyDays)} okna appka prečítala a nepredalo sa v nich nič — je to nameraná nula, nie medzera`}
         </span>
       )}
     </div>
@@ -437,14 +461,14 @@ export function SalesSection({
         <div className={`kpis ${styles.kpiCol}`} data-testid="sales-numbers">
           <div className="kpi">
             <div className="k">Dnes predané</div>
-            <div className="v num">{numbers.today === null ? '—' : pieces(numbers.today)}</div>
+            <div className="v num">{numbers.today === null ? NEVIEME : pieces(numbers.today)}</div>
             <div className="s">
               {numbers.today === null ? 'denný priebeh zatiaľ nemáme' : 'dnešok stále beží'}
             </div>
           </div>
           <div className="kpi">
             <div className="k">Priemer za deň</div>
-            <div className="v num">{numbers.perDay === null ? '—' : pieces(numbers.perDay)}</div>
+            <div className="v num">{numbers.perDay === null ? NEVIEME : pieces(numbers.perDay)}</div>
             <div className="s">
               {numbers.closedDays > 0
                 ? `${formatCountSk(numbers.closedDays)} ${pluralSk(numbers.closedDays, 'uzavretý deň', 'uzavreté dni', 'uzavretých dní')}`
@@ -454,7 +478,7 @@ export function SalesSection({
           <div className="kpi">
             <div className="k">Trend</div>
             <div className="v num">
-              {numbers.trendPercent === null ? '—' : signedPercent(numbers.trendPercent)}
+              {numbers.trendPercent === null ? NEVIEME : signedPercent(numbers.trendPercent)}
             </div>
             <div className="s">{range ?? 'obdobie zatiaľ nevieme'}</div>
           </div>
