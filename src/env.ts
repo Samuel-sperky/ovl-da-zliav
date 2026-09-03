@@ -16,6 +16,7 @@
  */
 import { z } from 'zod';
 
+import { MAX_SALES_WINDOW_DAYS } from '@/lib/sales/windows';
 import { APP_VERSION } from '@/version';
 
 /* ────────────────────────────── pomocné typy ───────────────────────────── */
@@ -101,10 +102,24 @@ export const envSchema = z
     // vlastnú, dlhšiu platnosť než 48 h zápisového kľúča (P2, odchýlka od R2).
     ORDERS_KEY_TTL_DAYS: intFromString({ min: 1, max: 90, default: 30 }),
     SALES_SYNC_ENABLED: boolFromString(true),
-    // P3: okno 3 dni. Zmerané 6.8.2026 — 3 dni = 978 objednávok, a keďže
-    // zoznam objednávok nevracia položky, je to 1 request na 1 objednávku.
-    // Rozširovať opatrne: 90 dní by bolo ~29 000 requestov na produkčný shop.
-    SALES_WINDOW_DAYS: intFromString({ min: 1, max: 90, default: 3 }),
+    /*
+     * P3: okno 3 dni. Zmerané 6.8.2026 — 3 dni = 978 objednávok, a keďže
+     * zoznam objednávok nevracia položky, je to 1 request na 1 objednávku.
+     *
+     * STROP JE ODVODENÝ, NIE NAPÍSANÝ (D149, K9). Do 3. 9. 2026 tu stál literál
+     * `90`, kým prepínač okna predajnosti ponúkal 180 a 360 dní — za dvoma
+     * z piatich okien teda NIKDY nemohli byť dáta (pasca D125). Strop sa preto
+     * berie z `MAX_SALES_WINDOW_DAYS`, čo je `Math.max()` nad tým istým
+     * zoznamom okien, aký kreslí UI a aký vie triediť zrkadlo katalógu.
+     *
+     * Rozširovať OPATRNE — cena je reálna a nie je zmeraná: pri sadzbe z toho
+     * jedného augustového vzorku (~326 objednávok/deň) je 90 dní ~29 000
+     * requestov a 360 dní ~117 000, čo je pri dráhe `orders` (800 čítaní na UTC
+     * deň) rádovo mesiace. Koľko objednávok má deň naozaj, appka NEMERIA
+     * (otvorená položka K9 z V5), takže vyššie čísla sú extrapolácia jedného
+     * vzorku, nie predpoveď. Zdvihnutý strop je dovolenie, nie plán.
+     */
+    SALES_WINDOW_DAYS: intFromString({ min: 1, max: MAX_SALES_WINDOW_DAYS, default: 3 }),
     // Strop na JEDEN beh synchronizácie. Po jeho dosiahnutí sa beh korektne
     // ukončí, uloží pokrok a pokračuje nabudúce (P6 — fail-soft).
     ORDERS_MAX_REQUESTS_PER_RUN: intFromString({ min: 10, max: 20_000, default: 1500 }),

@@ -66,10 +66,40 @@ test.describe('K12 — celá cesta appky', () => {
     ]);
     await db.seedSales(SLOW_SOLD.map((productId) => ({ productId, day: dayOffset(-5), unitsSold: 2 })));
 
+    /*
+     * POKRYTIE OKNA JE VSTUP PÁSIEM, NIE VEDĽAJŠÍ ÚČIN PREDAJOV (I11, D121;
+     * nájdené 3. 9. 2026 pri V7).
+     *
+     * Sprievodca sa pri určovaní pásma pýta, čo appka NAOZAJ prečítala, nie
+     * koľko riadkov predaja v DB leží: `soldUnitsForWindow()` vydá „0
+     * predaných" len pri okne bez jediného chýbajúceho dňa, inak odpovie
+     * „nevieme" — a produkt s „nevieme" sa do pásma nezaradí a zľavu
+     * nedostane. Kým tu pokrytie chýbalo, celých 18 nikdy nepredaných
+     * produktov spadlo do „nevieme, preskočené", pásmo A (`tier-none`) sa
+     * nevykreslilo vôbec a tento krok padal na timeout.
+     *
+     * Appka sa pritom chová správne — chybný bol seed. Preto sa tu vyslovuje
+     * to, čo by po nočnom sťahovaní bola pravda: celé okno 30 dní (default UI
+     * filtra) je prečítané. Dni PRED oknom zostávajú neprečítané, takže
+     * trojstavovosť ostáva nedotknutá.
+     */
+    await db.seedSalesCoverage(dayOffset(-29), dayOffset(0));
+
     // K1 — 30 produktov sa do pilotu (strop 10) nezmestí; uvoľnenie rozsahu
     // preto treba a zapisuje sa do auditu. Od D100 na to netreba sudo, len
     // mutáciu so správnym Origin (D72).
-    const scope = await api(page, 'POST', '/api/settings/scope-mode', { mode: 'plny' });
+    /*
+     * `confirmed: true` je POŽIADAVKA appky, nie obchádzka (D106, 28. 8. 2026):
+     * uvoľnenie rozsahu je jedna zo štyroch mutácií, ktoré bez výslovného
+     * potvrdenia vrátia 409. Po zmazaní hesla z tela (D99) je potvrdenie
+     * jediná brána, ktorá pred týmito akciami stojí — test ju preto prechádza
+     * rovnako ako človek, neoslabuje ju. Kým tu chýbalo, celý tento e2e padal
+     * na treťom kroku (nájdené 3. 9. 2026 pri V7).
+     */
+    const scope = await api(page, 'POST', '/api/settings/scope-mode', {
+      mode: 'plny',
+      confirmed: true,
+    });
     expect(scope.status(), await scope.text()).toBe(200);
     await storeApiKey(page);
     const writesAfterKeyProbe = (await control.state()).writeCount;
@@ -79,9 +109,19 @@ test.describe('K12 — celá cesta appky', () => {
     expect(sync.status(), await sync.text()).toBe(200);
     expect((await control.state()).writeCount).toBe(writesAfterKeyProbe);
 
-    /* ── 2. Prehľad ── */
+    /* ── 2. Prehľad a stav appky ── */
     await page.goto('/');
     await expect(page.getByTestId('overview')).toBeVisible();
+
+    /*
+     * STAV APPKY UŽ NIE JE NA PREHĽADE (V7, D152, 3. 9. 2026). Prehľad má štyri
+     * sekcie (KPI rad · graf · tabuľka · bežiace zľavy) a stavový pás
+     * s prekážkami odišiel do Nastavení; na Prehľade po ňom zostal JEDEN tichý
+     * riadok s odkazom, ktorý sa kreslí len vtedy, keď verdikt nie je zelený.
+     * Cesta z K12 sa tým nekrátí — klikne sa ten odkaz.
+     */
+    await page.getByTestId('overview-trouble').getByRole('link').click();
+    await expect(page.getByTestId('app-state-section')).toBeVisible();
 
     // V tomto bode ešte NEEXISTUJE ani jedna zľava, takže pod verdiktom stojí
     // prázdny stav — jedna veta a jedno tlačidlo (kontrakt UI, bod 11). Fronta
@@ -159,8 +199,9 @@ test.describe('K12 — celá cesta appky', () => {
     expect(queueBody.data.queue.campaigns).toBe(1);
 
     // Druhá strana tej istej výmeny: teraz už zľava existuje, takže pod
-    // verdiktom stojí fronta a prázdny stav zmizol.
-    await page.goto('/');
+    // verdiktom stojí fronta a prázdny stav zmizol. Stav appky žije od V7
+    // (D152) v Nastaveniach — Prehľad naň má len tichý odkaz.
+    await page.goto('/nastavenia/co-smie#stav');
     await expect(page.getByTestId('overview-status')).toBeVisible();
     await expect(page.getByTestId('queue-number')).toBeVisible();
     await expect(page.getByTestId('overview-empty')).toHaveCount(0);

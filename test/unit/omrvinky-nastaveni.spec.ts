@@ -43,6 +43,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
+import AppStateSection from '@/components/settings/AppStateSection';
 import AuditPanel from '@/components/audit/AuditPanel';
 import { TABS } from '@/components/layout/Nav';
 import type { KeyMetaView, QueueView, SettingsView } from '@/components/settings/api';
@@ -446,6 +447,10 @@ describe('odkazy Nastavení vedú na routy, ktoré existujú', () => {
       render(createElement(LockedFeatures)),
       render(createElement(SafeguardsSection, { settings: SETTINGS, onChanged: noop })),
       render(createElement(PanicButton, { keyPresent: true, onWiped: noop })),
+      /* Stav a prekážky (V7, D152) — sekcia si dáta ťahá sama, takže tu kreslí
+         kostru. Kotva `#stav` je aj v nej: odkaz z Prehľadu nesmie skončiť
+         v prázdne, kým prvá odpoveď nedobehne. */
+      render(createElement(AppStateSection)),
     ].join('\n');
 
     expect(SETTINGS_ANCHORS.length).toBeGreaterThan(10);

@@ -162,7 +162,10 @@
   width: 2rem;
   height: 2rem;
   border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--gold-fill) 14%, transparent);
+  /* 8 %, nie 14 %: `--gold-text` je na tejto tinte TEXT a pri 14 % mal
+     5,92 : 1 (tmavá) / 4,86 : 1 (svetlá). Slabšia tinta posúva plochu
+     k papieru v OBOCH témach, takže pomáha oboch smerom (D164). */
+  background: color-mix(in srgb, var(--gold-fill) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--gold-line) 26%, transparent);
   color: var(--gold-text);
 }
@@ -245,7 +248,7 @@
 }
 
 .tab:disabled {
-  color: color-mix(in srgb, var(--dim) 60%, transparent);
+  color: var(--ink-disabled);
   cursor: not-allowed;
 }
 
@@ -328,7 +331,7 @@
 }
 
 .segment:disabled {
-  color: color-mix(in srgb, var(--dim) 60%, transparent);
+  color: var(--ink-disabled);
   cursor: not-allowed;
 }
 

@@ -1,0 +1,48 @@
+/*
+ * Aura Zľavy — VZHĽAD RAILU PREPÍNAČA OKNA KARIET (V7, D143, D147, D155).
+ *
+ * Len rozloženie a typografia jedného riadku: popis · prepínač · veta
+ * o rozsahu platnosti. Samotný prepínač kreslí `ui/Segmented`
+ * (`ui/frame.module.css`) a tento súbor doň nesiaha — dve sady tried pre jeden
+ * prepínač by sa o mesiac rozišli (D142).
+ *
+ * Ani jeden hex, ani jedna `rgba()`, ani jedno `!important` (D147). Farby sú
+ * `--ink` a `--dim` z tokenovej vrstvy; po D164 je aj `--dim` na 7 : 1, takže
+ * hierarchiu medzi popisom a vetou nesie VEĽKOSŤ a ŤAHA, nie sila farby.
+ *
+ * Vlastník: V7, krok 1/4 (KPI riadok a prepínače okna).
+ */
+
+/*
+ * Jeden riadok, ktorý sa pri úzkej obrazovke ZALOMÍ. Prepínač má päť
+ * segmentov a veta o rozsahu je dlhá; bez `wrap` by rail pri ~600 px vytlačil
+ * vetu von zo stránky a rozsah platnosti by prestal byť napísaný.
+ */
+.rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ovl-s3);
+  margin-bottom: var(--ovl-s3);
+}
+
+/*
+ * Popis prepínača. Nie `<label>`: skupina rádií si meno berie z `aria-label`
+ * (`Segmented`), takže druhé meno navyše by čítačka prečítala dvakrát. Toto je
+ * text pre oči — preto obyčajný `<span>`.
+ */
+.label {
+  font-size: var(--ovl-fs-small);
+  font-weight: 620;
+  color: var(--ink);
+}
+
+/*
+ * Veta o rozsahu platnosti. Odtláča sa doprava, aby sa nečítala ako súčasť
+ * prepínača, ale ako jeho vysvetlenie.
+ */
+.note {
+  margin-left: auto;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}

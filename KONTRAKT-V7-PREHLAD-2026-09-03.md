@@ -121,4 +121,43 @@ Samuel na všetky tri odpovedal a rozhodnutia sú v §3.
 
 ## 8. Výsledok
 
+### K1 — kontrast 7 : 1 (3. 9. 2026)
+
+**SPLNENÉ s jednou pomenovanou výnimkou.** `test/unit/dizajn-kontrast.spec.ts`
+meria hranicu **7 : 1** a je zelený. Meria sa **7319 párov na tému nad 26
+plochami** (do V7: 2656 párov nad desiatimi). Najhorší textový pár je
+**7,12 : 1** v tmavej (biele písmo na `--st-critical-fill`) a **7,19 : 1**
+v svetlej (pruh PRODUKCIA).
+
+**NESPLNENÉ — jedna farba 7 : 1 neunesie a je to zmerané, nie zamlčané:**
+značkový teal svetlej témy (`--deep` = `#007278`, na ktorý ukazujú `--accent`
+aj `--brand`). Ako TEXT má na najhoršej ploche svetlej témy **4,60 : 1**, ako
+PLOCHA pod bielym písmom **5,71 : 1**. Obe sú nad WCAG 1.4.3 (AA), ani jedna
+nedosiahne 7 : 1 (AAA). Dotknutých je **218 párov, všetky v svetlej téme**
+(v tmavej je uvoľnených nula). Kritérium sa NEZNÍŽILO: `HRANICA_TEXT` je
+stále 7 a výnimka je viazaná na FARBU, nie na zoznam selektorov, plus nesie
+dva prepočítané dôkazy (§10a, §10b), ktoré sčervenajú, keď taký teal začne
+existovať. Dôvod je kolízia s farbosleposťou: na 7 : 1 sa teal dostane až pri
+~`#005156` a tam padne pod ΔE 8 od troch stavov (`paleta.spec.ts`). Vyhráva
+značenie — farba, ktorú časť ľudí nerozlíši od stavu, je horšia než farba,
+ktorá sa horšie číta.
+
+**Zatvorená diera, ktorú našla verifikácia V6c:** plochy boli RUČNÝ zoznam
+desiatich položiek, kým appka ich má 26 — sedem plôch nieslo text, ktorý sa
+nemeral ani raz. Odteraz sa plochy ODVODZUJÚ z CSS (94 pravidiel kreslí
+plochu; 51 sú plochy stránky, 10 sa meria farbou svojho základného stavu alebo
+predka, 35 párov pridávajú pravidlá potomkov, 33 je menovaných ako kresba bez
+textu — každé s dôvodom a s tvrdením, že naň naozaj nikto text nepíše).
+Nezaradená plocha padne v teste, nie o mesiac na obrazovke.
+
+**Čo to stálo (a čo sa preto nesmie „zjednotiť" späť):** stavové tinty zo 14 %
+na 10 % (nečinná z 12 % na 9 %), značková tinta z priesvitnej na plnú,
+`--st-critical-press` a `.btn.primary:hover` miešajú k `--ink` namiesto
+k `--mix-shade`, `<code>` v pruhu PRODUKCIA je tmavý čip namiesto svetlého.
+Všetky štyri boli pod hranicou a ani jednu žiadny test predtým nemeral:
+4,31 : 1 (stlačené červené tlačidlo v tmavej téme), 5,33 : 1 (čip v pruhu),
+6,76 : 1 (tlmený text na tinte), 6,85 : 1 (biele písmo na hoveri značky).
+
+### Ostatné kritériá
+
 _(dopĺňa sa)_

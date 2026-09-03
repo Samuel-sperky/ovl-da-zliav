@@ -1,129 +1,124 @@
 /**
- * Aura Zľavy — KPI RAD PREHĽADU: SKUTOČNÉ ZAPOJENIE (D136, V6b krok 1/3).
+ * Aura Zľavy — KPI RAD PREHĽADU: SKUTOČNÉ ZAPOJENIE (V7, krok 1/4).
  *
  * @vitest-environment jsdom
  *
  * PREČO TENTO SÚBOR EXISTUJE
  * ──────────────────────────
- * `KpiRow.tsx` a `kpi-row-model.ts` boli hotové a otestované dva dni pred tým,
- * než ich `Overview.tsx` začal vykresľovať. Modul bez volajúceho je presne to,
- * ako sa do tohto repa dostal mŕtvy `runEnrichBatch()`, a testy modelu o tom
- * mlčia z definície: dokazujú, že funkcia počíta správne, nie že ju niekto volá.
+ * `KpiRow.tsx` a `kpi-row-model.ts` boli vo V6b hotové a otestované dva dni
+ * pred tým, než ich `Overview.tsx` začal vykresľovať. Modul bez volajúceho je
+ * presne to, ako sa do tohto repa dostal mŕtvy `runEnrichBatch()`, a testy
+ * modelu o tom mlčia z definície: dokazujú, že funkcia počíta správne, nie že
+ * ju niekto volá.
  *
- * Merajú sa preto štyri veci, ktoré sa nedajú dokázať bez DOM-u:
+ * V7 to isté pravidlo platí na PREPÍNAČ OKNA. `SoldWindowSwitch` môže byť
+ * bezchybný a pritom neovládať nič — a `kpi-row-model.ts` by zostal zelený,
+ * pretože „zmenu nevieme" a pomlčka sú jeho legitímne odpovede.
  *
- *  1. **Rad je v DOM-e** (`data-testid="overview-kpi"`) so štyrmi dlaždicami
- *     v poradí `KPI_TILE_IDS`. Import bez vykreslenia toto tvrdenie nesplní.
- *  2. **Rad stojí NAD stavovým pásom** — rozhodnutie V6b, zdôvodnené
- *     v hlavičke `Overview.tsx`: pás sa sám otvorí pri každom nezelenom
- *     verdikte, čo je dnes (bez `shop_write` kľúča) bežný stav, takže rad pod
- *     ním by v obvyklom stave začínal až pod rozbalenou sekciou „Stav".
- *  3. **Prázdny rad vyzerá dobre a nelže** (R4 kontraktu V6, I11): keď sa
- *     neprečíta nič, sú tam štyri pomlčky a ani jedna nula. Nula je tvrdenie
- *     o produkčnom eshope.
- *  4. **Čísla z odpovedí naozaj DOTEČÚ do dlaždíc** — vrátane pilulky smeru,
- *     ktorá závisí od DRUHÉHO dotazu s `?anchor=`. Toto je tá časť drôtovania,
- *     ktorú model overiť nevie: keby `Overview` predchádzajúce okno nežiadal,
- *     model by naďalej správne hlásil „zmenu nevieme" a bol by zelený.
+ * Merajú sa preto veci, ktoré sa nedajú dokázať bez DOM-u:
+ *
+ *  1. **Rad je v DOM-e** (`data-testid="overview-kpi"`) s TROMI kartami
+ *     v poradí `KPI_CARD_IDS` (D152). Import bez vykreslenia to nesplní.
+ *  2. **Rad je PRVÝ obsah obrazovky** a prepínač okna stojí NAD ním (D155):
+ *     prepínač pod číslami by sa čítal ako ovládanie toho, čo je pod ním.
+ *     Do 3. 9. 2026 sa tu merala poloha rad → stavový PÁS; pás od V7 (D152)
+ *     na Prehľade nie je vôbec, takže sa meria rad → GRAF a k tomu to, že
+ *     pás ani prekážky na tejto obrazovke naozaj nie sú.
+ *  3. **Prázdny rad vyzerá dobre a nelže** (R4, I11): keď sa neprečíta nič,
+ *     sú tam tri pomlčky a ani jedna nula. Nula je tvrdenie o eshope.
+ *  4. **Čísla z odpovedí naozaj DOTEČÚ do kariet** — vrátane pilulky smeru,
+ *     ktorá závisí od DRUHÉHO dotazu s `?anchor=`.
+ *  5. **Prepínač okna mení KARTY AJ TABUĽKU** (D155). Tabuľku kreslí iný krok
+ *     V7, takže tu sa meria to, čo z nej už existuje a čo si z nej nemôže
+ *     vybrať: **jediný stav okna na obrazovke**. Dokazuje sa to tromi
+ *     tvrdeniami naraz — na Prehľade je PRESNE JEDEN prepínač okna predaja
+ *     (tabuľka si teda vlastný otvoriť nemôže), po kliknutí nesie koreň
+ *     obrazovky nové okno v `data-sold-window` (to je hodnota, z ktorej
+ *     tabuľka čerpá) a KPI si ho hneď vypýtali zo servera. Statickú stranu
+ *     toho istého pravidla — že si druhý stav okna neotvorí ani nikto ďalší
+ *     v `components/dashboard/` — drží `prehlad-kpi-okno.spec.ts`.
+ *  6. **Prepínač GRAFU zostáva samostatný** (D155): okno kariet ním nehýbe
+ *     a naopak. Jeden prepínač pre oboje Samuel odmietol výslovne.
  *
  * ŽIADNY SHOP (K8): jediné adresy, ktoré tu smú padnúť, sú lokálne `/api/*`;
  * test to overuje zoznamom volaní, nie dobrou vôľou. Okná odpovedí sa počítajú
  * z `window` a `anchor` v URL presne tak, ako ich počíta route — inak by sa
  * dve okná neprekrývali len náhodou a `windowsAdjoin()` by porovnanie zahodilo.
  *
- * Vlastník: V6b, KPI riadok Prehľadu.
+ * Vlastník: V7, krok 1/4 (KPI riadok a prepínače okna).
  */
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Overview from '@/components/dashboard/Overview';
-import { KPI_TILE_IDS } from '@/components/dashboard/kpi-row-model';
+import { KPI_CARD_IDS } from '@/components/dashboard/kpi-row-model';
 import { dayFromNumber, dayNumber } from '@/components/dashboard/sales-view';
+import { DEFAULT_SOLD_WINDOW, SOLD_WINDOW_DAYS } from '@/components/dashboard/sold-window';
 import { todayHere } from '@/lib/ui/vocabulary';
 
 /* ═══════════════════════════ 1. Prípravky ════════════════════════════════ */
 
 const NEVIEME = '—';
-/** Predvolené okno Prehľadu; odpovede sa preto skladajú pre 30 dní. */
-const WINDOW = 30;
 
 /** Okno odpovede tak, ako ho počíta route: `[kotva − (N−1), kotva]`. */
-function windowOf(url: string): { from: string; to: string } {
+function windowOf(url: string): { from: string; to: string; days: number } {
   const params = new URLSearchParams(url.slice(url.indexOf('?') + 1));
-  const days = Number(params.get('window') ?? WINDOW);
+  const days = Number(params.get('window') ?? DEFAULT_SOLD_WINDOW);
   const to = params.get('anchor') ?? todayHere();
   const last = dayNumber(to);
   if (last === null) throw new Error(`nečitateľná kotva: ${to}`);
-  return { from: dayFromNumber(last - (days - 1)), to };
+  return { from: dayFromNumber(last - (days - 1)), to, days };
 }
 
 /** Je to dotaz na PREDCHÁDZAJÚCE okno? Pilulka smeru stojí a padá na ňom. */
 const isAnchored = (url: string): boolean => url.includes('anchor=');
 
-const salesWindowPayload = (url: string) => ({
+/**
+ * Odpoveď koláča vlastných zliav. `dimension` je PODMIENKA, nie ozdoba —
+ * bez nej sa odpoveď zámerne nečíta (karta by nevedela, čí zápis počíta).
+ */
+const distributionPayload = () => ({
   ok: true,
   data: {
-    window: windowOf(url),
-    /* Staršie okno je slabšie, takže zmena je RAST — a je to jediný spôsob,
-       ako sa dá odlíšiť „appka porovnala" od „appka porovnať nevedela". */
-    windowUnits: isAnchored(url) ? 400 : 512,
-    unitsState: 'measured',
-    gaps: { unknownDays: 0 },
-  },
-});
-
-const revenueDailyPayload = (url: string) => ({
-  ok: true,
-  data: {
-    /* Bez `scope: 'eshop'` sa odpoveď zámerne NEČÍTA (D117) — nechať to na
-       náhodu by znamenalo test, ktorý prejde aj s tržbou neznámeho pôvodu. */
-    scope: 'eshop',
-    today: todayHere(),
-    window: windowOf(url),
-    series: [
-      {
-        currency: 'EUR',
-        days: [],
-        sum: isAnchored(url) ? '800.00' : '999.90',
-        sumState: 'measured',
-        lowerBoundDays: 0,
-      },
+    dimension: 'own-discount',
+    scope: 'catalog',
+    selectionSize: null,
+    total: 41_348,
+    slices: [
+      { bucket: 'active_now', count: 620, share: 0.015 },
+      { bucket: 'discounted_before', count: 1_200, share: 0.029 },
+      { bucket: 'never', count: 39_528, share: 0.956 },
     ],
-    missing: [],
-    hasGap: false,
+    unknown: { bucket: 'unknown', count: 0, share: 0, reason: 'none' },
+    sumMatchesTotal: true,
+    locked: [],
+    soldWindow: { days: 30, from: '2026-08-05', to: '2026-09-03' },
+    enrichedRows: 612,
   },
 });
 
-const enrichPayload = () => ({
-  ok: true,
-  data: {
-    state: {
-      everRan: true,
-      batchDay: todayHere(),
-      enrichedToday: 120,
-      dailyTarget: 600,
-      startedAt: null,
-      lastReadAt: null,
-      pauseReason: null,
-      pausedUntil: null,
-      paused: false,
-      waitsForHuman: false,
-      failedLastTime: false,
-      updatedAt: null,
+/**
+ * Odpoveď pomeru. Staršie okno je slabšie, takže zmena je RAST — a je to
+ * jediný spôsob, ako sa dá odlíšiť „appka porovnala" od „appka porovnať
+ * nevedela". Okná dlhšie než 90 dní priznávajú nedočítanú históriu (R3).
+ */
+const soldPerStockPayload = (url: string) => {
+  const window = windowOf(url);
+  const lowerBound = window.days > 90;
+  return {
+    ok: true,
+    data: {
+      window: { from: window.from, to: window.to },
+      soldPerStock: isAnchored(url) ? 1.2 : 1.5,
+      ratioState: lowerBound ? 'lower_bound' : 'measured',
+      windowUnits: 900,
+      stock: 600,
+      gaps: { unknownDays: lowerBound ? 274 : 0 },
+      coverage: { productsWithStock: 612, catalogRows: 41_348 },
     },
-    coverage: {
-      enriched: 612,
-      catalogProducts: 41_348,
-      shopTotalProducts: null,
-      remaining: 40_736,
-      percent: 1.5,
-      estimatedDaysLeft: 68,
-    },
-    unreadable: [],
-    at: '2026-09-02T06:00:00.000Z',
-  },
-});
+  };
+};
 
 /* ═══════════════════════════ 2. Prostredie ═══════════════════════════════ */
 
@@ -132,7 +127,7 @@ let root: Root;
 let calls: string[];
 const povodnyFetch = globalThis.fetch;
 
-/** `true` = VŠETKY endpointy odpovedia chybou (dôkaz o štyroch pomlčkách). */
+/** `true` = VŠETKY endpointy odpovedia chybou (dôkaz o troch pomlčkách). */
 let vsetkoZlyha = false;
 
 beforeEach(() => {
@@ -150,16 +145,15 @@ beforeEach(() => {
     const url = String(input);
     calls.push(url);
     if (vsetkoZlyha) return Promise.resolve(chyba());
-    if (url.startsWith('/api/insights/sales-daily')) {
-      return Promise.resolve(json(salesWindowPayload(url)));
+    if (url.startsWith('/api/insights/catalog-distribution')) {
+      return Promise.resolve(json(distributionPayload()));
     }
-    if (url.startsWith('/api/insights/revenue-daily')) {
-      return Promise.resolve(json(revenueDailyPayload(url)));
+    if (url.startsWith('/api/insights/sold-per-stock')) {
+      return Promise.resolve(json(soldPerStockPayload(url)));
     }
-    if (url.startsWith('/api/catalog/enrich')) return Promise.resolve(json(enrichPayload()));
-    /* Ostatné dotazy obrazovky (stav, fronta, zľavy, rebríček) tento súbor
-       nemeria. Odpovedajú chybou zámerne: dlaždice, ktoré z nich čerpajú,
-       musia zostať pomlčkami aj vtedy, keď ich susedia čísla majú. */
+    /* Ostatné dotazy obrazovky (stav, fronta, zľavy, rebríček, graf) tento
+       súbor nemeria. Odpovedajú chybou zámerne: karty, ktoré z nich nečerpajú,
+       musia zostať pravdivé aj vtedy, keď je zvyšok obrazovky bez dát. */
     return Promise.resolve(chyba());
   }) as unknown as typeof globalThis.fetch;
 
@@ -175,7 +169,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Vykreslí Prehľad a nechá dobehnúť efekty aj prísľuby oboch načítaní. */
+/** Vykreslí Prehľad a nechá dobehnúť efekty aj prísľuby všetkých načítaní. */
 async function otvor(): Promise<void> {
   await act(async () => {
     root.render(createElement(Overview));
@@ -185,27 +179,47 @@ async function otvor(): Promise<void> {
   });
 }
 
+const strom = (): Element | null => container.querySelector('[data-testid="overview"]');
 const rad = (): Element | null => container.querySelector('[data-testid="overview-kpi"]');
-const dlazdica = (id: string): Element | null =>
+const karta = (id: string): Element | null =>
   container.querySelector(`[data-testid="kpi-${id}"]`);
-const hodnota = (id: string): Element | null | undefined =>
-  dlazdica(id)?.querySelector('.v');
+const hodnota = (id: string): Element | null | undefined => karta(id)?.querySelector('.v');
+const detail = (id: string): string | null | undefined =>
+  karta(id)?.querySelector('.s')?.textContent;
+
+/** Prepínač okna kariet a tabuľky. */
+const prepinac = (): Element | null =>
+  container.querySelector('[data-testid="overview-sold-window-segmented"]');
+
+/** Klik na okno v prepínači kariet. Meno segmentu je celá fráza („180 dní"). */
+async function prepni(days: number): Promise<void> {
+  const button = prepinac()?.querySelector<HTMLButtonElement>(
+    `[aria-label="${String(days)} dní"]`,
+  );
+  if (button === null || button === undefined) throw new Error(`segment ${days} nie je`);
+  await act(async () => {
+    button.click();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
 
 /* ═════════════════════ 3. Rad je naozaj vykreslený ═══════════════════════ */
 
-describe('D136 — KPI rad Prehľadu je VYKRESLENÝ, nie len naimportovaný', () => {
-  it('rad je v DOM-e a nesie štyri dlaždice v záväznom poradí', async () => {
+describe('D152 — KPI rad Prehľadu je VYKRESLENÝ, nie len naimportovaný', () => {
+  it('rad je v DOM-e a nesie TRI karty v záväznom poradí', async () => {
     await otvor();
     const node = rad();
     expect(node).not.toBeNull();
-    // Poradie sa neopisuje ručne — berie sa z modelu, takže piata dlaždica
+    // Poradie sa neopisuje ručne — berie sa z modelu, takže štvrtá karta
     // alebo iné poradie zčervená tu, nie až v prehliadači.
     expect([...(node?.children ?? [])].map((el) => el.getAttribute('data-testid'))).toEqual(
-      KPI_TILE_IDS.map((id) => `kpi-${id}`),
+      KPI_CARD_IDS.map((id) => `kpi-${id}`),
     );
   });
 
-  it('zlatý vlas má PRESNE JEDNA dlaždica radu', async () => {
+  it('zlatý vlas má PRESNE JEDNA karta radu', async () => {
     await otvor();
     const zlate = [...(rad()?.children ?? [])].filter(
       (el) => el.getAttribute('data-accent') === 'gold',
@@ -213,15 +227,35 @@ describe('D136 — KPI rad Prehľadu je VYKRESLENÝ, nie len naimportovaný', ()
     expect(zlate.length).toBe(1);
   });
 
-  it('rad stojí NAD stavovým pásom (rozhodnutie V6b)', async () => {
+  it('rad stojí NAD grafom a prepínač okna NAD radom (D155)', async () => {
     await otvor();
     const node = rad();
-    const pas = container.querySelector('[data-testid="overview-status-band"]');
+    const seg = container.querySelector('[data-testid="overview-sold-window"]');
+    const graf = container.querySelector('[data-testid="discount-split"]');
     expect(node).not.toBeNull();
-    expect(pas).not.toBeNull();
-    // DOCUMENT_POSITION_FOLLOWING: pás nasleduje ZA radom.
-    const vztah = node?.compareDocumentPosition(pas as Node) ?? 0;
-    expect(vztah & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(seg).not.toBeNull();
+    expect(graf).not.toBeNull();
+    // DOCUMENT_POSITION_FOLLOWING: rad nasleduje ZA prepínačom, graf ZA radom.
+    expect(
+      (seg?.compareDocumentPosition(node as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      (node?.compareDocumentPosition(graf as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /*
+   * D152 — pás a prekážky odišli na Nastavenia. Meria sa to TU, vedľa merania
+   * poradia: keby sa vrátili, poradie rad → graf by zostalo zelené a jediné,
+   * čo by sa zmenilo, je počet vecí na obrazovke, teda práve tá príčina, pre
+   * ktorú V7 existuje. Celý presun (aj cieľovú obrazovku) meria
+   * `prehlad-styri-sekcie.spec.ts`.
+   */
+  it('stavový pás ani prekážky na Prehľade NIE SÚ (D152)', async () => {
+    await otvor();
+    expect(container.querySelector('[data-testid="overview-status-band"]')).toBeNull();
+    expect(container.querySelector('[data-testid="overview-status"]')).toBeNull();
+    expect(container.querySelector('[data-testid="overview-blockers"]')).toBeNull();
   });
 
   it('na render ceste sa nevolá shop, len lokálne `/api/*` (K8)', async () => {
@@ -233,19 +267,19 @@ describe('D136 — KPI rad Prehľadu je VYKRESLENÝ, nie len naimportovaný', ()
 
 /* ═══════════════════ 4. Prázdny rad (R4) — pomlčky, nie nuly ══════════════ */
 
-describe('R4 — rad bez dát je štyri pomlčky a ani jedna nula', () => {
-  it('keď sa neprečíta nič, každá dlaždica priznáva „nevieme"', async () => {
+describe('R4 — rad bez dát je tri pomlčky a ani jedna nula', () => {
+  it('keď sa neprečíta nič, každá karta priznáva „nevieme"', async () => {
     vsetkoZlyha = true;
     await otvor();
     expect(rad()).not.toBeNull();
-    for (const id of KPI_TILE_IDS) {
+    for (const id of KPI_CARD_IDS) {
       const cell = hodnota(id);
       expect(cell?.textContent, id).toBe(NEVIEME);
       expect(cell?.getAttribute('data-unknown'), id).toBe('ano');
     }
   });
 
-  it('ani jedna dlaždica prázdneho radu sa nevykreslí ako nula', async () => {
+  it('ani jedna karta prázdneho radu sa nevykreslí ako nula', async () => {
     vsetkoZlyha = true;
     await otvor();
     const nuly = [...(rad()?.querySelectorAll('.v') ?? [])].filter(
@@ -257,29 +291,30 @@ describe('R4 — rad bez dát je štyri pomlčky a ani jedna nula', () => {
   it('pilulka smeru prázdneho radu hovorí „zmenu nevieme", nie 0 %', async () => {
     vsetkoZlyha = true;
     await otvor();
-    for (const id of ['predane', 'trzba']) {
-      const pill = container.querySelector(`[data-testid="kpi-delta-${id}"]`);
-      expect(pill?.getAttribute('data-delta'), id).toBe('unknown');
-      expect(pill?.textContent, id).not.toContain('0 %');
-    }
+    const pill = container.querySelector('[data-testid="kpi-delta-predane-na-sklad"]');
+    expect(pill?.getAttribute('data-delta')).toBe('unknown');
+    expect(pill?.textContent).not.toContain('0 %');
   });
 });
 
-/* ═════════════ 5. Čísla z odpovedí naozaj dotečú do dlaždíc ═══════════════ */
+/* ═════════════ 5. Čísla z odpovedí naozaj dotečú do kariet ════════════════ */
 
-describe('D136 — dlaždice ukazujú to, čo prišlo z čítacích endpointov', () => {
-  it('predané kusy a tržba sedia na odpovedi okna', async () => {
+describe('D152 — karty ukazujú to, čo prišlo z čítacích endpointov', () => {
+  it('katalóg a počet vlastných zliav sedia na jednej odpovedi', async () => {
     await otvor();
-    expect(hodnota('predane')?.textContent).toBe('512');
-    expect(hodnota('predane')?.getAttribute('data-unknown')).toBe('nie');
-    // Desatinná ČIARKA a znak meny — suma sa nesmie prekresliť ako číslo kusov.
-    expect(hodnota('trzba')?.textContent).toContain('999,90');
-    expect(hodnota('trzba')?.textContent).toContain('€');
+    expect(hodnota('katalog')?.textContent).toBe('41 348');
+    expect(hodnota('katalog')?.getAttribute('data-unknown')).toBe('nie');
+    expect(hodnota('zlacnene')?.textContent).toBe('620');
+    // Podiel aj menovka „čí zápis to je" musia byť VIDIEŤ (I11, D156).
+    expect(detail('zlacnene')).toContain('1,5 %');
+    expect(detail('zlacnene')).toContain('podľa vlastných zápisov');
   });
 
-  it('obohatené z katalógu sedí na stave dávky', async () => {
+  it('pomer sa píše ako `N×` a hovorí, z koľkých produktov je', async () => {
     await otvor();
-    expect(hodnota('obohatene')?.textContent).toBe('612');
+    expect(hodnota('predane-na-sklad')?.textContent).toBe('1.5×');
+    expect(detail('predane-na-sklad')).toContain('612');
+    expect(detail('predane-na-sklad')).toContain('30 dní');
   });
 
   it('Prehľad si vypýtal aj PREDCHÁDZAJÚCE okno a pilulka z neho počíta', async () => {
@@ -287,21 +322,107 @@ describe('D136 — dlaždice ukazujú to, čo prišlo z čítacích endpointov',
     // Bez druhého dotazu s `?anchor=` by porovnanie neexistovalo — a model by
     // pritom zostal zelený, lebo „zmenu nevieme" je jeho legitímna odpoveď.
     const anchored = calls.filter(
-      (url) => url.startsWith('/api/insights/sales-daily') && url.includes('anchor='),
+      (url) => url.startsWith('/api/insights/sold-per-stock') && url.includes('anchor='),
     );
     expect(anchored.length).toBe(1);
 
-    const pill = container.querySelector('[data-testid="kpi-delta-predane"]');
+    const pill = container.querySelector('[data-testid="kpi-delta-predane-na-sklad"]');
     expect(pill?.getAttribute('data-delta')).not.toBe('unknown');
     expect(pill?.textContent).toContain('%');
   });
 
-  it('dlaždica z nečitateľného endpointu zostane pomlčkou vedľa dlaždíc s číslami', async () => {
+  it('karta z nečitateľného endpointu zostane pomlčkou vedľa kariet s číslami', async () => {
+    /* Koláč odpovie, pomer nie: priznanie je per karta, nie per rad. */
+    const povodny = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.startsWith('/api/insights/catalog-distribution')) {
+        return Promise.resolve(
+          { ok: true, json: () => Promise.resolve(distributionPayload()) } as unknown as Response,
+        );
+      }
+      return Promise.resolve(
+        {
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: { code: 'db_down' } }),
+        } as unknown as Response,
+      );
+    }) as unknown as typeof globalThis.fetch;
+
     await otvor();
-    // `/api/campaigns` v tomto súbore odpovedá chybou, takže `calm === null`.
-    expect(hodnota('zlavy')?.textContent).toBe(NEVIEME);
-    expect(hodnota('zlavy')?.getAttribute('data-unknown')).toBe('ano');
-    // A susedná dlaždica pritom číslo MÁ — priznanie je per dlaždica, nie per rad.
-    expect(hodnota('predane')?.textContent).toBe('512');
+    globalThis.fetch = povodny;
+
+    expect(hodnota('predane-na-sklad')?.textContent).toBe(NEVIEME);
+    expect(hodnota('predane-na-sklad')?.getAttribute('data-unknown')).toBe('ano');
+    expect(hodnota('katalog')?.textContent).toBe('41 348');
+  });
+});
+
+/* ═══════ 6. Prepínač okna mení KARTY AJ TABUĽKU (D155, bod 5 hlavičky) ════ */
+
+describe('D155 — jeden prepínač okna pre karty aj tabuľku', () => {
+  it('prepínač ponúka presne tie okná, ktoré appka pozná', async () => {
+    await otvor();
+    const labels = [...(prepinac()?.querySelectorAll('[role="radio"]') ?? [])].map(
+      (el) => el.textContent,
+    );
+    expect(labels).toEqual(SOLD_WINDOW_DAYS.map((days) => String(days)));
+    // Zvolené je predvolené okno a nesie to ARIA, nie len farba.
+    const checked = prepinac()?.querySelector('[aria-checked="true"]');
+    expect(checked?.textContent).toBe(String(DEFAULT_SOLD_WINDOW));
+  });
+
+  it('na obrazovke je PRESNE JEDEN prepínač okna predaja', async () => {
+    await otvor();
+    /*
+     * Druhý by znamenal, že karty a tabuľka môžu ukazovať dve rôzne obdobia.
+     * Tabuľku kreslí iný krok V7 a toto tvrdenie je brána, cez ktorú nesmie
+     * prejsť s vlastným prepínačom.
+     */
+    expect(container.querySelectorAll('[data-testid="overview-sold-window"]').length).toBe(1);
+  });
+
+  it('klik prepíše okno na koreni obrazovky — to je zdroj okna tabuľky', async () => {
+    await otvor();
+    expect(strom()?.getAttribute('data-sold-window')).toBe(String(DEFAULT_SOLD_WINDOW));
+    await prepni(180);
+    expect(strom()?.getAttribute('data-sold-window')).toBe('180');
+  });
+
+  it('klik si HNEĎ vypýta nové okno zo servera a karta ho ukáže', async () => {
+    await otvor();
+    const predtym = calls.filter((url) => url.includes('window=180')).length;
+    expect(predtym).toBe(0);
+
+    await prepni(180);
+
+    const potom = calls.filter(
+      (url) => url.startsWith('/api/insights/sold-per-stock') && url.includes('window=180'),
+    );
+    // Aktuálne okno aj predchádzajúce okno rovnakej dĺžky.
+    expect(potom.length).toBe(2);
+    expect(potom.filter((url) => url.includes('anchor=')).length).toBe(1);
+
+    // 180 dní histórie appka dnes celé nemá, takže karta nesie `≥` a POVIE to.
+    expect(hodnota('predane-na-sklad')?.textContent).toBe('≥ 1.5×');
+    expect(hodnota('predane-na-sklad')?.getAttribute('data-lower-bound')).toBe('true');
+    expect(detail('predane-na-sklad')).toContain('274 dní okna nemáme');
+    expect(detail('predane-na-sklad')).toContain('180 dní');
+  });
+
+  it('prepínač kariet NEHÝBE prepínačom grafu (D155 — sú to dva)', async () => {
+    await otvor();
+    const grafPredtym = container
+      .querySelector('[data-testid="overview-window"]')
+      ?.querySelector('.on')?.textContent;
+    await prepni(180);
+    const grafPotom = container
+      .querySelector('[data-testid="overview-window"]')
+      ?.querySelector('.on')?.textContent;
+    expect(grafPotom).toBe(grafPredtym);
+    // A okno grafu sa ani nedožadovalo prekreslenia na 180 dní (server ho
+    // v `WINDOW_DAYS_ALLOWED` nemá a odmietol by ho 400-kou).
+    expect(calls.some((url) => url.startsWith('/api/insights/timeline?window=180'))).toBe(false);
   });
 });

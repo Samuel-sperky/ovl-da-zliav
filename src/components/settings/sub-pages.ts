@@ -114,10 +114,29 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     slug: 'co-smie',
     title: 'Čo smie robiť a koľko toho smie',
     lead:
-      'Strop jednej zľavy, poistky zápisu a denné rozpočty. Tu sa dvíha strop ' +
-      'z desiatich produktov na tisíce.',
+      'Stav appky a čo ju práve zastavuje. Ďalej strop jednej zľavy, poistky ' +
+      'zápisu a denné rozpočty — tu sa dvíha strop z desiatich produktov na tisíce.',
     onIndex: true,
     groups: [
+      {
+        /*
+         * STAV A PREKÁŽKY PRIŠLI Z PREHĽADU (V7, D152, 3. 9. 2026).
+         *
+         * Prehľad mal šesť vecí pod sebou a má mať štyri, takže stavový pás
+         * a prekážky odišli sem. Práve sem, a nie na „Čo sa už stalo": prekážky
+         * hovoria, čo appka PRÁVE NESMIE alebo nemôže (chýba kľúč, odmietnutá
+         * adresa, vyčerpaný rozpočet, zámok poistky) — teda tú istú otázku,
+         * akú kladie celá táto podstránka. Stránka navyše už dnes číta frontu
+         * aj stav, takže sa presunom nepridalo ani jedno nové volanie do
+         * `PAGE_NEEDS`.
+         *
+         * Je to PRVÁ skupina zámerne: bez kľúča na zápis je nezelený verdikt
+         * bežný stav (R4) a človek, ktorý sem prišel z tichého odkazu na
+         * Prehľade, má prekážku vidieť bez rolovania.
+         */
+        title: 'Čo appku práve zastavuje',
+        anchors: [{ id: 'stav', label: 'Stav a prekážky' }],
+      },
       {
         title: 'Čo smie robiť',
         anchors: [

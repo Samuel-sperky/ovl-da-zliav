@@ -66,14 +66,16 @@ test.describe('katalóg — obnova nad celým katalógom', () => {
 
       await page.screenshot({ path: 'screenshots/katalog-obnova-produkty.png', fullPage: true });
 
-      /* 4. Prehľad — kontrola katalógu hovorí to isté. */
-      await page.goto('/');
+      /* 4. Stav appky — kontrola katalógu hovorí to isté. Riadok kontrol stál
+            do V7 (D152) na Prehľade; odtiaľ odišiel spolu so stavovým pásom
+            do Nastavení, obsah sa nezmenil. */
+      await page.goto('/nastavenia/co-smie#stav');
       const checks = page.getByTestId('overview-checks');
       await expect(checks).toBeVisible();
       await expect(checks).toContainText('načítaný celý');
       await expect(checks).toContainText('obnovuje');
 
-      await page.screenshot({ path: 'screenshots/katalog-obnova-prehlad.png', fullPage: true });
+      await page.screenshot({ path: 'screenshots/katalog-obnova-stav.png', fullPage: true });
     } finally {
       // `catalog_sync_state` je singleton a `db.reset()` ho nečistí — stav by
       // inak pretiekol do ďalších scenárov.

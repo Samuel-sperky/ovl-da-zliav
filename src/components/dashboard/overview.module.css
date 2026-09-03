@@ -1,33 +1,92 @@
 /*
- * Aura Zľavy — geometria Prehľadu (V9).
+ * Aura Zľavy — geometria Prehľadu A SEKCIE STAVU (V9; rozdelené vo V7).
  *
  * Zámerne LEN rozloženie, žiadne nové komponenty ani farby. Všetky vizuálne
  * prvky (.sec, .bar, .suggest, .kpi, .chart, .sig, .empty …) žijú
  * v `globals.css` a vlastní ich V2 — tento súbor je presne to, čo mali
  * mockupy `design/v3/prehlad*.html` vo svojom `<style>` bloku.
  *
- * HIERARCHIA VEĽKOSTÍ (P1) — jediné dve čísla, na ktorých obrazovka stojí:
+ * MODUL DNES KRESLÍ DVE OBRAZOVKY, A JE TO ZÁMER (V7, D152)
+ * ────────────────────────────────────────────────────────
+ * Stavový pás, sekcia „Stav" a prekážky sa od 3. 9. 2026 nekreslia na Prehľade,
+ * ale v Nastaveniach (`settings/AppStateSection.tsx`, kotva `#stav`). Ich
+ * triedy zostali TU, pretože sa presunula obrazovka, nie vlastníctvo — a
+ * rozdeliť ich do druhého modulu by znamenalo prepísať cesty v ôsmich testoch,
+ * ktoré ich čítajú z disku. Ktoré triedy patria ktorej obrazovke:
  *
- *   dominanta  `.lvl-1 .big.sm` z globals ....... 44 px
- *   druhá vec  `.queueNum` (číslo fronty) ....... 22 px  =  50 % dominanty
+ *   Prehľad ......... `.page`, `.trouble*`, `.mid`, `.liveCol`, `.midSingle`,
+ *                     `.colh`, `.camp*` (sekcia Zľavy)
+ *   Nastavenia ...... `.band*`, `.top`, `.actions`, `.queue*`, `.figs`,
+ *                     `.checks`, `.checkLink`, `.why`, `.gapNote`,
+ *                     `.actionNote`, `.reason*`, `.assumed`
+ *   nekreslí sa ..... `.salesGrid`, `.kpiCol`, `.chartCell`, `.revenueRow`,
+ *                     `.thin` (SalesSection), `.rank*` (TopFlopSection) —
+ *                     obe sekcie sú pod D152 nad počet a ich súbory ostávajú
+ *                     pre prípad, že sa pre ne nájde domov.
  *
- * P1 povoľuje 55 %, takže je tu rezerva. Tretia najväčšia vec na obrazovke je
- * `.kpi .v` v Predaji (22 px, z globals) — zhodou okolností rovnaká, čo je
- * v poriadku: dominanta je stále jediná. Veľkosť nesie len `.lvl-1 .big`
- * (`.prog-lg` je od 19. 8. 2026 iba geometria). Kto sem vráti vlastnú veľkosť
- * alebo `.calm` (32 px), zhodí P1 a nebude to vidieť inak než meraním.
+ * HIERARCHIA VEĽKOSTÍ (P1)
+ * ────────────────────────
+ * Dominanta `.lvl-1 .big.sm` (44 px) je od V7 v NASTAVENIACH, nie na Prehľade:
+ * je to číslo fronty a fronta je stav appky. Na Prehľade je najväčšie číslo
+ * karta KPI (~40 px, `kpi-row.module.css`, D154) a je JEDNA — tri karty radu sú
+ * jeden rad, nie tri dominanty. Druhá vec na tejto strane je `.queueNum`
+ * (22 px) v Nastaveniach; obe obrazovky tak majú vlastnú jedinú dominantu.
+ * Kto sem vráti vlastnú veľkosť alebo `.calm` (32 px), zhodí P1 a nebude to
+ * vidieť inak než meraním.
  *
- * Vlastník: V9.
+ * Vlastník: V9; rozdelenie obrazoviek V7 (krok 4/4).
  */
 
 /*
- * Štyri sekcie pod sebou. Zámerne NIE `.ovl-stack` — ten má
+ * Sekcie pod sebou. Zámerne NIE `.ovl-stack` — ten má
  * `align-items: flex-start` a sekcie by sa scvrkli na šírku obsahu.
  */
 .page {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* ─────────────── Tichý riadok, keď niečo horí (V7, D152) ────────────────── */
+
+/*
+ * JEDEN RIADOK, NIE PÁS. Stavový pás odišiel do Nastavení a toto je jediné, čo
+ * po ňom na Prehľade zostalo: značka a slovo verdiktu, jedna veta detailu
+ * a odkaz na stav. Kreslí sa len vtedy, keď verdikt nie je `ok`.
+ *
+ * ZÁMERNE BEZ PLOCHY A BEZ RÁMU. Karta by z priznania spravila piatu sekciu —
+ * a „priveľa vecí na obrazovke" je práve tá príčina, pre ktorú V7 existuje.
+ * Štruktúru drží riadok textu, farbu nesie `.sig` z globals (tri kanály:
+ * farba + značka + slovo), takže tu nie je ani jedna vlastná farba.
+ *
+ * `baseline`, nie `center`: značka verdiktu je 11,5 px a veta 12 px, takže na
+ * stred zarovnané by sedeli o pol pixela vedľa seba.
+ */
+.trouble {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+/*
+ * Odkaz na stav. `inherit` je zámer, nie lenivosť — vlastná farba by z tichého
+ * riadku spravila druhý akcent vedľa značky verdiktu a zároveň by pridala
+ * kontrastný pár, ktorý D164 meria proti VŠETKÝM plochám stránky. Že je to
+ * odkaz, hovorí podčiarknutie a slovo, nie farba.
+ */
+.troubleLink {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.troubleLink:hover {
+  text-decoration-thickness: 2px;
 }
 
 /* Dominanta: verdikt a fronta vľavo, stĺpec akcií vpravo. */
@@ -394,11 +453,13 @@
 
 /* ───────────────────────────── Drobnosti ────────────────────────────────── */
 
-/* Jeden riadok pod akciou — chyba akcie, nikdy nie vymyslené číslo. */
+/* Jeden riadok pod akciou — chyba akcie, nikdy nie vymyslené číslo.
+   `-ink`, nie plný tón: plný #6b4300 mal v svetlej téme na papieri pod
+   závojom 6,88 : 1 (D164). */
 .actionNote {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--st-attention);
+  color: var(--st-attention-ink);
 }
 
 /*

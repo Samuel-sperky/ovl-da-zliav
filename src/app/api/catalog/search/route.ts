@@ -171,6 +171,17 @@ const searchQuerySchema = z.object({
   soldBuckets: csvQuery,
   shopStatus: csvQuery,
   neverDiscounted: boolQuery,
+  /**
+   * `everDiscounted=1` — len produkty, na ktoré appka UŽ NIEKEDY zapísala
+   * zľavu (V7, D160).
+   *
+   * Presný opak `neverDiscounted`. Príznak `everDiscounted` nesie každý riadok
+   * odpovede od začiatku, ale filtrovať sa podľa neho nedalo — a tretia
+   * možnosť prepínača „stav zľavy" na Prehľade sa preto nedala postaviť bez
+   * toho, aby obrazovka zúžila naklikanú stránku a tvrdila o celom zrkadle to,
+   * čo overila na päťdesiatich riadkoch.
+   */
+  everDiscounted: boolQuery,
   currentlyDiscounted: boolQuery,
   /**
    * `shopDiscounted=1` — len produkty, na ktorých beží zľava PODĽA SHOPU (D116).
@@ -504,6 +515,7 @@ export function createCatalogSearchRoute(deps: CatalogSearchRouteDeps = {}): Nex
           page: q.page,
           perPage: q.perPage,
           neverDiscounted: q.neverDiscounted,
+          everDiscounted: q.everDiscounted,
           currentlyDiscounted: q.currentlyDiscounted,
           shopDiscounted: q.shopDiscounted,
         };

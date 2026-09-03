@@ -1,113 +1,127 @@
 'use client';
 
 /**
- * Aura Zľavy — PREHĽAD (V9, prestavaný V4 podľa D113, 28. 8. 2026).
+ * Aura Zľavy — PREHĽAD (V7, D152/D153/D166; prepis obrazovky, 3. 9. 2026).
  *
- * OTÁZKA, NA KTORÚ TÁTO OBRAZOVKA ODPOVEDÁ, SA ZMENILA. Do 28. 8. 2026 to bolo
- * „je všetko v poriadku?" a podľa toho bola postavená: dominantou bolo číslo
- * fronty v 44 px, stav appky bral vrchnú tretinu obrazovky aj vtedy, keď bolo
- * zeleno, a predaj bol štvrtá sekcia pod ohybom. D113 to obracia: prvá strana
- * odpovedá na **„čo sa predáva, čo leží, čo robia moje zľavy"**.
+ * Samuel preklikol V6 a povedal „nie je to čitateľné a prehľadné". Na otázku
+ * čo presne označil VŠETKY ŠTYRI ponúknuté príčiny — nízky kontrast, priveľa
+ * vecí na obrazovke, splývajúce panely, malé písmo a slabé čísla. Táto
+ * obrazovka odpovedá na druhú z nich: **mala šesť vecí pod sebou a má mať
+ * štyri.**
  *
- * Sekcia „Stav" sa NEPREPÍSALA ani nezmizla — zúžila sa do jedného riadku
- * (`StatusBand`) a celá zostáva pod jeho rozklikom. Dôvod je v hlavičke toho
- * komponentu; podstatné je, že sa neobjavila druhá formulácia toho istého stavu.
+ * ŠTYRI SEKCIE, V TOMTO PORADÍ (D152)
+ * ───────────────────────────────────
  *
- * PORADIE ZHORA (P5 — štyri sekcie sú STROP, nie cieľ)
- * ───────────────────────────────────────────────────
+ *   0. HLAVIČKA — `PageHeader`. Nie je sekcia, je to jeden riadok nadpisu
+ *      s vetou pod ním; rovnaký zvislý rytmus ako Zľavy, Produkty a Nastavenia.
+ *   0a. TICHÝ ODKAZ, KEĎ NIEČO HORÍ — jeden riadok, a len vtedy, keď verdikt
+ *      nie je `ok`. Dôvod, prečo tu nie je celý stavový pás, je nižšie.
+ *   0b. PREPÍNAČ OKNA KARIET A TABUĽKY — 30/60/90/180/360 dní
+ *      (`SoldWindowSwitch`, D155). Stojí NAD radom, pretože platí pre karty aj
+ *      pre tabuľku pod grafom. Nie je sekcia — je to ovládanie dvoch z nich.
+ *   1. KPI RIADOK — tri karty: produktov v katalógu, v zľave, predané na sklad
+ *      (`KpiRow`, D148/D152/D154).
+ *   2. DENNÝ PREDAJ — čiarový graf v TROCH krivkách: v zľave · bez zľavy ·
+ *      nevieme, či bola (`DiscountSplitChart`, D156–D158). Tretia krivka nie je
+ *      ozdoba: appka vie o zľave len to, čo sama zapísala, takže bez nej by
+ *      každý deň pred jej prvým zápisom spadol do „bez zľavy" a graf by tvrdil,
+ *      čo nevie.
+ *   3. TABUĽKA PRODUKTOV — deväť stĺpcov, filtre, stránkovač
+ *      (`ProductsTable`, D159–D163). Riadok NIE JE klikateľný: Prehľad je na
+ *      čítanie, detail a výber zostávajú v Produktoch.
+ *   4. ZĽAVY — čo beží, čo sa ponúka, najbližší plánovaný zápis a posledný
+ *      výsledok zápisu (`CampaignsSection`). Toto je „bežiace zľavy" z D152;
+ *      krátky zoznam, nie zoznam zliav — `liveCampaigns()` drží tri riadky.
  *
- *   0−−. HLAVIČKA STRÁNKY — `PageHeader` (V6b). Jedno `h1` na strom a rovnaký
- *      zvislý rytmus zhora ako na Zľavách, Produktoch a v Nastaveniach. Do V6b
- *      Prehľad nadpis NEMAL vôbec: obsah začínal v inej výške než ostatné tri
- *      oblasti a čítačka na tejto stránke nemala kde začať. Hlavička nie je
- *      sekcia — je to jeden riadok nadpisu s vetou pod ním.
- *   0−. KPI RIADOK — štyri dlaždice: predané kusy, tržba celého eshopu, bežiace
- *      zľavy, obohatené z katalógu. `KpiRow`.
- *   0. STAVOVÝ PÁS — jeden riadok: verdikt, kľúč, rozpočet, fronta. Rozklik
- *      nesie pôvodnú sekciu „Stav" so všetkými jej kontrolami a tlačidlami.
- *      Otvorí sa SÁM, keď verdikt nie je `ok`.
- *   0b. PREKÁŽKY — `BlockersSection`, hneď pod pásom a NIKDY pod rozklikom.
- *      Bez kľúča na zápis je celý zvyšok obrazovky dekorácia: grafy sú
- *      pravdivé a appka pritom nezapíše ani jednu zľavu.
- *   1. PREDAJ — denná krivka kusov s podfarbenými oknami zliav a priznanými
- *      medzerami, plus denná tržba CELÉHO ESHOPU (D117). `SalesSection`.
- *   2. ČO SA PREDÁVA — top 10 a flop 10 podľa kusov. `TopFlopSection`.
- *   3. ZĽAVY — čo beží, čo sa ponúka, najbližší plánovaný zápis a posledný
- *      výsledok zápisu. `CampaignsSection`.
+ * ČO ODIŠLO NA NASTAVENIA A PREČO TO NIE JE SCHOVANIE (D152)
+ * ─────────────────────────────────────────────────────────
+ * Stavový pás (`StatusBand` + celá sekcia „Stav" pod jeho rozklikom) a prekážky
+ * (`BlockersSection`) sa z tejto obrazovky NEKRESLIA. Kreslí ich
+ * `settings/AppStateSection.tsx` na podstránke „Čo smie robiť a koľko toho
+ * smie" pod kotvou `#stav` — teda tam, kde už žijú rozsah, poistky zápisu
+ * a rozpočty, ktorých sa prekážky týkajú.
  *
- * Pás ani prekážky nie sú sekcie: pás je jeden riadok a prekážky sa v pokoji
- * nekreslia vôbec. Sekcie sú teda tri, v najhoršom prípade štyri.
+ * Hlavička `StatusBand` má na to dva body, ktoré sa NESMÚ pokaziť, a oba tento
+ * presun rešpektuje:
  *
- * ROZHODNUTIE (V6b, 2. 9. 2026): KPI RIADOK STOJÍ **NAD** STAVOVÝM PÁSOM
- * ─────────────────────────────────────────────────────────────────────
- * D136 znie „riadok KPI kariet hore, hlavný graf pod nimi" a možnosť „stavový
- * pás najprv" Samuel VÝSLOVNE ODMIETOL: kým je všetko zelené, bol by to prázdny
- * pás na najlepšom mieste obrazovky. Rad preto dostáva prvé miesto a pás padá
- * o jedno nižšie.
+ *  · **„Prekážky nikdy neidú pod rozklik."** Na Nastaveniach stoja MIMO
+ *    rozkliku, presne ako predtým stáli mimo neho tu. Nie sú v `<details>`.
+ *  · **„Pás sa sám otvorí, keď nie je zeleno."** Otvára sa ďalej — `open` je
+ *    vlastnosť komponentu, nie obrazovky, a na Nastaveniach platí rovnako.
  *
- * Nie je to estetika, je to fold. Pás sa SÁM otvorí pri každom verdikte okrem
- * `ok` (bod 2 v hlavičke `StatusBand`) a dnes — bez `shop_write` kľúča — je
- * nezelený verdikt BEŽNÝ stav. Rad pod pásom by teda v obvyklom stave začínal
- * až pod rozbalenou sekciou „Stav", teda presne tam, kam D113 odsun predaja už
- * raz zakázalo. Nad pásom má rad výšku jedného radu dlaždíc a je vždy prvý.
+ * Čo sa presunom STRATILO, je jeden klik: bez kľúča na zápis je nezelený
+ * verdikt BEŽNÝ stav (R4) a celý zvyšok tejto obrazovky je vtedy dekorácia —
+ * grafy sú pravdivé a appka pritom nezapíše ani jednu zľavu. Preto tu zostáva
+ * `TroubleLine`: JEDEN tichý riadok s farbou, značkou a slovom verdiktu a
+ * s odkazom na stav. Keď je zeleno, nekreslí sa vôbec, takže „priveľa vecí na
+ * obrazovke" sa ním nevracia. Verdikt sa nikde neformuluje druhýkrát —
+ * `overviewVerdict()` je jeho jediný zdroj a riadok z neho berie hotové slovo.
  *
- * Pás sa NEZMAZAL ani neoslabil a stále nesie celú sekciu „Stav" pod rozklikom;
- * z jeho hlavičky platí ďalej všetko — vrátane toho, že `BlockersSection` stojí
- * MIMO rozkliku hneď pod ním. Dvojica pás + prekážky zostala nerozdelená, takže
- * prekážka je aj s radom nad ňou stále nad ohybom: rad je štyri dlaždice
- * v jednom rade, nie sekcia.
+ * ČO SA NEKRESLÍ A NEZMAZALO SA
+ * ─────────────────────────────
+ * `SalesSection` (tri čísla + krivka + denná tržba eshopu) a `TopFlopSection`
+ * (top 10 / flop 10 podľa kusov) sú pod D152 piata a šiesta sekcia, takže sa
+ * odtiaľto nekreslia. Súbory ani ich testy sa NEZMAZALI — je to ten istý
+ * postup, aký zvolila V7 pri `SalesSection` v kroku 2/4: keď sa pre sekciu
+ * nájde domov, je to presun, nie nový výpočet. Rebríček navyše dnes vie
+ * tabuľka: triedenie podľa „Predané N d" zostupne je top, vzostupne flop
+ * (D162). Kto ktorúkoľvek z nich vracia SEM, musí najprv povedať, ktorá zo
+ * štyroch sekcií D152 odchádza.
  *
- * OKNO 7 / 30 / 90 JE JEDNO PRE CELÚ OBRAZOVKU (predvolene 30). Graf, rebríček
- * aj tržba sa musia pýtať na to isté obdobie — tri čísla za tri rôzne obdobia
- * vedľa seba by vyzerali rovnako dôveryhodne ako tri čísla za jedno.
+ * DVE OKNÁ, DVA PREPÍNAČE, ŽIADNE PREKRÝVANIE (D155)
+ * ─────────────────────────────────────────────────
+ *  · **okno KARIET a TABUĽKY** — 30/60/90/180/360 (`soldWindow`). Stĺpce
+ *    „Predané N d" a „predané/sklad" sú TÁ ISTÁ veličina, akú nesie tretia
+ *    karta, takže tabuľka je jej rozpis a vlastné okno držať NESMIE. Stav je
+ *    preto JEDEN a leží tu.
+ *  · **okno GRAFU** — 7/30/90 (`windowDays`), teda `WINDOW_DAYS_ALLOWED`
+ *    čítacích endpointov. Graf odpovedá na inú otázku: denný priebeh, nie súhrn
+ *    okna.
+ *
+ * Ani jeden neťahá dáta toho druhého. Predvolené je v oboch 30 dní.
  *
  * NIČ SA NEOBNOVUJE SAMO (kontrakt, bod 4). Načítanie je registrované
  * v spoločnom mechanizme `layout/refresh.ts`: zbehne pri otvorení obrazovky a
  * potom až po stlačení Obnoviť v stavovom pruhu. Zmena okna je RUČNÁ akcia
- * človeka, takže načítanie po nej je tá istá kategória ako stlačenie Obnoviť —
- * nie automatické obnovovanie zadnými dverami.
+ * človeka, takže načítanie po nej je tá istá kategória ako stlačenie Obnoviť.
  *
- * NA SHOP Z TEJTO OBRAZOVKY NEODÍDE ANI JEDEN REQUEST (K8). Všetkých desať
- * endpointov je čisto čítacích nad lokálnou databázou; do eshopu zapisuje
- * výhradne executor. `Promise.all` tu nemá NIČ spoločné so zákazom paralelných
- * ZÁPISOV.
+ * NA SHOP Z TEJTO OBRAZOVKY NEODÍDE ANI JEDEN REQUEST (K8). Všetky endpointy
+ * sú čisto čítacie nad lokálnou databázou; do eshopu zapisuje výhradne
+ * executor.
  *
- * Vlastník: V9; prestavba V4.
+ * Vlastník: V7, krok 4/4 (rozvrh štyroch sekcií a presun stavu na Nastavenia).
  */
+import Link from 'next/link';
 import { useCallback, useState } from 'react';
 
-import BlockersSection from '@/components/dashboard/BlockersSection';
 import CampaignsSection from '@/components/dashboard/CampaignsSection';
+import DiscountSplitChart from '@/components/dashboard/DiscountSplitChart';
 import KpiRow from '@/components/dashboard/KpiRow';
-import SalesSection from '@/components/dashboard/SalesSection';
-import StatusBand from '@/components/dashboard/StatusBand';
-import StatusSection from '@/components/dashboard/StatusSection';
-import TopFlopSection from '@/components/dashboard/TopFlopSection';
+import ProductsTable from '@/components/dashboard/ProductsTable';
+import SoldWindowSwitch from '@/components/dashboard/SoldWindowSwitch';
 import WindowSwitch from '@/components/dashboard/WindowSwitch';
 import styles from '@/components/dashboard/overview.module.css';
 import { LoadingState } from '@/components/states';
 import { PageHeader } from '@/components/ui';
+import { SigMark } from '@/components/ui/StatusMark';
+import { hrefForAnchor } from '@/components/settings/sub-pages';
 import {
   getCampaigns,
   getInsights,
   getQueue,
-  getSales,
   type CampaignRow,
   type InsightRow,
   type QueueSnapshot,
-  type SalesSnapshot,
 } from '@/components/dashboard/api';
 import {
   getCatalogSync,
-  getEnrichState,
   getStatus,
   type CatalogSyncView,
   type StatusView,
 } from '@/components/dashboard/status-api';
-import { unreadableSentence } from '@/components/dashboard/live-status-model';
+import { sigClass } from '@/components/dashboard/live-status-model';
 import {
   DEFAULT_OVERVIEW_WINDOW,
-  calmNumbers,
   lastWriteResult,
   liveCampaigns,
   nextPlannedFire,
@@ -117,23 +131,41 @@ import {
   type NextFire,
   type OverviewWindow,
 } from '@/components/dashboard/overview-model';
-import { overviewChecks, overviewVerdict } from '@/components/dashboard/overview-verdict';
+import { overviewVerdict, type Verdict } from '@/components/dashboard/overview-verdict';
 import { previousWindowAnchor } from '@/components/dashboard/kpi-row-model';
 import {
-  getRevenueDaily,
-  getSalesWindow,
+  getOwnDiscountShare,
+  getSoldPerStock,
+  type OwnDiscountShareView,
+  type SoldPerStockView,
+} from '@/components/dashboard/kpi-api';
+import {
+  DEFAULT_SOLD_WINDOW,
+  type SoldWindow,
+} from '@/components/dashboard/sold-window';
+import {
   getTimelineWindow,
-  getTopFlop,
   getWriteActivity,
-  type RevenueDailyView,
-  type SalesWindowView,
   type TimelineWindowView,
-  type TopFlopView,
   type WriteActivityDayView,
 } from '@/components/dashboard/window-api';
+import {
+  getSalesDaily,
+  type SalesDailyView,
+} from '@/components/dashboard/sales-daily-api';
 import { useRefreshable } from '@/components/layout/refresh';
-import type { EnrichStatePayload } from '@/lib/catalog/enrich-view';
 import { todayHere } from '@/lib/ui/vocabulary';
+
+/**
+ * Kam vedie tichý odkaz. Cesta sa TU neskladá z literálu — `hrefForAnchor()`
+ * preloží kotvu na podstránku, ktorá ju naozaj má (`sub-pages.ts`). Dôvod je
+ * zapísaná pasca: mesiac sa v rozcestníku Nastavení ponúkal odkaz do prázdna
+ * po zmazanom `SignOut.tsx`, lebo cestu si napísal volajúci sám.
+ */
+export const OVERVIEW_TROUBLE_PATH = hrefForAnchor('#stav');
+
+/** Slovo odkazu. Jedna formulácia — je to zároveň menovka kotvy v Nastaveniach. */
+export const OVERVIEW_TROUBLE_LINK = 'Stav a prekážky';
 
 /**
  * Hlavička obrazovky. Vlastný komponent preto, aby ju vetva kostry a vetva
@@ -150,88 +182,150 @@ function OverviewHeader() {
   );
 }
 
+/**
+ * JEDEN TICHÝ RIADOK, KEĎ NIEČO HORÍ (D152).
+ *
+ * Nekreslí sa, kým je verdikt `ok` — inak by na najlepšom mieste obrazovky
+ * stál prázdny pás, čo Samuel pri V6b výslovne odmietol (D136).
+ *
+ * Nesie tri kanály v JEDNOM uzle (farba triedy tónu, značka `<svg>`, slovo
+ * verdiktu) a jednu vetu detailu, ktorú už poskladal `overviewVerdict()`.
+ * Vlastnú vetu si NESKLADÁ: druhá formulácia toho istého stavu by sa raz
+ * rozišla s tou, ktorú kreslí sekcia stavu v Nastaveniach.
+ *
+ * Exportovaný je zámerne: obe vetvy (zeleno → nič, inak → riadok) sa dajú
+ * dokázať len tak, že sa vykreslia. Postaviť pre druhú vetvu celú odpoveď
+ * `/api/status` by znamenalo merať parser namiesto rozhodnutia.
+ */
+export function TroubleLine({ verdict }: { verdict: Verdict }) {
+  if (verdict.kind === 'ok') return null;
+
+  return (
+    <p className={styles.trouble} data-testid="overview-trouble" data-verdict={verdict.kind}>
+      <span className={sigClass(verdict.tone)} data-testid="trouble-verdict">
+        <SigMark variant={verdict.tone} />
+        {verdict.word}
+      </span>
+      <span className="lvl-3" data-testid="trouble-detail">
+        {verdict.detail}
+      </span>
+      <Link className={styles.troubleLink} href={OVERVIEW_TROUBLE_PATH}>
+        {OVERVIEW_TROUBLE_LINK}
+      </Link>
+    </p>
+  );
+}
+
 interface OverviewData {
   queue: QueueSnapshot | null;
   campaigns: CampaignRow[] | null;
-  sales: SalesSnapshot | null;
   insights: InsightRow[] | null;
+  /**
+   * Živý stav appky. Obrazovka z neho kreslí JEDINÝ prvok — tichý riadok
+   * verdiktu (`TroubleLine`). Celé prekážky aj sekcia „Stav" žijú od V7
+   * v Nastaveniach; tu zostal verdikt, pretože bez neho by sa človek o
+   * chýbajúcom kľúči na prvej strane nedozvedel vôbec.
+   */
   status: StatusView | null;
   catalog: CatalogSyncView | null;
-  /**
-   * Stav DÁVKY obohacovania (`GET /api/catalog/enrich`). `null` = odpoveď sa
-   * nedala prečítať; sekcia z toho nakreslí priznanie, nikdy nulu.
-   */
-  enrich: EnrichStatePayload | null;
 }
 
-/** Dáta, ktoré závisia od okna prepínača. Menia sa spolu, tak sa aj ťahajú. */
+/** Dáta, ktoré závisia od okna prepínača GRAFU. Menia sa spolu, tak sa aj ťahajú. */
 interface WindowData {
+  /**
+   * Denný predaj po dňoch pre graf troch kriviek (D156). `null` = odpoveď sa
+   * nedala prečítať; graf z toho nakreslí chybovú vetu, NIE nuly.
+   */
+  daily: SalesDailyView | null;
+  /**
+   * Okná vlastných zliav. Graf z nich rozhoduje, do ktorej krivky deň patrí —
+   * a `status` v riadku hovorí, či sa kampaň naozaj zapísala (D156).
+   */
   timeline: TimelineWindowView | null;
-  revenue: RevenueDailyView | null;
-  rank: TopFlopView | null;
+  /** Zapísané dni — z nich je posledný výsledok zápisu v sekcii Zľavy. */
   activity: WriteActivityDayView[] | null;
-  /** Súčet kusov za okno — hodnota prvej dlaždice KPI riadku (D136). */
-  sold: SalesWindowView | null;
+}
+
+/**
+ * Dáta TROCH KPI KARIET (D152). Vlastné okno, vlastné načítanie.
+ *
+ * Prečo nie spolu s `WindowData`: prepínač kariet a tabuľky je INÝ prepínač než
+ * prepínač grafu (D155) a jeho okná sú iné (30/60/90/180/360 proti 7/30/90).
+ * Jeden objekt pre oboje by znamenal, že prepnutie okna kariet znovu ťahá graf
+ * — teda niečo, o čo človek vôbec nežiadal.
+ */
+interface KpiData {
+  /** Katalóg aj počet vlastných zliav z JEDNEJ odpovede (podiel a menovateľ). */
+  catalog: OwnDiscountShareView | null;
+  /** Pomer „predané na sklad" za vybrané okno. */
+  soldPerStock: SoldPerStockView | null;
   /**
    * To isté za PREDCHÁDZAJÚCE okno rovnakej dĺžky. Je to jediné „oproti čomu"
-   * pre pilulky smeru: bez neho by museli navždy hovoriť „zmenu nevieme".
+   * pre pilulku smeru: bez neho by musela navždy hovoriť „zmenu nevieme".
    * Nie je to nový endpoint — je to tá istá route s iným `?anchor=`.
    */
-  soldBefore: SalesWindowView | null;
-  revenueBefore: RevenueDailyView | null;
+  soldPerStockBefore: SoldPerStockView | null;
 }
 
 export function Overview() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [windowData, setWindowData] = useState<WindowData | null>(null);
   const [windowDays, setWindowDays] = useState<OverviewWindow>(DEFAULT_OVERVIEW_WINDOW);
+  /*
+   * JEDEN stav okna pre KARTY A TABUĽKU (D155). Tabuľka je rozpis tretej karty,
+   * takže si vlastné okno DRŽAŤ NESMIE — dva stavy nad jednou veličinou by na
+   * obrazovke postavili dve čísla za dve rôzne obdobia. Kto pridáva tabuľku,
+   * berie si `soldWindow` odtiaľto; `test/unit/prehlad-kpi-okno.spec.ts` padne,
+   * keď si niekto v `components/dashboard/` otvorí druhý stav okna predaja.
+   */
+  const [soldWindow, setSoldWindow] = useState<SoldWindow>(DEFAULT_SOLD_WINDOW);
+  const [kpiData, setKpiData] = useState<KpiData | null>(null);
 
   const load = useCallback(async () => {
-    const [queue, campaigns, sales, insights, status, catalog, enrich] = await Promise.all([
+    const [queue, campaigns, insights, status, catalog] = await Promise.all([
       getQueue(),
       getCampaigns(),
-      getSales(),
       getInsights(),
       getStatus(),
       getCatalogSync(),
-      /*
-       * Dávka obohacovania. Je to ĎALŠIE volanie na obrazovku a je tu vedome:
-       * do 31. 8. 2026 `catalog_enrich_state` nečítal nikto, takže dávka mohla
-       * stáť tri týždne s odmietnutou adresou a Prehľad o tom mlčal. Cena je
-       * tri dotazy po indexe, žiadne volanie eshopu (K8).
-       */
-      getEnrichState(),
     ]);
-    setData({ queue, campaigns, sales, insights, status, catalog, enrich });
+    setData({ queue, campaigns, insights, status, catalog });
   }, []);
 
   /*
-   * Okno sa ťahá zvlášť. Nie preto, aby to bolo pekné: keď človek prepne
-   * 30 → 90, mení sa len tieto štyri odpovede a načítať pri tom aj stav appky
-   * by znamenalo, že sa mu pod rukami prekreslí verdikt a prípadne aj tlačidlá
-   * v rozkliku — teda niečo, o čo vôbec nežiadal.
+   * Okno grafu sa ťahá zvlášť. Nie preto, aby to bolo pekné: keď človek prepne
+   * 30 → 90, menia sa len tieto tri odpovede a načítať pri tom aj stav appky by
+   * znamenalo, že sa mu pod rukami prekreslí verdikt — teda niečo, o čo vôbec
+   * nežiadal.
    */
   const loadWindow = useCallback(async (days: OverviewWindow) => {
-    /*
-     * Kotva predchádzajúceho okna sa počíta TU, z „dneška" v logickom pásme,
-     * a nie z odpovede aktuálneho okna — inak by predchádzajúce okno muselo
-     * čakať na to aktuálne a zmena prepínača by mala dve kolá namiesto
-     * jedného. Cena je, že sa kotva môže na hrane polnoci s dňom servera
-     * rozísť o deň; preto model porovnanie pripustí len vtedy, keď okná na
-     * seba naozaj naväzujú (`windowsAdjoin()`), a inak povie „zmenu nevieme".
-     */
+    const [daily, timeline, activity] = await Promise.all([
+      getSalesDaily(days),
+      getTimelineWindow(days),
+      getWriteActivity(days),
+    ]);
+    setWindowData({ daily, timeline, activity });
+  }, []);
+
+  /**
+   * Dáta troch KPI kariet. Vlastné načítanie, lebo majú vlastný prepínač
+   * (D155) — a prepnutie okna kariet nemá dôvod znovu ťahať graf.
+   *
+   * Kotva predchádzajúceho okna sa počíta TU, z „dneška" v logickom pásme, a
+   * nie z odpovede aktuálneho okna — inak by predchádzajúce okno muselo čakať
+   * na to aktuálne a zmena prepínača by mala dve kolá namiesto jedného. Cena
+   * je, že sa kotva môže na hrane polnoci s dňom servera rozísť o deň; preto
+   * model porovnanie pripustí len vtedy, keď okná na seba naozaj naväzujú
+   * (`windowsAdjoin()`), a inak povie „zmenu nevieme".
+   */
+  const loadKpi = useCallback(async (days: SoldWindow) => {
     const before = previousWindowAnchor(todayHere(), days);
-    const [timeline, revenue, rank, activity, sold, soldBefore, revenueBefore] =
-      await Promise.all([
-        getTimelineWindow(days),
-        getRevenueDaily(days),
-        getTopFlop(days),
-        getWriteActivity(days),
-        getSalesWindow(days),
-        before === null ? Promise.resolve(null) : getSalesWindow(days, before),
-        before === null ? Promise.resolve(null) : getRevenueDaily(days, before),
-      ]);
-    setWindowData({ timeline, revenue, rank, activity, sold, soldBefore, revenueBefore });
+    const [catalog, soldPerStock, soldPerStockBefore] = await Promise.all([
+      getOwnDiscountShare(),
+      getSoldPerStock(days),
+      before === null ? Promise.resolve(null) : getSoldPerStock(days, before),
+    ]);
+    setKpiData({ catalog, soldPerStock, soldPerStockBefore });
   }, []);
 
   // Registrácia do spoločného obnovovania. Hook si zámerne NESLEDUJE identitu
@@ -239,8 +333,9 @@ export function Overview() {
   // automatické obnovovanie zadnými dverami.
   useRefreshable(load);
   useRefreshable(useCallback(() => loadWindow(windowDays), [loadWindow, windowDays]));
+  useRefreshable(useCallback(() => loadKpi(soldWindow), [loadKpi, soldWindow]));
 
-  /** Kliknutie do prepínača: nové okno a hneď aj jeho dáta. */
+  /** Kliknutie do prepínača grafu: nové okno a hneď aj jeho dáta. */
   const changeWindow = useCallback(
     (days: OverviewWindow) => {
       setWindowDays(days);
@@ -249,14 +344,22 @@ export function Overview() {
     [loadWindow],
   );
 
+  /**
+   * Kliknutie do prepínača kariet. Prekresľuje karty AJ tabuľku (D155), preto
+   * je stav jeden a leží tu — nie v `KpiRow` a nie v tabuľke.
+   */
+  const changeSoldWindow = useCallback(
+    (days: SoldWindow) => {
+      setSoldWindow(days);
+      void loadKpi(days);
+    },
+    [loadKpi],
+  );
+
   /*
    * Prvé načítanie: kostra v tvare hotovej obrazovky, aby sa rozloženie pod
    * rukami nepreskladalo. Žiadne čísla — kým sa nič nevie, nič sa netvrdí.
-   *
-   * Od V6b to kreslí `LoadingState` z rodiny stavov (D134), nie päť ručných
-   * `.ovl-skeleton` divov s pevnými výškami v `style`: štyri dlaždice sú rad
-   * KPI, štyri bloky sú pás, predaj, rebrík a zľavy. Inline `style` navyše
-   * obchádzal tokenovú vrstvu a strážny test o ňom nevedel (D147).
+   * TRI dlaždice sú rad KPI, tri bloky sú graf, tabuľka a zľavy.
    *
    * Hlavička sa kreslí AJ tu — je to jediná časť obrazovky, ktorá na žiadnu
    * odpoveď nečaká, a keby dobehla až s dátami, nadpis by pod rukami poskočil.
@@ -265,7 +368,7 @@ export function Overview() {
     return (
       <div className={styles.page} aria-busy="true">
         <OverviewHeader />
-        <LoadingState tiles={4} blocks={4} label="Načítavam Prehľad…" />
+        <LoadingState tiles={3} blocks={3} label="Načítavam Prehľad…" />
       </div>
     );
   }
@@ -276,28 +379,17 @@ export function Overview() {
 
   const progress = queueProgress({ snapshot, campaigns: rows, today });
   const live: LiveCampaign[] | null = rows === null ? null : liveCampaigns(rows, today);
-  // Nečitateľný zoznam zliav je `null`, nie prázdne pole: `calmNumbers([])`
-  // vráti samé nuly a „0 zliav beží" je tvrdenie o ostrom eshope, nie priznaná
-  // medzera (P7, kontrakt UI bod 5). Sekcia z `null` nakreslí pomlčky.
-  const calm = rows === null ? null : calmNumbers(rows, today);
-  const heartbeat = snapshot === null ? null : snapshot.heartbeat;
 
-  const verdictInput = {
+  /*
+   * Verdikt — jediný zdroj vety o tom, či niečo stojí v ceste. Ten istý model
+   * kreslí stav aj v Nastaveniach; obrazovka si z neho berie hotové slovo.
+   */
+  const verdict = overviewVerdict({
     status: data.status,
     sync: data.catalog,
-    heartbeat,
+    heartbeat: snapshot === null ? null : snapshot.heartbeat,
     progress,
-  };
-  const verdict = overviewVerdict(verdictInput);
-
-  const budget =
-    snapshot === null || snapshot.budget === null
-      ? null
-      : {
-          spent: snapshot.budget.spent,
-          budget: snapshot.budget.budget,
-          remaining: snapshot.budget.remaining,
-        };
+  });
 
   /*
    * Okno sa ešte nenačítalo → `undefined`, teda „nežiadali sme". Sekcie potom
@@ -319,73 +411,73 @@ export function Overview() {
         : lastWriteResult(windowData.activity);
 
   return (
-    <div className={styles.page} data-testid="overview">
+    /*
+     * `data-sold-window` je JEDINÝ zdroj okna kariet a tabuľky na povrchu
+     * obrazovky (D155). Nie je to ozdoba pre test: tabuľka má z čoho overiť, že
+     * kreslí to isté obdobie, aké nesie tretia karta — a keby si otvorila
+     * vlastný stav, dva atribúty by si na jednom strome odporovali.
+     */
+    <div className={styles.page} data-testid="overview" data-sold-window={soldWindow}>
       <OverviewHeader />
 
+      {/* Jeden riadok, a len keď niečo horí. Celý stav je v Nastaveniach. */}
+      <TroubleLine verdict={verdict} />
+
       {/*
-       * KPI rad je PRVÝ na obrazovke — dôvod je v hlavičke (rozhodnutie V6b).
-       *
-       * Odkiaľ berie štyri veci, ktoré si nepýta zvlášť:
-       *  · `calm` je TEN ISTÝ objekt, aký dostáva `StatusSection` v rozkliku
-       *    (`calmNumbers(rows, today)`). Druhý výpočet by sa s ním rozišiel
-       *    a obrazovka by o bežiacich zľavách hovorila dvomi číslami.
-       *  · `enrich` je `data.enrich` z hlavného načítania (`getEnrichState()`),
-       *    teda ani jedno nové volanie na obrazovku (K8) a žiadne volanie shopu.
-       *  · okenné dlaždice berú `sold` / `soldBefore` / `revenue` /
-       *    `revenueBefore` z `windowData` — `undefined`, kým sa okno ťahá.
+       * PREPÍNAČ OKNA KARIET A TABUĽKY stojí NAD radom (D155), pretože platí
+       * pre karty aj pre tabuľku pod grafom — prepínač pod číslami by sa čítal
+       * ako ovládanie toho, čo je pod ním. Prepínač GRAFU je druhý a patrí do
+       * hlavičky karty grafu; tento ho neovláda.
+       */}
+      <SoldWindowSwitch value={soldWindow} onChange={changeSoldWindow} />
+
+      {/*
+       * 1. KPI RIADOK. Tri karty (D152) čítajú DVE odpovede a obe sú čisto
+       * čítacie (K8):
+       *  · `catalog` je `catalog-distribution?by=own-discount` — počet riadkov
+       *    zrkadla A počet vlastných zliav z JEDNEJ odpovede, takže podiel a
+       *    jeho menovateľ nemôžu byť z dvoch rôznych okamihov.
+       *  · `soldPerStock` / `soldPerStockBefore` je pomer za okno prepínača a
+       *    za predchádzajúce okno rovnakej dĺžky (`?anchor=`).
        *
        * `undefined` sa tu NESMIE zliať s `null`: prvé je „nežiadali sme"
        * (a vtedy sa medzera v dátach NEPRIZNÁVA), druhé je „odpoveď sa nedala
-       * prečítať" a to dlaždica povedať MUSÍ. Preto explicitné `=== null`.
+       * prečítať" a to karta povedať MUSÍ. Preto explicitné `=== null`.
        */}
       <KpiRow
-        windowDays={windowDays}
-        sold={windowData === null ? undefined : windowData.sold}
-        soldBefore={windowData === null ? undefined : windowData.soldBefore}
-        revenue={windowData === null ? undefined : windowData.revenue}
-        revenueBefore={windowData === null ? undefined : windowData.revenueBefore}
-        calm={calm}
-        enrich={data.enrich}
+        windowDays={soldWindow}
+        catalog={kpiData === null ? undefined : kpiData.catalog}
+        soldPerStock={kpiData === null ? undefined : kpiData.soldPerStock}
+        soldPerStockBefore={kpiData === null ? undefined : kpiData.soldPerStockBefore}
       />
 
-      <StatusBand
-        verdict={verdict}
-        keyPresent={data.status === null ? null : data.status.apiKey.present}
-        budget={budget === null ? null : { spent: budget.spent, budget: budget.budget }}
-        pending={snapshot === null ? null : snapshot.queue.pending}
-      >
-        <StatusSection
-          verdict={verdict}
-          checks={overviewChecks(verdictInput)}
-          progress={progress}
-          budget={budget}
-          calm={calm}
-          enrich={data.enrich}
-          gap={
-            data.status === null
-              ? 'Stav appky sa nepodarilo prečítať. Čísla preto nedopĺňame.'
-              : unreadableSentence(data.status.unreadable)
-          }
-          onChanged={() => void load()}
-        />
-      </StatusBand>
-
-      {/* Prekážky MIMO rozkliku — dôvod je v hlavičke `StatusBand`. */}
-      <BlockersSection blockers={data.status === null ? null : data.status.blockers} />
-
-      <SalesSection
-        sales={data.sales}
+      {/*
+       * 2. HLAVNÝ GRAF (D156–D158). `undefined` je „nežiadali sme" (kostra),
+       * `null` je „odpoveď sa nedala prečítať" (chybová veta). Preto výslovné
+       * `=== null`.
+       */}
+      <DiscountSplitChart
+        daily={windowData === null ? undefined : windowData.daily}
+        campaigns={timeline === undefined || timeline === null ? [] : timeline.campaigns}
         windowDays={windowDays}
         switcher={<WindowSwitch value={windowDays} onChange={changeWindow} />}
-        discountWindows={timeline === undefined || timeline === null ? [] : timeline.campaigns}
-        revenue={windowData === null ? undefined : windowData.revenue}
       />
 
-      <TopFlopSection
-        data={windowData === null ? undefined : windowData.rank}
-        windowDays={windowDays}
-      />
+      {/*
+       * 3. TABUĽKA PRODUKTOV (D159–D163). Stojí HNEĎ POD GRAFOM zámerne: graf
+       * má ~300 px (D158) práve preto, aby pod ním bolo vidieť prvé riadky.
+       *
+       * Okno dostáva PROPOM z jediného stavu okna kariet (D155). Kto sem podá
+       * `windowDays` (okno GRAFU), postaví na jednu obrazovku dve čísla za dve
+       * rôzne obdobia a obe budú vyzerať rovnako dôveryhodne.
+       *
+       * Dáta si ťahá SAMA a je to zámer: filter, poradie a strana sú jej
+       * vlastný stav, takže prelistovanie nemá dôvod znovu ťahať graf. Obe jej
+       * volania sú čisto čítacie (K8).
+       */}
+      <ProductsTable soldWindow={soldWindow} />
 
+      {/* 4. BEŽIACE ZĽAVY — čo beží, čo sa ponúka a či sa naozaj zapisuje. */}
       <CampaignsSection
         campaigns={live}
         insights={data.insights}

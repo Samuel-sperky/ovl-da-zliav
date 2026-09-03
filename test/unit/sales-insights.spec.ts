@@ -330,6 +330,57 @@ describe('predajnosť sa nikde nevydáva za obrátkovosť', () => {
        * v zozname stojí.
        */
       'src/lib/ui/product-columns.ts',
+      /*
+       * PRIBUDLO 3. 9. 2026 (V7, D148, K3). Samuel si vyžiadal KPI kartu
+       * s účtovným pomerom zásoby a predaja; z dát appky sa spočítať nedá
+       * (zásoba z `getFull` je momentka, nákupné ceny appka nemá), takže karta
+       * nesie `soldPerStock` a volá sa „Predané na sklad". Rovnaký tvar
+       * zlyhania ako pri `product-columns.ts` o riadok vyššie: kým súbor nie je
+       * v tomto zozname, môže si metriku pomenovať zakázaným menom a grep-test
+       * o tom mlčí. Druhú stranu toho istého pravidla (vrátane slova
+       * v docblockoch) drží `test/unit/prehlad-kpi-okno.spec.ts` §C.
+       */
+      'src/components/dashboard/kpi-row-model.ts',
+      'src/components/dashboard/KpiRow.tsx',
+      'src/components/dashboard/kpi-api.ts',
+      'src/components/dashboard/sold-window.ts',
+      /*
+       * PRIBUDLO 3. 9. 2026 (V7, krok 3/4). Tabuľka Prehľadu je ROZPIS karty
+       * „Predané na sklad" a nesie stĺpce `soldWindow` a `soldPerStock` — teda
+       * presne tie veličiny, ktoré sa dajú pomenovať zakázaným menom. Kým
+       * súbor nie je v tomto zozname, grep-test o diere v ňom mlčí (to isté
+       * poučenie ako pri `product-columns.ts` vyššie).
+       */
+      'src/components/dashboard/products-table-view.ts',
+      'src/components/dashboard/products-table-api.ts',
+      'src/components/dashboard/ProductsTable.tsx',
+      /*
+       * PRIBUDLO 3. 9. 2026 (zelená brána V7). Zoznam mal do tohto dňa LEN
+       * klientske súbory kroku 1 a 3 — teda presne ten tvar zlyhania, ktorý
+       * má tento test v hlavičke napísaný: „grep nad priečinkom A nepovie nič
+       * o diere v priečinku B". Pomer `soldPerStock` sa POČÍTA NA SERVERI
+       * (`insights/product-kpi`), okná mu dáva `_shared.ts` a ich jediný zdroj
+       * je `lib/sales/windows.ts`; graf a jeho čítacia cesta nesú tú istú
+       * veličinu za deň. Keby si ktorýkoľvek z nich pomenoval pomer účtovnou
+       * metrikou, klient by to poslušne zobrazil a oba dnešné grepy by mlčali.
+       *
+       * ČO V ZOZNAME BYŤ NEMÔŽE (a kto to stráži namiesto neho):
+       * `src/lib/repo/catalog.repo.ts` a `src/app/api/catalog/search/route.ts`
+       * to slovo v docblocku MAJÚ — obe vetou o tom, že filtračný rozmer
+       * `turnover` z appky ODIŠEL (D125). Regex vetu od mena metriky nerozlíši,
+       * takže by tu padli za to, že hovoria pravdu. Že sa ten rozmer nevráti,
+       * drží typová väzba `src/lib/ui/locked-dimensions.ts` (rozchod prestane
+       * KOMPILOVAŤ) a `test/integration/repo-fronta.spec.ts` (`lockedFilters`
+       * neobsahuje `turnover`) plus `filtre-podla-dat.spec.ts`.
+       */
+      'src/app/api/insights/product-kpi/route.ts',
+      'src/app/api/insights/_shared.ts',
+      'src/lib/sales/windows.ts',
+      'src/components/dashboard/window-api.ts',
+      'src/components/dashboard/Overview.tsx',
+      'src/components/dashboard/sales-daily-api.ts',
+      'src/components/dashboard/discount-split-view.ts',
+      'src/components/dashboard/DiscountSplitChart.tsx',
     ]) {
       const code = read(path);
       // Slovo smie padnúť len v popise toho, čo appka NEVIE — nikdy ako

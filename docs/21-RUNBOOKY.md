@@ -202,6 +202,29 @@ sleduj `sales_sync_state`. Dôsledok krátkeho okna, ktorý appka priznáva aj v
 UI: produkt, ktorý sa predáva raz za týždeň, vyzerá na začiatku ako
 nepredávaný. História sa dopĺňa každým behom, takže pokrytie časom rastie samo.
 
+**Strop okna je od 3. 9. 2026 360 dní, nie 90** (D149). Zdvihol sa preto, že
+prepínač okna predajnosti ponúkal 180 a 360 dní, za ktorými ENV schéma nikdy
+nedovolila stiahnuť ani jeden deň. **Strop je dovolenie, nie plán** a default
+zostáva 3 dni. Dve veci, ktoré treba vedieť, PRED tým, než hodnotu zdvihneš:
+
+1. **Cena nie je zmeraná.** Pri sadzbe z augustového vzorku (~326 objednávok
+   na deň) je 360 dní ~118 000 requestov. Dráha `orders` má 800 čítaní na UTC
+   deň (80 % z 1000 na objednávkový kľúč), takže dočítanie by trvalo **rádovo
+   mesiace**. Koľko objednávok má deň naozaj, appka NEMERIA — je to jeden
+   vzorok z troch augustových dní, nie predpoveď (otvorená položka K9 z V5).
+   Pauza medzi requestami ani strop na beh pritom nie sú úzke hrdlo: úzke
+   hrdlo je denná kvóta.
+2. **Beh ide od NAJSTARŠIEHO dňa okna.** Dočítané dni v minulosti sa
+   preskočia zadarmo, ale nedočítané spotrebujú rozpočet **skôr, než sa beh
+   dostane na dnes a včera** — a práve tie dva dni sa prepočítavajú vždy. Pri
+   skoku z 3 na 360 dní nad prázdnou históriou preto prestanú byť svieže
+   čerstvé dni, kým sa nedožerie backlog. Zdvíhaj po desiatkach dní a nechaj
+   `sales_sync_state` dobehnúť; skok na 360 naraz nie je „dlhší beh", je to
+   zastavené sledovanie dneška.
+
+Kým je okno nedočítané, čítacie odpovede to hovoria číslom
+(`completeDays` / `unknownDays`, `lowerBound`) a UI kreslí `≥` — nie nulu.
+
 **Čo predajnosť NIE JE.** Nie je to obrátkovosť — na tú treba COGS a zásobu
 nevariantných produktov a shop API ani jedno neposkytuje (požiadavky sú v
 `docs/20-BACKLOG-SHOP-API.md`). A nie je to obrat: `total_paid` patrí celej

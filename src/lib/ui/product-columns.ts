@@ -50,12 +50,17 @@
  *    zľavy: `reference`, `name`. `price` aj `discountNow` sú vynechané zámerne
  *    (viď pravidlo D124 vyššie); „Cena pri príprave", „Zľava" tejto kampane
  *    a „Zapísané" sú stĺpce HISTÓRIE ZÁPISU, ktorá sa neprepisuje (I4).
- *  · `src/components/products/CatalogTable.tsx` — Produkty: VŠETKÝCH OSEM
+ *  · `src/components/products/CatalogTable.tsx` — Produkty: OSEM z deviatich
  *    stĺpcov, vrátane rozpadu marže na dve polovice (`productMarginCells`),
- *    ktorý tá tabuľka kreslí ako dva uzly. Má navyše tri stĺpce MIMO sady
- *    (druhé okno predajnosti, posledný predaj a zľavu podľa vlastných zápisov
- *    appky); jednotné stĺpce medzi nimi idú v poradí sady a stráži to
- *    `test/unit/produkty-jednotne-stlpce.spec.ts`.
+ *    ktorý tá tabuľka kreslí ako dva uzly. `ean13` VYNECHÁVA (D124) — EAN tam
+ *    už stojí tichým druhým riadkom v bunke názvu a z inej cesty. Má navyše
+ *    tri stĺpce MIMO sady (druhé okno predajnosti, posledný predaj a zľavu
+ *    podľa vlastných zápisov appky); jednotné stĺpce medzi nimi idú v poradí
+ *    sady a stráži to `test/unit/produkty-jednotne-stlpce.spec.ts`.
+ *  · `src/components/dashboard/ProductsTable.tsx` — tabuľka Prehľadu (V7,
+ *    D159): CELÁ sada, teda VŠETKÝCH DEVÄŤ stĺpcov. Je to jediná tabuľka,
+ *    ktorá nevynecháva ani jeden, takže na nej sa meria meno aj veta `title`
+ *    každého z nich (`test/unit/prehlad-tabulka.spec.ts` §A).
  *  · História (`src/components/audit/`) tabuľka produktov NIE JE: je to jeden
  *    riadok textu na udalosť, takže tam ostáva `productLabel()` (D122).
  *
@@ -280,6 +285,12 @@ export interface ProductRowValues {
    */
   readonly productId?: number;
   readonly reference?: ProductValue<string>;
+  /**
+   * Čiarový kód EAN-13 (D150, V7). Vlastné pole, nie prívesok referencie:
+   * referencia je hlavný identifikátor a EAN je iný kód z iného stĺpca
+   * zrkadla, takže každý má vlastnú medzeru a vlastný dôvod.
+   */
+  readonly ean13?: ProductValue<string>;
   readonly name?: ProductValue<string>;
   readonly price?: ProductValue<string | number>;
   readonly discountNow?: ProductDiscountNow;
@@ -295,6 +306,31 @@ export interface ProductRowValues {
  * Jednotná sada a jej ZÁVÄZNÉ poradie (D124). Poradie je súčasťou definície:
  * dve tabuľky s tými istými stĺpcami v inom poradí sa porovnať nedajú o nič
  * lepšie než dve tabuľky s inými menami.
+ *
+ * ═══ ČO ZMENILA V7 (D159, 3. 9. 2026) ═══
+ * Sada má DEVÄŤ stĺpcov a dve zmeny naraz — obe sú voľba Samuela pre tabuľku
+ * Prehľadu a obe platia pre VŠETKY tabuľky, pretože poradie je vlastnosť
+ * definície, nie obrazovky:
+ *
+ *  1. **`stock` stojí PRED `margin`.** Sklad a marža sú dve veličiny z tej
+ *     istej odpovede `getFull`, ale sklad odpovedá na otázku „koľko toho
+ *     ešte mám" a stojí preto vedľa predaného; marža je peňažný záver a je
+ *     posledná z čísel. Do V7 to bolo obrátene a Produkty to prekreslili
+ *     spolu s touto zmenou — dve tabuľky s tou istou sadou v inom poradí sú
+ *     presne to, čo D124 zakazuje.
+ *  2. **Pribudol `ean13`.** Referencia je hlavný identifikátor a je PRVÁ
+ *     (D150); EAN je pre čítačku a má vlastný stĺpec, nie prívesok
+ *     v referencii. Je POSLEDNÝ, pretože sa ním nič neporovnáva — je to kód
+ *     na odpísanie, nie veličina.
+ *
+ * `ean13` NEKRESLÍ každá tabuľka a je to D124, nie výnimka z nej: kde sa
+ * stĺpec nehodí, VYNECHÁ sa. Produkty ho ako stĺpec nemajú, pretože EAN tam
+ * už stojí tichým druhým riadkom v bunke názvu (`CodeLine`) a berie ho z inej
+ * cesty (`/api/catalog/details`, teda spoza kľúča) — dva stĺpce s tým istým
+ * menom z dvoch rôznych zdrojov by boli horšie než jeden. Že sa Produkty pri
+ * tom nerozišli s poradím sady, meria `produkty-jednotne-stlpce.spec.ts`;
+ * že tabuľka Prehľadu kreslí všetkých deväť v poradí D159, meria
+ * `prehlad-tabulka.spec.ts`.
  */
 export const PRODUCT_COLUMN_IDS = [
   'reference',
@@ -303,8 +339,9 @@ export const PRODUCT_COLUMN_IDS = [
   'discountNow',
   'soldWindow',
   'soldPerStock',
-  'margin',
   'stock',
+  'margin',
+  'ean13',
 ] as const;
 
 export type ProductColumnId = (typeof PRODUCT_COLUMN_IDS)[number];
@@ -344,6 +381,18 @@ const REFERENCE_TITLE =
   'aj v administrácii eshopu — názvy sa opakujú, referencia nie.';
 
 const NAME_TITLE = 'Názov produktu z posledného prechodu katalógu.';
+
+/**
+ * EAN je DRUHÝ kód, nie druhé meno referencie (D150).
+ *
+ * Veta menuje, na čo je: referencia sa píše rukou zo skladovej karty, EAN sa
+ * načíta čítačkou. `title` zámerne NEHOVORÍ, že prázdno znamená „shop ho
+ * nevedie" — pri neobohatenom riadku je v zrkadle `NULL`, teda „nevieme", a
+ * ten rozdiel nesie `PRODUCT_GAP_REASON`, nie tento text.
+ */
+const EAN13_TITLE =
+  'Čiarový kód EAN-13 tak, ako ho poslal shop. Je pre čítačku — referencia ' +
+  'je kód, ktorý sa píše rukou, EAN je ten, ktorý sa sníma.';
 
 const PRICE_TITLE = 'Predajná cena z posledného prechodu katalógu.';
 
@@ -605,6 +654,19 @@ const DEFS: Readonly<Record<ProductColumnId, ColumnDef>> = {
     headTitle: () => STOCK_TITLE,
     cell: (values) => fieldCell(values.stock, (value) => formatCountSk(value), STOCK_TITLE),
   },
+  ean13: {
+    label: () => 'EAN',
+    /*
+     * `numeric: false` napriek tomu, že sú to samé cifry. Trieda `n` v tomto
+     * repe znamená „veličina": zarovná doprava, aby sa jednotky dali porovnať
+     * pod sebou. EAN nie je veličina, je to IDENTIFIKÁTOR a porovnáva sa
+     * odpredu po znakoch — presne ako referencia (D122). Tabulárne číslice
+     * mu dáva CSS obrazovky, nie zarovnanie.
+     */
+    numeric: false,
+    headTitle: () => EAN13_TITLE,
+    cell: (values) => fieldCell(values.ean13, (value) => value, EAN13_TITLE),
+  },
 };
 
 /** Jeden stĺpec jednotnej sady, pomenovaný a pripravený na vykreslenie. */
@@ -652,6 +714,7 @@ export function unknownRowValues(gap: ProductGap, productId?: number): ProductRo
   return {
     ...(productId === undefined ? {} : { productId }),
     reference: value<string>(),
+    ean13: value<string>(),
     name: value<string>(),
     price: value<string | number>(),
     discountNow: {

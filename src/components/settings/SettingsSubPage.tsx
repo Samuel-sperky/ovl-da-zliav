@@ -36,6 +36,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
 import AuditPanel from '@/components/audit/AuditPanel';
+import AppStateSection from '@/components/settings/AppStateSection';
 import BudgetSection from '@/components/settings/BudgetSection';
 import DiagnosticsSection from '@/components/settings/DiagnosticsSection';
 import DomainForm from '@/components/settings/DomainForm';
@@ -234,10 +235,19 @@ function sections(page: SettingsPage, input: SectionInput) {
     case 'co-smie':
       return settings === null ? null : (
         <>
+          {/*
+            STAV A PREKÁŽKY (V7, D152) — prišlo z Prehľadu. Sekcia si dáta ťahá
+            SAMA a je to zámer: `settings/api.ts` a `dashboard/api.ts` majú na
+            frontu a stav dva rôzne parsery, takže zdieľať jeden objekt by
+            znamenalo jeden z nich prepísať. Dôvod je v hlavičke
+            `AppStateSection.tsx`.
+          */}
           {many ? groupTitle(page.groups[0].title) : null}
+          <AppStateSection />
+          {many ? groupTitle(page.groups[1].title) : null}
           <ScopeModeForm settings={settings} onChanged={input.reload} />
           <WritesSection status={input.status} settings={settings} />
-          {many ? groupTitle(page.groups[1].title) : null}
+          {many ? groupTitle(page.groups[2].title) : null}
           <BudgetSection settings={settings} queue={input.queue} catalog={input.catalog} />
           {/* Dávka obohacovania míňa denný ČÍTACÍ rozpočet, takže patrí pod
               rozpočty — a hlavne: je to jediné miesto v appke, kde sa dá

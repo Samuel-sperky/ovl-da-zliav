@@ -425,7 +425,7 @@ describe('Prehľad — tržby počítajú len uzavreté dni', () => {
   });
 });
 
-/* ═════════════════ E. Tvrdá hranica: žiadna tabuľka produktov ════════════ */
+/* ═════════════ E. Hranica voči Produktom: JEDNA tabuľka, na čítanie ══════ */
 
 describe('Prehľad — hranica voči Produktom', () => {
   const DIR = resolve(process.cwd(), 'src/components/dashboard');
@@ -436,33 +436,43 @@ describe('Prehľad — hranica voči Produktom', () => {
       .map((name) => ({ path: name, code: readFileSync(join(DIR, name), 'utf8') }));
   }
 
+  /** Značky aj primitívum. `<ChartTable` sa nechytá — `Table` ním nezačína. */
+  const TABULKA = /<table|<thead|<tbody|ovl-table|\btbl-|<Table\b|components\/ui\/Table/;
+
   /**
-   * Architektúra §1: „Tabuľka produktov — Prehľad NIKDY, Produkty vždy."
-   * Bez tohto testu sa hranica rozpustí prvým „veď to je len malý zoznam".
+   * ČO SA TU ZMENILO 3. 9. 2026 A PREČO TO NIE JE ROZPUSTENÁ HRANICA
+   * ────────────────────────────────────────────────────────────────
+   * Architektúra §1 znela „Tabuľka produktov — Prehľad NIKDY, Produkty vždy."
+   * a tento test to meral zákazom značky `<table>` v celom priečinku. D159 to
+   * rozhodnutie MENÍ: Prehľad má deväťstĺpcovú tabuľku s filtrami, pretože
+   * Samuelova otázka „čo leží" sa v desiatich riadkoch rebríka nedala
+   * zodpovedať.
    *
-   * PRIMITÍVUM SA POČÍTA TIEŽ (doplnené 3. 9. 2026). Vzor hľadal len značky
-   * malými písmenami, takže od V6a stačilo napísať `<Table …>` a hranicu by
-   * prekročil práve ten spôsob, ktorý je odvtedy najpohodlnejší — strážca by
-   * pri tom zostal zelený. Verifikácia V6c to overila mutáciou: vykreslený
-   * `<Table>` v Prehľade tento test NEZOBUDIL.
+   * Hranica sa tým ale nezrušila, len sa presunula z formy na SPRÁVANIE
+   * a jej dnešnú polovicu meria `prehlad-tabulka.spec.ts` §E: riadok NIE JE
+   * klikateľný (D163), tabuľka nemá výber ani obohacovanie strany a na shop
+   * z nej neodíde ani jeden request. Prehľad je na čítanie, Produkty sú
+   * pracovná obrazovka.
    *
-   * `<ChartTable>` (prepis grafu pre čítačku) sa tým nezakazuje: nie je to
-   * tabuľka produktov a vzor `<Table\b` ho nechytí, lebo `<ChartTable`
-   * značkou `Table` nezačína.
+   * Čo zostáva TU, je to, čo tá druhá polovica nevie zmerať: **tabuľka je na
+   * Prehľade PRESNE JEDNA.** Bez tohto tvrdenia by stačilo, aby si druhá
+   * sekcia nakreslila „malý zoznam" v `<table>`, a o mesiac by boli na jednej
+   * obrazovke dve tabuľky produktov s dvomi rôznymi sadami stĺpcov — presne
+   * ten rozchod, pre ktorý existuje `product-columns.ts` (D124).
    */
-  it('nikde v Prehľade nie je tabuľka — ani značka, ani primitívum', () => {
+  it('tabuľku kreslí PRESNE JEDEN komponent Prehľadu — `ProductsTable`', () => {
     const hits = sources()
-      .filter((file) =>
-        /<table|<thead|<tbody|ovl-table|\btbl-|<Table\b|components\/ui\/Table/.test(file.code),
-      )
-      .map((file) => file.path);
-    expect(hits.join(', ')).toBe('');
+      .filter((file) => TABULKA.test(file.code))
+      .map((file) => file.path)
+      .sort();
+    expect(hits).toEqual(['ProductsTable.tsx']);
   });
 
   it('sanity — skener naozaj číta komponenty Prehľadu', () => {
     const files = sources();
     expect(files.length).toBeGreaterThanOrEqual(5);
-    expect(files.some((file) => file.path === 'StatusSection.tsx')).toBe(true);
+    expect(files.some((file) => file.path === 'ProductsTable.tsx')).toBe(true);
+    expect(files.some((file) => file.path === 'Overview.tsx')).toBe(true);
   });
 });
 

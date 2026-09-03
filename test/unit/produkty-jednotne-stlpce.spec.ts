@@ -55,6 +55,27 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 
 const TABULKA = read('../../src/components/products/CatalogTable.tsx');
 
+/**
+ * Stĺpce sady, ktoré Produkty KRESLIA.
+ *
+ * Od 3. 9. 2026 má sada deväť stĺpcov (V7, D159) a `ean13` medzi kreslenými
+ * NIE JE — je to D124, nie výnimka z neho: „kde sa stĺpec nehodí, VYNECHÁ sa".
+ * EAN v tejto tabuľke už stojí tichým druhým riadkom v bunke názvu
+ * (`CodeLine`) a berie ho INÁ cesta než KPI riadok — `POST /api/catalog/details`
+ * spoza kľúča, kde má tri druhy prázdna. Druhý stĺpec s tým istým menom
+ * z druhého zdroja by na jednej obrazovke postavil dve odpovede na tú istú
+ * otázku.
+ *
+ * KTO STRÁŽI TO, ČO TÁTO VÝNIMKA VYŇALA (pravidlo z `CLAUDE.md`):
+ * `test/unit/prehlad-tabulka.spec.ts` §A meria, že tabuľka Prehľadu kreslí
+ * VŠETKÝCH DEVÄŤ stĺpcov v poradí D159 — stĺpec teda nezostal bez jedinej
+ * tabuľky, ktorá ho naozaj vypisuje, a jeho meno ani vety `title` nie sú bez
+ * dozoru. Zoznam sa tu pritom NEPÍŠE ručne: je ODVODENÝ zo sady, takže nový
+ * stĺpec sady sa objaví aj tu a test padne, kým ho niekto vedome nezaradí
+ * alebo nevynechá.
+ */
+const KRESLENE: readonly ProductColumnId[] = PRODUCT_COLUMN_IDS.filter((id) => id !== 'ean13');
+
 /** Zdroj bez komentárov — inak by tvrdenie zhodila veta v docblocku. */
 const bezKomentarov = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -197,8 +218,22 @@ function bunka(html: string, id: ProductColumnId): string {
 describe('A. Produkty kreslia CELÚ jednotnú sadu v poradí sady (D124)', () => {
   const html = render(stranka(obohateny()));
 
-  it('v hlavičke je všetkých osem stĺpcov sady, ani jeden nechýba', () => {
-    expect([...poradieVHlavicke(html)].sort()).toEqual([...PRODUCT_COLUMN_IDS].sort());
+  it('v hlavičke sú všetky KRESLENÉ stĺpce sady, ani jeden nechýba', () => {
+    expect([...poradieVHlavicke(html)].sort()).toEqual([...KRESLENE].sort());
+  });
+
+  it('vynechaný `ean13` sa tu nekreslí ako stĺpec — a nepremenoval sa', () => {
+    /*
+     * Druhá strana toho istého pravidla (D124): stĺpec, ktorý sa nehodí, sa
+     * VYNECHÁ — nikdy sa nepremenuje ani nenaplní inou veličinou. Meria sa to
+     * na `data-col`, nie na texte: slovo „EAN" v tejto tabuľke LEGITÍMNE je
+     * (tichý druhý riadok v bunke názvu), takže grep nad textom by tvrdil
+     * opak toho, čo sa deje.
+     */
+    expect(poradieVHlavicke(html)).not.toContain('ean13');
+    expect(html).not.toContain('data-col="ean13"');
+    // A meno stĺpca sady zostalo menom stĺpca sady, nie menovkou riadku.
+    expect(productColumn('ean13').label).toBe('EAN');
   });
 
   it('idú v ZÁVÄZNOM poradí sady — stĺpce mimo sady ho nesmú prehádzať', () => {
@@ -209,11 +244,11 @@ describe('A. Produkty kreslia CELÚ jednotnú sadu v poradí sady (D124)', () =>
      * Dve tabuľky s tými istými stĺpcami v inom poradí sa porovnať nedajú
      * o nič lepšie než dve s inými menami.
      */
-    expect(poradieVHlavicke(html)).toEqual([...PRODUCT_COLUMN_IDS]);
+    expect(poradieVHlavicke(html)).toEqual([...KRESLENE]);
   });
 
   it('mriežka `data-col` je aj v RIADKU, nielen v hlavičke', () => {
-    for (const id of PRODUCT_COLUMN_IDS) expect(bunka(html, id).length).toBeGreaterThan(0);
+    for (const id of KRESLENE) expect(bunka(html, id).length).toBeGreaterThan(0);
   });
 
   /*
@@ -260,8 +295,8 @@ describe('A. Produkty kreslia CELÚ jednotnú sadu v poradí sady (D124)', () =>
 describe('B. tabuľka si mená stĺpcov nedrží vo vlastnej kópii', () => {
   const html = render(stranka(obohateny()));
 
-  it('každý stĺpec sady nesie meno aj vetu `title` z DEFINÍCIE', () => {
-    for (const id of PRODUCT_COLUMN_IDS) {
+  it('každý KRESLENÝ stĺpec sady nesie meno aj vetu `title` z DEFINÍCIE', () => {
+    for (const id of KRESLENE) {
       const column = productColumn(id, { soldWindowDays: 30 });
       expect(html, `${id} — meno`).toContain(column.label);
       expect(html, `${id} — headTitle`).toContain(vAtribute(column.headTitle));

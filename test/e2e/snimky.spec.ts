@@ -41,13 +41,16 @@ test.describe('snímky obrazoviek', () => {
     const riadkov = await db.seedCatalogFromFixture();
     console.log(`snímky: katalóg naplnený na ${riadkov} riadkov`);
 
-    /* 1. Prehľad bez jedinej zľavy — verdikt, prázdny stav a riadok kontrol.
-       Katalóg je pritom NAČÍTANÝ, takže obrazovka ukazuje stav, v akom je
-       inštalácia používateľa, nie stav pred prvým spustením. */
+    /* 1. Prehľad bez jedinej zľavy — štyri sekcie (V7, D152): KPI rad, graf
+       troch kriviek, tabuľka a bežiace zľavy. Verdikt a riadok kontrol tu už
+       NIE SÚ — stavový pás odišiel do Nastavení (snímka 5) a zostal po ňom
+       jeden tichý riadok s odkazom. Katalóg je pritom NAČÍTANÝ, takže obrazovka
+       ukazuje stav, v akom je inštalácia používateľa, nie stav pred prvým
+       spustením. */
     await page.goto('/');
     await expect(page.getByTestId('overview')).toBeVisible();
-    await expect(page.getByTestId('verdict-headline')).toBeVisible();
-    await expect(page.getByTestId('overview-checks')).toBeVisible();
+    await expect(page.getByTestId('overview-kpi')).toBeVisible();
+    await expect(page.getByTestId('overview-trouble')).toBeVisible();
     await page.screenshot({ path: 'screenshots/aktualne-1-prehlad-prazdny.png', fullPage: true });
 
     /* 2. Produkty — stav katalógu a strop výberu. */
@@ -70,10 +73,13 @@ test.describe('snímky obrazoviek', () => {
       fullPage: true,
     });
 
-    /* 5. Podstránka „Čo smie robiť" — rozsah, zápisy, rozpočty. Práve tu je
-     *    prepínač stropu, ktorý používateľ mesiace nenašiel. */
+    /* 5. Podstránka „Čo smie robiť" — stav a prekážky (V7, D152), rozsah,
+     *    zápisy, rozpočty. Práve tu je prepínač stropu, ktorý používateľ
+     *    mesiace nenašiel. */
     await page.goto('/nastavenia/co-smie');
     await expect(page.getByTestId('settings-sub-co-smie')).toBeVisible();
+    await expect(page.getByTestId('verdict-headline')).toBeVisible();
+    await expect(page.getByTestId('overview-checks')).toBeVisible();
     await page.waitForLoadState('networkidle');
     await page.screenshot({ path: 'screenshots/aktualne-5-nastavenia-co-smie.png', fullPage: true });
 

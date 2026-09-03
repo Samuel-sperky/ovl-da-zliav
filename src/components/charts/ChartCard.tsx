@@ -19,11 +19,12 @@
  *  3. **Legenda nesie TRI KANÁLY.** Predloha mala v položke legendy `label`
  *     a `color`. Farba sama v tejto appke nosičom rozdielu byť nesmie (§4
  *     bod 3 kontraktu V6), takže marka vie byť aj šrafovaná (`gap` —
- *     „nevieme"), prerušovaná (`dashed` — trend), s prerušovanou hranou
- *     (`open` — dolná hranica, zhrnutý chvost) alebo zvislá čiarka (`tick` —
- *     jednotlivá položka na osi), a slovo je povinné vždy. Zoznam mariek je
- *     uzavretý rovnako ako `CHART_KINDS`: nová marka je rozhodnutie o jazyku,
- *     nie o vzhľade jedného grafu.
+ *     „nevieme"), prerušovaná (`dashed` — trend), bodkovaná (`dotted` —
+ *     namerané hodnoty, ktorých zaradenie nevieme; V7, D156), s prerušovanou
+ *     hranou (`open` — dolná hranica, zhrnutý chvost) alebo zvislá čiarka
+ *     (`tick` — jednotlivá položka na osi), a slovo je povinné vždy. Zoznam
+ *     mariek je uzavretý rovnako ako `CHART_KINDS`: nová marka je rozhodnutie
+ *     o jazyku, nie o vzhľade jedného grafu.
  *  4. **Rám je `Panel`, nie vlastná karta.** Predloha to má rovnako a bolo by
  *     to jediné miesto, kde by v tejto appke stála druhá, takmer rovnaká
  *     ohraničená plocha (D142: dvojník je dlh). V `charts.module.css` zostáva
@@ -108,6 +109,21 @@ export interface ChartLegendEntry {
    * a neutrálny textový token, nie krok rampy.
    */
   tick?: boolean;
+  /**
+   * Marka radu, ktorého HODNOTY SÚ NAMERANÉ, ale ich ZARADENIE NEVIEME —
+   * bodkovaná čiara.
+   *
+   * Pribudla vo V7 s grafom troch kriviek (D156) a je to jazykové rozhodnutie,
+   * nie vzhľad jedného grafu. Krivka „nevieme, či bola zľava" nesie POCTIVO
+   * ZMERANÉ kusy, takže `gap` (šrafovanie = „toto sme nemerali") by o meraní
+   * tvrdil, že meranie nie je — a v tom istom grafe už `gap` znamená
+   * nesťahovaný deň, takže dve rôzne priznania by mali jednu marku. `dashed`
+   * to byť nemohlo: prerušovaná marka je v tejto appke TREND a dve rovnaké
+   * marky s dvoma rôznymi slovami sú horšie než veta.
+   *
+   * Farba zostáva farbou radu; rozdiel nesie TVAR (bodky) a slovo.
+   */
+  dotted?: boolean;
 }
 
 /**
@@ -146,6 +162,28 @@ function LegendMark({ entry, hatchId }: { entry: ChartLegendEntry; hatchId: stri
           stroke={entry.color ?? 'currentColor'}
           strokeWidth="2"
           strokeDasharray="4 3"
+        />
+      </svg>
+    );
+  }
+  if (entry.dotted === true) {
+    /* Bodky, nie čiarky: čiarky sú TREND. Guľaté konce sú nosné — bez nich sú
+       to krátke čiarky a marka sa od trendu na oko nelíši. */
+    return (
+      <svg
+        className={styles.legendMark}
+        width="16"
+        height="12"
+        viewBox="0 0 16 12"
+        aria-hidden="true"
+      >
+        <path
+          d="M1.5 6.5 H14.5"
+          fill="none"
+          stroke={entry.color ?? 'currentColor'}
+          strokeWidth="2"
+          strokeDasharray="0.1 4"
+          strokeLinecap="round"
         />
       </svg>
     );
@@ -248,6 +286,91 @@ export function ChartSummaryTable({
           <tr key={row.label}>
             <th scope="row">{row.label}</th>
             <td>{chartRowText(row, format)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/* ══════════ 2b. Prepis grafu s VIAC RADMI nad jednou osou (V7) ═══════════ */
+
+/** Jeden riadok prepisu: popis bodu, hodnota za každý rad a priznanie k bodu. */
+export interface ChartSeriesSummaryRow {
+  /** Kľúč pre React. Popis sa v dlhom okne môže zopakovať, kľúč nie. */
+  key: string;
+  label: string;
+  /**
+   * HOTOVÉ texty hodnôt v poradí `valueHeads`. Skladá ich MODEL grafu tou
+   * istou funkciou, akou kreslí plochu (`chartRowText()`), a preto sa tu
+   * neformátuje nič: druhá cesta k tým istým číslam je druhá verzia pravdy
+   * a človek s čítačkou by čítal práve tú.
+   */
+  cells: readonly string[];
+  /** Priznanie k bodu („deň sa nesťahoval", „deň ešte beží"), inak `''`. */
+  note?: string;
+}
+
+export interface ChartSeriesSummaryTableProps {
+  /** Čo tabuľka prepisuje. Ide do `<caption>`, teda do reči čítačky. */
+  caption: string;
+  /** Hlavičky stĺpcov hodnôt — po jednej na rad, slovensky. */
+  valueHeads: readonly string[];
+  rows: readonly ChartSeriesSummaryRow[];
+  /** Hlavička stĺpca popisov. Predvolene „Bod" — pri čiare je to deň. */
+  labelHead?: string;
+  /** Hlavička stĺpca priznaní. Kreslí sa LEN keď má aspoň jeden riadok vetu. */
+  noteHead?: string;
+}
+
+/**
+ * Prepis grafu, v ktorom nad JEDNOU osou leží VIAC RADOV.
+ *
+ * Sestra `ChartSummaryTable` (jeden rad = dva stĺpce) a je to zámerne tá istá
+ * dielňa, nie druhý komponent inde (D142): pravidlá prepisu — pomlčka namiesto
+ * nuly, `≥` pri dolnej hranici, riadok pre KAŽDÝ bod osi — musia mať jedno
+ * miesto. Vznikla vo V7 s grafom troch kriviek (D156), kde jeden rad na
+ * prepis nestačí: čítačka musí vedieť porovnať „v zľave", „bez zľavy"
+ * a „nevieme, či bola" pre ten istý deň.
+ *
+ * Tabuľka NESMIE byť v `components/dashboard/` — architektúra §1 hovorí
+ * „tabuľka produktov: Prehľad NIKDY" a `prehlad.spec.ts` to stráži hľadaním
+ * značky `<table>` v komponentoch Prehľadu. Prepis grafu tabuľkou produktov
+ * nie je, ale hranica sa nekreslí výnimkami — kreslí sa tým, že tabuľka žije
+ * vo vrstve grafov.
+ */
+export function ChartSeriesSummaryTable({
+  caption,
+  valueHeads,
+  rows,
+  labelHead = 'Bod',
+  noteHead = 'Poznámka',
+}: ChartSeriesSummaryTableProps) {
+  /* Stĺpec priznaní sa kreslí len vtedy, keď je čo priznať — prázdny stĺpec
+     by čítačka prečítala pri každom riadku a nič by nepovedal. */
+  const hasNotes = rows.some((row) => row.note !== undefined && row.note !== '');
+  return (
+    <table>
+      <caption>{caption}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{labelHead}</th>
+          {valueHeads.map((head) => (
+            <th scope="col" key={head}>
+              {head}
+            </th>
+          ))}
+          {hasNotes ? <th scope="col">{noteHead}</th> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.key}>
+            <th scope="row">{row.label}</th>
+            {row.cells.map((cell, index) => (
+              <td key={valueHeads[index] ?? String(index)}>{cell}</td>
+            ))}
+            {hasNotes ? <td>{row.note ?? ''}</td> : null}
           </tr>
         ))}
       </tbody>

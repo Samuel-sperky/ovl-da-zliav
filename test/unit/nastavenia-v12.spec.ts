@@ -32,6 +32,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import AppStateSection from '@/components/settings/AppStateSection';
 import AuditFilters from '@/components/audit/AuditFilters';
 import AuditTable, { auditRowText, showsFailureFlag } from '@/components/audit/AuditTable';
 import { EMPTY_FILTERS, auditEventLabel, type AuditRow } from '@/components/audit/api';
@@ -112,10 +113,16 @@ describe('Nastavenia — kotvy a sekcie', () => {
     // v akom poradí historicky vznikali:
     //   čo appka vie      → covie
     //   na čo je napojená → pripojenie, kluce
+    //   čo ju zastavuje   → stav
     //   čo smie robiť     → rozsah, zapisy
     //   koľko toho smie   → rozpocet
     //   čo už spravila    → historia, diagnostika, zamknute
     //   núdzové brzdy     → poistky, cervena
+    //
+    // `stav` pribudol 3. 9. 2026 (V7, D152): stavový pás a prekážky odišli
+    // z Prehľadu — mal šesť vecí pod sebou a má mať štyri — a stoja na tej
+    // podstránke, ktorá sa pýta „čo smie robiť". Prekážka hovorí, čo appka
+    // PRÁVE nesmie, takže je to prvá otázka tej istej stránky, nie nová.
     //
     // `covie` je navrchu zámerne: používateľ mesiace netušil, že strop
     // desiatich produktov je iba prepínač, takže rozcestník „čo appka vie"
@@ -124,6 +131,7 @@ describe('Nastavenia — kotvy a sekcie', () => {
       'covie',
       'pripojenie',
       'kluce',
+      'stav',
       'rozsah',
       'zapisy',
       'rozpocet',
@@ -151,6 +159,13 @@ describe('Nastavenia — kotvy a sekcie', () => {
       ),
       renderToStaticMarkup(createElement(LockedFeatures)),
       renderToStaticMarkup(createElement(DiagnosticsSection)),
+      /*
+       * Stav a prekážky (V7, D152). Sekcia si dáta ťahá sama, takže pri
+       * statickom renderi kreslí kostru — a kotva `#stav` MUSÍ byť aj v nej.
+       * Keby vznikla až s dátami, odkaz z Prehľadu by pri prvom vykreslení
+       * skončil v prázdne a človek by pristál na vrchu stránky bez slova.
+       */
+      renderToStaticMarkup(createElement(AppStateSection)),
     ].join('\n');
 
     // Podmnožina kotiev — tie ostatné (`pripojenie`, `historia`, `cervena`)
@@ -161,7 +176,15 @@ describe('Nastavenia — kotvy a sekcie', () => {
     // `SignOut.tsx`, rozcestník ponúkal odkaz na sekciu, ktorá neexistuje,
     // a našel to až preklik v prehliadači. Čo je vyňaté tu, nestráži NIKTO;
     // kto pridá kotvu do `SETTINGS_ANCHORS`, nech ju pridá aj sem.
-    for (const id of ['kluce', 'rozpocet', 'rozsah', 'poistky', 'zamknute', 'diagnostika']) {
+    for (const id of [
+      'kluce',
+      'rozpocet',
+      'rozsah',
+      'poistky',
+      'zamknute',
+      'diagnostika',
+      'stav',
+    ]) {
       expect(markup, `chýba sekcia s kotvou ${id}`).toContain(`id="${id}"`);
     }
   });

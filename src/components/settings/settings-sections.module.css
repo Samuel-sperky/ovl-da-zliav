@@ -77,6 +77,24 @@
 }
 
 /*
+ * STAV A PREKÁŽKY (V7, D152) — dva bloky pod sebou v jednom obale.
+ *
+ * Obal existuje kvôli kotve `#stav`: musí platiť pre pás AJ pre prekážky pod
+ * ním, lebo bez kľúča na zápis je práve tá druhá časť to, kvôli čomu sa človek
+ * na túto stránku prišiel pozrieť.
+ *
+ * Odstup nesie `gap`, nie `.sec + .sec` z `SETTINGS_CSS`: pás je `<details>`,
+ * nie `.sec`, takže by susedné pravidlo prekážky pod ním nechytilo a oba bloky
+ * by sa zlepili. `gap` je zároveň jediné číslo, ktoré tu treba — keď je zeleno
+ * a prekážky sa nekreslia vôbec, nemá čo vytvoriť prázdne miesto.
+ */
+.stateStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/*
  * Pilulka spojenia a veta k nej vedľa seba. Veta si drží vlastnú šírku
  * (`flex-basis`), takže sa pri úzkom okne zalomí pod pilulku celá, nie po
  * jednom slove.

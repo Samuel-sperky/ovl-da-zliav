@@ -46,6 +46,7 @@ import { addCalendarMonths, addDays, diffDays, isDateOnly, todayInZone } from '@
 import { insightsRepo as defaultInsightsRepo } from '@/lib/repo/insights.repo';
 import { campaignsRepo as defaultCampaignsRepo } from '@/lib/repo/campaigns.repo';
 import { campaignItemsRepo as defaultCampaignItemsRepo } from '@/lib/repo/campaign-items.repo';
+import { SOLD_WINDOW_CHOICES } from '@/lib/sales/windows';
 
 /* ═══════════════════════ 1. Závislosti route-ov ═══════════════════════════ */
 
@@ -150,6 +151,32 @@ export const windowQuery = z.coerce
   .number()
   .int()
   .refine((v) => WINDOW_DAYS_ALLOWED.includes(v), 'Okno smie byť 7, 30 alebo 90 dní.')
+  .optional();
+
+/**
+ * `?long=30|60|90|180|360` — DLHÉ okno predajnosti (D149, V7).
+ *
+ * Je to iný prepínač než `windowQuery` a zámerne iný zoznam: `windowQuery`
+ * hovorí o osi grafu (7/30/90), zatiaľ čo toto je okno, za ktoré sa sčítajú
+ * KUSY — a tie okná ponúka prepínač predajnosti (`SOLD_WINDOW_CHOICES`) aj
+ * zrkadlo katalógu (`ALLOWED_SOLD_WINDOWS`). Oba zoznamy sú od 3. 9. 2026 ten
+ * istý modul, takže sa nemajú ako rozísť.
+ *
+ * Nepovolená hodnota je 400, nie tichý fallback — z tej istej príčiny ako
+ * u `windowQuery`: obrazovka, ktorá si vypýta 360 dní a dostane 90, nakreslí
+ * nadpis, ktorý neplatí.
+ *
+ * POZOR: prijaté okno NIE JE sľub, že dáta zaň sú. Odpoveď preto vždy nesie
+ * `completeDays` a `unknownDays` a súčet je pri `unknownDays > 0` DOLNÁ
+ * HRANICA (I11) — kým sa história nedočíta, je to normálny stav, nie chyba.
+ */
+export const soldWindowQuery = z.coerce
+  .number()
+  .int()
+  .refine(
+    (v) => (SOLD_WINDOW_CHOICES as readonly number[]).includes(v),
+    `Dlhé okno smie byť ${SOLD_WINDOW_CHOICES.join(', ')} dní.`,
+  )
   .optional();
 
 export interface WindowRange {

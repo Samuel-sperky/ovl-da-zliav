@@ -82,6 +82,7 @@ import { catalogRepo } from '@/lib/repo/catalog.repo';
 import type { SalesRepoContract } from '@/lib/repo/sales.repo';
 import { salesRepo } from '@/lib/repo/sales.repo';
 import type { SalesStopRecord } from '@/lib/sales/stop-policy';
+import { MAX_SALES_WINDOW_DAYS } from '@/lib/sales/windows';
 
 /* ═══════════════════════════ 1. Konštanty ═════════════════════════════════ */
 
@@ -573,8 +574,16 @@ export function describeCoverageSk(coverage: SalesCoverage): string {
 export const KPI_WINDOW_SHORT_DAYS = 30;
 /** Dlhé okno KPI — D114 „ks 90 d"; z neho vzniká aj značka „bez predaja". */
 export const KPI_WINDOW_LONG_DAYS = 90;
-/** Strop okna. 400 dní je viac než najdlhšie okno, ktoré UI ponúka. */
-const MAX_KPI_WINDOW_DAYS = 400;
+/**
+ * Strop okna — presne najdlhšie okno, ktoré appka ponúka (`lib/sales/windows.ts`).
+ *
+ * Do 3. 9. 2026 tu stálo `400` s poznámkou „viac než najdlhšie okno, ktoré UI
+ * ponúka". Bola to druhá kópia tej istej vedomosti a mlčala by: keby zoznam
+ * okien niekto rozšíril nad 400 dní, `clampWindowDays()` by okno TICHO skrátil
+ * a odpoveď by nesla iné `windowDays`, než o aké obrazovka požiadala. Odvodením
+ * sa z toho stane nemožnosť, nie disciplína.
+ */
+const MAX_KPI_WINDOW_DAYS = MAX_SALES_WINDOW_DAYS;
 /** Strop jednej strany KPI. UI stránkuje po 100; 500 je poistka, nie plán. */
 const MAX_KPI_PRODUCTS = 500;
 
@@ -833,6 +842,10 @@ export function buildProductKpis(input: ProductKpiInput): ProductKpiRow[] {
       missing: product.missing,
       name: product.name,
       reference: fromEnrichment(at, e.reference),
+      /* EAN z toho istého riadku obohatenia ako referencia (D150, V7). Ide tou
+         istou cestou `fromEnrichment()`, takže neobohatený riadok dostane
+         `not_enriched` a nie prázdny reťazec. */
+      ean13: fromEnrichment(at, e.ean13),
       supplier: fromEnrichment(at, e.supplier),
       listPrice: product.price,
       priceWithVat: fromEnrichment(at, e.sellPriceWithVat),

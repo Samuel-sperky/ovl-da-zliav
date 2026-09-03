@@ -26,7 +26,10 @@
  *     migrácie 0014 zdroj MAJÚ (`getFull`), takže v stave sú — a platia nad
  *     OBOHATENÝMI riadkami, čo panel priznáva jednou vetou (I11).
  *  3. **Predvolené okno je 30 dní** (architektúra §1, odpoveď 53). Repozitár
- *     má vlastný default 180, preto sa okno posiela VŽDY explicitne.
+ *     má vlastný default 180, preto sa okno posiela VŽDY explicitne — a samotný
+ *     ZOZNAM okien sa tu nepíše, berie sa zo `lib/sales/windows.ts` (D149, K9).
+ *     Ten modul je zámerne LIST (neimportuje nič), takže tento zostáva ČISTÝ aj
+ *     s ním: stále bez Reactu, bez `fetch`, bez `process.env`, bez DB.
  *
  * Triedenie je poradie, nie podmienka
  * ───────────────────────────────────
@@ -42,6 +45,12 @@
  * Vlastník: V10.
  */
 
+import {
+  SOLD_WINDOW_CHOICES,
+  isSoldWindowDays,
+  type SoldWindowDays,
+} from '@/lib/sales/windows';
+
 /* ═══════════════════════════ 1. Hodnoty filtra ════════════════════════════ */
 
 /** Vedrá predajnosti podľa bočného panela. Rovnaké kódy ako v repozitári. */
@@ -49,10 +58,29 @@ export type SoldBucket = 'none' | 'low' | 'mid' | 'high';
 
 export const SOLD_BUCKETS: readonly SoldBucket[] = ['none', 'low', 'mid', 'high'];
 
-/** Prepínač obdobia. Predvolené je 30 — najkratšie, nie najagresívnejšie. */
-export const SOLD_WINDOWS = [30, 60, 90, 180, 360] as const;
+/**
+ * Prepínač obdobia. Predvolené je 30 — najkratšie, nie najagresívnejšie.
+ *
+ * ═══ ZOZNAM SA TU NEPÍŠE RUČNE (D149, K9) ═══
+ * Berie sa zo `SOLD_WINDOW_CHOICES` (`lib/sales/windows.ts`) — z TOHO ISTÉHO
+ * zoznamu, z ktorého sa odvodzuje strop `SALES_WINDOW_DAYS` v `src/env.ts`,
+ * povolené okná zrkadla (`ALLOWED_SOLD_WINDOWS`), `?long=` na čítacích
+ * endpointoch aj prepínač Prehľadu (`dashboard/sold-window.ts`).
+ *
+ * Do 3. 9. 2026 tu stál vlastný literál `[30, 60, 90, 180, 360]`. Zhodoval sa
+ * so zdrojom NÁHODOU — dve kópie sú v deň vzniku vždy rovnaké a rozídu sa až
+ * pri prvej zmene: pridané okno by tu filter PONUKOL, kým appka by zaň nesmela
+ * stiahnuť ani jeden deň (pasca D125). To je „to isté číslo nesmie žiť na dvoch
+ * miestach" z CLAUDE.md a v tomto repe to už raz stálo produkčné číslo
+ * (`MAX_DAILY_WRITE_BUDGET` existoval dvakrát a kópie sa rozišli).
+ *
+ * `SoldWindow` je len KRATŠIE MENO pre `SoldWindowDays`, nie druhá deklarácia:
+ * dva typy pre jednu veličinu by boli dve miesta, kde sa dá zabudnúť na nové
+ * okno. Uzavretý literálový typ sa tým nestráca — nesie ho `as const` v zdroji.
+ */
+export const SOLD_WINDOWS: readonly SoldWindowDays[] = SOLD_WINDOW_CHOICES;
 
-export type SoldWindow = (typeof SOLD_WINDOWS)[number];
+export type SoldWindow = SoldWindowDays;
 
 /**
  * Stránkovanie po 50 alebo 100 riadkoch (architektúra §1; D10 pridalo 200,
@@ -252,8 +280,13 @@ export const DEFAULT_CATALOG_FILTER: CatalogFilterState = {
 
 /* ═══════════════════════════ 2. Rozpoznávanie ═════════════════════════════ */
 
-const isSoldWindow = (value: number): value is SoldWindow =>
-  (SOLD_WINDOWS as readonly number[]).includes(value);
+/**
+ * Je to okno z ponuky? Rozoznávanie sa TU NEPÍŠE — je to `isSoldWindowDays()`
+ * z jedného zdroja. Vlastné `includes()` by bolo druhé pravidlo o tom istom
+ * zozname. Fail-closed: čokoľvek mimo zoznamu je `false` a filter spadne na
+ * predvolené okno, nie na číslo z adresy.
+ */
+const isSoldWindow: (value: number) => value is SoldWindow = isSoldWindowDays;
 
 const isSoldBucket = (value: string): value is SoldBucket =>
   (SOLD_BUCKETS as readonly string[]).includes(value);

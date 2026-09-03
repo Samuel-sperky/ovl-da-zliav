@@ -964,18 +964,26 @@ describe('F. stavový pás sa zúžil, prekážky zostali viditeľné', () => {
   });
 
   /**
-   * Tvrdenie o USPORIADANÍ obrazovky sa nedá zmerať vykreslením jednej sekcie,
-   * lebo `Overview` potrebuje šesť odpovedí zo servera. Meria sa preto zdroj —
-   * a je to zmysluplné meranie: zabaliť prekážky do pásu znamená presunúť
-   * `<BlockersSection>` medzi jeho značky, a to je práve to, čo sa tu hľadá.
+   * PÁS AJ PREKÁŽKY SÚ OD V7 (D152) V NASTAVENIACH, nie na Prehľade — Prehľad
+   * mal šesť vecí pod sebou a má mať štyri. Tvrdenie sa presunom NEZMENILO
+   * a je to to najdôležitejšie z celej hlavičky `StatusBand`: prekážka
+   * zabalená do `<details>` je z povinného čítania voliteľné.
+   *
+   * Meria sa zdroj SEKCIE NASTAVENÍ; vykreslenú podobu toho istého pravidla
+   * (že prekážky naozaj nie sú potomkom `<details>`) meria
+   * `prehlad-styri-sekcie.spec.ts` §E na DOM-e.
    */
   it('`BlockersSection` stojí MIMO pásu, nie v jeho rozkliku', () => {
-    const source = read('../../src/components/dashboard/Overview.tsx');
+    const source = read('../../src/components/settings/AppStateSection.tsx');
     const closeBand = source.indexOf('</StatusBand>');
     const blockers = source.indexOf('<BlockersSection');
     expect(closeBand).toBeGreaterThan(-1);
     expect(blockers).toBeGreaterThan(-1);
     expect(blockers).toBeGreaterThan(closeBand);
+    // A na Prehľade nie je ani jedno z toho.
+    const overview = read('../../src/components/dashboard/Overview.tsx');
+    expect(overview).not.toContain('<BlockersSection');
+    expect(overview).not.toContain('<StatusBand');
   });
 
   it('pás si prekážky nekreslí ani sám — má na ne len miesto pod sebou', () => {
@@ -990,13 +998,26 @@ describe('F. stavový pás sa zúžil, prekážky zostali viditeľné', () => {
     expect(source).not.toContain('BlockersSection');
   });
 
-  it('predaje a rebríček stoja NAD zľavami (D113)', () => {
+  it('predaj stojí NAD zľavami a rozpisom pod ním (D113, D152)', () => {
+    /*
+     * TVRDENIE JE TO ISTÉ, KOMPONENTY INÉ (V7). Denný predaj kreslí od D156
+     * `DiscountSplitChart` (tri krivky) a čo pod ním rozpisuje predaj, je od
+     * D159 TABUĽKA, nie rebríček top/flop: `TopFlopSection` ani `SalesSection`
+     * sa z Prehľadu nekreslia (D152 dovoľuje štyri sekcie a obe by boli piata).
+     * Poradie zhora, ktoré D113 vybojovalo, sa nezmenilo: predaj hore, jeho
+     * rozpis pod ním, zľavy naspodku.
+     */
     const source = read('../../src/components/dashboard/Overview.tsx');
-    const sales = source.indexOf('<SalesSection');
-    const rankPos = source.indexOf('<TopFlopSection');
+    const sales = source.indexOf('<DiscountSplitChart');
+    const table = source.indexOf('<ProductsTable');
     const campaigns = source.indexOf('<CampaignsSection');
     expect(sales).toBeGreaterThan(-1);
-    expect(sales).toBeLessThan(rankPos);
-    expect(rankPos).toBeLessThan(campaigns);
+    expect(sales).toBeLessThan(table);
+    expect(table).toBeLessThan(campaigns);
+    // A staré sekcie sa nekreslia DVAKRÁT vedľa nových: dva grafy denného
+    // predaja na jednej obrazovke boli presne to „priveľa vecí", pre ktoré
+    // V7 vzniklo.
+    expect(source).not.toContain('<SalesSection');
+    expect(source).not.toContain('<TopFlopSection');
   });
 });

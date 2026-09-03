@@ -1,0 +1,132 @@
+/*
+ * Aura Zľavy — GRAF TROCH KRIVIEK: to, čo Recharts nevie z tokenov (V7, D156,
+ * D157, D143, D147).
+ *
+ * Rám, výšku plochy (`--chart-h`), legendu, prepis pre čítačku a pätičku kreslí
+ * `ChartCard`; farby kriviek si graf berie z `useChartTheme()`. Tu zostáva len
+ * to, čo ani jeden z nich nemá — a nič z toho nie je farba napísaná ručne:
+ *
+ *  1. **Bodkovaná krivka „nevieme, či bola".** Odlíšenie TVAROM je povinné
+ *     (§4 bod 3): farba sama nosičom rozdielu byť nesmie. Bodky, nie čiarky —
+ *     prerušovaná čiara je v tejto appke TREND (`sales-chart.module.css`),
+ *     takže by tá istá značka niesla dva významy.
+ *
+ *     Prečo `:global(.recharts-curve)`: Recharts vešia `className` na skupinu
+ *     `<g class="recharts-layer recharts-line …">`, ale čiaru kreslí `<path>`
+ *     s vlastným prezentačným atribútom. Trieda na skupine sa preto musí
+ *     dostať až na potomka. `stroke` sa tu ZÁMERNE nenastavuje — farbu krivky
+ *     posiela paleta, aby to isté číslo (krok série) nežilo na dvoch miestach.
+ *
+ *  2. **Značky bodov.** Tri stavy dňa majú tri TVARY (kruh · štvorec · kruh
+ *     s prázdnym stredom) a farbu si značka berie z krivky, ku ktorej patrí.
+ *     Prázdny stred je `--paper2`, teda tá istá reč, akou `charts.module.css`
+ *     kreslí dnešok; prerušovaný prstenec znamená dolnú hranicu (P7) a nič iné.
+ *
+ *  3. **Šrafovanie „nesťahované".** Vzor musí byť v `<defs>` nejakého SVG
+ *     v dokumente a plocha Rechartsu si vlastné `<defs>` vložiť nedá, takže
+ *     stojí vedľa nej v nulovom SVG. `position: absolute` je nosné:
+ *     `ResponsiveContainer` meria RODIČA a rodič s pevnou výškou by o výšku
+ *     tohto SVG pretiekol.
+ *
+ *  4. **Bublina s tromi hodnotami.** Farby nesie paleta, tu je geometria
+ *     a mriežka „slovo · hodnota" pre tri krivky naraz (D157). Bublina musí
+ *     ukázať VŠETKY TRI, aby sa dali porovnať — a krivka, ktorá deň nenesie,
+ *     má POMLČKU, nie nulu.
+ *
+ * Žiadny surový hex, žiadne `rgba()`, žiadny `!important` (D147).
+ *
+ * Vlastník: V7, krok 2/4 (graf troch kriviek).
+ */
+
+/* ── 1. Bodkovaná krivka „nevieme, či bola" ────────────────────────────── */
+
+.curveUnknown :global(.recharts-curve) {
+  stroke-dasharray: 0.1 5;
+  stroke-linecap: round;
+  fill: none;
+}
+
+/* ── 2. Značky bodov ───────────────────────────────────────────────────── */
+
+/* Hrana značky. Hrúbka je v pixeloch — plochu kreslí Recharts, nie `viewBox`. */
+.mark {
+  stroke-width: 2;
+}
+
+/*
+ * Prázdny stred: deň, ktorý ešte beží, a deň, o ktorého zľave nevieme. Vetu
+ * k obom nesie bublina a prepis — v legende marku nemajú, pretože dve rovnaké
+ * marky s dvoma rôznymi slovami sú horšie než veta.
+ */
+.markHollow {
+  fill: var(--paper2);
+}
+
+/*
+ * Prerušovaný prstenec = DOLNÁ HRANICA (neúplne stiahnutý deň, P7). Ten istý
+ * tvar, akým `charts.module.css` hovorí „aspoň toľko" — nie šrafovanie, lebo
+ * číslo je namerané.
+ */
+.markEstimate {
+  stroke-dasharray: 3 2;
+}
+
+/* ── 3. Definícia šrafovania vedľa plochy ──────────────────────────────── */
+
+.hatchDefs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ── 4. Bublina s tromi hodnotami ──────────────────────────────────────── */
+
+.tip {
+  pointer-events: none;
+  background: var(--paper2);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm);
+  box-shadow: var(--ovl-shadow);
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.tipDay {
+  display: block;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+  margin-bottom: 3px;
+}
+
+/*
+ * Tri riadky „slovo · hodnota". Mriežka, nie zalomený text: hodnoty troch
+ * kriviek sa majú dať porovnať pohľadom zhora dolu, a to zalomený riadok nedá.
+ */
+.tipGrid {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 10px;
+}
+
+.tipWord {
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}
+
+.tipValue {
+  font-size: var(--ovl-fs-small);
+  color: var(--ink);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Riadok, v ktorom hodnota nie je celý meraný deň. Nikdy sa nevynechá:
+   pomlčka bez vety je zvláštne miesto v grafe, nie priznanie. */
+.tipNote {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--ovl-fs-micro);
+  color: var(--dim);
+}

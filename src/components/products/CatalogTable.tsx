@@ -287,6 +287,21 @@ const WAIT_ROWS = 8;
  * jednotné stĺpce v hlavičke idú v poradí sady, len prekladané. Stráži to
  * `produkty-jednotne-stlpce.spec.ts`, ktorý číta `data-col` z hlavičky.
  *
+ * `ean13` SA TU VYNECHÁVA — A JE TO D124, NIE VÝNIMKA Z NEHO (V7, 3. 9. 2026)
+ * ──────────────────────────────────────────────────────────────────────────
+ * Sada má od D159 deviaty stĺpec `ean13`. Táto tabuľka ho ako STĹPEC nemá,
+ * pretože EAN v nej už stojí — tichým druhým riadkom v bunke názvu
+ * (`CodeLine`), a berie ho z INEJ cesty než KPI riadok:
+ * z `POST /api/catalog/details`, teda spoza kľúča, kde má TRI druhy prázdna
+ * („doťahuje sa", „vyžaduje kľúč", „shop ho nevedie"). Druhý stĺpec s tým
+ * istým menom z druhého zdroja by na jednej obrazovke postavil dve odpovede
+ * na tú istú otázku — presne to, čo D124 zakazuje. Pravidlo znie „kde sa
+ * stĺpec nehodí, VYNECHÁ sa", a toto je ten prípad.
+ *
+ * Kto stráži to, čo tá výnimka vyňala: `prehlad-tabulka.spec.ts` meria, že
+ * tabuľka Prehľadu kreslí VŠETKÝCH DEVÄŤ stĺpcov v poradí D159 — stĺpec teda
+ * nezostal bez jedinej tabuľky, ktorá ho naozaj kreslí.
+ *
  * ČLENSTVO V SADE NESIE `data-col`, MENOVKU BUNKY `data-l`
  * ───────────────────────────────────────────────────────
  * `colId` dostane VÝHRADNE stĺpec sady, takže z vykresleného `<thead>` sa dá
@@ -311,8 +326,8 @@ const UNIFIED_IDS: readonly ProductColumnId[] = [
   'discountNow',
   'soldWindow',
   'soldPerStock',
-  'margin',
   'stock',
+  'margin',
 ];
 
 type UnifiedColumns = Readonly<Record<ProductColumnId, ProductColumn>>;
@@ -912,6 +927,21 @@ export function CatalogTable({
       cell: (row) => kpiTableCell(kpiLastSaleCell(view(row).k), `kpi-last-sale-${row.productId}`),
     },
     {
+      /* PORADIE SA 3. 9. 2026 OTOČILO (V7, D159): sklad stojí PRED maržou.
+         Nie je to voľba tejto obrazovky — poradie je vlastnosť jednotnej sady
+         (`PRODUCT_COLUMN_IDS`), takže sa zmenilo aj tu. Dve tabuľky s tou
+         istou sadou v inom poradí sa nedajú porovnať o nič lepšie než dve
+         tabuľky s inými menami (D124). */
+      key: 'stock',
+      colId: 'stock',
+      cardLabel: col.stock.label,
+      header: col.stock.label,
+      headerTitle: col.stock.headTitle,
+      align: 'right',
+      width: WIDTH.stock,
+      cell: (row) => kpiTableCell(col.stock.cell(view(row).values), `kpi-stock-${row.productId}`),
+    },
+    {
       /* Marža v EUR a v % sú DVE hodnoty z `getFull` a každá má vlastnú
          medzeru — preto dva texty v jednej bunke a nie jeden reťazec, ktorý by
          pri jednej chýbajúcej polovici musel zmiznúť celý. Stav a `title`
@@ -941,16 +971,6 @@ export function CatalogTable({
           title: whole.title,
         };
       },
-    },
-    {
-      key: 'stock',
-      colId: 'stock',
-      cardLabel: col.stock.label,
-      header: col.stock.label,
-      headerTitle: col.stock.headTitle,
-      align: 'right',
-      width: WIDTH.stock,
-      cell: (row) => kpiTableCell(col.stock.cell(view(row).values), `kpi-stock-${row.productId}`),
     },
   ];
 

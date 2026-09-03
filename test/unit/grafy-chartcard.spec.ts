@@ -657,7 +657,29 @@ describe('C3. legenda nesie tri kanály — farba, značka, slovo', () => {
     expect(html).not.toContain('stroke-dasharray');
   });
 
-  it('marky sa navzájom nezliali — štyri tvary, štyri významy', () => {
+  it('NAMERANÉ HODNOTY S NEZNÁMYM ZARADENÍM sú BODKY, nie čiarky (V7)', () => {
+    /*
+     * `dotted` pribudlo s grafom troch kriviek (D156). Krivka „nevieme, či
+     * bola zľava" nesie POCTIVO ZMERANÉ kusy, takže `gap` (šrafovanie =
+     * „nemerali sme") by o meraní tvrdil, že meranie nie je — a v tom istom
+     * grafe už šrafovanie znamená nesťahovaný deň. `dashed` to byť nemohlo:
+     * prerušovaná marka je TREND.
+     *
+     * Meria sa preto rozdiel proti oboma: bodky (guľaté konce, medzera dlhšia
+     * než čiarka) a žiadny vzor.
+     */
+    const html = card({
+      legend: [{ label: 'nevieme, či bola', color: 'var(--chart-3)', dotted: true }],
+    });
+    expect(html).toContain('nevieme, či bola');
+    expect(html).toContain('stroke="var(--chart-3)"');
+    expect(html).toContain('stroke-linecap="round"');
+    expect(html).not.toContain('<pattern');
+    // Bodka je „takmer nulová čiarka s veľkou medzerou" — čiarka trendu je 4 3.
+    expect(html).toContain('stroke-dasharray="0.1 4"');
+  });
+
+  it('marky sa navzájom nezliali — päť tvarov, päť významov', () => {
     /*
      * Bez tejto vety by tvrdenia vyššie prešli aj vtedy, keby `LegendMark`
      * vracal pre všetko to isté. Meria sa, že sa štyri marky od seba naozaj
@@ -672,7 +694,8 @@ describe('C3. legenda nesie tri kanály — farba, značka, slovo', () => {
     const trend = tvar({ color: 'var(--chart-1)', dashed: true });
     const hranica = tvar({ color: 'var(--chart-1)', open: true });
     const znacka = tvar({ color: 'var(--ink)', tick: true });
-    const vsetky = [plna, medzera, trend, hranica, znacka];
+    const bodky = tvar({ color: 'var(--chart-1)', dotted: true });
+    const vsetky = [plna, medzera, trend, hranica, znacka, bodky];
     expect(new Set(vsetky).size, 'dve marky vyzerajú rovnako').toBe(vsetky.length);
   });
 
@@ -811,17 +834,23 @@ describe('D3. inventúra: KTO v `src/` kreslí graf a kto ide cez `ChartCard`', 
     expect(SOURCES.length).toBeGreaterThan(100);
   });
 
-  it('graf v `src/` kreslí presne PIAŤ súborov — nový sa nepridá tichom', () => {
+  it('graf v `src/` kreslí presne ŠESŤ súborov — nový sa nepridá tichom', () => {
     /*
-     * Toto je zapísaná inventúra, nie výnimka. Kto pridá šiesty graf, spadne
+     * Toto je zapísaná inventúra, nie výnimka. Kto pridá siedmy graf, spadne
      * na tomto tvrdení a bude musieť povedať, do ktorej z dvoch skupín nižšie
      * patrí. Bez toho by sa nový graf pridal so vlastným rámom, vlastnou
      * legendou a vlastným pravidlom osi — presne tak vznikli tri jazyky,
      * ktoré D126 zliepal dokopy.
+     *
+     * ŠIESTY PRIBUDOL VO V7 (D156): `DiscountSplitChart` je hlavný graf
+     * Prehľadu a kreslí denný predaj v troch krivkách (v zľave · bez zľavy ·
+     * nevieme, či bola). Ide cez `ChartCard` aj cez `useChartTheme()`, takže
+     * patrí do skupiny `RAMOVANE` nižšie — nie medzi priznané výnimky.
      */
     expect(GRAFY).toEqual([
       'src/components/charts/ChartCard.tsx',
       'src/components/charts/PriceHistogram.tsx',
+      'src/components/dashboard/DiscountSplitChart.tsx',
       'src/components/dashboard/SalesChart.tsx',
       'src/components/products/ProductDetailPanel.tsx',
       'src/components/ui/Charts.tsx',
@@ -836,6 +865,7 @@ describe('D3. inventúra: KTO v `src/` kreslí graf a kto ide cez `ChartCard`', 
      */
     const RAMOVANE = [
       'src/components/charts/PriceHistogram.tsx',
+      'src/components/dashboard/DiscountSplitChart.tsx',
       'src/components/dashboard/SalesChart.tsx',
     ];
     for (const path of RAMOVANE) {

@@ -142,6 +142,7 @@ describe('štruktúra podstránok', () => {
       'covie',
       'pripojenie',
       'kluce',
+      'stav',
       'rozsah',
       'zapisy',
       'rozpocet',

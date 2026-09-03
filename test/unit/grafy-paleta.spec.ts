@@ -198,25 +198,29 @@ describe.each(TEMY)('$nazov téma — trend sa dá odlíšiť od série', ({ bod
 describe('tlmená farba sa na druhú marku použiť nedá — a rozbilo by to len jednu tému', () => {
   /*
    * Poistka proti „upratovaniu". Zlatá trendová čiara vyzerá ako značková
-   * ozdoba a láka prepísať ju na neutrál. V TMAVEJ téme by to prešlo
-   * (`--accent` ↔ `--dim` má pod protanopiou ΔE 10,3), v SVETLEJ nie
-   * (ΔE 4,9) — a taká zmena sa odhalí len na jednom nastavení systému.
-   * Presne preto sa tmavá téma neodvodzuje preklopením svetlej.
+   * ozdoba a láka prepísať ju na neutrál. Taká zámena prejde v JEDNEJ téme
+   * a v druhej nie, takže sa odhalí len na jednom nastavení systému — presne
+   * preto sa tmavá téma neodvodzuje preklopením svetlej.
+   *
+   * SMER SA 3. 9. 2026 OBRÁTIL a je to dôkaz toho pravidla, nie jeho výnimka.
+   * Do D164 (kontrast 7 : 1) prechádzala TMAVÁ (`--accent` ↔ `--dim` pod
+   * protanopiou ΔE 10,3) a padala SVETLÁ (ΔE 4,9). Posun `--dim` a prechod
+   * `--accent` na `--teal3` v tmavej to vymenil: dnes je svetlá 12,29
+   * a tmavá 5,47. Preto sa tu odteraz tvrdí ASYMETRIA, nie jej dnešný smer —
+   * tvrdenie o smere bola snímka stavu a pri prvej zmene palety zhaslo.
    */
-  it('vo svetlej téme splýva akcent s tlmenou pod protanopiou', () => {
-    const odstup = deltaE(
-      simulate(resolve(SVETLA, '--accent'), 'protanopia'),
-      simulate(resolve(SVETLA, '--dim'), 'protanopia'),
+  const odstupProti = (body: string): number =>
+    deltaE(
+      simulate(resolve(body, '--accent'), 'protanopia'),
+      simulate(resolve(body, '--dim'), 'protanopia'),
     );
-    expect(odstup).toBeLessThan(8);
-  });
 
-  it('v tmavej téme by tá istá zámena prešla — preto sa nesmie robiť naslepo', () => {
-    const odstup = deltaE(
-      simulate(resolve(TMAVA, '--accent'), 'protanopia'),
-      simulate(resolve(TMAVA, '--dim'), 'protanopia'),
-    );
-    expect(odstup).toBeGreaterThanOrEqual(8);
+  it('presne jedna téma tú zámenu neunesie — v druhej by prešla naslepo', () => {
+    const hodnoty = [odstupProti(SVETLA), odstupProti(TMAVA)];
+    expect(
+      hodnoty.filter((x) => x < 8),
+      `svetlá ${hodnoty[0]!.toFixed(2)} · tmavá ${hodnoty[1]!.toFixed(2)}`,
+    ).toHaveLength(1);
   });
 });
 

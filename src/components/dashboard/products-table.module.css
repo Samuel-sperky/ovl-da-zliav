@@ -1,0 +1,149 @@
+/*
+ * Aura Zľavy — ČO JE NA TABUĽKE PREHĽADU MIESTNE (V7, D143, D159).
+ *
+ * Geometria tabuľkovej skupiny — rám, posuvná plocha, prilepenie, tri stavy
+ * bunky, pätka — žije v `ui/tables.module.css` a TU sa neopakuje. Zostávajú
+ * štyri veci, ktoré sú vlastnosťou TEJTO sekcie:
+ *
+ *  1. **Hustota D159.** Riadok ~40 px namiesto kompaktných 36 px z primitíva.
+ *     Nepíše sa prepísaním cudzieho súboru: `--ovl-tbl-*` sú MIESTNE TOKENY
+ *     deklarované na `.frame`, a hlavička primitíva to výslovne ponúka
+ *     („obrazovka smie prepísať jedným riadkom bez toho, aby siahla do tohto
+ *     súboru"). Produkty tým zostávajú kompaktné — 41 348 riadkov pracovnej
+ *     obrazovky je iná úloha než dvanásť riadkov na čítanie.
+ *
+ *     PÍSMO SA TU NEZMENŠUJE — A JE TO ZÁMER (D159, meranie 3. 9. 2026).
+ *     D159 žiada 13 px „z dnešných 12". Dnešných 12 px ale NEEXISTUJE:
+ *     `--ovl-fs-table` v `globals.css` je `0.875rem`, teda **14 px** (základ
+ *     `html` je 16 px, `globals.css` ho neprepisuje). Nastaviť tu 13 px by
+ *     znamenalo písmo ZMENŠIŤ na obrazovke, ktorá vznikla preto, že Samuel
+ *     označil malé písmo za jednu zo štyroch príčin nečitateľnosti. Tabuľka
+ *     preto berie `--ovl-fs-table` z primitíva a tento modul o veľkosti písma
+ *     buniek NEHOVORÍ NIČ. Že to nie je nedopatrenie, drží
+ *     `prehlad-tabulka.spec.ts`: meria, že token je ≥ 13 px a že tu žiadne
+ *     zmenšujúce `font-size` nie je.
+ *
+ *  2. **Pevná mriežka stĺpcov.** Pri automatickom rozložení meria prehliadač
+ *     obsah stránky a najdlhší názov rozhodne, kde začne stĺpec Cena — čísla
+ *     sa teda pri každom prelistovaní posunú inam a oko ich hľadá odznova.
+ *     `table-layout: fixed` to zastaví; `min-width` je to, čo deväť stĺpcov
+ *     radšej pošle do vodorovného posuvu vo VLASTNEJ ploche (`.scroll`
+ *     v primitíve), než by si zjedli obsah navzájom. Číslo je ODVODENÉ, nie
+ *     odhadnuté: 128 + 300 + 104 + 120 + 112 + 120 + 96 + 136 + 148 = 1264 px,
+ *     teda súčet šírok z `WIDTH` v `ProductsTable.tsx`.
+ *
+ *  3. **Dva identifikátory sa NESKRACUJÚ.** Referencia (D122) ani EAN (D150)
+ *     nemajú výpustku a nemajú zarovnanie doprava — orezaný identifikátor je
+ *     iný identifikátor a porovnáva sa odpredu po znakoch, nie odzadu po
+ *     jednotkách. Dostanú len tabuľkové číslice, aby sa stĺpec dal skenovať
+ *     zvisle.
+ *
+ *  4. **Strop výšky je v RIADKOCH, nie v okne.** Primitívum má
+ *     `calc(100vh - 280px)`, čo je počítané pre obrazovku, kde je tabuľka
+ *     dominantou. Na Prehľade je nad ňou hlavička, prepínač, rad kariet a graf
+ *     (~300 px, D158), takže okenná miera by tabuľku pretiahla pod ohyb.
+ *     Strop je preto hlavička + dvanásť riadkov — číslo, ktoré sa dá prečítať
+ *     ako „dvanásť riadkov vidno, zvyšok sa posúva vnútri rámu".
+ *
+ * ČO SA TU NESMIE POKAZIŤ
+ * ───────────────────────
+ *  A. **Farba sa tu nevyrába** (D132, D144, D147): žiadny surový hex, žiadna
+ *     `rgba()`, žiadny `!important`. Len tokeny.
+ *  B. **`data-col` VYPISUJE primitívum** — a len pre stĺpce jednotnej sady
+ *     (`colId`, bod G hlavičky `ui/Table`). Tabuľka Prehľadu kreslí CELÚ sadu,
+ *     takže `colId` má každý jej stĺpec a selektory nižšie sa naozaj majú
+ *     o čo uchytiť. Toto je presne to miesto, kde sa v tomto repe už raz
+ *     stala tichá chyba: `[data-col='select']` v `catalog-table.module.css`
+ *     cielil na atribút, ktorý primitívum pri zaškrtávacom stĺpci NEVYPISUJE,
+ *     takže selektor nebol nepoužitý — bol MŔTVY a odsadenie prvej bunky
+ *     zmizlo. Kto sem pridá `data-*` selektor, musí napísať, KTO ten atribút
+ *     vypisuje, a overiť to na VYKRESLENOM markupe.
+ *  C. **Priznanie sa stlmí, nezmizne** (I11). Stlmenie pomlčky kreslí
+ *     primitívum (`.unknown`); tento modul ho neprebíja a `display` ani
+ *     `opacity` na bunkách nemení.
+ *
+ * Vlastník: V7, krok 3/4 (tabuľka s filtrami).
+ */
+
+/* ═══════════════════════════ 1. Sekcia ═══════════════════════════════════ */
+
+/*
+ * Sekcia je plocha v rade Prehľadu. `min-width: 0` je to, čo jej dovolí sa
+ * v stĺpcovom rozvrhu naozaj stlačiť — bez neho ju vnútorná šírka tabuľky
+ * vytlačí a vodorovný posuv skončí na `<body>` namiesto na `.scroll` (P4).
+ */
+.section {
+  min-width: 0;
+}
+
+/* Lišta filtrov, zámky, tabuľka a vety pod ňou dýchajú v jednom rytme. */
+.section > * + * {
+  margin-top: var(--ovl-s4);
+}
+
+/* ═══════════════════════════ 2. Hustota a mriežka ════════════════════════ */
+
+.table {
+  /* Bod 1 hlavičky — D159 chce vzdušnejší riadok než kompaktné Produkty. */
+  --ovl-tbl-row-h: 40px;
+  --ovl-tbl-head-h: 38px;
+  /* Bod 4 hlavičky — strop je hlavička plus dvanásť riadkov. */
+  --ovl-tbl-max-h: calc(var(--ovl-tbl-head-h) + 12 * var(--ovl-tbl-row-h));
+  /* Názov smie byť dlhší než na Produktoch: nekonkuruje mu tu panel detailu. */
+  --ovl-tbl-trunc: 300px;
+}
+
+/* Bod 2 hlavičky. `min-width` je súčet šírok z `WIDTH` v `ProductsTable.tsx`. */
+.table table {
+  table-layout: fixed;
+  min-width: 1264px;
+}
+
+/* ═══════════════════════════ 3. Identifikátory (D122, D150) ══════════════ */
+
+/*
+ * Referencia a EAN: tabuľkové číslice, žiadne zarovnanie doprava, žiadna
+ * výpustka. `data-col` vypisuje primitívum pre stĺpce sady — pozri bod B
+ * hlavičky, tam je aj dôvod, prečo sa to musí overovať na vykreslenom markupe.
+ */
+.table td[data-col='reference'],
+.table td[data-col='ean13'] {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* ═══════════════════════════ 4. Pásma predaných ══════════════════════════ */
+
+/*
+ * Pásma sú ČIPY, nie prepínač: dajú sa kombinovať (server ich spája cez OR).
+ * Popisok pred nimi je nutný — samotné „0 · 1–2 · 3–9 · 10+" nepovie, čoho sú
+ * to počty, a `aria-label` skupiny hovorí to isté pre čítačku.
+ */
+.bands {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ovl-s2);
+}
+
+.bandsLabel {
+  font-size: var(--ovl-fs-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ═══════════════════════════ 5. Zamknuté rozmery (K7) ════════════════════ */
+
+/*
+ * Tri zámky pod lištou filtrov. Stoja pod ovládačmi, nie medzi nimi: zámok
+ * v rade s čipmi vyzerá ako čip, ktorý sa dá stlačiť, a to je presne to
+ * nedorozumenie, ktoré D125 zakazuje. Vzhľad samotného zámku kreslí
+ * `LockBadge` (`.locked-note` v `globals.css`) — tu je len rozvrh.
+ */
+.locked {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--ovl-s2);
+}

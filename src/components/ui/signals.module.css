@@ -67,13 +67,16 @@
 }
 
 /*
- * Vypnutý čip je stále čitateľný. `--dim` je NAJSVETLEJŠIA legálna farba textu
- * v oboch témach (tokenová vrstva to má zmerané) — pod ňu sa ísť nesmie ani
- * pri „zošednutí".
+ * Vypnutý čip nesie `--ink-disabled` — vlastný token pre NEAKTÍVNY prvok
+ * (D164). Do 3. 9. 2026 tu stálo `--dim` s vetou „pod ňu sa ísť nesmie";
+ * platila, kým bola `--dim` 4,7 : 1 a teda sama zošednutím. Po posune na
+ * 7 : 1 by vypnutý čip vyzeral ako zapnutý, takže sa nedostupnosť presunula
+ * do vlastného tokenu. WCAG 1.4.3 text neaktívneho prvku z hranice vyníma,
+ * podlaha je 2 : 1 a stráži ju `dizajn-kontrast.spec.ts`.
  */
 .chip:disabled {
   cursor: not-allowed;
-  color: var(--dim);
+  color: var(--ink-disabled);
   border-color: var(--line);
 }
 
@@ -94,8 +97,10 @@
   font-weight: 700;
 }
 
+/* Smer tónovania nesie TOKEN `--accent-press`, nie tento mix: v tmavej téme
+   je text na výplni tmavý, takže stmavenie ho zrážalo na 4,92 : 1 (D164). */
 .chip[aria-pressed='true']:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--accent) 86%, var(--mix-shade));
+  background: var(--accent-press);
   color: var(--accent-on);
 }
 
@@ -116,6 +121,18 @@
 
 .chip[aria-pressed='true'] .chipCount {
   color: inherit;
+}
+
+/*
+ * Počet pri HOVERI. Tint hoveru kreslí susedné pravidlo (`.chip:hover`),
+ * takže statický parser `dizajn-kontrast.spec.ts` tie dve nezloží a `--dim`
+ * meria na čistých plochách — na tinte nad zdvihnutým panelom to bolo
+ * 5,99 : 1 (zmerané ručne 3. 9. 2026, D164). Číslo tu preto ide o stupeň
+ * hore, na `--ink2` (8,2 : 1 na tej istej ploche). Nie je to kozmetika:
+ * je to jediný živý prípad diery, ktorú si hlavička toho testu menuje.
+ */
+.chip:hover:not(:disabled) .chipCount {
+  color: var(--ink2);
 }
 
 /* ══════════════ 2. Čip ako značka platného filtra (FilterChip) ═══════════ */

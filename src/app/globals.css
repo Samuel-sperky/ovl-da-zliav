@@ -91,10 +91,15 @@
 :root {
   /* Značkové PLOCHY. Sú tmavé/svietivé samy o sebe, takže ich ink je v oboch
      témach ten istý — meniť ich s témou by značku roztrieštilo.
-     Merané: #ffffff na #03797e = 5,20 : 1 · na #025c60 = 7,77 : 1 ·
+     PLOCHA SA POSUNULA PRE D164 (7 : 1, 3. 9. 2026): #ffffff na pôvodnom
+     #03797e malo 5,20 : 1 a bielejší text neexistuje, takže jediná cesta na
+     7 : 1 viedla cez plochu. Nová základňa je presne ten tón, ktorý tu už
+     bol ako hover (#025c60 = 7,77 : 1), a hover sa posunul o krok nižšie
+     (#014a4e = 10,04 : 1). Odtiaľ tá pôvodná dvojica čísel v tomto komentári.
+     Merané: #ffffff na #025c60 = 7,77 : 1 · na #014a4e = 10,04 : 1 ·
      #1a1410 na #d8b878 = 9,59 : 1 · na #c9a869 = 8,07 : 1. */
-  --brand-fill: #03797e;
-  --brand-fill-hover: #025c60;
+  --brand-fill: #025c60;
+  --brand-fill-hover: #014a4e;
   --on-brand-fill: #ffffff;
   --gold-fill: #d8b878;
   --gold-line: #c9a869;
@@ -193,36 +198,73 @@
   --teal: #05bcc4;
   --deep: #03797e;
   --teal3: #7fd0d4;
-  /* Zlatá ako TEXT. Na tmavých plochách je svietivá zlatá čitateľná
-     (9,93 : 1 na --paper, 9,33 : 1 na --paper2), takže sa rovná ploche. */
-  --gold-text: #d8b878;
+  /* Zlatá ako TEXT. Na tmavých plochách je svietivá zlatá čitateľná, ale na
+     VLASTNEJ tinte (značka v `.pageHeaderMark`) mala pri 14 % len 5,92 : 1.
+     Pre D164 sa posunulo oboje: tinta na 8 % a tón o krok svetlejšie
+     (7,12 : 1 na 8 % tinte nad kartou, 10,90 : 1 na --paper). */
+  --gold-text: #dcbd80;
   --gold2: #c9a869;
-  --accent: var(--teal);
+  /* Značkový teal ako TEXT je `--teal3`, nie `--teal` (D164, 3. 9. 2026).
+     Svietivý #05bcc4 má na karte 6,49 : 1 a na vlastnej 14 % tinte 5,10 : 1 —
+     ako VÝPLŇ (pruh, marka, prstenec) zostáva, ako TEXT nie. Je to to isté
+     rozdelenie PLOCHA vs. TEXT, aké má zlatá a aké má svetlá téma
+     u `--deep`. `--teal3` dáva 8,56 : 1 na karte a 7,7 : 1 na `--brand-tint`. */
+  --accent: var(--teal3);
   --accent-on: #08201f;
+  /* Stlačený čip pri hoveri. V TMAVEJ sa výplň ZOSVETĽUJE, lebo text na nej
+     je tmavý (`--accent-on`): stmavenie ho zrážalo pod hranicu (4,92 : 1 pri
+     vtedajšom `--accent`). V svetlej ide ten istý token opačným smerom —
+     preto je to token a nie mix napísaný v pravidle. */
+  --accent-press: color-mix(in oklab, var(--accent) 86%, var(--ink));
 
-  /* Plochy a písmo. `--dim` je NAJSVETLEJŠIA legálna farba textu
-     (5,95 : 1 na --paper, 5,59 : 1 na --paper2) — nikdy ju nezosvetľuj. */
-  --paper: #101114;
-  --paper2: #17181c;
-  --paper3: #1e2026;
+  /* Plochy a písmo. Rebrík má štyri stupne a každý je VIDIEŤ (D153):
+     stránka #0a0b0e → panel #16181d (1,11 : 1) → pruh #20232a (1,13 : 1) →
+     karta #23262d (1,04 : 1) plus 1 px linka; stránka proti karte je
+     1,30 : 1. Do V7 boli stránka a panel 1,06 : 1 od seba, čo je na
+     obrazovke nič — odtiaľ „splývajúce panely".
+     `--dim` je NAJSVETLEJŠIA legálna farba textu: 7,28 : 1 na karte
+     (najhoršia čistá plocha), 8,54 : 1 na paneli, 9,47 : 1 na stránke.
+     Nezosvetľuj ju ani nezotmavuj — 7 : 1 (D164) drží na karte s rezervou
+     0,28, takže obe strany sú tesné. */
+  --paper: #0a0b0e;
+  --paper2: #16181d;
+  --paper3: #20232a;
   --ink: #eceef2;
-  --ink2: #bfc4cd;
-  --dim: #8b919b;
-  --line: #282a31;
-  --line2: #3c3e43;
+  --ink2: #ccd1d9;
+  --dim: #b0b4bc;
+  /* Text NEAKTÍVNEHO prvku. Vlastný token vznikol s D164: kým `--dim` mala
+     4,7 : 1, dala sa použiť aj na „zošednutie" a nedostupné vyzeralo
+     nedostupne. Po posune na 7,4 : 1 by zakázaný čip vyzeral rovnako ako
+     bežný popisok, takže sa oddelil. WCAG 1.4.3 text neaktívneho prvku
+     z hranice 4,5 : 1 VYNÍMA výslovne; podlaha 2 : 1 (čitateľnosť tvaru,
+     nie obsahu) tu drží s 2,8 : 1 na karte. Nezvyšuj ho — jeho úlohou je
+     povedať „toto sa nedá", nie sa dobre čítať. */
+  --ink-disabled: #676a70;
+  --line: #34373e;
+  --line2: #4a4d54;
   --line-strong: var(--line2);
   /* DRÁHA MERACIEHO PRÚŽKU. Nesie mierku: bez nej je „96/240" plný prúžok
      a nie dve pätiny. Musí byť vidieť na karte aj na stránke. Tmavá mala
      kedysi #212329 = 1,13 : 1 na karte a na snímke z nej nezostalo nič;
-     #3a3d45 je 1,60 : 1 na karte a 1,69 : 1 na stránke. */
+     #3a3d45 je 1,39 : 1 na karte, 1,63 : 1 na paneli a 1,81 : 1 na stránke.
+     Čísla sa hýbali s plochami pri D164 — dráha sa nehýbala. */
   --track: #3a3d45;
-  --sel: #152a2a;
+  /* Pozadie VYBRANÉHO riadku. Musí zostať POD kartou (#23262d), inak je to
+     najsvetlejšia plocha v appke a diktuje `--dim` celej téme — presne to
+     robilo pôvodné #152a2a (4,74 : 1 na tlmenom texte). */
+  --sel: #122525;
   --barfill: var(--teal);
   --surface: color-mix(in srgb, var(--paper2) 62%, transparent);
   --surface-solid: var(--paper2);
-  --surface-raised: #22242a;
-  --brand: var(--teal);
-  --brand-tint: color-mix(in srgb, var(--teal) 14%, transparent);
+  --surface-raised: #23262d;
+  --brand: var(--teal3);
+  /* NEPRIESVITNÁ, ako všetky ostatné tinty (10 % tónu do `--surface-solid`).
+     Do 3. 9. 2026 to bolo `color-mix(--teal 10%, transparent)`, teda závoj —
+     a závoj nad KARTOU zosvetlil plochu tak, že tlmený text na nej mal
+     6,88 : 1 (nad pruhom) a 6,62 : 1 (nad kartou). Našlo to odvodenie plôch
+     vo V7; plná tinta je od podkladu nezávislá a `--dim` má na nej 7,7 : 1.
+     Naklikaný čip nesie `--brand` (`--teal3`) ako TEXT na tejto tinte. */
+  --brand-tint: color-mix(in oklab, var(--teal) 10%, var(--surface-solid));
 
   /* Spodná lišta výberu je tmavá v OBOCH témach — je to plávajúca akcia,
      nie plocha stránky. `--selbar-fg-dim` je jej tichší text (12,53 : 1). */
@@ -253,19 +295,29 @@
      panic). Biele písmo, ktoré tam stálo natvrdo, má na #fa8076 2,4 : 1;
      tmavý ink má 7,12 : 1. */
   --on-st-critical: #16181c;
+  /* VÝPLŇ potvrdzovacieho tlačidla zápisu a panicu — oddelená od plného tónu
+     (D164, 3. 9. 2026). V tmavej je to ten istý tón, lebo tmavý ink na ňom
+     má 7,12 : 1; v svetlej sa musel stmaviť, pretože biely text sa zosvetliť
+     nedal a #d13228 sa hýbať NESMIE (ΔE pod protanopiou). Rozdelenie je to
+     isté ako `--brand-fill` vs. `--accent`: PLOCHA nie je TEXT. */
+  --st-critical-fill: var(--st-critical);
   /* Text stavu na TINTE: čistý stavový tón má na 14 % tinte ~4,1 : 1, čo pri
-     13 px bold nestačí. Mieša sa preto k --ink a dostane ≥ 4,5 : 1 na tinte
-     aj na papieri. Plný tón zostáva nedotknutý pre okraje, pruhy a marky. */
-  --st-critical-ink: color-mix(in oklab, var(--st-critical) 80%, var(--ink));
-  --st-attention-ink: color-mix(in oklab, var(--st-attention) 80%, var(--ink));
-  --st-progress-ink: color-mix(in oklab, var(--st-progress) 80%, var(--ink));
-  --st-good-ink: color-mix(in oklab, var(--st-good) 80%, var(--ink));
-  --st-idle-ink: color-mix(in oklab, var(--st-idle) 80%, var(--ink));
+     13 px bold nestačí. Mieša sa preto k --ink. Podiel tónu klesol z 80 %
+     na 52 % (D164): pri 80 % mal „nečinný" na vybranom riadku 5,04 : 1
+     a „v poriadku" 5,17 : 1. Plný tón zostáva nedotknutý pre okraje, pruhy
+     a marky, takže stavová škála ani jej ΔE sa nehýbu. */
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 52%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 52%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 52%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 52%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 52%, var(--ink));
 
   /* Pruh PRODUKCIA (D6) — VŽDY plný a nepriesvitný, jeho čitateľnosť je
-     bezpečnostná funkcia, nie estetika (6,06 : 1). */
-  --production-bg: #b3261e;
-  --production-fg: #fff4f2;
+     bezpečnostná funkcia, nie estetika. Pre D164 sa posunula PLOCHA
+     (#b3261e → #a8231c) a písmo na čistú bielu: 6,06 : 1 → 7,19 : 1.
+     Text sa zosvetliť nedal, #fff4f2 už bolo takmer biele. */
+  --production-bg: #a8231c;
+  --production-fg: #ffffff;
 
   /* Sekvenčná teal rampa (hĺbka zľavy) — monotónna vo svetlosti. Nekóduje
      stav, len magnitúdu. */
@@ -313,39 +365,69 @@
   --teal: #05bcc4;
   /* Značkový teal ako TEXT (`--accent`, `--brand`, `--barfill`). Do
      2. 9. 2026 tu stálo #03797e — tá istá hodnota ako plocha `--brand-fill`.
-     Na `--paper2` mala 5,20 : 1, ale na `--paper3` (bočný rail) 4,48 : 1
-     a na vlastnej tinte `--brand-tint` tiež 4,48 : 1, takže naklikaný chip
-     `.ovl-chip[aria-pressed='true']` bol pod hranicou. #007278 dáva 4,74 : 1
-     na tinte a 4,75 : 1 na raile. PLOCHA `--brand-fill` zostáva #03797e
-     nedotknutá — je invariantná a ink na nej sa nemeria proti tomuto tokenu
-     (pravidlo PLOCHA vs. TEXT v hlavičke). */
+     Na `--paper2` mala 5,20 : 1, ale na vtedajšom `--paper3` (bočný rail)
+     4,48 : 1 a na vlastnej tinte `--brand-tint` tiež 4,48 : 1, takže
+     naklikaný chip `.ovl-chip[aria-pressed='true']` bol pod hranicou 4,5.
+     #007278 dáva dnes 4,93 : 1 na tinte, 5,37 : 1 na pruhu a 5,71 : 1 na
+     bielom paneli. PLOCHA `--brand-fill` je vlastný invariantný token
+     (dnes #025c60) a ink na nej sa proti tomuto tokenu nemeria — pravidlo
+     PLOCHA vs. TEXT z hlavičky. */
+  /* TENTO TOKEN 7 : 1 NEUNESIE A ZOSTÁVA NA #007278 (D164, riziko R2
+     kontraktu V7 — zmerané 3. 9. 2026, NESPLNENÉ).
+     Najhoršia hodnota je 4,60 : 1 (papier pod závojom); na 7 : 1 by musel
+     ísť na ~#005156, čo funguje — ale vtedy sa značkový teal dostane pod
+     farbosleposťou na ΔE 4,0 od „nečinný" (protanopia), 4,1 od „v poriadku"
+     a 7,1 od „prebieha" (tritanopia), teda pod hranicu 8, ktorú drží
+     `paleta.spec.ts`. To nie je nepresnosť, to je stav vyhlásený farbou,
+     ktorú časť ľudí nerozlíši — a to je horšie než slabší kontrast.
+     Nie je to voľba plochy: PRE ŽIADNU plochu to nevychádza. Najtmavší
+     teal s ΔE ≥ 8 má aj na ČISTEJ BIELEJ len 6,05 : 1, takže 7 : 1 je pre
+     túto farbu nedosiahnuteľné bez posunu stavovej škály. Dôkaz nie je táto
+     veta, ale tvrdenie v `dizajn-kontrast.spec.ts` (§10), ktoré si ten
+     výpočet zopakuje a padne, keď prestane platiť. */
   --deep: #007278;
   --teal3: #7fd0d4;
-  /* Zlatá ako TEXT: svietivá #d8b878 má na bielej 1,9 : 1, teda nečitateľná.
-     Zlatá pre TEXT je preto tmavá (5,17 : 1 na --paper2, 4,79 : 1 na
-     --paper), kým `--gold-fill` zostáva svietivá v oboch témach. Presne toto
-     rozdelenie je dôvod, prečo svetlá téma značku nezničí.
-     Do 2. 9. 2026 to bolo #8a6417; na `--paper3` malo 4,62 : 1, ale na
-     vlastnej 14 % tinte zlatej plochy (`.pageHeaderMark` vo `frame.module.css`)
-     len 4,33 : 1 — a to je jediné miesto, kde sa tento token naozaj kreslí
-     na zlatom. */
-  --gold-text: #825c0a;
+  /* Zlatá ako TEXT: svietivá #d8b878 má na bielej 1,90 : 1, teda
+     nečitateľná. Zlatá pre TEXT je preto tmavá, kým `--gold-fill` zostáva
+     svietivá v oboch témach — presne toto rozdelenie je dôvod, prečo svetlá
+     téma značku nezničí.
+     Hodnota sa posúvala dvakrát. Do 2. 9. 2026 to bolo #8a6417 (na vlastnej
+     14 % tinte v `.pageHeaderMark` len 4,33 : 1), potom #825c0a (4,86 : 1 na
+     tej istej tinte, 4,79 : 1 na papieri), a pre D164 je to #5f4200:
+     9,27 : 1 na bielom paneli, 7,98 : 1 na papieri a 7,69 : 1 na 8 % tinte
+     zlatej plochy. Hue zostáva zlatý, len tmavší — chroma sa nestratila. */
+  --gold-text: #5f4200;
   --gold2: #a8853c;
   --accent: var(--deep);
   --accent-on: #ffffff;
+  /* Stlačený čip pri hoveri — v svetlej téme sa výplň STMAVUJE, lebo text na
+     nej je biely. Opačný smer než v tmavej; preto je to token. */
+  --accent-press: color-mix(in oklab, var(--accent) 86%, var(--mix-shade));
 
-  --paper: #f5f6f7;
+  /* Rebrík plôch (D153): stránka #eceef2 → panel a karta #ffffff je
+     1,16 : 1, kým pôvodné #f5f6f7 → #ffffff bolo 1,05 : 1, teda na obrazovke
+     nič. `--paper3` sa OBRÁTIL: bol tmavší než stránka (#edeef1), teraz je
+     svetlejší (#f7f8fa), takže „zdvihnuté" znamená v oboch témach to isté
+     a najhoršou plochou pre text je stránka, nie pruh.
+     `--dim` je najtmavšia potrebná farba textu: 7,12 : 1 na papieri pod
+     závojom (najhoršia plocha svetlej témy), 7,71 : 1 na čistom papieri
+     a 8,95 : 1 na bielom paneli. Pôvodné #63696f malo 4,79 : 1 na pruhu —
+     to je celý dôvod D164. */
+  --paper: #eceef2;
   --paper2: #ffffff;
-  --paper3: #edeef1;
+  --paper3: #f7f8fa;
   --ink: #16181c;
-  --ink2: #3f444c;
-  /* Najsvetlejšia legálna farba textu: 5,13 : 1 na --paper, 5,55 : 1 na
-     --paper2, 4,79 : 1 na --paper3 a 4,80 : 1 na papieri pod závojom.
-     Nikdy ju nezosvetľuj — a nezosilňuj ani závoj: pri jeho pôvodných 10 %
-     mala táto farba 4,49 : 1, teda POD hranicou. */
-  --dim: #63696f;
-  --line: #dfe1e6;
-  --line2: #c7c9cd;
+  /* Stmavené z #3f444c (D164): po posune `--dim` na #454a4f boli sekundárny
+     a tlmený text 1,10 : 1 od seba, teda na oko tá istá farba, a pravidlo D2
+     („popisok sekcie je tmavší než popisok stĺpca") by prestalo platiť.
+     Rebrík je teraz ink → ink2 1,32 : 1 → dim 1,51 : 1. */
+  --ink2: #2a2f36;
+  --dim: #454a4f;
+  /* Text neaktívneho prvku — pozri dôvod v tmavej téme. 2,69 : 1 na bielom
+     paneli, 2,31 : 1 na papieri a 2,14 : 1 na papieri pod závojom. */
+  --ink-disabled: #9b9ea3;
+  --line: #c9ccd2;
+  --line2: #aeb1b7;
   --line-strong: var(--line2);
   /* 1,22 : 1 na bielej — dosť, aby dráha nesla mierku, málo, aby súperila. */
   --track: #e7e9ed;
@@ -366,21 +448,28 @@
      a na papieri pod závojom 4,02 : 1. Stmavenie neprichádza do úvahy —
      pod protanopiou by sa dostalo na ΔE 6,3 od „obmedzuje" a na 7,4 od
      „v poriadku", čiže tri rôzne stavy by časť ľudí videla ako jednu farbu
-     (paleta.spec.ts). Slovo stavu preto kreslí `--st-critical-ink`
-     (7,09 : 1 na papieri) a plný tón zostáva výplňou, okrajom a markou. */
+     (paleta.spec.ts). Slovo stavu preto kreslí `--st-critical-ink` a plný
+     tón zostáva výplňou, okrajom a markou. Konkrétne číslo tu zámerne nie
+     je: `-ink` je `color-mix()`, takže sa hýbe s `--ink` aj s podielom tónu
+     a napísané by starlo. Meria ho `dizajn-kontrast.spec.ts` na 7 : 1. */
   --st-critical: #d13228;
   --st-attention: #6b4300;
   --st-progress: #2f2585;
   --st-good: #1a5e33;
   --st-idle: #4f555c;
   --on-st-critical: #ffffff;
-  --st-critical-ink: color-mix(in oklab, var(--st-critical) 70%, var(--ink));
-  --st-attention-ink: color-mix(in oklab, var(--st-attention) 70%, var(--ink));
-  --st-progress-ink: color-mix(in oklab, var(--st-progress) 70%, var(--ink));
-  --st-good-ink: color-mix(in oklab, var(--st-good) 70%, var(--ink));
-  --st-idle-ink: color-mix(in oklab, var(--st-idle) 70%, var(--ink));
+  /* VÝPLŇ tlačidla, nie stavový tón. Biela na #d13228 má 5,00 : 1 a bielejší
+     text neexistuje, takže 7 : 1 sa dalo dosiahnuť len stmavením plochy
+     (#9e2019 = 7,85 : 1). Plný `--st-critical` zostáva #d13228 — jeho posun
+     by pod protanopiou zrazil ΔE od „obmedzuje" a „v poriadku" pod 8. */
+  --st-critical-fill: #9e2019;
+  --st-critical-ink: color-mix(in oklab, var(--st-critical) 52%, var(--ink));
+  --st-attention-ink: color-mix(in oklab, var(--st-attention) 52%, var(--ink));
+  --st-progress-ink: color-mix(in oklab, var(--st-progress) 52%, var(--ink));
+  --st-good-ink: color-mix(in oklab, var(--st-good) 52%, var(--ink));
+  --st-idle-ink: color-mix(in oklab, var(--st-idle) 52%, var(--ink));
 
-  --production-bg: #b3261e;
+  --production-bg: #a8231c;
   --production-fg: #ffffff;
 
   --seq-teal-1: #e3f1f1;
@@ -402,11 +491,12 @@
   /* POLOVIČNÝ závoj (5 % / 4 % proti 10 % / 8 % v tmavej). Nie je to vkus:
      na svetlom papieri závoj SVETLOSŤ ZNIŽUJE, teda ide tým istým smerom ako
      tmavý text, a pri 10 % zrazil „bráni" (#d13228) na 4,04 : 1, tlmený text
-     na 4,49 : 1 a značkový teal na 4,20 : 1 — všetko pod hranicou.
+     na 4,49 : 1 a značkový teal na 4,20 : 1 — všetko pod vtedajšou hranicou.
      Hodnoty závoja sa určili tak, aby padla DEKORÁCIA a nie farby, ktoré
      nesú význam: stavová červená sa nesmie odfarbovať preto, že pod ňou leží
-     ozdobný gradient. Pri 5 % / 4 % prejde celá paleta (najhoršie 4,53 : 1)
-     a závoj je stále vidieť. */
+     ozdobný gradient. Po D164 je papier pod závojom NAJHORŠIA plocha svetlej
+     témy a celá paleta na nej prechádza 7 : 1 (najhoršie 7,12 : 1) — silnejší
+     závoj by ten zvyšok zjedol a kontrastný test sčervená. */
   --veil-brand: color-mix(in oklab, var(--brand) 5%, transparent);
   --veil-gold: color-mix(in oklab, var(--gold-text) 4%, transparent);
 }
@@ -426,8 +516,9 @@
   --chart-h-sm: clamp(180px, 28vh, 300px);
 }
 
-/* @tokens:dark — na tmavej karte (#17181c) má každý rad 6,84–10,40 : 1,
-   najbližší pár ΔE76 = 11,3. */
+/* @tokens:dark — na tmavom paneli (#16181d, `--surface-solid`) má každý rad
+   6,85–10,41 : 1, najbližší pár ΔE76 = 11,3. Hex sa posunul s D164
+   (#17181c → #16181d); rady sa nehýbali. */
 :root {
   --chart-1: #d8b878;
   --chart-2: #4dd9df;
@@ -457,26 +548,43 @@
 /* ── T5 · DERIVOVANÉ TOKENY — @tokens:derived ─────────────────────────────
    Jedno pravidlo pre obe témy. Tinty a okraje sa miešajú proti
    NEPRIESVITNÉMU povrchu, aby badge a chybové panely zostali plné — ich
-   čitateľnosť je bezpečnostná funkcia (D6), nie estetika. */
+   čitateľnosť je bezpečnostná funkcia (D6), nie estetika.
+
+   PODIEL TÓNU JE 10 % (nečinná 9 %), nie 14 / 12 %. Zoslabli 3. 9. 2026, keď
+   `dizajn-kontrast.spec.ts` prestal plochy vymenúvať a začal ich odvodzovať
+   z CSS: tinty text NESÚ (`.ovl-note summary`, `.ovl-alerts-banner`) a pri
+   14 % mal tlmený text v tmavej téme 6,76 : 1 a značkový teal v svetlej
+   4,34 : 1 — teda pod hranicou D164 aj pod WCAG AA. Pri 10 % je to 7,30 : 1
+   a 4,70 : 1. Stavový kanál sa nestratil: plný tón drží ľavý okraj, marka
+   a slovo (pravidlo troch kanálov). NEZVYŠUJ ich späť. */
 :root {
-  --st-critical-tint: color-mix(in oklab, var(--st-critical) 14%, var(--surface-solid));
+  --st-critical-tint: color-mix(in oklab, var(--st-critical) 10%, var(--surface-solid));
   --st-critical-edge: color-mix(in oklab, var(--st-critical) 42%, var(--surface-solid));
-  --st-attention-tint: color-mix(in oklab, var(--st-attention) 14%, var(--surface-solid));
+  --st-attention-tint: color-mix(in oklab, var(--st-attention) 10%, var(--surface-solid));
   --st-attention-edge: color-mix(in oklab, var(--st-attention) 42%, var(--surface-solid));
-  --st-progress-tint: color-mix(in oklab, var(--st-progress) 14%, var(--surface-solid));
+  --st-progress-tint: color-mix(in oklab, var(--st-progress) 10%, var(--surface-solid));
   --st-progress-edge: color-mix(in oklab, var(--st-progress) 42%, var(--surface-solid));
-  --st-good-tint: color-mix(in oklab, var(--st-good) 14%, var(--surface-solid));
+  --st-good-tint: color-mix(in oklab, var(--st-good) 10%, var(--surface-solid));
   --st-good-edge: color-mix(in oklab, var(--st-good) 42%, var(--surface-solid));
-  --st-idle-tint: color-mix(in oklab, var(--st-idle) 12%, var(--surface-solid));
+  --st-idle-tint: color-mix(in oklab, var(--st-idle) 9%, var(--surface-solid));
   --st-idle-edge: color-mix(in oklab, var(--st-idle) 36%, var(--surface-solid));
 
   /* Solid červená je vyhradená potvrdzovacím tlačidlám zápisu a panic
-     buttonu; toto je jej stlačený stav. */
-  --st-critical-press: color-mix(in oklab, var(--st-critical) 82%, var(--mix-shade));
+     buttonu; toto je jej stlačený stav. Mieša sa k `--ink`, nie
+     k `--mix-shade`, a to je ten istý dôvod, aký má `--accent-press`: nápis
+     je v svetlej téme BIELY a v tmavej TMAVÝ, takže výplň sa musí v každej
+     téme hýbať OPAČNE. Kým sa miešala k čiernej, mala v tmavej téme
+     4,31 : 1 (tmavý nápis na stmavenej výplni) a nikto to nevidel, lebo
+     plochu hoveru vtedy žiadny test nemeral. Dnes: 8,28 : 1 v tmavej,
+     9,35 : 1 v svetlej. */
+  --st-critical-press: color-mix(in oklab, var(--st-critical-fill) 82%, var(--ink));
 
-  /* Vlas pod pruhom PRODUKCIA a plocha pod jeho `<code>`. */
+  /* Vlas pod pruhom PRODUKCIA a plocha pod jeho `<code>`. Čip je TMAVÝ
+     (22 % čiernej), nie svetlý: kým bol 16 % bielej, zosvetľoval červený
+     pruh a biely nápis na ňom mal 5,33 : 1 — pod hranicou práve na tom
+     jedinom prvku, ktorý má kričať. Dnes 9,83 : 1 v oboch témach. */
   --gold-hairline: color-mix(in oklab, var(--gold-line) 70%, transparent);
-  --production-code-bg: color-mix(in srgb, var(--production-fg) 16%, transparent);
+  --production-code-bg: color-mix(in srgb, var(--mix-shade) 22%, transparent);
 
   /* Tichá akcia v lište výberu: lišta je tmavá v oboch témach, takže sa
      okraj aj hover miešajú z jej vlastného písma, nie z farby stránky. */
@@ -1024,10 +1132,13 @@ hr {
 /* Farba písma tu bola napísaná natvrdo ako biela a v TMAVEJ téme to bola
    chyba: biela má na tmavom `--st-critical` 2,4 : 1. `--on-st-critical` je
    preto v tmavej tmavý ink (7,12 : 1) a v svetlej zostáva biela — hodnoty
-   a merania sú v T2/T3. */
+   a merania sú v T2/T3.
+   PLOCHA je od D164 vlastný token `--st-critical-fill`, nie plný stavový
+   tón: v svetlej téme mala biela na #d13228 len 5,00 : 1 a text sa nemal kam
+   posunúť. Plný tón sa hýbať nesmie (ΔE), plocha smie. */
 .ovl-btn--danger {
-  background: var(--st-critical);
-  border-color: var(--st-critical);
+  background: var(--st-critical-fill);
+  border-color: var(--st-critical-fill);
   color: var(--on-st-critical);
 }
 .ovl-btn--danger:hover:not(:disabled) {
@@ -1118,7 +1229,7 @@ hr {
 }
 :where(input, select, textarea):disabled {
   background: var(--surface-raised);
-  color: var(--dim);
+  color: var(--ink-disabled);
   cursor: not-allowed;
 }
 input[type='checkbox'],
@@ -2037,7 +2148,10 @@ b.lvl-2 {
 .lvl-3 {
   font-size: 12px;
   color: var(--dim);
-  font-weight: 500;
+  /* 450, nie 500 (D164 / riziko R1): po posune na 7 : 1 je `--dim` blízko
+     `--ink`, takže rozdiel medzi „bežné" a „potlačené" musí niesť ŤAHA
+     a veľkosť, nie farba. Kontrast sa vracať nesmie. */
+  font-weight: 450;
   letter-spacing: 0;
 }
 .lvl-3 b {
@@ -2308,10 +2422,13 @@ b.lvl-2 {
   font-weight: 500;
 }
 
-/* Príznak — vždy ZA stavom, menším písmom, jantárový. Nikdy nie stav. */
+/* Príznak — vždy ZA stavom, menším písmom, jantárový. Nikdy nie stav.
+   Farbu berie z `-ink` odnože, nie z plného tónu: pri 11,5 px mal plný
+   #6b4300 na papieri pod závojom 6,88 : 1 (D164). Je to to isté pravidlo,
+   aké už platí pre `.state.*` a `.sig.*` — plný tón je výplň a okraj. */
 .flag {
   font-size: 11.5px;
-  color: var(--st-attention);
+  color: var(--st-attention-ink);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -2366,10 +2483,12 @@ b.lvl-2 {
 }
 
 /* Odhad — znak ≈ + tlmenejší odtieň (P7). Meraný fakt ho NIKDY nemá. */
+/* `opacity: 0.82` tu do D164 zrážala `--ink2` o celý pomer (6,26 : 1 na
+   vybranom riadku). Odhad nesie znak `≈` a ťaha písma, nie zoslabená farba —
+   priznanie „nevieme presne" (I11) sa nesmie platiť čitateľnosťou. */
 .est {
   color: var(--ink2);
-  opacity: 0.82;
-  font-weight: 550;
+  font-weight: 600;
 }
 .est::before {
   content: '≈ ';
@@ -2688,9 +2807,11 @@ table.tbl tr.muted td {
   color: var(--accent-on);
 }
 /* Hover mieša k --ink: vo svetlej stmavne, v tmavej zosvetlí. Jedno pravidlo
-   namiesto dvoch tém. */
+   namiesto dvoch tém. 78 %, nie 86 %: pri 86 % mala biela na tejto ploche
+   v svetlej téme 6,85 : 1 (7,60 : 1 pri 78 %). Plochu hoveru začal test
+   merať až vo V7 — dovtedy o nej nevedel. */
 .btn.primary:hover {
-  background: color-mix(in oklab, var(--accent) 86%, var(--ink));
+  background: color-mix(in oklab, var(--accent) 78%, var(--ink));
 }
 .btn.lg {
   font-size: 15px;

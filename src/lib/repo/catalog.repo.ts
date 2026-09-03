@@ -136,6 +136,7 @@ import type {
 import { query as poolQuery } from '@/db/pool';
 import { addDays, todayInZone } from '@/lib/domain/dates';
 import { anonReadBudget } from '@/lib/repo/read-budget.repo';
+import { SOLD_WINDOW_CHOICES } from '@/lib/sales/windows';
 import { KEYED_FALLBACK_PER_UTC_DAY } from '@/lib/shop/rate-limits';
 import {
   readDaysNeeded,
@@ -428,6 +429,22 @@ export interface CatalogSearchFilter {
   soldBuckets?: SoldBucket[];
   /** Len produkty, na ktoré appka NIKDY úspešne nezapísala zľavu (I11). */
   neverDiscounted?: boolean;
+  /**
+   * Len produkty, na ktoré appka UŽ NIEKEDY úspešne zapísala zľavu (I11).
+   *
+   * PRIBUDLO 3. 9. 2026 (V7, D160). Je to presný opak `neverDiscounted` a bez
+   * neho sa tretia možnosť filtra „stav zľavy" na Prehľade nedala postaviť:
+   * `everDiscounted` niesol KAŽDÝ riadok odpovede, ale filtrovať sa podľa
+   * neho nedalo, takže by obrazovka musela zúžiť naklikanú stránku a tvrdiť
+   * o 41 348 riadkoch niečo, čo overila na päťdesiatich.
+   *
+   * `now_on` sa NEPOZERÁ: „bola už niekedy" zahŕňa aj tú, ktorá beží dnes —
+   * je to otázka o histórii, nie o dnešku. Kto chce dnešok, má
+   * `currentlyDiscounted`. Kombinovať sa dajú a `everDiscounted` +
+   * `neverDiscounted` naraz je zámerne prázdny výsledok, nie chyba: sú to dve
+   * podmienky, ktoré sa vylučujú, a repozitár nemá čo hádať, ktorú mysleli.
+   */
+  everDiscounted?: boolean;
   /** Len produkty, ktoré sú podľa VLASTNÉHO zápisu dnes v okne zľavy (I11). */
   currentlyDiscounted?: boolean;
   /**
@@ -806,12 +823,18 @@ const DEFAULT_SOLD_WINDOW_DAYS = 180;
 /**
  * Povolené okná predajnosti podľa prepínača v UI.
  *
- * JEDINÝ ZDROJ toho, ktoré okná zrkadlo vie triediť v SQL. Exportuje sa preto,
- * že `api/insights/top-products` si z toho počíta, kedy poradie zvládne SQL a
- * kedy musí ísť obchádzkou cez kohortu (`MIRROR_SORTABLE_WINDOWS`) — ručná
- * kópia toho zoznamu sa pri prvej zmene ticho rozišla.
+ * Exportuje sa preto, že `api/insights/top-products` si z toho počíta, kedy
+ * poradie zvládne SQL a kedy musí ísť obchádzkou cez kohortu
+ * (`MIRROR_SORTABLE_WINDOWS`) — ručná kópia toho zoznamu sa pri prvej zmene
+ * ticho rozišla.
+ *
+ * Zoznam sa tu od 3. 9. 2026 (D149) NEPÍŠE: je to `SOLD_WINDOW_CHOICES`
+ * z `lib/sales/windows.ts`, teda ten istý zoznam, z ktorého sa odvodzuje aj
+ * strop `SALES_WINDOW_DAYS`. Kým tu stála vlastná kópia, mohol byť rozsah
+ * sťahovania (90) menší než najdlhšie triediteľné okno (360) bez toho, aby to
+ * čokoľvek zastavilo — a filter tak sľuboval dáta, ktoré appka nemala.
  */
-export const ALLOWED_SOLD_WINDOWS: readonly number[] = [30, 60, 90, 180, 360];
+export const ALLOWED_SOLD_WINDOWS: readonly number[] = SOLD_WINDOW_CHOICES;
 
 /**
  * Filtre bez dát v schéme (K8, po D125 už len tri — pozri `LockedCatalogFilter`).
@@ -2115,6 +2138,12 @@ function buildWhere(
     }
     if (filter.neverDiscounted === true) {
       where.push('d.product_id IS NULL');
+    }
+    /* Opak riadku vyššie (D160). Ten istý `LEFT JOIN`, ten istý index, žiadny
+       nový dotaz — riadok v `d` existuje práve vtedy, keď má produkt aspoň
+       jednu položku kampane so stavom `ok`. */
+    if (filter.everDiscounted === true) {
+      where.push('d.product_id IS NOT NULL');
     }
     if (filter.currentlyDiscounted === true) {
       where.push('COALESCE(d.now_on, 0) = 1');

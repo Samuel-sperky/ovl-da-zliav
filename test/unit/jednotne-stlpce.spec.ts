@@ -99,10 +99,13 @@ function telo(rel: string, name: string): string {
 
 /* ═══════════════════════════ fixtúry ══════════════════════════════════════ */
 
-/** Riadok, o ktorom appka vie VŠETKO — jeden pre všetkých osem stĺpcov. */
+/** Riadok, o ktorom appka vie VŠETKO — jeden pre všetkých deväť stĺpcov. */
 const ZNAME: ProductRowValues = {
   productId: 4100,
   reference: knownValue('NAU-0031'),
+  /* EAN pribudol do sady 3. 9. 2026 (V7, D150, D159) — je to DRUHÝ kód, nie
+     druhé meno referencie, a má vlastnú medzeru aj vlastný dôvod. */
+  ean13: knownValue('8594001234567'),
   name: knownValue('Náušnice Lumen'),
   price: knownValue('34.90'),
   discountNow: {
@@ -212,7 +215,7 @@ function bunka(html: string, id: ProductColumnId): string | null {
 describe('A. každý stĺpec vie sám nakresliť všetky tri stavy (I11, D124)', () => {
   it('meranie vôbec niečo prechádza', () => {
     /* Bez tejto poistky by cykly nižšie prešli aj nad prázdnou sadou. */
-    expect(PRODUCT_COLUMN_IDS.length).toBe(8);
+    expect(PRODUCT_COLUMN_IDS.length).toBe(9);
   });
 
   it('1. hodnota — zmerané číslo sa vypíše a NIE je to priznanie', () => {
@@ -406,7 +409,7 @@ describe('C. kde sa stĺpec nehodí, VYNECHÁ sa — a nepremenuje (D124)', () =
 
   it('vzorka výberu vynecháva obohatené stĺpce, ktoré nemá čím naplniť', () => {
     expect([...SAMPLE_COLUMN_IDS]).toEqual(['reference', 'name', 'price', 'soldWindow']);
-    for (const id of ['discountNow', 'soldPerStock', 'margin', 'stock'] as const) {
+    for (const id of ['discountNow', 'soldPerStock', 'margin', 'stock', 'ean13'] as const) {
       expect(hlavicka(vzorkaHtml, id), id).toBeNull();
       expect(bunka(vzorkaHtml, id), id).toBeNull();
     }
@@ -427,6 +430,11 @@ describe('C. kde sa stĺpec nehodí, VYNECHÁ sa — a nepremenuje (D124)', () =
 
 describe('D. sada je jedna a jej poradie je záväzné (D124, D122)', () => {
   it('sada je presne tá, ktorú vymenúva D124', () => {
+    /*
+     * ZMENA 3. 9. 2026 (V7, D159): deväť stĺpcov a `stock` PRED `margin`.
+     * Poradie aj členstvo vymenoval Samuel pre tabuľku Prehľadu a platí pre
+     * VŠETKY tabuľky — poradie je vlastnosť definície, nie obrazovky (D124).
+     */
     expect([...PRODUCT_COLUMN_IDS]).toEqual([
       'reference',
       'name',
@@ -434,8 +442,9 @@ describe('D. sada je jedna a jej poradie je záväzné (D124, D122)', () => {
       'discountNow',
       'soldWindow',
       'soldPerStock',
-      'margin',
       'stock',
+      'margin',
+      'ean13',
     ]);
   });
 

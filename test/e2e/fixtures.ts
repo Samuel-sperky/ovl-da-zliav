@@ -101,6 +101,10 @@ const DATA_TABLES = [
   // `reset()` a ďalší scenár by staval pásma na cudzích dátach.
   'campaign_tiers',
   'product_sales_daily',
+  // I11 — stav sťahovania po dňoch. Riadok, ktorý prežije `reset()`, tvrdí
+  // ďalšiemu scenáru, že appka ten deň prečítala; pásma (D121) aj graf
+  // Prehľadu z toho tvrdenia počítajú, takže by dostali cudzie pokrytie.
+  'sales_sync_state',
   'campaigns',
   'catalog_cache',
   'products_allowlist',
@@ -180,8 +184,34 @@ export interface DbHelper {
    * bežal nad plným katalógom (41 220) alebo nad vzorkou (500).
    */
   seedCatalogFromFixture(options?: { limit?: number }): Promise<number>;
-  /** Predané kusy per produkt — z nich vznikajú pásma zľavy (K3, P4). */
+  /**
+   * Predané kusy per produkt — z nich vznikajú pásma zľavy (K3, P4).
+   *
+   * Zapíše DVA fakty, nie jeden: riadky do `product_sales_daily` a k nim stav
+   * `complete` do `sales_sync_state` pre každý seedovaný deň. Predaj, o ktorom
+   * appka vie, sa inak než z prečítaného dňa dostať nemôže — a bez toho stavu
+   * je riadok predaja pre appku neviditeľný (brána `status = 'complete'`,
+   * D121).
+   */
   seedSales(rows: readonly SeedSalesRow[]): Promise<void>;
+  /**
+   * PREČÍTANÉ DNI BEZ PREDAJA (I11, D121) — druhá polovica toho istého faktu.
+   *
+   * `seedSales()` vie povedať len o dňoch, v ktorých sa niečo predalo. „Tento
+   * deň appka prečítala celý a nepredalo sa nič" je iné tvrdenie a z riadkov
+   * predaja sa odvodiť NEDÁ, pretože `product_sales_daily` má riadok len pre
+   * (produkt, deň) s predajom. Scenár, ktorý ho potrebuje, ho preto musí
+   * vysloviť sám — presne ako appka, ktorá deň naozaj stiahla.
+   *
+   * Bez neho je MERANÁ nula nedosiahnuteľná: `soldUnitsForWindow()`
+   * (`catalog.repo.ts`) vydá „0 predaných" iba pri okne bez jediného
+   * chýbajúceho dňa, inak vráti `null` = „nevieme" — a produkt s `null` sa do
+   * pásma nezaradí (`soldBucketOf()`). Trojstavovosť tým NEOSLABUJE: dni mimo
+   * `from`–`to` zostávajú neprečítané, teda naďalej „nevieme".
+   *
+   * Rozsah je inklúzivny, `YYYY-MM-DD`.
+   */
+  seedSalesCoverage(from: string, to: string): Promise<void>;
   seedCampaign(input: SeedCampaignInput): Promise<number>;
   /** D39c — audit záznam s príznakom nezhody cien v `after_snapshot`. */
   seedAuditRow(input: {
@@ -197,6 +227,51 @@ export interface DbHelper {
   expireApiKey(): Promise<void>;
   keyRowCount(): Promise<number>;
   lockWrites(reason: string): Promise<void>;
+}
+
+/** Strop dní jedného seedu pokrytia — okno appky je 30/90 dní, nie roky. */
+const MAX_SEEDED_DAYS = 400;
+
+/** Dni rozsahu vrátane oboch krajov. Neplatný alebo obrátený rozsah je chyba seedu. */
+function daysBetween(from: string, to: string): string[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    throw new Error(`Rozsah dní musí byť YYYY-MM-DD, prišlo: ${from} – ${to}`);
+  }
+  if (from > to) throw new Error(`Rozsah dní je obrátený: ${from} – ${to}`);
+  const out: string[] = [];
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cursor <= end) {
+    out.push(cursor.toISOString().slice(0, 10));
+    if (out.length > MAX_SEEDED_DAYS) throw new Error(`Rozsah dní je príliš dlhý: ${from} – ${to}`);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/**
+ * Označí dni za PREČÍTANÉ CELÉ (`status = 'complete'`) — jediný stav, z ktorého
+ * appka kusy sčítava (D121). `orders_seen` sa NIKDY neznižuje: keď deň už nesie
+ * predaj zo `seedSales()`, doplnenie pokrytia mu nesmie zobrať dôkaz, že sa
+ * z neho niečo prečítalo.
+ */
+async function markDaysRead(
+  query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>,
+  days: readonly string[],
+  ordersSeen: number,
+): Promise<void> {
+  for (const day of days) {
+    await query(
+      'INSERT INTO sales_sync_state ' +
+        '(sale_day, orders_seen, status, requests_used, started_at, finished_at) ' +
+        "VALUES (?, ?, 'complete', 1, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3)) " +
+        'ON DUPLICATE KEY UPDATE ' +
+        "status = 'complete', " +
+        'orders_seen = GREATEST(orders_seen, VALUES(orders_seen)), ' +
+        'finished_at = UTC_TIMESTAMP(3)',
+      [day, Math.max(0, Math.trunc(ordersSeen))],
+    );
+  }
 }
 
 function makeDb(): DbHelper {
@@ -264,6 +339,14 @@ function makeDb(): DbHelper {
           [row.productId, row.day, row.unitsSold],
         );
       }
+      // Deň, z ktorého appka pozná predaj, je prečítaný deň. `orders_seen = 1`
+      // je najmenšie číslo, ktoré to nepopiera (`isMeasuredDay()` v
+      // `insights.ts` neberie `partial` s nulou objednávok za meranie).
+      await markDaysRead(query, [...new Set(rows.map((row) => row.day))], 1);
+    },
+
+    async seedSalesCoverage(from: string, to: string): Promise<void> {
+      await markDaysRead(query, daysBetween(from, to), 0);
     },
 
     async seedAllowlist(productIds: readonly number[]): Promise<void> {

@@ -1383,6 +1383,23 @@ export interface ProductKpiRow {
   readonly name: string | null;
   /** Kód produktu („ref · názov", D116). Len z `getFull`. */
   readonly reference: KpiValue<string>;
+  /**
+   * Čiarový kód EAN-13 z obohatenia (`catalog_cache.ean13`, migrácia 0014).
+   *
+   * PRIBUDLO 3. 9. 2026 (V7, D150). Zrkadlo ho malo od 0014 a hľadanie
+   * `/api/catalog/search` v ňom hľadalo, ale ŽIADNA čítacia cesta ho
+   * nevracala — jediné miesto, odkiaľ sa dal získať, bolo
+   * `POST /api/catalog/details` a `POST /api/catalog/enrich`, teda cesty,
+   * ktoré VOLAJÚ SHOP a míňajú kvótu. Tabuľka Prehľadu ho má ako vlastný
+   * stĺpec (D159) a na render ceste sa shop volať nesmie (K8), takže ho nesie
+   * KPI riadok — ten je čisto čítací a už teraz nesie `reference` z toho
+   * istého riadku obohatenia.
+   *
+   * `gap: 'not_enriched'` znamená „appka sa na produkt nikdy nepýtala",
+   * `value: null` bez `gap` znamená „shop kód nevedie". Sú to dve rôzne vety
+   * a stĺpec ich rozlišuje vetou v `title`, nie prázdnom.
+   */
+  readonly ean13: KpiValue<string>;
   readonly supplier: KpiValue<string>;
   /**
    * Cenníková cena zo zoznamového prechodu (`catalog_cache.price`), teda BEZ

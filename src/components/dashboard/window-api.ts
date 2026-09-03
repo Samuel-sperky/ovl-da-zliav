@@ -13,6 +13,16 @@
  * ŽIADNY Z NICH NEVOLÁ SHOP (K8). Všetko sú `SELECT`-y nad lokálnou databázou;
  * sťahovanie z eshopu má na starosti scheduler a beží mimo tejto obrazovky.
  *
+ * ČO ODTIAĽTO ODIŠLO 3. 9. 2026 (V7, D152, D139)
+ * ----------------------------------------------
+ * Piaty čítač `getSalesWindow()` / `parseSalesWindow()` (súhrn okna
+ * z `/api/insights/sales-daily`) tu bol pre PRVÚ dlaždicu KPI radu V6
+ * („Predané kusy"). V7 zúžil rad na tri karty a tá dlaždica zanikla, takže
+ * čítač stratil jediného volajúceho — a modul bez volajúceho je mŕtvy celý
+ * (D139). Zmazal sa, nezostal „pre istotu": route `sales-daily` žije ďalej a
+ * kto ju bude potrebovať pre denný RAD (tri krivky grafu, D156), potrebuje
+ * čítač série po dňoch, nie súhrn okna — teda nie ten, ktorý tu stál.
+ *
  * PRAVIDLO MODULU JE TO ISTÉ AKO V `api.ts`: čo sa nedá prečítať, je `null` —
  * nikdy nula a nikdy dopočítaný odhad. Rozdiel proti `api.ts` je len rozsah:
  * tieto štyri odpovede závisia od okna prepínača, takže ich načítanie sa
@@ -52,7 +62,19 @@ import { fetchJson } from '@/components/layout/health';
  * plánovaného zápisu (`fireAt`). Sú to dva rôzne fakty o tej istej zľave a
  * odpoveď ich vracia spolu, takže sa spolu aj čítajú.
  */
-export interface TimelineWindowRow extends DiscountWindowInput, FireWindowInput {}
+export interface TimelineWindowRow extends DiscountWindowInput, FireWindowInput {
+  /**
+   * Stav kampane (`campaigns.status`, odvodený z `campaign_items`). `null` =
+   * odpoveď ho neposlala.
+   *
+   * PRIBUDLO VO V7 (D156) a nie je to ozdoba: graf troch kriviek z neho
+   * rozhoduje, či okno zľavy vôbec DOKAZUJE zápis do eshopu. Kampaň v stave
+   * `failed`, `missed` alebo `cancelled` nezapísala nič, takže jej dni nie sú
+   * „v zľave" — a bez tohto poľa by ich graf za zľavu vydával, pretože okno
+   * v odpovedi je bez ohľadu na to, ako skončilo.
+   */
+  status: string | null;
+}
 
 export interface TimelineWindowView {
   today: string;
@@ -76,6 +98,9 @@ function parseTimelineRow(raw: unknown): TimelineWindowRow | null {
     dateFrom,
     dateTo,
     fireAt: str(row, 'fireAt'),
+    /* Nečitateľný stav zostáva `null` — dosadiť „done" by z nezapísanej
+       kampane spravilo dokázanú zľavu (D156). Fail-closed. */
+    status: str(row, 'status'),
   };
 }
 
@@ -451,69 +476,4 @@ export async function getWriteActivity(
   windowDays: OverviewWindow,
 ): Promise<WriteActivityDayView[] | null> {
   return parseWriteActivity(await fetchJson(`/api/insights/activity?days=${windowDays}`));
-}
-
-/* ══════════ 5. Súčet kusov za okno — hlavička KPI riadku (D136) ═══════════ */
-
-/**
- * Súhrn okna z `/api/insights/sales-daily`. Rad po dňoch tu ZÁMERNE nie je:
- * ten číta graf v sekcii Predaj a KPI dlaždica z neho nič nepočíta — inak by
- * na jednej obrazovke stáli dva výpočty toho istého čísla a rozišli by sa pri
- * prvej zmene pravidla „čo je meraný deň".
- *
- * Tri polia = tri stavy jedného čísla (I11), presne ako ich posiela route:
- *  · `unitsState: 'measured'`    → `windowUnits` je súčet celého okna,
- *  · `unitsState: 'lower_bound'` → je to DOLNÁ HRANICA (časť dní nemáme),
- *  · `unitsState: 'unknown'`     → `windowUnits` je `null`, NIE nula.
- */
-export interface SalesWindowView {
-  from: string;
-  to: string;
-  /** Súčet kusov za dočítané dni okna. `null` = ani jeden deň nie je dočítaný. */
-  windowUnits: number | null;
-  unitsState: 'measured' | 'lower_bound' | 'unknown';
-  /**
-   * Koľko dní okna appka NEMÁ. `null` = odpoveď to nepovedala (fail-closed,
-   * ten istý dôvod ako `TopFlopView.unknownDays`): nula by tvrdila „nechýba
-   * nič", a to je práve to, čo `lower_bound` popiera.
-   */
-  unknownDays: number | null;
-}
-
-/**
- * Súhrn okna z odpovede. Neznámy stav merania NIE JE `measured`.
- *
- * Poradie podmienok je záväzné: najprv sa pýtame, čím číslo JE, a až potom ho
- * čítame. Kto to obráti, dosadí súčet dočítaných dní ako meranie celého okna.
- */
-export function parseSalesWindow(raw: unknown): SalesWindowView | null {
-  const root = asRecord(raw);
-  if (root === null) return null;
-  const window = asRecord(root.window);
-  if (window === null) return null;
-  const from = str(window, 'from');
-  const to = str(window, 'to');
-  if (from === null || to === null) return null;
-
-  const state = root.unitsState;
-  const unitsState =
-    state === 'measured' || state === 'lower_bound' ? state : ('unknown' as const);
-  const gaps = asRecord(root.gaps);
-  return {
-    from,
-    to,
-    /* Pri `unknown` sa číslo NEČÍTA vôbec — odpoveď ho v tom stave neposiela
-       a keby ho poslala, bola by to hodnota, o ktorej sama tvrdí, že ju nemá. */
-    windowUnits: unitsState === 'unknown' ? null : count(root, 'windowUnits'),
-    unitsState,
-    unknownDays: gaps === null ? null : count(gaps, 'unknownDays'),
-  };
-}
-
-export async function getSalesWindow(
-  windowDays: OverviewWindow,
-  anchor?: string,
-): Promise<SalesWindowView | null> {
-  const at = anchor === undefined ? '' : `&anchor=${anchor}`;
-  return parseSalesWindow(await fetchJson(`/api/insights/sales-daily?window=${windowDays}${at}`));
 }

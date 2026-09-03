@@ -1,24 +1,22 @@
 /*
- * Aura Zľavy — GEOMETRIA KPI RIADKU PREHĽADU (D136, D143, D147).
+ * Aura Zľavy — GEOMETRIA A TYPOGRAFIA KPI RIADKU PREHĽADU (V7: D143, D147, D154).
  *
- * Zámerne LEN rozloženie. Výplň dlaždice, tri riadky (`.k` / `.v` / `.s`),
- * orámovanie aj medzery mriežky vlastní `.kpis` / `.kpi` v `globals.css`
- * a `StatTile` ich DEDÍ — druhá, takmer rovnaká sada tried by sa o mesiac
- * rozišla s prvou (docblock `primitives.module.css`). Vlas zdôraznenia
- * a pilulka smeru žijú v `ui/kpi.module.css`, teda vedľa komponentov, ktoré
- * ich kreslia.
+ * Zámerne LEN rozloženie a veľkosť písma. Výplň karty, orámovanie a medzery
+ * mriežky vlastní `.kpis` / `.kpi` v `globals.css` a `StatTile` ich DEDÍ —
+ * druhá, takmer rovnaká sada tried by sa o mesiac rozišla s prvou (D142).
+ * Vlas zdôraznenia a pilulka smeru žijú v `ui/kpi.module.css`, teda vedľa
+ * komponentov, ktoré ich kreslia.
  *
- * Ani jeden hex, ani jedna `rgba()`, ani jedno `!important` (D147) — tu nie je
- * ani jedna farba, lebo tento súbor o farbách nerozhoduje.
+ * Ani jeden hex, ani jedna `rgba()`, ani jedno `!important` (D147). Jediná
+ * farba tu je token `--dim` na popisku karty.
  *
- * PREČO PEVNÉ ŠTYRI STĹPCE A NIE `auto-fit`
- * -----------------------------------------
- * `.kpis` z globals má `repeat(auto-fit, minmax(150px, 1fr))`. Pri šírkach
- * medzi ~620 a ~800 px z toho vyjdú TRI bunky a štvrtá sa zlomí do druhého
- * riadku — a rad, ktorý má odpovedať „číslo najprv" (D136), sa vtedy prečíta
- * ako tri čísla a jedna osamotená dlaždica pod nimi. Štyri diely držia rad
- * radom; bunky sú `minmax(0, 1fr)`, takže dlhá hodnota stĺpec nerozšíri, ale
- * sa v ňom zalomí.
+ * PREČO PEVNÉ TRI STĹPCE A NIE `auto-fit`
+ * ---------------------------------------
+ * `.kpis` z globals má `repeat(auto-fit, minmax(150px, 1fr))`. Pri úzkych
+ * šírkach z toho vyjdú DVE bunky a tretia sa zlomí do druhého riadku — a rad,
+ * ktorý má odpovedať na tri otázky prvej strany, sa vtedy prečíta ako dve
+ * čísla a jedna osamotená karta pod nimi. Tri diely držia rad radom; bunky sú
+ * `minmax(0, 1fr)`, takže dlhá hodnota stĺpec nerozšíri, ale sa v ňom zalomí.
  *
  * `:global(.kpis)` v selektore NIE JE ozdoba — je to ten istý dôvod, aký má
  * `.figs` v `overview.module.css`: samotná `.row` má rovnakú špecifickosť ako
@@ -26,5 +24,59 @@
  * Dvojica tried vyhrá bez `!important`.
  */
 :global(.kpis).row {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/*
+ * D154 — ČÍSLO ~40 px A TABULÁRNE ČÍSLICE.
+ *
+ * „Slabé čísla" bola jedna zo štyroch príčin, pre ktoré Samuel označil V6 za
+ * nečitateľné: `.kpi .v` z globals má 22 px, čo je pri troch kartách na šírku
+ * obrazovky menšie než nadpis sekcie pod nimi. 2,5 rem = 40 px.
+ *
+ * `tabular-nums` nie je kozmetika: bez nej majú číslice rôznu šírku a tri
+ * čísla vedľa seba sa opticky nezrovnajú — rad potom vyzerá ako tri rôzne
+ * veľké čísla, hoci sú v jednom reze. `lining-nums` drží číslice na jednej
+ * výške, aby sa pomlčka „nevieme" nečítala ako iná veľkosť písma.
+ *
+ * Špecifickosť: `.row` + `:global(.kpi)` + `:global(.v)` je 0,3,0 a prebíja
+ * `.kpi .v` z globals (0,2,0) bez `!important`. Obe globálne triedy vypisuje
+ * `ui/StatTile.tsx` (koreň `kpi`, hodnota `v`), takže selektor nie je mŕtvy.
+ */
+.row :global(.kpi) :global(.v) {
+  font-size: 2.5rem;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/*
+ * D154 — POPISOK NAD ČÍSLOM: malý a tlmený.
+ *
+ * Po D164 je `--dim` na 7 : 1, takže rozdiel medzi popiskom a číslom NEMÔŽE
+ * niesť farba (R1 kontraktu). Nesie ho veľkosť (0,75 rem proti 2,5 rem) a
+ * ťaha — presne to, čo D164 predpisuje ako náhradu za stratený farebný odstup.
+ * Väčšia medzera pod popiskom oddeľuje dva riadky, ktoré sú v 40 px reze inak
+ * nalepené.
+ */
+.row :global(.kpi) :global(.k) {
+  font-size: var(--ovl-fs-label-tile);
+  font-weight: 600;
+  color: var(--dim);
+  margin-bottom: var(--ovl-s2);
+}
+
+/*
+ * Riadok detailu smie mať DVA riadky textu a potom sa odreže.
+ *
+ * Detail nesie priznania („aspoň toľko, 12 dní okna nemáme", „zo skladu 612
+ * produktov"), takže jeden riadok je málo — ale bunky mriežky sú rovnako
+ * vysoké, takže neohraničený text by tromi riadkami v jednej karte natiahol
+ * všetky tri. Celý text zostáva v DOM-e, takže test aj čítačka ho vidia.
+ */
+.row :global(.kpi) :global(.s) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
