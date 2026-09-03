@@ -158,6 +158,81 @@ Všetky štyri boli pod hranicou a ani jednu žiadny test predtým nemeral:
 4,31 : 1 (stlačené červené tlačidlo v tmavej téme), 5,33 : 1 (čip v pruhu),
 6,76 : 1 (tlmený text na tinte), 6,85 : 1 (biele písmo na hoveri značky).
 
-### Ostatné kritériá
+### Ostatné kritériá (dopísané 3. 9. 2026 — agent `dokaz-a-kontrakt` padol na `529 Overloaded`, takže toto je moje meranie)
 
-_(dopĺňa sa)_
+**Balík:** `npm run typecheck`, `npm run lint` a `npm run check-compose-bind`
+čisté, **243 súborov / 5111 testov zelených v izolácii** (pred V7 236/4912,
+teda **+199 tvrdení**).
+
+| K | Stav | Čím sa to dokázalo |
+|---|---|---|
+| K2 | **áno** | Na ŽIVOM DOM-e (`localhost:3070`) sú sekcie `overview-kpi` · `discount-split` · `overview-products` · `overview-campaigns`. Stavový pás a poistky sú na `/nastavenia/co-smie#stav`. |
+| K3 | **áno** | Karty: „Produktov v katalógu" · „V zľave" · **„Predané na sklad"**. Slovo „obrátkovosť" v kóde ani v UI nie je a grep-test má v zozname aj nové súbory V7. |
+| K4 | **áno, mutačne** | Na živej appke ukazuje „Predané na sklad" **pomlčku** a `— zmenu nevieme` (kľúč chýba, R4). Mutácia pomlčka → `0` zhodí 4 tvrdenia zo 4323, nie plošne súbor. |
+| K5 | **áno, mutačne** | Legenda má **tri** položky: `v zľave` · `bez zľavy` · `nevieme, či bola`, plus `nesťahované, predaj nepoznáme`. Tabuľková alternatíva pre čítačku má stĺpce `Deň · v zľave · bez zľavy · nevieme, či bola · Poznámka` — overené na DOM-e. Mutácia medzera → nula zhodí **15** tvrdení, pomlčka v tooltipe → nula **4**. |
+| K6 | **áno** | Na živom DOM-e **všetkých deväť stĺpcov v poradí D159**: REFERENCIA · NÁZOV · CENA · ZĽAVA V SHOPE · PREDANÉ 30 D · PREDANÉ / SKLAD · SKLAD · MARŽA · EAN. Referencia je pri neobohatených **pomlčka** (D151). Riadok neklikateľný. |
+| K7 | **áno** | Tri zamknuté rozmery (kategória, kov, typ šperku) sú na obrazovke **viditeľne zamknuté s dôvodom**, nie funkčné; zoznam odvodený z `locked-dimensions.ts`. |
+| K8 | **áno** | `CENA` a `PREDANÉ 30 D` nesú v prístupnom mene `ZORADIŤ`; triedenie má tri stavy. |
+| K9 | **áno** | Strop je `MAX_SALES_WINDOW_DAYS`, odvodený z jedného zoznamu (`src/lib/sales/windows.ts`). Číslo 360 nie je napísané ručne ani raz — a zmizli pritom **dve tiché kópie** tej istej vedomosti (`ALLOWED_SOLD_WINDOWS` v repozitári a `MAX_KPI_WINDOW_DAYS = 400` v `insights.ts`). |
+| K10 | **áno, mutačne** | Pomlčka → nula (4 pady) · stav bez značky aj slova (3) · veta o nesťahovaných dňoch → prázdna (1) · `≥ N` → obyčajné číslo (5). Každá zhodila **správne** tvrdenie. |
+| K11 | **áno** | `css-moduly-strazca.spec.ts` zelený. |
+| K12 | **áno** | 243/243 · 5111/5111 v izolácii, žiadny nový `.skip`. |
+| K13 | **NESPLNENÉ — čaká na Samuela** | Screenshoty sa **podarili** (obe témy, `760×1300`) a sú v konverzácii. Dôkaz čitateľnosti je ale jeho preklik, nie môj screenshot — a toto kritérium sa preškrtnúť nemá. |
+
+**Overil som, že výnimka pre teál nie sú zadné dvierka:** keď som oslobodenú
+farbu skúsil použiť v TMAVEJ téme, test **aj tak padol**. Je zúžená na svetlú.
+Rovnako pokazenie `--dim` v tmavej zhodí test s konkrétnymi pármi a číslami
+(3,85 · 3,29 · 3,42) — nie plošne.
+
+### Čo som pri prekliku videl a nesedí mi (nález, nie chyba)
+
+**Tri zamknuté filtre zaberajú deväť riadkov textu.** Každý má vlastný
+dvoj- až trojriadkový odsek s takmer rovnakou vetou („appka na tento rozmer
+nemá dáta v zrkadle katalógu…"), takže nad tabuľkou stojí stena textu, ktorá
+hovorí trikrát to isté. Samuel označil **„priveľa vecí na obrazovke"** ako
+jednu zo štyroch príčin nečitateľnosti — a toto ju pridáva, nie uberá.
+Návrh: JEDEN zamknutý pás s tromi menami a JEDNOU vetou. Nechal som to tak,
+lebo je to zmena rozsahu, nie oprava chyby.
+
+**Vedľajšia poznámka:** hlavička hlási `Zápisy 0/200 dnes`. Nie je to chyba —
+`daily_write_budget` je nastavenie a 200 je jeho uložená hodnota. Kvóta shopu
+je od 1. 9. 2026 **1000**, takže sa dá zdvihnúť v Nastaveniach.
+
+## 9. Čo preklikať
+
+`http://localhost:3070/` — **`localhost`, nie `127.0.0.1`** (HSTS, dôvod
+v README). Prihlásenie neexistuje.
+
+**Najprv toto, inak budeš hlásiť ako chyby veci, ktoré chybami nie sú.** Appka
+je bez `shop_write` kľúča a IP je zabanovaná shopom:
+
+- **Karta „Predané na sklad" je pomlčka**, pod ňou `— zmenu nevieme`. Pomlčka
+  je odpoveď „nevieme", nie prázdno a nie nula.
+- **Stĺpec REFERENCIA je celý pomlčky** — referencia aj EAN sú v zrkadle len
+  pri obohatených produktoch a obohacovanie bez kľúča nebeží.
+- **Graf je takmer celý šrafovaný** a nesie vetu s číslom, koľko dní okna sa
+  nesťahovalo. Šrafovanie znamená „toto sme nemerali".
+- **Krivka „nevieme, či bola"** pokrýva celé okno, lebo appka ešte nezapísala
+  žiadnu zľavu — o žiadnom dni teda nemôže tvrdiť, či v ňom zľava bola.
+
+Čo je NOVÉ oproti V6:
+
+1. **Kontrast.** Tlmený text už nie je sivý na sivom. Ak sa ti teraz zdá, že
+   hlavný a tlmený text sú **priveľmi podobné**, je to predpovedaný následok
+   (R1) a rieši sa veľkosťou a ťahou písma, **nie vrátením farby** — povedz to
+   a upravím typografiu.
+2. **Štyri sekcie namiesto šesť.** Prekážky odišli na `/nastavenia/co-smie#stav`;
+   na Prehľade zostal **jeden tichý riadok** so slovom, značkou a odkazom
+   „Stav a prekážky".
+3. **Panely majú hranicu a vlastné pozadie** — karta je zjavne svetlejšia než
+   stránka, žiadne tiene.
+4. **Dva prepínače okna:** `Okno predaja` (30/60/90/180/360) nad kartami platí
+   pre karty **aj tabuľku** a je to pri ňom napísané; graf má vlastný (7/30/90).
+5. **Tabuľka má deväť stĺpcov** vrátane EAN a marže, riadok 40 px, písmo 13 px.
+   Široká je zámerne — roluje sa **vnútri** svojho rámu, telo stránky nie.
+6. **Tri zamknuté filtre sú vidieť aj s dôvodom.** Vyžiadal si ich; funkčné
+   nie sú, lebo zrkadlo pre ne stĺpec nemá.
+
+**Prepínač témy** je vpravo v hlavičke. **Svetlú tému som prvýkrát videl dnes**
+pri tomto prekliku — screenshot je v konverzácii, ale posúdiť ju musíš ty.
+Prejdi Prehľad v oboch témach.

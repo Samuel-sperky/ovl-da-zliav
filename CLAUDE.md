@@ -189,6 +189,47 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
     `grafy-jazyk.spec.ts` (závora na štvrtú kópiu pravidla osi).
     Keď meníš vzhľad, meníš aj to, čo tieto štyri súbory merajú — sú to
     pravidlá, nie snímky.
+- **Prehľad po V7** (`KONTRAKT-V7-PREHLAD-2026-09-03.md`, D148–D166). Samuel
+  preklikol V6 a povedal „nie je to čitateľné"; na otázku čo presne označil
+  všetky štyri príčiny (kontrast, priveľa vecí, splývajúce panely, malé
+  písmo). Čo z toho platí ako pravidlo:
+  - **Kontrast textu je 7 : 1, nie 4,5** (D164). `dizajn-kontrast.spec.ts` meria
+    **7319 párov na tému nad 26 plochami** a plochy sa **ODVODZUJÚ z CSS**, nie
+    vymenúvajú — ručný zoznam desiatich nechal sedem plôch s textom nemeraných.
+    Jedna farba to neunesie a je to zapísané, nie zamlčané: **značkový teál
+    svetlej témy** (`--deep`), 4,60 : 1 ako text a 5,71 : 1 pod bielym písmom,
+    218 párov, všetky v svetlej. Je to kolízia dvoch pravidiel — na 7 : 1 by
+    musel byť ~`#005156` a tam padne pod ΔE 8 od troch stavov, takže by sa
+    stal nerozlíšiteľným od stavu. Výnimka je viazaná na FARBU, nie na zoznam
+    selektorov, a v tmavej téme neplatí (skúšané mutáciou).
+  - **Neaktívny prvok má vlastný `--ink-disabled`.** Kým bola `--dim` na
+    4,7 : 1, zošedla sama; pri 7 : 1 by vypnutý čip vyzeral zapnutý.
+  - **Odstup `--ink2` / `--dim` je 1,36**, takže hierarchiu nesie VEĽKOSŤ
+    a ŤAHA písma. Keď sa text zdá plochý, rieši sa typografia — kontrast sa
+    NEVRACIA.
+  - **Prehľad má štyri sekcie** (D152): KPI riadok · line chart · tabuľka
+    s filtrami · bežiace zľavy. Stavový pás a poistky sú na
+    `/nastavenia/co-smie#stav`; na Prehľade zostal jeden tichý riadok
+    s odkazom. Presun bol dovolený, lebo obe podmienky z hlavičky `StatusBand`
+    tam držia: prekážky nie sú pod rozklikom a pás sa sám otvorí, keď nie je
+    zeleno.
+  - **Graf má TRI krivky** (D156): v zľave · bez zľavy · **nevieme, či bola**.
+    Tretia existuje preto, že `discountedNow` je momentka podľa VLASTNÉHO
+    zápisu — zľava nastavená ručne v administrácii eshopu je pre appku
+    neviditeľná, takže bez tretej krivky by taký deň spadol do „bez zľavy"
+    a to nie je nepresnosť, to je nepravda.
+  - **„Obrátkovosť" zostáva zakázané slovo** (D148). Karta sa volá **„Predané
+    na sklad"** a nesie `soldPerStock` ako `N×`. Účtovnú obrátkovosť sa
+    z momentkovej zásoby spočítať nedá a `sales-insights.spec.ts` to slovo
+    brání ako meno metriky, premennej aj vzorca.
+  - **Okno predaja má strop 360** (D149) a číslo nie je napísané ručne ani raz
+    — `MAX_SALES_WINDOW_DAYS` sa odvodzuje z `src/lib/sales/windows.ts`.
+    Pri tej príležitosti zmizli dve tiché kópie tej istej vedomosti
+    (`ALLOWED_SOLD_WINDOWS` v repozitári a `MAX_KPI_WINDOW_DAYS = 400`).
+  - **Tabuľka Prehľadu má deväť stĺpcov** v poradí z `product-columns.ts`
+    (D159) vrátane EAN, riadok 40 px a písmo 13 px. **Riadok nie je
+    klikateľný** (D163) — Produkty zostávajú pracovnou obrazovkou a druhá
+    plná kópia tabuľky by sa rozišla s prvou.
 - Rezerva zápisov žije vo `src/lib/engine/budget.ts`: čítania sa z denného
   rozpočtu odpočítavajú LEN NAD `WRITE_QUOTA_RESERVE` (`min(rozpočet, rezerva)`,
   odvodená ako `MAX_DAILY_WRITE_BUDGET − READ_LANE_LIMITS.product_read.perUtcDay`
