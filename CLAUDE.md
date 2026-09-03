@@ -141,6 +141,54 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   produkt ↔ zľava, D127) a `.../campaign/[id]/effectiveness/route.ts`. Route
   `.../campaign/[id]/performance` bola ZMAZANÁ (druhý, mŕtvy výpočet účinnosti
   bez konzumenta a bez testu) — účinnosť číta výhradne `effectiveness`.
+- **Dizajnová vrstva V6** (`KONTRAKT-V6-DIZAJN-2026-09-02.md`, D129–D147).
+  Čo treba vedieť, než sa dotkneš čohokoľvek farebného:
+  - **Tokenová vrstva na začiatku `globals.css`.** Farba sa NEPÍŠE v pravidle,
+    berie sa z tokenu; tónovanie výhradne `color-mix()`, `rgba()` len v bloku
+    tokenov (`--overlay`, `--shadow-*`, D147). Tokenový blok je len ten, nad
+    ktorým stojí značka `@tokens:invariant|dark|light|derived` — `:root` blokov
+    je v súbore šesť a jeden z nich (aliasová vrstva `--ovl-*: var(…)`)
+    tokenový NIE JE. Značky sú kritérium, nie kozmetika.
+  - **Holý `:root` je TMAVÝ, `[data-theme="light"]` je prepis** (D145) —
+    obrátene než sesterská `aura-roadmap`. Dôvod: tmavá je predvolená, a keby
+    `:root` niesol svetlé hodnoty, každý dokument by blikol svetlou, kým sa
+    atribút nenastaví. Následok, na ktorý si prišiel `theme.ts` sám:
+    *zmazanie* atribútu znamená „vždy tmavá", takže bootstrap musí `light`
+    stampovať VÝSLOVNE — inak človek so svetlým OS dostane tmavú appku bez
+    toho, aby si o ňu povedal. Duplikovať treba len token, ktorý sa rozkladá
+    na literálnu farbu; odvodený (`var()`, `color-mix()`) tému dedí sám a
+    kópia vo svetlom bloku by bola chyba.
+  - **`src/components/ui/` (32 reexportov v barreli) a `src/components/states/`
+    (šesť stavov) sú JEDINÁ vrstva primitív.** Nová obrazovka si komponent
+    berie odtiaľ; nový komponent, ktorý sa podobá na existujúci, sa NEPÍŠE —
+    existujúci sa rozšíri (D142). Vzhľad primitíva žije v `*.module.css` vedľa
+    komponentu, nikdy v `globals.css` (D143). Stavov je šesť, nie päť, lebo
+    „nič tu nie je" a „nemerali sme to" nie je tá istá veta (`UnmeasuredState`);
+    vety vlastní `state-copy.ts`, aby si šesť volajúcich nevymyslelo šesť
+    významov.
+  - **Grafy sú Recharts pod `ChartCard` + `useChartTheme`.** `chartScaleMax()`
+    v `chart-language.ts` je JEDINÉ telo pravidla osi — do V6b existovalo
+    v troch znakovo zhodných kópiách (`niceCeiling()` v `sales-view.ts`,
+    `niceCount()` v `price-bins.ts`) a testy ich porovnávali klon s klonom,
+    takže rovnaký preklep v oboch by prešiel. Dnes sú hodnoty pribité na
+    vlastnú tabuľku očakávaní a štvrtú kópiu zastaví statická závora.
+    `chart-language.ts` je SLOVNÍK a čisté funkcie; kreslí sa v `Charts.tsx`.
+  - **Časová os Zliav je ZÁMERNE tabuľka.** Okno platnosti nemeria veličinu,
+    ale interval — nie je to ani jedna z troch foriem (čiara/stĺpec/koláč),
+    a Gantt by bol štvrtá forma v šatách druhej. Nekresli ju grafom.
+  - **Histogram cien je STĹPEC** a `CHART_KINDS` sa preň NEROZŠIRUJE:
+    nakrájané cenové pásma sú položky, takže je to porovnanie medzi položkami.
+  - **Štyria strážcovia, ktorí to držia** (všetci mutačne overení — mutácia
+    zhodí 1–2 tvrdenia, nikdy plošne celý súbor):
+    `test/unit/dizajn-tokeny-strazca.spec.ts` (hex, `rgba()`, `!important`,
+    obe témy; číta `globals.css` AJ všetkých 17 `*.module.css`),
+    `dizajn-kontrast.spec.ts` (kontrast sa POČÍTA — páry sa parsujú z CSS,
+    nevypisujú ručne; ~2000 párov v každej téme),
+    `css-moduly-strazca.spec.ts` (17 modulov v OBOCH smeroch: použitý kľúč
+    musí mať pravidlo, deklarovaná trieda musí mať volajúceho) a
+    `grafy-jazyk.spec.ts` (závora na štvrtú kópiu pravidla osi).
+    Keď meníš vzhľad, meníš aj to, čo tieto štyri súbory merajú — sú to
+    pravidlá, nie snímky.
 - Rezerva zápisov žije vo `src/lib/engine/budget.ts`: čítania sa z denného
   rozpočtu odpočítavajú LEN NAD `WRITE_QUOTA_RESERVE` (`min(rozpočet, rezerva)`,
   odvodená ako `MAX_DAILY_WRITE_BUDGET − READ_LANE_LIMITS.product_read.perUtcDay`
@@ -172,6 +220,21 @@ cudzí host si ju uspokojí sám). Rozbor: `KONTRAKT-BEZ-LOGINU-2026-08-27.md` �
   INSERT INTO settings (id) VALUES (1)`. Nie je to race v kóde a nie je to pád
   tvrdenia. **Žiadny report z `npm test` nie je dôkaz, ak súčasne beží iný
   vitest** — over `ps | grep vitest` a beh zopakuj v izolácii.
+- **ZABITÝ testový beh nechá v DB riadky, ktoré zhodia NASLEDUJÚCI beh**
+  (3. 9. 2026). Prejavilo sa to ako **6 padov v testoch jednorazovosti
+  potvrdzovacieho tokenu** („už použitý token", „druhý zápis tým istým
+  tokenom") pri kóde **bajt na bajt zhodnom so zeleným commitom**; opakovanie
+  toho istého behu bolo zelené. Je to INÝ jav než dva súbežné vitesty a
+  rozlíšiš ich podpisom:
+  · dva súbežné behy → `SqlError 1062 Duplicate entry '1' for key 'PRIMARY'`
+    na `INSERT INTO settings (id) VALUES (1)`, teda pád v PRÍPRAVE
+    (`truncateAll()` sa pobijú), a beží druhý vitest — `ps -W | grep -i vitest`
+    ho ukáže;
+  · zvyšok po zabitom behu → padajú TVRDENIA v integračných testoch okolo
+    tokenov, príprava prejde a **žiadny iný vitest nebeží**.
+  Postup je preto: keď padnú integračné testy okolo tokenov, **najprv beh
+  ZOPAKUJ** a až potom diagnostikuj. Zelené opakovanie je odpoveď, nie náhoda —
+  prvý beh len uklidil, čo po sebe nechal zabitý predchodca.
 - **Kvóta kľúča je od 1. 9. 2026 `150/min` a `1000/deň`** (predtým 20/200;
   zdvihol ju správca shopu na `docs/64-ZIADOST-LIMITY-2026-09-01.md`, potvrdené
   v appke — `GET /api/queue` hlási `shopPerUtcDay: 1000`, `shopPerMinute: 150`).

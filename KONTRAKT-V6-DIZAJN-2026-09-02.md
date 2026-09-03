@@ -317,3 +317,165 @@ stále chýba (P0).
 **Otvorené do V6b:** obrazovky ešte primitíva nepoužívajú (K4 je „existujú",
 nie „sú použité"), `.ovl-*` sa zatiaľ nemazalo (K11), a K8/K9/K12/K14
 čakajú na V6b a preklik.
+
+### V6c — verifikácia, brána, dokumentácia (3. 9. 2026, 12 agentov)
+
+Základ behu: `3469b41` — **235 súborov / 4865 testov zelených v izolácii**,
+`typecheck`, `lint`, `check-compose-bind` čisté. Brána V6c uzavrela commit
+`178261d`.
+
+Kritériá K1–K14 po poriadku. Kde je stav „áno", je napísané ČÍM sa dokázal;
+kde nie, je napísané NESPLNENÉ a prečo — kritérium sa neprepisuje, aby vyšlo.
+
+| K | Stav | Čím sa to dokázalo |
+|---|---|---|
+| K1 | **áno** | `dizajn-tokeny-strazca.spec.ts`: 0 surových hexov a 0 `rgba()` mimo blokov so značkou `@tokens:*`. Tokenový blok nie je „hocijaký `:root`" — súbor ich má šesť a aliasová vrstva `--ovl-*: var(…)` medzi ne nepatrí, inak by sa hex smel schovať o 400 riadkov nižšie. |
+| K2 | **áno, s prepísaným kritériom** | Pôvodné znenie („každý token v oboch témach") bolo hrubšie než implementácia a je preškrtnuté v §7. Duplikuje sa len token, ktorý sa rozkladá na LITERÁLNU farbu; 31 odvodených cez `var()` tému dedí samo, 48 sú rozmery/časy/písma a 8 literálnych je zámerne téma-invariantných. |
+| K3 | **áno, mutačne** | Brána spustila **päť vlastných mutácií** nezávislých od agentových: hex do `globals.css` mimo tokenového bloku, hex do `ui/kpi.module.css`, `rgba()` do modulu, `!important`, a token bez svetlého páru. Každá zhodila **presne 1 z 28** tvrdení — teda konkrétne pravidlo, nie plošne súbor. To potvrdzuje D144: test naozaj číta moduly, nie len `globals.css`. |
+| K4 | **áno** | Primitíva sú POUŽITÉ, nie len portované — `Overview.tsx`, `CatalogPanel/Table/Filters.tsx`, `DiscountsList.tsx`, `NewDiscount.tsx` a `SettingsIndex/SubPage.tsx` importujú z barrelu `@/components/ui`. Drôtovanie `KpiRow` overené mutáciou (odpojenie vykreslenia pri ponechanom importe zhodí 6 tvrdení) — test teda stráži DRÔT, nie import. |
+| K5 | **áno** (v V6a bolo toto tvrdenie NEPRAVDIVÉ, pozri vyššie) | Tri kópie rebríka `[1, 2, 5, 10]` → **jedno telo** `chartScaleMax()`; `niceCeiling()` a `niceCount()` sú zmazané a na ich mieste stojí komentár, čo tam bolo. Hodnoty sú pribité na vlastnú tabuľku 25 očakávaní (nie na druhú implementáciu) a štvrtú kópiu zastaví statická závora — mutácia: štvrtá kópia zhodí presne 1 z 35. |
+| K6 | **áno** | Nesťahovaný deň = medzera, nameraná nula = nula. Rozšírené 3. 9. 2026 na **štyri stavy dňa** (`trzba-styri-stavy-dna.spec.ts`): hodnota · nameraná nula `0.00` · dolná hranica `≥` · medzera. Route posielala `dayStates`, `emptyDays` aj `measuredZeroDays` už predtým — klient ich zahadzoval, čo bol I11 naopak (appka mala priznanie a nevyslovila ho). `srSummary` je na `ChartCard`. |
+| K7 | **áno** | `dizajn-kontrast.spec.ts` si páry NEVYMÝŠĽA — parsuje ich z `globals.css` a z každého `*.module.css` nájdeného chôdzou po `src/`, takže moduly, ktoré pridalo V6b, meria ten istý test bez dopisovania zoznamu. Zmerané v OBOCH témach; najhoršie `4,89 : 1` (tmavá) a `4,79 : 1` (svetlá). Tri tokeny sa opravili, test nie. |
+| K8 | **áno** | Tabuľka kompaktná (~36 px riadok), prilepená hlavička, prilepené prvé dva stĺpce. Preklik zostáva na Samuelovi (K14). |
+| K9 | **áno** | Breadcrumb na piatich pod-stránkach Nastavení + test, že KAŽDÝ odkaz rozcestníka vedie na existujúcu routu. Ten test má dôvod: mesiac sa v rozcestníku ponúkal odkaz do prázdna po zmazanom `SignOut.tsx`. |
+| K10 | **áno, mutačne** | Štyri brány `confirmed: true` nedotknuté — ani jeden z tých route súborov nie je v diffe V6. Brána V6c pridala **vlastné mutácie na všetky štyri nedotknuteľné veci** (§4): priznania, dry-run, tri kanály, slovenčina. |
+| K11 | **áno** | 21 mŕtvych `.ovl-*` tried: 19 zmazaných, 2 opravené. Nový strážca `css-moduly-strazca.spec.ts` kryje **všetkých 17 CSS modulov v OBOCH smeroch** (použitý kľúč musí mať pravidlo; deklarovaná trieda musí mať volajúceho), 44 tvrdení, mutačne overený na dvoch rôznych moduloch (2 z 44, nie plošne). |
+| K12 | **áno — ale dokázala to brána, nie ja** | 235/235 súborov a 4865/4865 tvrdení zelených v izolácii je zmerané na `3469b41`; brána V6c to zopakovala nad `178261d` a pridala +63 tvrdení. Ja (agent 40) mám plošný beh zakázaný, takže to číslo **preberám z brány a hovorím to nahlas** — presne ten druh prevzatia, ktorý v tomto sprinte už raz vyrobil nepravdivé tvrdenie (K5 v V6a). Žiadny nový `.skip`, `.todo` ani `.only`. |
+| K13 | **áno** | `recharts ^3.10.1` pridaný, `npm audit` bez kritických, `lucide-react` NIE (D146). |
+| K14 | **NESPLNENÉ — čaká na Samuela** | Toto kritérium agent splniť NEVIE a nemá sa ako preškrtnúť. Zoznam obrazoviek na preklik je v §10 (D141). **Svetlú tému doteraz nikto nevidel okom** — má zmeraný kontrast, nie odklikanie. |
+
+**Nález, ktorý hlásim ako nález, nie ako chybu:** `test/unit/product-label.spec.ts`
+a `zlavy-timeline.spec.ts` porovnávajú pomlčku „nevieme" **klón s klónom**
+(`toBe(NEVIEME)`), takže samotný ZNAK nestrážia — zmerané mutáciou
+(`NEVIEME = '?'` ich oba nechá zelené). Chybou to nie je: literálnu pomlčku
+pripína `prehlad-v4.spec.ts` a `trzba-styri-stavy-dna.spec.ts`. Slovník teda
+strážený JE, len nie v tých dvoch súboroch. Nechané tak zámerne — prepisovať
+cudzie zelené testy nad rámec zadania je rozbitý rozsah.
+
+## 10. Čo preklikať (D141)
+
+Appka beží na `http://localhost:3070` — **`localhost`, nie `127.0.0.1`**
+(HSTS, dôvod je v README). Prihlásenie neexistuje: otvoríš adresu a si vnútri.
+
+**Najprv prečítaj toto, inak budeš hlásiť ako chyby veci, ktoré chybami
+nie sú.** Appka je dnes **bez `shop_write` kľúča** a **IP je zabanovaná
+shopom**. Priamy dôsledok na KAŽDEJ obrazovke:
+
+- **KPI a stĺpce z obohateného katalógu sú POMLČKY** (cena, marža, sklad,
+  predané). Pomlčka je odpoveď „nevieme", nie prázdne miesto a nie nula.
+- **Obohacovanie sa nespustí.** Otvorenie strany Produktov nič nedotiahne;
+  dávka sa zastaví s dôvodom (`no_key`, `ip_banned`) a nemá to byť ticho.
+- **Účinnosť zliav je podmienená** — bez histórie objednávok dostane
+  priznanie namiesto čísla (I11).
+- **Grafy budú mať šrafované plochy a medzery.** Šrafovanie znamená vo
+  všetkých formách to isté: „toto sme nemerali".
+
+Toto nie je chyba dizajnu — je to dizajn navrhnutý pre prázdny stav (riziko R4).
+Chyba je, keď appka na prázdne miesto napíše **nulu**, **odhad** alebo
+**nič** namiesto pomlčky a vety.
+
+**Prepínač témy** je okrúhle tlačidlo **úplne vpravo v hlavičke**, na každej
+obrazovke. V tmavej téme ponúka slnko, v svetlej mesiac. **Svetlá téma nebola
+NIKDY videná okom** — má vypočítaný kontrast (najhorší pár 4,79 : 1), nie
+preklik. Prejdi prosím všetkých päť obrazoviek dvakrát, raz v každej téme;
+prvý pohľad na svetlú tému bude Tvoj.
+
+---
+
+### 1. Prehľad — `http://localhost:3070/`
+
+**Čo tam má byť:** riadok KPI kariet hore (`StatTile` s `DeltaPill` — číslo,
+pod ním zmena), pod nimi hlavný graf tržby s prepínačom okna, a top/flop
+produkty ako vodorovné pásy (`BarList`). Ďalej stavový pás, bežiace zľavy
+a poistky.
+
+**Čo je NOVÉ oproti stavu pred V6:** poradie „číslo najprv, priebeh druhý"
+(D136) — KPI riadok je hore, nie pod grafom. Graf je Recharts pod `ChartCard`:
+má legendu, tooltip pri prejazde myšou a responzivitu, ktoré vlastné SVG
+nemalo. Top/flop sú pásy, nie tabuľka. A **deň tržby má štyri stavy** —
+prečítaný deň bez objednávky ukáže `0.00` a nameranú nulu, kým nesťahovaný
+deň ukáže medzeru; do 3. 9. 2026 oba mizli rovnako.
+
+**Čo NEUVIDÍŠ a prečo:** väčšina KPI bude pomlčka (chýba kľúč), tržba bude
+mať dva prečítané dni zo 180 a zvyšok medzeru, a top/flop môžu byť takmer
+prázdne — predaje za okno appka vo väčšine prípadov nepozná (D121). Číslo
+s nepokrytým oknom nesie `≥` — je to dolná hranica, nie fakt.
+
+### 2. Produkty — `http://localhost:3070/produkty`
+
+**Čo tam má byť:** kompaktná tabuľka (riadok ~36 px), **hlavička zostane
+prilepená pri rolovaní** a **prvé dva stĺpce (referencia, názov) pri rolovaní
+doprava**. Nad tabuľkou lišta s hľadaním a filtrami ako naklikané čipy;
+zamknuté filtre (kategória, kov, typ šperku) sú **viditeľne zamknuté**, nie
+skryté. Klik do riadku otvorí bočný panel s detailom produktu.
+
+**Čo je NOVÉ:** prilepená hlavička a dva prilepené stĺpce (D137) — pri 12
+stĺpcoch a 41 348 riadkoch je to celý rozdiel medzi použiteľnou a
+nepoužiteľnou tabuľkou. Tabuľka je primitívum `Table` + `Pagination`, nie
+vlastné `.ovl-*` triedy, takže vyzerá rovnako ako tabuľky na iných
+obrazovkách.
+
+**Čo NEUVIDÍŠ a prečo:** cena, marža, sklad a predané budú **pomlčky** — bez
+`shop_write` kľúča neexistuje `product:read`, z ktorého `getFull` ide.
+Otvorenie strany nespustí obohatenie. Veta pod tabuľkou má POVEDAŤ ČÍSLOM,
+prečo tie riadky majú pomlčky; keby mlčala alebo tam bola nula, to je chyba.
+
+### 3. Zľavy — `http://localhost:3070/zlavy`
+
+**Čo tam má byť:** zoznam zliav so stavom (pripravená / beží / skončila).
+Stav nesie **farbu + značku + slovo**, nikdy len farbu. Rozkliknutie zľavy
+(`/zlavy/<id>`) dá detail so zoznamom produktov v nej a s časovou osou.
+
+**Čo je NOVÉ:** jednotný rámec stránky (`PageHeader`, `Panel`, `Toolbar`) a
+tabuľka z tej istej sady stĺpcov ako Produkty. **Časová os zostala TABUĽKOU
+zámerne** — okno platnosti nemeria veličinu, ale interval, a Gantt by bol
+štvrtá forma grafu v šatách druhej. Ak Ti tam graf chýba, je to rozhodnutie,
+nie zabudnutie.
+
+**Čo NEUVIDÍŠ a prečo:** účinnosť zľavy bude priznanie namiesto čísla — bez
+histórie objednávok ju nie je z čoho počítať, a `orders_read` kľúč je
+neoverený.
+
+### 4. Nová zľava — `http://localhost:3070/zlavy/nova`
+
+**Čo tam má byť:** sprievodca po krokoch — výber produktov, pásma s
+percentami, trvanie — a na konci **skúška naprázdno a potvrdenie**. Dva kroky,
+výrazne, nie jedno tlačidlo.
+
+**Čo je NOVÉ:** táto obrazovka bola 2. 9. 2026 v prehliadači **jeden stĺpec
+neoštýlovaného textu** — prepnutý import CSS modulu nechal v JSX staré mená a
+11 z 15 kľúčov v module neexistovalo (`class="undefined"`). Typecheck, lint
+ani 4651 testov to nemali ako zachytiť. **Toto je obrazovka, ktorú prosím
+preklikni najpozornejšie** — a to isté platí pre pole na meno presetu, ktoré
+malo tú istú príčinu. Ak vidíš niekde stĺpec surového textu, je to presne ten
+jav a chcem to vedieť.
+
+**Čo NEUVIDÍŠ a prečo:** výber produktov bude pracovať s pomlčkami namiesto
+marže a predajnosti, takže pásma podľa predajnosti budú takmer prázdne —
+produkt s neznámym predajom sa do pásma **nezaradí vôbec** (D121,
+fail-closed). Prázdne pásmo je správna odpoveď, nie chyba. Skúška naprázdno
+prebehne, zápis do shopu bez kľúča neprejde.
+
+### 5. Nastavenia — `http://localhost:3070/nastavenia`
+
+**Čo tam má byť:** rozcestník s kartami a päť pod-stránok:
+`/nastavenia/napojenie` (na čo je appka napojená) · `/nastavenia/co-smie` ·
+`/nastavenia/co-vie` · `/nastavenia/historia` · `/nastavenia/cervena-zona`
+(poistky a panic button). Na KAŽDEJ pod-stránke je vľavo hore **breadcrumb
+„← Nastavenia"**.
+
+**Čo je NOVÉ:** breadcrumb (D138) — pred V6 z pod-stránky nebolo vidieť, že
+cesta von existuje. Test navyše overuje, že každý odkaz rozcestníka vedie na
+existujúcu routu; mesiac tu bol odkaz do prázdna.
+
+**Čo NEUVIDÍŠ a prečo:** stav kľúča bude `present: false` a stav napojenia
+povie, že shop odmieta volania (`ip_banned`). Obe sú pravdivé hlásenia stavu,
+nie chyby obrazovky. **V červenej zóne nič nepotvrdzuj len tak** — sú tam
+uvoľňujúce akcie za `confirmed: true` a panic button.
+
+---
+
+**Ako to hlásiť, aby to bolo použiteľné:** adresa · téma (tmavá/svetlá) · čo
+si videl · čo si čakal. Zvlášť ma zaujíma každé miesto, kde appka namiesto
+pomlčky napíše **nulu** alebo **nič** — to je jediná trieda chyby, ktorú tento
+sprint vedel vyrobiť potichu.

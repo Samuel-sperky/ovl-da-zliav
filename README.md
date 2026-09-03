@@ -117,6 +117,37 @@ Kontrakt: `KONTRAKT-V5-2026-09-01.md` (D122–D128, kritériá K1–K12).
   odtiaľ. **Dry-run a potvrdenie sú nedotknuté** — nová cesta ide cez tú istú
   bránu (I3).
 
+## Čo pridala V6 (2.–3. 9. 2026)
+
+Kontrakt: `KONTRAKT-V6-DIZAJN-2026-09-02.md` (D129–D147, kritériá K1–K14).
+V5 zjednotil, čo appka **hovorí**; V6 to, ako **vyzerá**.
+
+- **Tokenová vrstva.** Farba sa v pravidle nepíše — berie sa z tokenu.
+  Nula surových hexov a nula `rgba()` mimo bloku tokenov (predtým 121 hexov),
+  tónovanie výhradne `color-mix()`.
+- **Dve témy, tmavá predvolená** (D131, D145). Prepínač je okrúhle tlačidlo
+  úplne vpravo v hlavičke a je to čisto vizuálna voľba jedného prehliadača —
+  neukladá sa na server ani do auditu. **Svetlú tému ešte nikto nevidel okom**;
+  má zmeraný kontrast (nie posúdený), nie odklikanie.
+- **Jedna vrstva primitív** — `src/components/ui/` a `src/components/states/`.
+  Stavov je šesť, nie päť: „nič tu nie je" a „nemerali sme to" nie je tá istá
+  veta, takže `UnmeasuredState` má vlastný. `.ovl-*` triedy odchádzajú
+  s obrazovkou, ktorá ich mala (D139) — 21 mŕtvych sa zmazalo alebo opravilo.
+- **Grafy na Rechartse** pod `ChartCard` + `useChartTheme`, so `srSummary`
+  (dátová tabuľka pre čítačku). Pravidlo hornej hranice osi je na JEDNOM
+  mieste (`chartScaleMax()`); do V6b existovalo v troch kópiách.
+- **Tabuľka Produktov je kompaktná** (~36 px riadok) s prilepenou hlavičkou
+  a prilepenými prvými dvoma stĺpcami (referencia, názov) — pri 41 348
+  riadkoch je to jediný spôsob, ako sa v nej neztratiť.
+- **Breadcrumb na pod-stránkach Nastavení** (D138): „← Nastavenia" povie, že
+  cesta von existuje. Navigácia zostáva štvorpoložková.
+- **Vzhľad stráži päť testov, nie oko**: hex/`rgba()`/`!important` a obe témy
+  (`dizajn-tokeny-strazca.spec.ts`, číta `globals.css` aj všetkých 17 CSS
+  modulov), počítaný kontrast v oboch témach (`dizajn-kontrast.spec.ts`),
+  kľúče CSS modulov v oboch smeroch (`css-moduly-strazca.spec.ts`), jeden
+  jazyk grafov (`grafy-jazyk.spec.ts`) a mŕtve triedy (`mrtve-triedy.spec.ts`).
+  Dôvod je zapísaný v repe: *čo test vyňal z kontroly, nestráži NIKTO*.
+
 ### Čo appka NEVIE — povedané nahlas
 
 - **API shopu je zabanované na našej IP.** Vracia `{"error":"ip_banned"}` na
@@ -150,12 +181,13 @@ Kontrakt: `KONTRAKT-V5-2026-09-01.md` (D122–D128, kritériá K1–K12).
   za 2 dni z 180, takže „0 predaných" sa NESMIE čítať ako fakt — appka takému
   produktu dá pomlčku a do pásiem zľavy ho **nezaradí vôbec** (D121, fail-closed:
   radšej nič než 30 % z nemeraného predpokladu).
-- **Denný graf tržby ešte nekreslí stav „deň prečítaný, nepredalo sa nič".**
-  Tabuľka `shop_revenue_read_state` (migrácia 0016) ten stav drží a
-  `/api/insights/revenue-daily` ho posiela ako `dayStates`, ale obrazovka číta
-  len počet chýbajúcich dní — taký deň teda z grafu zmizne bez bodu aj bez
-  značky. Smer je bezpečný (appka netvrdí nič navyše), dokresliť ho je
-  otvorené rozhodnutie o vzhľade.
+- ~~Denný graf tržby nekreslí stav „deň prečítaný, nepredalo sa nič".~~
+  **Platilo do 3. 9. 2026, dnes už nie.** Route `/api/insights/revenue-daily`
+  posielala `dayStates`, `emptyDays` aj `measuredZeroDays` celý čas a obrazovka
+  z toho čítala len počet chýbajúcich dní. Deň sa teraz rozlíši na ŠTYRI stavy:
+  hodnota · nameraná nula (`0.00`, nie pomlčka) · dolná hranica `≥` ·
+  medzera (nesťahovaný deň, šrafovaná plocha). Stráži to
+  `test/unit/trzba-styri-stavy-dna.spec.ts`.
 - Zoznam vedome vynechaných vecí (mobil, notifikácie, CSV export, druhý
   používateľ…) je v `KONTRAKT-V4-2026-08-28.md` §3 a pre V5
   v `KONTRAKT-V5-2026-09-01.md` §4 — tam pribudol **drill-down** (klik do grafu
@@ -306,7 +338,15 @@ rozbehnúť).
   obrazoviek: neutrálna paleta so **zmeranými** kontrastmi a odstupmi pri
   farbosleposti, tri roly popiskov, hustota proti reálnym 41 220 produktom.
   Paletu stráži `test/unit/paleta.spec.ts` (číta tokeny priamo z
-  `globals.css`), písmo `test/unit/typografia.spec.ts`.
+  `globals.css`), písmo `test/unit/typografia.spec.ts`. **Po V6 je to už len
+  jeden z piatich strážcov vzhľadu** a najhrubší z nich — meria ručne
+  vypísaný zoznam štrnástich párov, kým `dizajn-kontrast.spec.ts` si páry
+  parsuje z CSS a meria obe témy.
+- `KONTRAKT-V6-DIZAJN-2026-09-02.md` — **kontrakt V6** (D129–D147, kritériá
+  K1–K14): tokenová vrstva, dve témy, vrstva primitív, grafy na Rechartse,
+  strážcovia vzhľadu. §9 hovorí pri každom kritériu, čím sa dokázalo — a čo
+  sa nedokázalo; §„Čo preklikať" je zoznam obrazoviek na Samuelov preklik
+  (D141: dôkaz dizajnu je preklik, nie agentov report).
 
 **Prevádzka a API shopu**
 
